@@ -1,0 +1,22 @@
+[package]
+name = "aep-domain"
+description = "Protocol-neutral domain model for the Agentic Engineering Protocol (AEP)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_yaml.workspace = true
+
+
+[lints]
+workspace = true

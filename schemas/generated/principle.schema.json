@@ -1,0 +1,896 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawPrinciple",
+  "description": "A principle document, as parsed.",
+  "type": "object",
+  "required": [
+    "id",
+    "title"
+  ],
+  "properties": {
+    "applies_when": {
+      "description": "When it applies; omitted means always.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Predicate"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capabilities": {
+      "description": "What it takes away or puts behind approval.",
+      "default": {},
+      "allOf": [
+        {
+          "$ref": "#/definitions/CapabilityPolicy"
+        }
+      ]
+    },
+    "evidence": {
+      "description": "Evidence that must exist by completion.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/EvidenceRequirement"
+      }
+    },
+    "id": {
+      "description": "Its identifier.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/PrincipleId"
+        }
+      ]
+    },
+    "obligations": {
+      "description": "Explicitly identified obligations.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawObligation"
+      }
+    },
+    "on_failure": {
+      "description": "What happens when one of its requirements is not met.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FailurePolicy"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "requires": {
+      "description": "Timed requirements, keyed by `always`, `before_<phase>`, `during_<phase>`, or given as requirement keys alongside a `before`/`during` selector.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Node"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "summary": {
+      "description": "What it is for.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "title": {
+      "description": "A short human title.",
+      "type": "string"
+    },
+    "verification": {
+      "description": "Verifiers that must have spoken.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Node"
+      }
+    },
+    "version": {
+      "description": "Its major version.",
+      "default": 1,
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "ApprovalId": {
+      "description": "approval identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "ApprovalRequirement": {
+      "description": "An approval that must have been granted.",
+      "type": "object",
+      "required": [
+        "approval",
+        "human"
+      ],
+      "properties": {
+        "approval": {
+          "description": "Which approval.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalId"
+            }
+          ]
+        },
+        "human": {
+          "description": "Whether a person must have granted it.",
+          "type": "boolean"
+        }
+      }
+    },
+    "ArtifactKind": {
+      "description": "Artifact kind in kebab-case; the named vocabulary is listed in `examples`, and any other kebab-case name is accepted as an organisation-specific kind.",
+      "examples": [
+        "vision",
+        "product-requirements",
+        "initiative",
+        "epic",
+        "story",
+        "task",
+        "specification",
+        "acceptance-criteria",
+        "design",
+        "feature-design",
+        "component-design",
+        "architecture-design",
+        "api-design",
+        "data-design",
+        "architecture-decision-record",
+        "test-plan",
+        "evaluation-plan",
+        "verification-report",
+        "review-result",
+        "approval-record",
+        "release-plan",
+        "migration-plan",
+        "runbook",
+        "incident-report",
+        "postmortem"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ArtifactRef": {
+      "description": "Reference to an artifact, optionally pinned with `@<version>`.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._/-]*(@[^@]+)?$"
+    },
+    "ArtifactRequirement": {
+      "description": "An artifact that must exist in the graph.",
+      "type": "object",
+      "required": [
+        "at_least",
+        "fresh",
+        "kind"
+      ],
+      "properties": {
+        "at_least": {
+          "description": "How many are needed.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "fresh": {
+          "description": "Whether it must not be retired.",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "Which kind of artifact; kinds that specialise it also count.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactKind"
+            }
+          ]
+        },
+        "relation": {
+          "description": "A relationship it must have.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RelationRequirement"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "description": "Which status it must have reached.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "ArtifactStatus": {
+      "description": "Where an artifact's lifecycle has got to.\n\nThis is independent of workflow state: a design can be `approved` while the task that consumes it is still in `implement`.",
+      "oneOf": [
+        {
+          "description": "Being written.",
+          "type": "string",
+          "enum": [
+            "draft"
+          ]
+        },
+        {
+          "description": "Put forward for a decision.",
+          "type": "string",
+          "enum": [
+            "proposed"
+          ]
+        },
+        {
+          "description": "Under review.",
+          "type": "string",
+          "enum": [
+            "in_review"
+          ]
+        },
+        {
+          "description": "Reviewed and agreed.",
+          "type": "string",
+          "enum": [
+            "approved"
+          ]
+        },
+        {
+          "description": "Decided and in force; the ADR spelling of `approved`.",
+          "type": "string",
+          "enum": [
+            "accepted"
+          ]
+        },
+        {
+          "description": "Reviewed and turned down.",
+          "type": "string",
+          "enum": [
+            "rejected"
+          ]
+        },
+        {
+          "description": "Current and in use.",
+          "type": "string",
+          "enum": [
+            "active"
+          ]
+        },
+        {
+          "description": "Realised in the system.",
+          "type": "string",
+          "enum": [
+            "implemented"
+          ]
+        },
+        {
+          "description": "Replaced by a later artifact.",
+          "type": "string",
+          "enum": [
+            "superseded"
+          ]
+        },
+        {
+          "description": "Kept for the record only.",
+          "type": "string",
+          "enum": [
+            "archived"
+          ]
+        }
+      ]
+    },
+    "Capability": {
+      "description": "A semantic capability, such as `repository.write` or `deployment.create:staging`.",
+      "examples": [
+        "repository.read",
+        "repository.write",
+        "tests.execute",
+        "command.execute",
+        "network.read",
+        "network.write",
+        "telemetry.read",
+        "production.read",
+        "production.write",
+        "secret.read",
+        "artifact.read",
+        "artifact.write",
+        "planning.read",
+        "planning.write",
+        "review.request",
+        "approval.request",
+        "deployment.create:staging",
+        "deployment.rollback:production"
+      ],
+      "type": "string"
+    },
+    "CapabilityPolicy": {
+      "description": "The capabilities an execution may exercise.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Capabilities that may be exercised.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Capability"
+          },
+          "uniqueItems": true
+        },
+        "approval_required": {
+          "description": "Capabilities that may be exercised only with a recorded approval.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Capability"
+          },
+          "uniqueItems": true
+        },
+        "deny": {
+          "description": "Capabilities that must never be exercised.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Capability"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConditionalRequirement": {
+      "description": "Requirements that only apply when a condition holds.\n\nThis is where governance stops being a convention: *if* the change is architectural, *then* an architecture design and an ADR are required — checkable, and not dependent on anyone remembering the rule.",
+      "type": "object",
+      "required": [
+        "require",
+        "when"
+      ],
+      "properties": {
+        "require": {
+          "description": "What is then required.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RequirementSet"
+            }
+          ]
+        },
+        "when": {
+          "description": "When these requirements apply.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Predicate"
+            }
+          ]
+        }
+      }
+    },
+    "EvidenceKind": {
+      "description": "A kind of evidence.",
+      "oneOf": [
+        {
+          "description": "A test run.",
+          "type": "string",
+          "enum": [
+            "test_result"
+          ]
+        },
+        {
+          "description": "Static analysis output.",
+          "type": "string",
+          "enum": [
+            "static_analysis"
+          ]
+        },
+        {
+          "description": "Contract verification output.",
+          "type": "string",
+          "enum": [
+            "contract_result"
+          ]
+        },
+        {
+          "description": "A property test.",
+          "type": "string",
+          "enum": [
+            "property_test_result"
+          ]
+        },
+        {
+          "description": "A deployment.",
+          "type": "string",
+          "enum": [
+            "deployment_result"
+          ]
+        },
+        {
+          "description": "A measured value.",
+          "type": "string",
+          "enum": [
+            "metric_observation"
+          ]
+        },
+        {
+          "description": "A health check.",
+          "type": "string",
+          "enum": [
+            "health_observation"
+          ]
+        },
+        {
+          "description": "A human approval.",
+          "type": "string",
+          "enum": [
+            "approval"
+          ]
+        },
+        {
+          "description": "A set of source changes.",
+          "type": "string",
+          "enum": [
+            "diff"
+          ]
+        },
+        {
+          "description": "An observation about an artifact.",
+          "type": "string",
+          "enum": [
+            "artifact"
+          ]
+        },
+        {
+          "description": "A review outcome.",
+          "type": "string",
+          "enum": [
+            "review"
+          ]
+        },
+        {
+          "description": "A verifier's statement about a claim.",
+          "type": "string",
+          "enum": [
+            "verification"
+          ]
+        },
+        {
+          "description": "Specification satisfaction.",
+          "type": "string",
+          "enum": [
+            "specification"
+          ]
+        }
+      ]
+    },
+    "EvidenceRequirement": {
+      "description": "Evidence that must have been produced.",
+      "type": "object",
+      "required": [
+        "at_least",
+        "independent",
+        "kind"
+      ],
+      "properties": {
+        "at_least": {
+          "description": "How many records are needed.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "independent": {
+          "description": "Whether the producer must be something other than an agent.\n\nThis is what \"generation and verification are separate\" reduces to mechanically: an agent's own claim that the tests passed does not satisfy the requirement.",
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "Which kind of evidence.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EvidenceKind"
+            }
+          ]
+        },
+        "subject": {
+          "description": "What the evidence must be about.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifier": {
+          "description": "Which verifier must have produced it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Verifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "FailurePolicy": {
+      "description": "What to do when a requirement is not met: `block`, `abort`, or a mapping with `action: retry|rollback|escalate` and that action's parameters.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Node"
+          }
+        }
+      ]
+    },
+    "Node": {
+      "description": "Any JSON/YAML value: null, boolean, number, string, array or object."
+    },
+    "Predicate": {
+      "description": "A condition over facts: the compact expression form (`tests.unit.failed == 0`), a list (implicit `all`), or a mapping using `all`, `any`, `not`, `none` or a fact path with an operator constraint.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Node"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Node"
+          }
+        }
+      ]
+    },
+    "PrincipleId": {
+      "description": "principle identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "RawObligation": {
+      "description": "An explicitly identified obligation, as parsed.",
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "always": {
+          "description": "Checked at every transition.",
+          "default": false,
+          "type": "boolean"
+        },
+        "before": {
+          "description": "Before entering this phase or state.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Node"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "description": "What it is for.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "during": {
+          "description": "While in this phase or state.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Node"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "description": "Its identifier within the principle.",
+          "type": "string"
+        },
+        "requires": {
+          "description": "What must hold.",
+          "default": {},
+          "allOf": [
+            {
+              "$ref": "#/definitions/RequirementSet"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RelationKind": {
+      "description": "The meaning of an edge in the artifact graph.",
+      "oneOf": [
+        {
+          "description": "Shaped by, without being derived from.",
+          "type": "string",
+          "enum": [
+            "informed_by"
+          ]
+        },
+        {
+          "description": "Produced from a higher-level artifact.",
+          "type": "string",
+          "enum": [
+            "derived_from"
+          ]
+        },
+        {
+          "description": "Breaks a larger artifact into smaller work.",
+          "type": "string",
+          "enum": [
+            "decomposes"
+          ]
+        },
+        {
+          "description": "States the required behaviour of something.",
+          "type": "string",
+          "enum": [
+            "specifies"
+          ]
+        },
+        {
+          "description": "Proposes how to satisfy something.",
+          "type": "string",
+          "enum": [
+            "designs"
+          ]
+        },
+        {
+          "description": "Realises something in the system.",
+          "type": "string",
+          "enum": [
+            "implements"
+          ]
+        },
+        {
+          "description": "Records a decision taken within something.",
+          "type": "string",
+          "enum": [
+            "decides"
+          ]
+        },
+        {
+          "description": "Assesses something.",
+          "type": "string",
+          "enum": [
+            "reviews"
+          ]
+        },
+        {
+          "description": "Establishes that something holds.",
+          "type": "string",
+          "enum": [
+            "verifies"
+          ]
+        },
+        {
+          "description": "Prevents progress on something.",
+          "type": "string",
+          "enum": [
+            "blocks"
+          ]
+        },
+        {
+          "description": "Needs something else first.",
+          "type": "string",
+          "enum": [
+            "depends_on"
+          ]
+        },
+        {
+          "description": "Replaces something.",
+          "type": "string",
+          "enum": [
+            "supersedes"
+          ]
+        }
+      ]
+    },
+    "RelationRequirement": {
+      "description": "A relationship an artifact must have.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Which relation.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RelationKind"
+            }
+          ]
+        },
+        "target_kind": {
+          "description": "What kind of thing it must point at.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "RequirementSet": {
+      "description": "Everything that must hold at one point in a workflow.",
+      "type": "object",
+      "properties": {
+        "approvals": {
+          "description": "Approvals that must have been granted.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ApprovalRequirement"
+          }
+        },
+        "artifacts": {
+          "description": "Artifacts that must exist.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ArtifactRequirement"
+          }
+        },
+        "conditional": {
+          "description": "Requirements that apply only under a condition.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConditionalRequirement"
+          }
+        },
+        "evidence": {
+          "description": "Evidence that must exist.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/EvidenceRequirement"
+          }
+        },
+        "predicates": {
+          "description": "Conditions over facts.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Predicate"
+          }
+        },
+        "reviews": {
+          "description": "Reviews that must have happened.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewRequirement"
+          }
+        }
+      }
+    },
+    "ReviewDisposition": {
+      "description": "What a review concluded.",
+      "oneOf": [
+        {
+          "description": "Accepted as it stands.",
+          "type": "string",
+          "enum": [
+            "approved"
+          ]
+        },
+        {
+          "description": "Not accepted yet; specific changes are wanted.",
+          "type": "string",
+          "enum": [
+            "changes_requested"
+          ]
+        },
+        {
+          "description": "Not accepted.",
+          "type": "string",
+          "enum": [
+            "rejected"
+          ]
+        }
+      ]
+    },
+    "ReviewRequirement": {
+      "description": "A review that must have happened.",
+      "type": "object",
+      "required": [
+        "fresh",
+        "human",
+        "result"
+      ],
+      "properties": {
+        "fresh": {
+          "description": "Whether the review must apply to the artifact's current version.",
+          "type": "boolean"
+        },
+        "human": {
+          "description": "Whether a person must have done it.",
+          "type": "boolean"
+        },
+        "result": {
+          "description": "What the review must have concluded.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReviewDisposition"
+            }
+          ]
+        },
+        "subject": {
+          "description": "The specific artifact that must have been reviewed.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject_kind": {
+          "description": "What kind of thing must have been reviewed.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "SubjectRef": {
+      "description": "Subject of evidence, written `<kind>:<id>`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "Verifier": {
+      "description": "A verifier class; the named classes are listed in `examples`, and any other name is treated as an external tool.",
+      "examples": [
+        "compiler",
+        "test-runner",
+        "contract-runner",
+        "static-analyzer",
+        "property-tester",
+        "model-checker",
+        "telemetry-query",
+        "policy-engine",
+        "human-approval",
+        "human-review",
+        "artifact-validator"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"
+    }
+  }
+}

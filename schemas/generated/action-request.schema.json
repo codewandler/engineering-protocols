@@ -1,0 +1,651 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ActionRequest",
+  "description": "An action together with who is asking, as submitted to the engine for authorisation.",
+  "type": "object",
+  "required": [
+    "action"
+  ],
+  "properties": {
+    "action": {
+      "description": "The action.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Action"
+        }
+      ]
+    },
+    "rationale": {
+      "description": "Free-form rationale, recorded in the audit trail.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requested_by": {
+      "description": "Who is asking.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Producer"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Action": {
+      "description": "A meaningful operation an agent may request.",
+      "oneOf": [
+        {
+          "description": "Read repository contents.",
+          "type": "object",
+          "required": [
+            "action",
+            "paths"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "repository_read"
+              ]
+            },
+            "paths": {
+              "description": "Paths to be read, relative to the repository root.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "description": "Modify repository contents.",
+          "type": "object",
+          "required": [
+            "action",
+            "paths"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "repository_write"
+              ]
+            },
+            "intent": {
+              "description": "What the change is for.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "paths": {
+              "description": "Paths to be written, relative to the repository root.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "description": "Run tests.",
+          "type": "object",
+          "required": [
+            "action",
+            "suite"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "test_execute"
+              ]
+            },
+            "selector": {
+              "description": "A selector narrowing the run, such as a test name filter.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "suite": {
+              "description": "The suite to run.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TestSuite"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "Run a command.",
+          "type": "object",
+          "required": [
+            "action",
+            "program"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "command_execute"
+              ]
+            },
+            "args": {
+              "description": "Its arguments.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "program": {
+              "description": "The program.",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Make a network request.",
+          "type": "object",
+          "required": [
+            "action",
+            "intent",
+            "url"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "network_request"
+              ]
+            },
+            "intent": {
+              "description": "Whether it changes remote state.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/NetworkIntent"
+                }
+              ]
+            },
+            "url": {
+              "description": "Where the request goes.",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Query telemetry.",
+          "type": "object",
+          "required": [
+            "action",
+            "query"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "telemetry_query"
+              ]
+            },
+            "query": {
+              "description": "The query, in whatever language the telemetry system speaks.",
+              "type": "string"
+            },
+            "service": {
+              "description": "The service the query is about.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Create a deployment.",
+          "type": "object",
+          "required": [
+            "action",
+            "environment",
+            "revision"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "deploy"
+              ]
+            },
+            "environment": {
+              "description": "The target environment.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Environment"
+                }
+              ]
+            },
+            "revision": {
+              "description": "The revision being deployed.",
+              "type": "string"
+            },
+            "strategy": {
+              "description": "The rollout strategy, such as `canary`.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Roll a deployment back.",
+          "type": "object",
+          "required": [
+            "action",
+            "environment"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "rollback"
+              ]
+            },
+            "environment": {
+              "description": "The target environment.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Environment"
+                }
+              ]
+            },
+            "to_revision": {
+              "description": "The revision to roll back to; absent means \"the previous one\".",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Read a secret.",
+          "type": "object",
+          "required": [
+            "action",
+            "secret"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "secret_read"
+              ]
+            },
+            "secret": {
+              "description": "The secret's name.",
+              "type": "string"
+            }
+          }
+        },
+        {
+          "description": "Create or update an artifact.",
+          "type": "object",
+          "required": [
+            "action",
+            "artifact",
+            "kind"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "artifact_write"
+              ]
+            },
+            "artifact": {
+              "description": "The artifact being written.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ArtifactRef"
+                }
+              ]
+            },
+            "kind": {
+              "description": "What kind of artifact it is.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ArtifactKind"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "Ask for a review.",
+          "type": "object",
+          "required": [
+            "action",
+            "subject"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "review_request"
+              ]
+            },
+            "reviewer": {
+              "description": "Who or which group is asked.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "subject": {
+              "description": "What is to be reviewed.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ArtifactRef"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "Ask for approval.",
+          "type": "object",
+          "required": [
+            "action",
+            "approval"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "approval_request"
+              ]
+            },
+            "approval": {
+              "description": "Which approval is being sought.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ApprovalId"
+                }
+              ]
+            },
+            "reason": {
+              "description": "Why it is needed.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        {
+          "description": "Run an external tool.",
+          "type": "object",
+          "required": [
+            "action",
+            "tool"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "tool_invoke"
+              ]
+            },
+            "args": {
+              "description": "Its arguments.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "tool": {
+              "description": "The tool.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolRef"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ApprovalId": {
+      "description": "approval identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "ArtifactKind": {
+      "description": "Artifact kind in kebab-case; the named vocabulary is listed in `examples`, and any other kebab-case name is accepted as an organisation-specific kind.",
+      "examples": [
+        "vision",
+        "product-requirements",
+        "initiative",
+        "epic",
+        "story",
+        "task",
+        "specification",
+        "acceptance-criteria",
+        "design",
+        "feature-design",
+        "component-design",
+        "architecture-design",
+        "api-design",
+        "data-design",
+        "architecture-decision-record",
+        "test-plan",
+        "evaluation-plan",
+        "verification-report",
+        "review-result",
+        "approval-record",
+        "release-plan",
+        "migration-plan",
+        "runbook",
+        "incident-report",
+        "postmortem"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ArtifactRef": {
+      "description": "Reference to an artifact, optionally pinned with `@<version>`.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._/-]*(@[^@]+)?$"
+    },
+    "Environment": {
+      "description": "A deployment environment; `*` means every environment.",
+      "examples": [
+        "*",
+        "development",
+        "test",
+        "staging",
+        "production"
+      ],
+      "type": "string",
+      "pattern": "^(\\*|[a-z][a-z0-9-]*)$"
+    },
+    "NetworkIntent": {
+      "description": "The direction of a network request, which decides which capability it needs.",
+      "oneOf": [
+        {
+          "description": "A request that only reads.",
+          "type": "string",
+          "enum": [
+            "read"
+          ]
+        },
+        {
+          "description": "A request that changes remote state.",
+          "type": "string",
+          "enum": [
+            "write"
+          ]
+        }
+      ]
+    },
+    "Producer": {
+      "description": "What produced a piece of evidence.",
+      "oneOf": [
+        {
+          "description": "An agent.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Its identifier, such as a model or session name.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "agent"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A person.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Their identifier.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "human"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A tool.",
+          "type": "object",
+          "required": [
+            "producer",
+            "tool"
+          ],
+          "properties": {
+            "producer": {
+              "type": "string",
+              "enum": [
+                "tool"
+              ]
+            },
+            "tool": {
+              "description": "Which tool.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolRef"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "The harness itself.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Its identifier.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "harness"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A verifier.",
+          "type": "object",
+          "required": [
+            "producer",
+            "verifier"
+          ],
+          "properties": {
+            "producer": {
+              "type": "string",
+              "enum": [
+                "verifier"
+              ]
+            },
+            "verifier": {
+              "description": "Which class of verifier.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Verifier"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "TestSuite": {
+      "description": "Which body of tests was run.",
+      "examples": [
+        "unit",
+        "integration",
+        "contract",
+        "property",
+        "regression",
+        "mutation",
+        "fuzz",
+        "differential",
+        "e2e",
+        "smoke"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ToolRef": {
+      "description": "tool identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
+    },
+    "Verifier": {
+      "description": "A verifier class; the named classes are listed in `examples`, and any other name is treated as an external tool.",
+      "examples": [
+        "compiler",
+        "test-runner",
+        "contract-runner",
+        "static-analyzer",
+        "property-tester",
+        "model-checker",
+        "telemetry-query",
+        "policy-engine",
+        "human-approval",
+        "human-review",
+        "artifact-validator"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"
+    }
+  }
+}

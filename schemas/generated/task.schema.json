@@ -1,0 +1,289 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawTask",
+  "description": "A task document, as parsed.",
+  "type": "object",
+  "required": [
+    "id",
+    "kind",
+    "objective",
+    "profile",
+    "protocol"
+  ],
+  "properties": {
+    "constraints": {
+      "description": "Its limits and declared inputs.",
+      "default": {},
+      "allOf": [
+        {
+          "$ref": "#/definitions/Constraints"
+        }
+      ]
+    },
+    "context": {
+      "description": "Other artifacts that constrain it.",
+      "default": {},
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/Node"
+        }
+      }
+    },
+    "derived_from": {
+      "description": "What this task was decomposed from.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Node"
+      }
+    },
+    "id": {
+      "description": "Its identifier.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/TaskId"
+        }
+      ]
+    },
+    "kind": {
+      "description": "What sort of work it is.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/TaskKind"
+        }
+      ]
+    },
+    "manifest": {
+      "description": "Where the artifact manifest lives.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "objective": {
+      "description": "What it is for.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Objective"
+        }
+      ]
+    },
+    "principle_overrides": {
+      "description": "Principles it adds or drops.",
+      "default": {},
+      "allOf": [
+        {
+          "$ref": "#/definitions/PrincipleOverrides"
+        }
+      ]
+    },
+    "profile": {
+      "description": "Which profile it uses.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProfileVersionedRef"
+        }
+      ]
+    },
+    "protocol": {
+      "description": "Which protocol version governs it.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProtocolRef"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Capability": {
+      "description": "A semantic capability, such as `repository.write` or `deployment.create:staging`.",
+      "examples": [
+        "repository.read",
+        "repository.write",
+        "tests.execute",
+        "command.execute",
+        "network.read",
+        "network.write",
+        "telemetry.read",
+        "production.read",
+        "production.write",
+        "secret.read",
+        "artifact.read",
+        "artifact.write",
+        "planning.read",
+        "planning.write",
+        "review.request",
+        "approval.request",
+        "deployment.create:staging",
+        "deployment.rollback:production"
+      ],
+      "type": "string"
+    },
+    "CapabilityPolicy": {
+      "description": "The capabilities an execution may exercise.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Capabilities that may be exercised.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Capability"
+          },
+          "uniqueItems": true
+        },
+        "approval_required": {
+          "description": "Capabilities that may be exercised only with a recorded approval.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Capability"
+          },
+          "uniqueItems": true
+        },
+        "deny": {
+          "description": "Capabilities that must never be exercised.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Capability"
+          },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "Constraints": {
+      "description": "Limits and inputs that apply to one task.",
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "description": "Capability limits on top of the profile's.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CapabilityPolicy"
+            }
+          ]
+        },
+        "facts": {
+          "description": "Facts the task declares, which nothing else can observe for it.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/FactValue"
+          }
+        },
+        "notes": {
+          "description": "Anything a person needs to know that the protocol does not model.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "FactValue": {
+      "description": "A fact value: boolean, number or string.",
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "description": "A number; NaN is not permitted.",
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    },
+    "Node": {
+      "description": "Any JSON/YAML value: null, boolean, number, string, array or object."
+    },
+    "Objective": {
+      "description": "What the task is for.",
+      "type": "object",
+      "required": [
+        "summary"
+      ],
+      "properties": {
+        "details": {
+          "description": "Anything longer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "description": "A one-line statement, such as `add-passkey-support`.",
+          "type": "string"
+        }
+      }
+    },
+    "PrincipleId": {
+      "description": "principle identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "PrincipleOverrides": {
+      "description": "Which principles a task adds to or removes from its profile.",
+      "type": "object",
+      "properties": {
+        "add": {
+          "description": "Principles to add.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PrincipleRef"
+          }
+        },
+        "remove": {
+          "description": "Principles to drop.\n\nRemoval is recorded in the audit trail: dropping `mutation-testing` for one task is a decision someone should be able to find later.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PrincipleId"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "PrincipleRef": {
+      "description": "Reference to a principle, optionally pinned to a major version.",
+      "type": "string",
+      "pattern": "^(principle:)?[a-z][a-z0-9-]*(/[1-9][0-9]*)?$"
+    },
+    "ProfileVersionedRef": {
+      "description": "Reference to a profile, optionally pinned to a major version.",
+      "type": "string",
+      "pattern": "^(profile:)?[a-z][a-z0-9-]*([./][a-z0-9-]+)*(/[1-9][0-9]*)?$"
+    },
+    "ProtocolRef": {
+      "description": "Reference to a protocol at a major version, such as `aep/1`.",
+      "type": "string",
+      "pattern": "^(protocol:)?[a-z][a-z0-9-]*/[1-9][0-9]*$"
+    },
+    "TaskId": {
+      "description": "task identifier.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+    },
+    "TaskKind": {
+      "description": "What sort of work the task is.",
+      "examples": [
+        "feature",
+        "bugfix",
+        "refactor",
+        "investigation",
+        "incident",
+        "release",
+        "migration",
+        "dependency-upgrade",
+        "security-response",
+        "infrastructure-change",
+        "documentation"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    }
+  }
+}

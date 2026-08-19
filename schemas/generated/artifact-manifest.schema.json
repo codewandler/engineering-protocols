@@ -1,0 +1,575 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawArtifactManifest",
+  "description": "An artifact manifest document, as parsed.\n\nThis is the file a project keeps — conventionally `.engineering/artifacts.yaml` — that points at its artifacts rather than duplicating them:\n\n```yaml version: aep.artifacts/1 artifacts: - id: spec:passkeys-auth kind: specification status: approved location: path: docs/specs/passkeys-auth.md relations: - specifies: story:AUTH-142 ```",
+  "type": "object",
+  "properties": {
+    "artifacts": {
+      "description": "The artifacts it declares.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Artifact"
+      }
+    },
+    "version": {
+      "description": "The manifest format version.",
+      "default": "aep.artifacts/1",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Artifact": {
+      "description": "A durable engineering artifact.",
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "location",
+        "status"
+      ],
+      "properties": {
+        "freshness": {
+          "description": "How long it stays valid.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FreshnessPolicy"
+            }
+          ]
+        },
+        "id": {
+          "description": "Its identifier.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactId"
+            }
+          ]
+        },
+        "kind": {
+          "description": "What kind of artifact it is.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactKind"
+            }
+          ]
+        },
+        "location": {
+          "description": "Where it lives.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactLocation"
+            }
+          ]
+        },
+        "metadata": {
+          "description": "Human-facing description.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactMetadata"
+            }
+          ]
+        },
+        "provenance": {
+          "description": "Who made it and from what.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "relations": {
+          "description": "Its outgoing edges.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ArtifactRelation"
+          }
+        },
+        "status": {
+          "description": "Where its lifecycle has got to.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactStatus"
+            }
+          ]
+        },
+        "version": {
+          "description": "Which version this record describes.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ArtifactId": {
+      "description": "Artifact identifier, written `<namespace>:<name>`.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "ArtifactKind": {
+      "description": "Artifact kind in kebab-case; the named vocabulary is listed in `examples`, and any other kebab-case name is accepted as an organisation-specific kind.",
+      "examples": [
+        "vision",
+        "product-requirements",
+        "initiative",
+        "epic",
+        "story",
+        "task",
+        "specification",
+        "acceptance-criteria",
+        "design",
+        "feature-design",
+        "component-design",
+        "architecture-design",
+        "api-design",
+        "data-design",
+        "architecture-decision-record",
+        "test-plan",
+        "evaluation-plan",
+        "verification-report",
+        "review-result",
+        "approval-record",
+        "release-plan",
+        "migration-plan",
+        "runbook",
+        "incident-report",
+        "postmortem"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ArtifactLocation": {
+      "description": "Where the artifact lives: `inline`, a repository path, a URL, or `{provider, reference}` for an object in an external system.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "ArtifactMetadata": {
+      "description": "Human-facing description of an artifact.",
+      "type": "object",
+      "properties": {
+        "owner": {
+          "description": "Who owns it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "description": "One-line summary.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tags": {
+          "description": "Free-form labels.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "uniqueItems": true
+        },
+        "title": {
+          "description": "Its title.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/Node"
+      }
+    },
+    "ArtifactProvenance": {
+      "description": "Who made an artifact, when, and from what.\n\nAuthorship is recorded, not scored: an agent-authored design is not thereby less trustworthy than a human-authored one. What it changes is what evidence a protocol may reasonably ask for.",
+      "type": "object",
+      "properties": {
+        "created_at": {
+          "description": "When it was created.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "created_by": {
+          "description": "Who created it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Producer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "revision": {
+          "description": "The source revision it was generated from, for generated artifacts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "How it came to exist.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ArtifactRelation": {
+      "description": "A single-entry mapping from a relation name to an artifact reference, such as `{designs: spec:passkeys-auth}`.",
+      "examples": [
+        {
+          "informed_by": "design:passkeys-auth"
+        },
+        {
+          "derived_from": "design:passkeys-auth"
+        },
+        {
+          "decomposes": "design:passkeys-auth"
+        },
+        {
+          "specifies": "design:passkeys-auth"
+        },
+        {
+          "designs": "design:passkeys-auth"
+        },
+        {
+          "implements": "design:passkeys-auth"
+        },
+        {
+          "decides": "design:passkeys-auth"
+        },
+        {
+          "reviews": "design:passkeys-auth"
+        },
+        {
+          "verifies": "design:passkeys-auth"
+        },
+        {
+          "blocks": "design:passkeys-auth"
+        },
+        {
+          "depends_on": "design:passkeys-auth"
+        },
+        {
+          "supersedes": "design:passkeys-auth"
+        }
+      ],
+      "type": "object",
+      "maxProperties": 1,
+      "minProperties": 1
+    },
+    "ArtifactSource": {
+      "description": "How an artifact came to exist.",
+      "oneOf": [
+        {
+          "description": "Written by a person.",
+          "type": "string",
+          "enum": [
+            "human_authored"
+          ]
+        },
+        {
+          "description": "Written by an agent.",
+          "type": "string",
+          "enum": [
+            "agent_authored"
+          ]
+        },
+        {
+          "description": "Produced by a tool from something else.",
+          "type": "string",
+          "enum": [
+            "tool_generated"
+          ]
+        },
+        {
+          "description": "Derived from another artifact.",
+          "type": "string",
+          "enum": [
+            "derived"
+          ]
+        },
+        {
+          "description": "Brought in from another system.",
+          "type": "string",
+          "enum": [
+            "imported"
+          ]
+        }
+      ]
+    },
+    "ArtifactStatus": {
+      "description": "Where an artifact's lifecycle has got to.\n\nThis is independent of workflow state: a design can be `approved` while the task that consumes it is still in `implement`.",
+      "oneOf": [
+        {
+          "description": "Being written.",
+          "type": "string",
+          "enum": [
+            "draft"
+          ]
+        },
+        {
+          "description": "Put forward for a decision.",
+          "type": "string",
+          "enum": [
+            "proposed"
+          ]
+        },
+        {
+          "description": "Under review.",
+          "type": "string",
+          "enum": [
+            "in_review"
+          ]
+        },
+        {
+          "description": "Reviewed and agreed.",
+          "type": "string",
+          "enum": [
+            "approved"
+          ]
+        },
+        {
+          "description": "Decided and in force; the ADR spelling of `approved`.",
+          "type": "string",
+          "enum": [
+            "accepted"
+          ]
+        },
+        {
+          "description": "Reviewed and turned down.",
+          "type": "string",
+          "enum": [
+            "rejected"
+          ]
+        },
+        {
+          "description": "Current and in use.",
+          "type": "string",
+          "enum": [
+            "active"
+          ]
+        },
+        {
+          "description": "Realised in the system.",
+          "type": "string",
+          "enum": [
+            "implemented"
+          ]
+        },
+        {
+          "description": "Replaced by a later artifact.",
+          "type": "string",
+          "enum": [
+            "superseded"
+          ]
+        },
+        {
+          "description": "Kept for the record only.",
+          "type": "string",
+          "enum": [
+            "archived"
+          ]
+        }
+      ]
+    },
+    "FreshnessPolicy": {
+      "description": "How long an artifact stays valid.",
+      "oneOf": [
+        {
+          "description": "Never goes stale.",
+          "type": "string",
+          "enum": [
+            "always_valid"
+          ]
+        },
+        {
+          "description": "Valid until something supersedes it. The default.",
+          "type": "string",
+          "enum": [
+            "until_superseded"
+          ]
+        },
+        {
+          "description": "Valid only for the revision it was approved against.",
+          "type": "string",
+          "enum": [
+            "bound_to_revision"
+          ]
+        },
+        {
+          "description": "Valid only while its dependencies are unchanged.",
+          "type": "string",
+          "enum": [
+            "bound_to_dependency_set"
+          ]
+        }
+      ]
+    },
+    "Node": {
+      "description": "Any JSON/YAML value: null, boolean, number, string, array or object."
+    },
+    "Producer": {
+      "description": "What produced a piece of evidence.",
+      "oneOf": [
+        {
+          "description": "An agent.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Its identifier, such as a model or session name.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "agent"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A person.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Their identifier.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "human"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A tool.",
+          "type": "object",
+          "required": [
+            "producer",
+            "tool"
+          ],
+          "properties": {
+            "producer": {
+              "type": "string",
+              "enum": [
+                "tool"
+              ]
+            },
+            "tool": {
+              "description": "Which tool.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolRef"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "The harness itself.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Its identifier.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "harness"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A verifier.",
+          "type": "object",
+          "required": [
+            "producer",
+            "verifier"
+          ],
+          "properties": {
+            "producer": {
+              "type": "string",
+              "enum": [
+                "verifier"
+              ]
+            },
+            "verifier": {
+              "description": "Which class of verifier.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Verifier"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ToolRef": {
+      "description": "tool identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
+    },
+    "Verifier": {
+      "description": "A verifier class; the named classes are listed in `examples`, and any other name is treated as an external tool.",
+      "examples": [
+        "compiler",
+        "test-runner",
+        "contract-runner",
+        "static-analyzer",
+        "property-tester",
+        "model-checker",
+        "telemetry-query",
+        "policy-engine",
+        "human-approval",
+        "human-review",
+        "artifact-validator"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"
+    }
+  }
+}

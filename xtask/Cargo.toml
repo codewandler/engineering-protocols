@@ -1,0 +1,15 @@
+[package]
+name = "xtask"
+description = "Repository automation for engineering-protocols."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+aep-schema.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true

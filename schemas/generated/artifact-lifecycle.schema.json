@@ -1,0 +1,152 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ArtifactLifecycle",
+  "description": "The legal statuses and status transitions for one artifact kind.\n\nLifecycles differ by kind — an ADR goes `proposed → accepted → superseded`, a design goes `draft → in_review → approved → implemented` — and validation rejects a status a kind does not have, which catches the copy-paste error that would otherwise make a requirement silently unsatisfiable.",
+  "type": "object",
+  "required": [
+    "initial"
+  ],
+  "properties": {
+    "initial": {
+      "description": "The status a new artifact starts in.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ArtifactStatus"
+        }
+      ]
+    },
+    "kind": {
+      "description": "The kind this lifecycle governs; absent for the fallback lifecycle.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ArtifactKind"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "transitions": {
+      "description": "For each status, the statuses it may move to.",
+      "default": {},
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/ArtifactStatus"
+        },
+        "uniqueItems": true
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "ArtifactKind": {
+      "description": "Artifact kind in kebab-case; the named vocabulary is listed in `examples`, and any other kebab-case name is accepted as an organisation-specific kind.",
+      "examples": [
+        "vision",
+        "product-requirements",
+        "initiative",
+        "epic",
+        "story",
+        "task",
+        "specification",
+        "acceptance-criteria",
+        "design",
+        "feature-design",
+        "component-design",
+        "architecture-design",
+        "api-design",
+        "data-design",
+        "architecture-decision-record",
+        "test-plan",
+        "evaluation-plan",
+        "verification-report",
+        "review-result",
+        "approval-record",
+        "release-plan",
+        "migration-plan",
+        "runbook",
+        "incident-report",
+        "postmortem"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ArtifactStatus": {
+      "description": "Where an artifact's lifecycle has got to.\n\nThis is independent of workflow state: a design can be `approved` while the task that consumes it is still in `implement`.",
+      "oneOf": [
+        {
+          "description": "Being written.",
+          "type": "string",
+          "enum": [
+            "draft"
+          ]
+        },
+        {
+          "description": "Put forward for a decision.",
+          "type": "string",
+          "enum": [
+            "proposed"
+          ]
+        },
+        {
+          "description": "Under review.",
+          "type": "string",
+          "enum": [
+            "in_review"
+          ]
+        },
+        {
+          "description": "Reviewed and agreed.",
+          "type": "string",
+          "enum": [
+            "approved"
+          ]
+        },
+        {
+          "description": "Decided and in force; the ADR spelling of `approved`.",
+          "type": "string",
+          "enum": [
+            "accepted"
+          ]
+        },
+        {
+          "description": "Reviewed and turned down.",
+          "type": "string",
+          "enum": [
+            "rejected"
+          ]
+        },
+        {
+          "description": "Current and in use.",
+          "type": "string",
+          "enum": [
+            "active"
+          ]
+        },
+        {
+          "description": "Realised in the system.",
+          "type": "string",
+          "enum": [
+            "implemented"
+          ]
+        },
+        {
+          "description": "Replaced by a later artifact.",
+          "type": "string",
+          "enum": [
+            "superseded"
+          ]
+        },
+        {
+          "description": "Kept for the record only.",
+          "type": "string",
+          "enum": [
+            "archived"
+          ]
+        }
+      ]
+    }
+  }
+}

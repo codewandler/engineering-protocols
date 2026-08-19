@@ -1,0 +1,1071 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EventEnvelope",
+  "description": "One event with its position in the stream.\n\nThe event's own fields are flattened into the envelope, so one record is one flat object: `{seq, at, execution, event: \"state_entered\", state: \"implement\"}`. That keeps the stream readable with ordinary tools, which matters for something whose job is being read during an incident review.",
+  "type": "object",
+  "oneOf": [
+    {
+      "description": "A task was accepted.",
+      "type": "object",
+      "required": [
+        "event",
+        "kind",
+        "task"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "task_created"
+          ]
+        },
+        "kind": {
+          "description": "What sort of work it is.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TaskKind"
+            }
+          ]
+        },
+        "task": {
+          "description": "Which task.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TaskId"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A task was resolved into an execution plan.",
+      "type": "object",
+      "required": [
+        "dropped_principles",
+        "event",
+        "principles",
+        "profile",
+        "protocol",
+        "workflow"
+      ],
+      "properties": {
+        "dropped_principles": {
+          "description": "Principles dropped by the profile or the task.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PrincipleId"
+          }
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "protocol_resolved"
+          ]
+        },
+        "principles": {
+          "description": "The principles in force.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PrincipleId"
+          }
+        },
+        "profile": {
+          "description": "The profile.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProfileId"
+            }
+          ]
+        },
+        "protocol": {
+          "description": "The protocol version.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ProtocolRef"
+            }
+          ]
+        },
+        "workflow": {
+          "description": "The workflow.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WorkflowId"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "Execution entered a state.",
+      "type": "object",
+      "required": [
+        "event",
+        "state"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "state_entered"
+          ]
+        },
+        "state": {
+          "description": "Which state.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateId"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "An action was proposed.",
+      "type": "object",
+      "required": [
+        "action",
+        "capability",
+        "event"
+      ],
+      "properties": {
+        "action": {
+          "description": "What was proposed.",
+          "type": "string"
+        },
+        "capability": {
+          "description": "The capability it needs.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Capability"
+            }
+          ]
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "action_requested"
+          ]
+        }
+      }
+    },
+    {
+      "description": "An action was authorised.",
+      "type": "object",
+      "required": [
+        "action",
+        "capability",
+        "event"
+      ],
+      "properties": {
+        "action": {
+          "description": "What was authorised.",
+          "type": "string"
+        },
+        "capability": {
+          "description": "The capability exercised.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Capability"
+            }
+          ]
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "action_allowed"
+          ]
+        }
+      }
+    },
+    {
+      "description": "An action was refused.",
+      "type": "object",
+      "required": [
+        "action",
+        "capability",
+        "decision",
+        "event",
+        "reason"
+      ],
+      "properties": {
+        "action": {
+          "description": "What was refused.",
+          "type": "string"
+        },
+        "capability": {
+          "description": "The capability it needed.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Capability"
+            }
+          ]
+        },
+        "decision": {
+          "description": "What the policy said.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CapabilityDecision"
+            }
+          ]
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "action_denied"
+          ]
+        },
+        "reason": {
+          "description": "Which rule refused it.",
+          "type": "string"
+        }
+      }
+    },
+    {
+      "description": "A harness reported carrying an action out.",
+      "type": "object",
+      "required": [
+        "action",
+        "event",
+        "succeeded"
+      ],
+      "properties": {
+        "action": {
+          "description": "What was carried out.",
+          "type": "string"
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "action_executed"
+          ]
+        },
+        "succeeded": {
+          "description": "Whether it succeeded.",
+          "type": "boolean"
+        }
+      }
+    },
+    {
+      "description": "Evidence was submitted.",
+      "type": "object",
+      "required": [
+        "event",
+        "evidence",
+        "kind",
+        "producer",
+        "state"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "evidence_produced"
+          ]
+        },
+        "evidence": {
+          "description": "Its identifier.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EvidenceId"
+            }
+          ]
+        },
+        "kind": {
+          "description": "Its kind.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EvidenceKind"
+            }
+          ]
+        },
+        "producer": {
+          "description": "What produced it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Producer"
+            }
+          ]
+        },
+        "state": {
+          "description": "The state it was submitted in.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateId"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A verifier established a claim.",
+      "type": "object",
+      "required": [
+        "event",
+        "verifier"
+      ],
+      "properties": {
+        "claim": {
+          "description": "What it established.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "verification_passed"
+          ]
+        },
+        "verifier": {
+          "description": "Which verifier.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Verifier"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A verifier refuted a claim, or could not establish it.",
+      "type": "object",
+      "required": [
+        "counterexamples",
+        "event",
+        "status",
+        "verifier"
+      ],
+      "properties": {
+        "claim": {
+          "description": "What it was asked about.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "counterexamples": {
+          "description": "How many counterexamples it produced.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "verification_failed"
+          ]
+        },
+        "status": {
+          "description": "The outcome.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/VerificationStatus"
+            }
+          ]
+        },
+        "verifier": {
+          "description": "Which verifier.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Verifier"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "An approval was asked for.",
+      "type": "object",
+      "required": [
+        "approval",
+        "event"
+      ],
+      "properties": {
+        "approval": {
+          "description": "Which approval.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalId"
+            }
+          ]
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "approval_requested"
+          ]
+        },
+        "reason": {
+          "description": "Why.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "description": "An approval was given.",
+      "type": "object",
+      "required": [
+        "approval",
+        "approver",
+        "event"
+      ],
+      "properties": {
+        "approval": {
+          "description": "Which approval.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalId"
+            }
+          ]
+        },
+        "approver": {
+          "description": "Who gave it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Producer"
+            }
+          ]
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "approval_granted"
+          ]
+        }
+      }
+    },
+    {
+      "description": "An approval was refused.",
+      "type": "object",
+      "required": [
+        "approval",
+        "approver",
+        "event"
+      ],
+      "properties": {
+        "approval": {
+          "description": "Which approval.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalId"
+            }
+          ]
+        },
+        "approver": {
+          "description": "Who refused it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Producer"
+            }
+          ]
+        },
+        "event": {
+          "type": "string",
+          "enum": [
+            "approval_denied"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A transition was taken.",
+      "type": "object",
+      "required": [
+        "event",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "transition_performed"
+          ]
+        },
+        "from": {
+          "description": "Where from.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateId"
+            }
+          ]
+        },
+        "to": {
+          "description": "Where to.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateId"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A transition was evaluated and not permitted.",
+      "type": "object",
+      "required": [
+        "event",
+        "from",
+        "to",
+        "unmet"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "transition_blocked"
+          ]
+        },
+        "from": {
+          "description": "Where from.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateId"
+            }
+          ]
+        },
+        "to": {
+          "description": "Where it would have gone.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateId"
+            }
+          ]
+        },
+        "unmet": {
+          "description": "The requirements that were not met.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "description": "An obligation was not met.",
+      "type": "object",
+      "required": [
+        "event",
+        "obligation",
+        "principle",
+        "unmet"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "obligation_unmet"
+          ]
+        },
+        "obligation": {
+          "description": "Which obligation.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ObligationId"
+            }
+          ]
+        },
+        "principle": {
+          "description": "Which principle obliges it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/PrincipleId"
+            }
+          ]
+        },
+        "unmet": {
+          "description": "What is missing.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "description": "The task's completion condition was satisfied in a terminal state.",
+      "type": "object",
+      "required": [
+        "event",
+        "state",
+        "task"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "task_completed"
+          ]
+        },
+        "state": {
+          "description": "Where it finished.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateId"
+            }
+          ]
+        },
+        "task": {
+          "description": "Which task.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TaskId"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "The execution stopped without completing.",
+      "type": "object",
+      "required": [
+        "event",
+        "reason",
+        "task"
+      ],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": [
+            "task_abandoned"
+          ]
+        },
+        "reason": {
+          "description": "Why.",
+          "type": "string"
+        },
+        "task": {
+          "description": "Which task.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TaskId"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "required": [
+    "at",
+    "execution",
+    "seq"
+  ],
+  "properties": {
+    "at": {
+      "description": "When it happened.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "execution": {
+      "description": "Which execution it belongs to.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ExecutionId"
+        }
+      ]
+    },
+    "seq": {
+      "description": "Its position, starting at 1 and never reused.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "ApprovalId": {
+      "description": "approval identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "Capability": {
+      "description": "A semantic capability, such as `repository.write` or `deployment.create:staging`.",
+      "examples": [
+        "repository.read",
+        "repository.write",
+        "tests.execute",
+        "command.execute",
+        "network.read",
+        "network.write",
+        "telemetry.read",
+        "production.read",
+        "production.write",
+        "secret.read",
+        "artifact.read",
+        "artifact.write",
+        "planning.read",
+        "planning.write",
+        "review.request",
+        "approval.request",
+        "deployment.create:staging",
+        "deployment.rollback:production"
+      ],
+      "type": "string"
+    },
+    "CapabilityDecision": {
+      "description": "What a policy says about one capability.",
+      "oneOf": [
+        {
+          "description": "May be exercised.",
+          "type": "string",
+          "enum": [
+            "allowed"
+          ]
+        },
+        {
+          "description": "May be exercised once a matching approval has been recorded.",
+          "type": "string",
+          "enum": [
+            "requires_approval"
+          ]
+        },
+        {
+          "description": "Explicitly forbidden; no grant can override this.",
+          "type": "string",
+          "enum": [
+            "denied"
+          ]
+        },
+        {
+          "description": "Not mentioned by the policy, and therefore not granted.",
+          "type": "string",
+          "enum": [
+            "not_granted"
+          ]
+        }
+      ]
+    },
+    "EvidenceId": {
+      "description": "evidence identifier.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+    },
+    "EvidenceKind": {
+      "description": "A kind of evidence.",
+      "oneOf": [
+        {
+          "description": "A test run.",
+          "type": "string",
+          "enum": [
+            "test_result"
+          ]
+        },
+        {
+          "description": "Static analysis output.",
+          "type": "string",
+          "enum": [
+            "static_analysis"
+          ]
+        },
+        {
+          "description": "Contract verification output.",
+          "type": "string",
+          "enum": [
+            "contract_result"
+          ]
+        },
+        {
+          "description": "A property test.",
+          "type": "string",
+          "enum": [
+            "property_test_result"
+          ]
+        },
+        {
+          "description": "A deployment.",
+          "type": "string",
+          "enum": [
+            "deployment_result"
+          ]
+        },
+        {
+          "description": "A measured value.",
+          "type": "string",
+          "enum": [
+            "metric_observation"
+          ]
+        },
+        {
+          "description": "A health check.",
+          "type": "string",
+          "enum": [
+            "health_observation"
+          ]
+        },
+        {
+          "description": "A human approval.",
+          "type": "string",
+          "enum": [
+            "approval"
+          ]
+        },
+        {
+          "description": "A set of source changes.",
+          "type": "string",
+          "enum": [
+            "diff"
+          ]
+        },
+        {
+          "description": "An observation about an artifact.",
+          "type": "string",
+          "enum": [
+            "artifact"
+          ]
+        },
+        {
+          "description": "A review outcome.",
+          "type": "string",
+          "enum": [
+            "review"
+          ]
+        },
+        {
+          "description": "A verifier's statement about a claim.",
+          "type": "string",
+          "enum": [
+            "verification"
+          ]
+        },
+        {
+          "description": "Specification satisfaction.",
+          "type": "string",
+          "enum": [
+            "specification"
+          ]
+        }
+      ]
+    },
+    "ExecutionId": {
+      "description": "execution identifier.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+    },
+    "ObligationId": {
+      "description": "obligation identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*([-_][a-z0-9]+)*([./][a-z0-9]+([-_][a-z0-9]+)*)*$"
+    },
+    "PrincipleId": {
+      "description": "principle identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "Producer": {
+      "description": "What produced a piece of evidence.",
+      "oneOf": [
+        {
+          "description": "An agent.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Its identifier, such as a model or session name.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "agent"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A person.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Their identifier.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "human"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A tool.",
+          "type": "object",
+          "required": [
+            "producer",
+            "tool"
+          ],
+          "properties": {
+            "producer": {
+              "type": "string",
+              "enum": [
+                "tool"
+              ]
+            },
+            "tool": {
+              "description": "Which tool.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolRef"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "The harness itself.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Its identifier.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "harness"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A verifier.",
+          "type": "object",
+          "required": [
+            "producer",
+            "verifier"
+          ],
+          "properties": {
+            "producer": {
+              "type": "string",
+              "enum": [
+                "verifier"
+              ]
+            },
+            "verifier": {
+              "description": "Which class of verifier.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Verifier"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ProfileId": {
+      "description": "profile identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
+    },
+    "ProtocolRef": {
+      "description": "Reference to a protocol at a major version, such as `aep/1`.",
+      "type": "string",
+      "pattern": "^(protocol:)?[a-z][a-z0-9-]*/[1-9][0-9]*$"
+    },
+    "StateId": {
+      "description": "state identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*([-_][a-z0-9]+)*([./][a-z0-9]+([-_][a-z0-9]+)*)*$"
+    },
+    "TaskId": {
+      "description": "task identifier.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+    },
+    "TaskKind": {
+      "description": "What sort of work the task is.",
+      "examples": [
+        "feature",
+        "bugfix",
+        "refactor",
+        "investigation",
+        "incident",
+        "release",
+        "migration",
+        "dependency-upgrade",
+        "security-response",
+        "infrastructure-change",
+        "documentation"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ToolRef": {
+      "description": "tool identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
+    },
+    "VerificationStatus": {
+      "description": "The outcome of a verification.",
+      "oneOf": [
+        {
+          "description": "The claim holds.",
+          "type": "string",
+          "enum": [
+            "passed"
+          ]
+        },
+        {
+          "description": "The claim does not hold.",
+          "type": "string",
+          "enum": [
+            "failed"
+          ]
+        },
+        {
+          "description": "The verifier could not decide; this is not a pass.",
+          "type": "string",
+          "enum": [
+            "inconclusive"
+          ]
+        },
+        {
+          "description": "The verifier did not run.",
+          "type": "string",
+          "enum": [
+            "skipped"
+          ]
+        }
+      ]
+    },
+    "Verifier": {
+      "description": "A verifier class; the named classes are listed in `examples`, and any other name is treated as an external tool.",
+      "examples": [
+        "compiler",
+        "test-runner",
+        "contract-runner",
+        "static-analyzer",
+        "property-tester",
+        "model-checker",
+        "telemetry-query",
+        "policy-engine",
+        "human-approval",
+        "human-review",
+        "artifact-validator"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"
+    },
+    "WorkflowId": {
+      "description": "workflow identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
+    }
+  }
+}

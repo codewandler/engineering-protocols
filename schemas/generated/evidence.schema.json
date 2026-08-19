@@ -1,0 +1,1362 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Evidence",
+  "description": "An observable fact produced during execution.",
+  "oneOf": [
+    {
+      "description": "A test run.",
+      "type": "object",
+      "required": [
+        "kind",
+        "suite"
+      ],
+      "properties": {
+        "duration_ms": {
+          "description": "How long the run took.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "failed": {
+          "description": "How many failed.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "test_result"
+          ]
+        },
+        "passed": {
+          "description": "How many tests passed.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "selector": {
+          "description": "The selector the run was narrowed by, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skipped": {
+          "description": "How many were skipped.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "suite": {
+          "description": "Which suite ran.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TestSuite"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "Static analysis output.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "errors": {
+          "description": "How many errors it reported.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "static_analysis"
+          ]
+        },
+        "tool": {
+          "description": "Which analyser ran.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "warnings": {
+          "description": "How many warnings.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        }
+      }
+    },
+    {
+      "description": "Contract verification output.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "breaking_changes": {
+          "description": "How many changes break an existing consumer.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "checked": {
+          "description": "How many contracts were checked.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "consumer": {
+          "description": "The consumer, when the check is consumer-specific.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failed": {
+          "description": "How many failed.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "contract_result"
+          ]
+        },
+        "provider": {
+          "description": "The provider.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A property test.",
+      "type": "object",
+      "required": [
+        "kind",
+        "property",
+        "status"
+      ],
+      "properties": {
+        "cases": {
+          "description": "How many cases were generated.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "counterexamples": {
+          "description": "Inputs that break the property.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Counterexample"
+          }
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "property_test_result"
+          ]
+        },
+        "property": {
+          "description": "Which property was tested.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ClaimId"
+            }
+          ]
+        },
+        "status": {
+          "description": "The outcome.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/VerificationStatus"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A deployment.",
+      "type": "object",
+      "required": [
+        "environment",
+        "kind",
+        "revision",
+        "status"
+      ],
+      "properties": {
+        "environment": {
+          "description": "Where it went.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Environment"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "deployment_result"
+          ]
+        },
+        "previous_revision": {
+          "description": "What was running before, which is what a rollback needs.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "description": "What was deployed.",
+          "type": "string"
+        },
+        "status": {
+          "description": "How it ended.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/DeploymentStatus"
+            }
+          ]
+        },
+        "strategy": {
+          "description": "The rollout strategy used.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A measured value.",
+      "type": "object",
+      "required": [
+        "kind",
+        "metric",
+        "value"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "metric_observation"
+          ]
+        },
+        "metric": {
+          "description": "The metric's name, as a dotted path.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FactPath"
+            }
+          ]
+        },
+        "service": {
+          "description": "The service it describes.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ServiceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "description": "Its unit.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "description": "Its value.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Number"
+            }
+          ]
+        },
+        "window": {
+          "description": "The window it was measured over, such as `5m`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "description": "A health check.",
+      "type": "object",
+      "required": [
+        "kind",
+        "status"
+      ],
+      "properties": {
+        "detail": {
+          "description": "What was checked.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "health_observation"
+          ]
+        },
+        "service": {
+          "description": "Which service.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ServiceId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "description": "How healthy it is.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/HealthStatus"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A human approval.",
+      "type": "object",
+      "required": [
+        "approval",
+        "approver",
+        "decision",
+        "kind"
+      ],
+      "properties": {
+        "approval": {
+          "description": "Which approval this is.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalId"
+            }
+          ]
+        },
+        "approver": {
+          "description": "Who gave or refused it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Producer"
+            }
+          ]
+        },
+        "decision": {
+          "description": "What they decided.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ApprovalDecision"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "approval"
+          ]
+        },
+        "note": {
+          "description": "Anything they said.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subject": {
+          "description": "What the approval is about.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A set of source changes.",
+      "type": "object",
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "files_changed": {
+          "description": "How many files changed.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "diff"
+          ]
+        },
+        "lines_added": {
+          "description": "How many lines were added.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "lines_removed": {
+          "description": "How many lines were removed.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "paths": {
+          "description": "Which paths changed.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "revision_after": {
+          "description": "The revision after it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision_before": {
+          "description": "The revision before the change.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    {
+      "description": "An observation about an artifact.",
+      "type": "object",
+      "required": [
+        "artifact",
+        "kind",
+        "observation"
+      ],
+      "properties": {
+        "artifact": {
+          "description": "Which artifact.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactRef"
+            }
+          ]
+        },
+        "detail": {
+          "description": "What was checked, or why it does not hold.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "holds": {
+          "description": "Whether the observation holds.",
+          "default": true,
+          "type": "boolean"
+        },
+        "kind": {
+          "description": "What kind it is.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactKind"
+            }
+          ]
+        },
+        "observation": {
+          "description": "What was observed.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactObservation"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A review outcome.",
+      "type": "object",
+      "required": [
+        "disposition",
+        "kind",
+        "reviewer",
+        "subject"
+      ],
+      "properties": {
+        "disposition": {
+          "description": "What they concluded.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ReviewDisposition"
+            }
+          ]
+        },
+        "findings": {
+          "description": "What they found.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Finding"
+          }
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "review"
+          ]
+        },
+        "reviewed_revision": {
+          "description": "Which source revision the subject was at.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewed_version": {
+          "description": "Which version of the artifact they saw.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reviewer": {
+          "description": "Who reviewed it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Reviewer"
+            }
+          ]
+        },
+        "subject": {
+          "description": "What was reviewed.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactRef"
+            }
+          ]
+        },
+        "subject_kind": {
+          "description": "What kind of thing that was, when known without consulting the graph.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "A verifier's statement about a claim.",
+      "type": "object",
+      "required": [
+        "claim",
+        "kind",
+        "status",
+        "verifier"
+      ],
+      "properties": {
+        "claim": {
+          "description": "What was claimed.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ClaimId"
+            }
+          ]
+        },
+        "counterexamples": {
+          "description": "Inputs that break the claim.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Counterexample"
+          }
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "verification"
+          ]
+        },
+        "status": {
+          "description": "The outcome.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/VerificationStatus"
+            }
+          ]
+        },
+        "subject": {
+          "description": "What the claim is about.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifier": {
+          "description": "Who established it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Verifier"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "description": "Specification satisfaction.",
+      "type": "object",
+      "required": [
+        "kind",
+        "satisfied"
+      ],
+      "properties": {
+        "artifact": {
+          "description": "Which specification.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ArtifactRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "specification"
+          ]
+        },
+        "requirements_satisfied": {
+          "description": "How many are satisfied.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "requirements_total": {
+          "description": "How many requirements it has.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "satisfied": {
+          "description": "Whether every requirement is satisfied.",
+          "type": "boolean"
+        },
+        "unsatisfied": {
+          "description": "Which are not.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "ApprovalDecision": {
+      "description": "Whether an approval was given.",
+      "oneOf": [
+        {
+          "description": "Approved.",
+          "type": "string",
+          "enum": [
+            "granted"
+          ]
+        },
+        {
+          "description": "Refused.",
+          "type": "string",
+          "enum": [
+            "denied"
+          ]
+        }
+      ]
+    },
+    "ApprovalId": {
+      "description": "approval identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "ArtifactKind": {
+      "description": "Artifact kind in kebab-case; the named vocabulary is listed in `examples`, and any other kebab-case name is accepted as an organisation-specific kind.",
+      "examples": [
+        "vision",
+        "product-requirements",
+        "initiative",
+        "epic",
+        "story",
+        "task",
+        "specification",
+        "acceptance-criteria",
+        "design",
+        "feature-design",
+        "component-design",
+        "architecture-design",
+        "api-design",
+        "data-design",
+        "architecture-decision-record",
+        "test-plan",
+        "evaluation-plan",
+        "verification-report",
+        "review-result",
+        "approval-record",
+        "release-plan",
+        "migration-plan",
+        "runbook",
+        "incident-report",
+        "postmortem"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ArtifactObservation": {
+      "description": "What was observed about an artifact.",
+      "oneOf": [
+        {
+          "description": "It is there.",
+          "type": "string",
+          "enum": [
+            "exists"
+          ]
+        },
+        {
+          "description": "It conforms to its schema.",
+          "type": "string",
+          "enum": [
+            "schema_valid"
+          ]
+        },
+        {
+          "description": "It has the sections its kind requires.",
+          "type": "string",
+          "enum": [
+            "sections_present"
+          ]
+        },
+        {
+          "description": "It has been approved.",
+          "type": "string",
+          "enum": [
+            "approved"
+          ]
+        },
+        {
+          "description": "It has been reviewed, whatever the outcome.",
+          "type": "string",
+          "enum": [
+            "reviewed"
+          ]
+        },
+        {
+          "description": "It still applies to the current revision.",
+          "type": "string",
+          "enum": [
+            "current"
+          ]
+        },
+        {
+          "description": "Its relationships resolve and are of legal kinds.",
+          "type": "string",
+          "enum": [
+            "relationship_valid"
+          ]
+        }
+      ]
+    },
+    "ArtifactRef": {
+      "description": "Reference to an artifact, optionally pinned with `@<version>`.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._/-]*(@[^@]+)?$"
+    },
+    "ClaimId": {
+      "description": "claim identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "Counterexample": {
+      "description": "A concrete input that breaks a claim.",
+      "type": "object",
+      "required": [
+        "verifier"
+      ],
+      "properties": {
+        "expected": {
+          "description": "What should have happened.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Node"
+            }
+          ]
+        },
+        "input": {
+          "description": "The input that broke it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Node"
+            }
+          ]
+        },
+        "note": {
+          "description": "Anything else worth handing back to the agent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observed": {
+          "description": "What did happen.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Node"
+            }
+          ]
+        },
+        "property": {
+          "description": "The property or claim that failed.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ClaimId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifier": {
+          "description": "Which verifier produced it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Verifier"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "DeploymentStatus": {
+      "description": "How a deployment ended.",
+      "oneOf": [
+        {
+          "description": "Still going.",
+          "type": "string",
+          "enum": [
+            "in_progress"
+          ]
+        },
+        {
+          "description": "Completed.",
+          "type": "string",
+          "enum": [
+            "succeeded"
+          ]
+        },
+        {
+          "description": "Did not complete.",
+          "type": "string",
+          "enum": [
+            "failed"
+          ]
+        },
+        {
+          "description": "Was undone.",
+          "type": "string",
+          "enum": [
+            "rolled_back"
+          ]
+        }
+      ]
+    },
+    "Environment": {
+      "description": "A deployment environment; `*` means every environment.",
+      "examples": [
+        "*",
+        "development",
+        "test",
+        "staging",
+        "production"
+      ],
+      "type": "string",
+      "pattern": "^(\\*|[a-z][a-z0-9-]*)$"
+    },
+    "FactPath": {
+      "description": "Dotted path to an observable value, such as `tests.unit.failed`.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*(\\.[A-Za-z0-9_-]+)*$"
+    },
+    "Finding": {
+      "description": "One thing a review found.",
+      "type": "object",
+      "required": [
+        "severity",
+        "summary"
+      ],
+      "properties": {
+        "blocking": {
+          "description": "Whether it must be resolved before the work proceeds.",
+          "default": false,
+          "type": "boolean"
+        },
+        "location": {
+          "description": "Where it is, such as a `file:line` or a document section.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "severity": {
+          "description": "How serious it is.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Severity"
+            }
+          ]
+        },
+        "summary": {
+          "description": "What it is.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "HealthStatus": {
+      "description": "How healthy a service is.",
+      "oneOf": [
+        {
+          "description": "Serving normally.",
+          "type": "string",
+          "enum": [
+            "healthy"
+          ]
+        },
+        {
+          "description": "Serving, with impairment.",
+          "type": "string",
+          "enum": [
+            "degraded"
+          ]
+        },
+        {
+          "description": "Not serving.",
+          "type": "string",
+          "enum": [
+            "unhealthy"
+          ]
+        }
+      ]
+    },
+    "Node": {
+      "description": "Any JSON/YAML value: null, boolean, number, string, array or object."
+    },
+    "Number": {
+      "description": "A number; NaN is not permitted.",
+      "type": "number"
+    },
+    "Producer": {
+      "description": "What produced a piece of evidence.",
+      "oneOf": [
+        {
+          "description": "An agent.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Its identifier, such as a model or session name.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "agent"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A person.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Their identifier.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "human"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A tool.",
+          "type": "object",
+          "required": [
+            "producer",
+            "tool"
+          ],
+          "properties": {
+            "producer": {
+              "type": "string",
+              "enum": [
+                "tool"
+              ]
+            },
+            "tool": {
+              "description": "Which tool.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolRef"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "description": "The harness itself.",
+          "type": "object",
+          "required": [
+            "id",
+            "producer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Its identifier.",
+              "type": "string"
+            },
+            "producer": {
+              "type": "string",
+              "enum": [
+                "harness"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A verifier.",
+          "type": "object",
+          "required": [
+            "producer",
+            "verifier"
+          ],
+          "properties": {
+            "producer": {
+              "type": "string",
+              "enum": [
+                "verifier"
+              ]
+            },
+            "verifier": {
+              "description": "Which class of verifier.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Verifier"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ReviewDisposition": {
+      "description": "What a review concluded.",
+      "oneOf": [
+        {
+          "description": "Accepted as it stands.",
+          "type": "string",
+          "enum": [
+            "approved"
+          ]
+        },
+        {
+          "description": "Not accepted yet; specific changes are wanted.",
+          "type": "string",
+          "enum": [
+            "changes_requested"
+          ]
+        },
+        {
+          "description": "Not accepted.",
+          "type": "string",
+          "enum": [
+            "rejected"
+          ]
+        }
+      ]
+    },
+    "Reviewer": {
+      "description": "Who reviewed.",
+      "oneOf": [
+        {
+          "description": "A person.",
+          "type": "object",
+          "required": [
+            "id",
+            "reviewer"
+          ],
+          "properties": {
+            "id": {
+              "description": "Their identifier in whatever system recorded the review.",
+              "type": "string"
+            },
+            "reviewer": {
+              "type": "string",
+              "enum": [
+                "human"
+              ]
+            }
+          }
+        },
+        {
+          "description": "A group.",
+          "type": "object",
+          "required": [
+            "name",
+            "reviewer"
+          ],
+          "properties": {
+            "name": {
+              "description": "The team's name.",
+              "type": "string"
+            },
+            "reviewer": {
+              "type": "string",
+              "enum": [
+                "team"
+              ]
+            }
+          }
+        },
+        {
+          "description": "An agent.",
+          "type": "object",
+          "required": [
+            "id",
+            "reviewer"
+          ],
+          "properties": {
+            "id": {
+              "description": "The agent's identifier.",
+              "type": "string"
+            },
+            "reviewer": {
+              "type": "string",
+              "enum": [
+                "agent"
+              ]
+            }
+          }
+        },
+        {
+          "description": "An automated check standing in for a reviewer.",
+          "type": "object",
+          "required": [
+            "reviewer",
+            "tool"
+          ],
+          "properties": {
+            "reviewer": {
+              "type": "string",
+              "enum": [
+                "automated"
+              ]
+            },
+            "tool": {
+              "description": "What ran.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/ToolRef"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "ServiceId": {
+      "description": "service identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"
+    },
+    "Severity": {
+      "description": "How serious a review finding is.",
+      "oneOf": [
+        {
+          "description": "Worth knowing.",
+          "type": "string",
+          "enum": [
+            "info"
+          ]
+        },
+        {
+          "description": "Minor.",
+          "type": "string",
+          "enum": [
+            "low"
+          ]
+        },
+        {
+          "description": "Should be addressed.",
+          "type": "string",
+          "enum": [
+            "medium"
+          ]
+        },
+        {
+          "description": "Must be addressed.",
+          "type": "string",
+          "enum": [
+            "high"
+          ]
+        },
+        {
+          "description": "Stops everything.",
+          "type": "string",
+          "enum": [
+            "critical"
+          ]
+        }
+      ]
+    },
+    "SubjectRef": {
+      "description": "Subject of evidence, written `<kind>:<id>`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "TestSuite": {
+      "description": "Which body of tests was run.",
+      "examples": [
+        "unit",
+        "integration",
+        "contract",
+        "property",
+        "regression",
+        "mutation",
+        "fuzz",
+        "differential",
+        "e2e",
+        "smoke"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ToolRef": {
+      "description": "tool identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
+    },
+    "VerificationStatus": {
+      "description": "The outcome of a verification.",
+      "oneOf": [
+        {
+          "description": "The claim holds.",
+          "type": "string",
+          "enum": [
+            "passed"
+          ]
+        },
+        {
+          "description": "The claim does not hold.",
+          "type": "string",
+          "enum": [
+            "failed"
+          ]
+        },
+        {
+          "description": "The verifier could not decide; this is not a pass.",
+          "type": "string",
+          "enum": [
+            "inconclusive"
+          ]
+        },
+        {
+          "description": "The verifier did not run.",
+          "type": "string",
+          "enum": [
+            "skipped"
+          ]
+        }
+      ]
+    },
+    "Verifier": {
+      "description": "A verifier class; the named classes are listed in `examples`, and any other name is treated as an external tool.",
+      "examples": [
+        "compiler",
+        "test-runner",
+        "contract-runner",
+        "static-analyzer",
+        "property-tester",
+        "model-checker",
+        "telemetry-query",
+        "policy-engine",
+        "human-approval",
+        "human-review",
+        "artifact-validator"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"
+    }
+  }
+}

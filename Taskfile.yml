@@ -1,0 +1,50 @@
+# Task runner for engineering-protocols. Requires go-task (https://taskfile.dev).
+version: "3"
+
+tasks:
+  default:
+    desc: Run the full gate, as CI does.
+    deps: [check]
+
+  check:
+    desc: Format check, lint, test and schema check — everything CI runs.
+    cmds:
+      - task: fmt-check
+      - task: clippy
+      - task: test
+      - task: schema-check
+
+  fmt:
+    desc: Format the workspace.
+    cmds:
+      - cargo fmt --all
+
+  fmt-check:
+    desc: Fail if anything is unformatted.
+    cmds:
+      - cargo fmt --all -- --check
+
+  clippy:
+    desc: Lint every target, warnings are errors.
+    cmds:
+      - cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    desc: Run every test in the workspace.
+    cmds:
+      - cargo test --workspace
+
+  schema:
+    desc: Regenerate schemas/generated/ from the Rust types.
+    cmds:
+      - cargo xtask schema
+
+  schema-check:
+    desc: Fail if the committed schemas differ from the Rust types.
+    cmds:
+      - cargo xtask schema --check
+
+  doc:
+    desc: Build the API documentation.
+    cmds:
+      - cargo doc --workspace --no-deps
