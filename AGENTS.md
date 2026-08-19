@@ -101,6 +101,14 @@ makes the change. Internal refactors that change nothing observable do not.
 Write the entry for the person hitting the behaviour, not for the person who wrote it: "an approval
 of version 3 no longer satisfies a review requirement for version 7", not "added freshness check".
 
+## Tags
+
+Each delivered wave gets an annotated tag named after its `CHANGELOG.md` heading — `0.1.0`,
+`0.2.0-wave-1`, `0.2.0-wave-2` — pointing at the commit that delivered the work, not at the
+changelog housekeeping that follows it. The tag message states what the wave delivered and the
+implementation percentage after it, so `git tag -n99` reads as a project history without opening a
+browser.
+
 ## Commits
 
 * Conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.

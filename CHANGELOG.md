@@ -9,6 +9,10 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Wave 3 — conformance suites, `adp-domain` and `aop-domain`. See `docs/plan/wave-3-conformance.md`.
+
+## [0.2.0-wave-2] — 2026-08-20
+
 ### Added
 
 - **Identity.** Every addressable thing now has an opaque `EntityId`, a logical `EntityLocator`
@@ -125,3 +129,8 @@ belongs in the commit message or in `docs/design/`.
   generation for six document types and four interchange types.
 - **`xtask schema [--check]`** — schemas are generated from the Rust types, and CI proves they match.
 - Repository scaffolding: workspace, `Taskfile.yml` gate, Apache-2.0 licence, `AGENTS.md`.
+
+[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-2...HEAD
+[0.2.0-wave-2]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-1...0.2.0-wave-2
+[0.2.0-wave-1]: https://github.com/codewandler/engineering-protocols/compare/0.1.0...0.2.0-wave-1
+[0.1.0]: https://github.com/codewandler/engineering-protocols/releases/tag/0.1.0
