@@ -1,30 +1,30 @@
 //! Every mutation leaves a record that names who, what and which revision.
 //!
-//! §52 makes audit a cross-cutting concern rather than a feature, and §78.10 fixes what a record
-//! has to be able to answer about a successful change: who authorised it, what executed it, which
-//! entity moved, and from which revision to which. This is not logging. A log line is written for
-//! whoever is watching now; an audit record is written for whoever asks in six months, by which time
-//! the only thing left is the record. A backend that writes nothing, or writes a single `user` field
-//! that conflates a person with the agent acting for them, can answer "something changed" and
-//! nothing else — which is exactly the answer that makes an access review or an incident review
-//! impossible.
+//! §52 makes audit a cross-cutting concern rather than a feature, and §78.10 fixes what a record has
+//! to answer about a successful change: who authorised it, what executed it, which entity moved, and
+//! from which revision to which. This is not logging. A log line is written for whoever is watching
+//! now; an audit record is written for whoever asks in six months, by which time the record is all
+//! there is. A backend that writes nothing, or writes one `user` field that conflates a person with
+//! the agent acting for them, can answer "something changed" and nothing else — which is exactly the
+//! answer that makes an access review or an incident review impossible.
 
+use aep_contract::command::{CommandEnvelope, CommandResult};
 use aep_contract::query::AuditQuery;
 use aep_contract::testing::block_on;
 use aep_domain::audit::AuditRecord;
 use aep_domain::command::{Command, CreateEntity};
-use aep_domain::entity::{EntityRef, EntityType, VersionedEntityRef};
+use aep_domain::entity::{
+    EntityLocator, EntityRef, EntityRevision, EntityType, VersionedEntityRef,
+};
+use aep_domain::ids::{CommandId, IdempotencyKey};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness};
+use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
 use crate::report::SuiteReport;
 
 /// Runs the audit suite.
-// A suite is one ordered list of checks, each depending on the state the last one left. Splitting it
-// into helpers would hide that sequence, which is the thing a reader needs to follow.
-#[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new("audit");
+    let harness = Harness::new(SUITE);
     let mut report = SuiteReport::new("audit");
 
     let left = "a create leaves at least one audit record";
@@ -33,7 +33,7 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     let names_change = "an audit record says which entity changed and which revision it reached";
     let scoped = "audit by entity returns that entity's records and no others";
 
-    let design = match plant(&harness, backend, "design") {
+    let design = match plant(&harness, backend, "design", "subject") {
         Ok(reference) => reference,
         Err(detail) => {
             report.aborted(left, detail);
@@ -42,7 +42,7 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     };
     // A second entity, so that "only this entity's records" is a claim about filtering rather than
     // a claim about there being nothing else to return.
-    let elsewhere = match plant(&harness, backend, "story") {
+    let elsewhere = match plant(&harness, backend, "story", "bystander") {
         Ok(reference) => reference,
         Err(detail) => {
             report.aborted(scoped, detail);
@@ -97,15 +97,10 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
         names_change,
         records.iter().any(|candidate| covers(candidate, &design)),
         format!(
-            "no record covers entity {} at revision {}; the records for it carry {:?}",
+            "no record says that {} reached revision {}; the records for it report {:?}",
             design.id,
             design.revision.get(),
-            records
-                .iter()
-                .map(|candidate| candidate.change.as_ref().map(|change| change
-                    .after
-                    .map_or(0, aep_domain::entity::EntityRevision::get)))
-                .collect::<Vec<_>>()
+            records.iter().map(reached).collect::<Vec<_>>()
         ),
     );
 
@@ -141,34 +136,44 @@ fn covers(record: &AuditRecord, reference: &VersionedEntityRef) -> bool {
     })
 }
 
-/// Creates an entity and reports where it landed.
+/// The revision a record says its subject reached, for a failure detail worth reading.
+fn reached(record: &AuditRecord) -> Option<u64> {
+    record
+        .change
+        .as_ref()
+        .and_then(|change| change.after)
+        .map(EntityRevision::get)
+}
+
+/// Creates an entity of `aep.<kind>/v1` and reports where it landed.
 ///
-/// It falls back to resolving the locator when a backend reports no affected entity, so that a
+/// It falls back to resolving the address when a backend reports no affected entity, so that a
 /// backend failing the `command-execution` suite is not failed here for the same reason twice.
 fn plant<B: Backend>(
     harness: &Harness,
     backend: &B,
     kind: &str,
+    tag: &str,
 ) -> Result<VersionedEntityRef, String> {
     let entity_type = EntityType::parse(&format!("aep.{kind}/v1")).map_err(|e| e.to_string())?;
-    let locator = harness.locator(kind);
-    let data = Node::Map(
-        [
-            ("title".to_owned(), Node::from("An entity under audit")),
-            ("status".to_owned(), Node::from("active")),
-        ]
-        .into(),
-    );
-    let result = harness
-        .run(
-            backend,
-            Command::CreateEntity(CreateEntity {
-                entity_type,
-                locator: locator.clone(),
-                data,
-            }),
-        )
-        .map_err(|error| format!("the entity could not be created: {error}"))?;
+    let locator = address(kind, tag)?;
+    let result = issue(
+        harness,
+        backend,
+        tag,
+        Command::CreateEntity(CreateEntity {
+            entity_type,
+            locator: locator.clone(),
+            data: Node::Map(
+                [
+                    ("title".to_owned(), Node::from("An entity under audit")),
+                    ("status".to_owned(), Node::from("active")),
+                ]
+                .into(),
+            ),
+        }),
+    )
+    .map_err(|error| format!("the entity could not be created: {error}"))?;
     if let Some(reference) = result.affected.first() {
         return Ok(reference.clone());
     }
@@ -177,6 +182,43 @@ fn plant<B: Backend>(
         .read(backend, &EntityRef::new(id))?
         .metadata
         .versioned_reference())
+}
+
+/// The name this suite mints into every identifier it creates.
+///
+/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
+/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
+/// for different commands and create entities at the same address; both are refused, and the failure
+/// reads as a fault in the backend rather than as a collision between suites.
+const SUITE: &str = "audit";
+
+/// An address no other suite in the same run uses.
+fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
+    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
+        .map_err(|error| error.to_string())
+}
+
+/// An envelope whose command id and idempotency key no other suite in the same run uses.
+fn envelope(
+    harness: &Harness,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandEnvelope<Command>, String> {
+    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
+}
+
+/// Issues a command under identifiers this suite owns.
+fn issue<B: Backend>(
+    harness: &Harness,
+    backend: &B,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandResult, String> {
+    harness
+        .execute(backend, envelope(harness, tag, payload)?)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

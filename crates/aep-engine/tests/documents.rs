@@ -129,6 +129,72 @@ fn a_development_task_can_be_walked_to_completion_with_evidence() {
     }
 }
 
+#[test]
+fn the_approval_floor_is_in_force_for_every_shipped_profile() {
+    // The claim three documents make — "a profile that granted production.write outright would fail
+    // to resolve" — was untrue for every `adp/1` and `aop/1` profile, because `Protocol::extend` did
+    // not inherit the floor. The shipped profiles happened to be safe by hand-writing
+    // `require_approval`, so nothing failed and the check that was supposed to make it impossible was
+    // doing nothing. This asserts against the real documents rather than a fixture.
+    let registry = load_tree_report(&root())
+        .into_result()
+        .expect("the document tree is valid");
+
+    for profile in [
+        "development.standard",
+        "incident.standard",
+        "release.progressive",
+    ] {
+        let reference: aep_domain::version::ProfileVersionedRef =
+            profile.parse().expect("a profile reference");
+        let resolved = registry
+            .resolved_profile(&reference)
+            .unwrap_or_else(|errors| panic!("{profile} does not resolve: {errors}"));
+        let protocol = registry
+            .resolved_protocol(&resolved.protocol)
+            .unwrap_or_else(|errors| panic!("{profile}'s protocol does not resolve: {errors}"));
+
+        assert!(
+            protocol.needs_approval_floor(&aep_domain::capability::Capability::ProductionWrite),
+            "`{profile}` runs under `{}`, whose approval floor does not cover production.write; a \
+             profile could grant it outright and nothing would refuse",
+            protocol.reference()
+        );
+    }
+}
+
+#[test]
+fn a_profile_that_grants_production_outright_is_refused_under_every_protocol() {
+    let registry = load_tree_report(&root())
+        .into_result()
+        .expect("the document tree is valid");
+
+    // Resolution is what refuses this, so the check has to go through a task.
+    for (protocol, workflow) in [("adp/1", "adp/default"), ("aop/1", "incident/standard")] {
+        let profile = format!(
+            "id: test.reckless\nversion: 1\ntitle: Reckless\nprotocol: {protocol}\nworkflow: {workflow}\n\
+             principles: []\ncapabilities:\n  allow: [repository.read, production.write]\n\
+             completion:\n  - evidence.missing == 0\n"
+        );
+        let mut registry = registry.clone();
+        registry
+            .insert_profile(
+                aep_schema::parse::profile(&profile, None).expect("the profile document parses"),
+            )
+            .expect("the profile is new");
+
+        let task = task(&format!(
+            "id: T-1\nkind: feature\nobjective: something\nprotocol: {protocol}\nprofile: test.reckless\n"
+        ));
+        let errors = resolve(&task, &registry)
+            .expect_err("granting production.write outright must not resolve under {protocol}");
+        assert!(
+            errors.contains(aep_domain::error::ValidationCode::ProductionWriteWithoutApproval),
+            "under {protocol} the refusal must be the approval floor, not something else: {errors}"
+        );
+    }
+}
+
 /// Renders validation errors as an indented block.
 fn indent(errors: &ValidationErrors) -> String {
     errors

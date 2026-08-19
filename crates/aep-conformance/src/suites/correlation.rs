@@ -2,31 +2,31 @@
 //!
 //! §38 keeps correlation and causation apart because they answer different questions: causation says
 //! what produced this one step, correlation says what belongs together. A release, an incident or a
-//! single user request is a dozen commands, events and decisions spread across minutes and services,
+//! single user request is a dozen commands, events and decisions spread over minutes and services,
 //! and the only thing that makes it one story afterwards is that every record carries the same
 //! `correlation_id`. Lose it and the trail still contains everything that happened, in the sense
-//! that a shredded document still contains every word: the question "show me everything about that
-//! release" stops having an answer, and the questions people actually ask after an outage are all
-//! that question.
+//! that a shredded document still contains every word: "show me everything about that release" stops
+//! having an answer, and the questions people actually ask after an outage are all that question.
 
+use aep_contract::command::{CommandEnvelope, CommandResult};
 use aep_contract::query::AuditQuery;
 use aep_contract::testing::block_on;
 use aep_domain::command::{Command, CreateEntity, UpdateEntity};
-use aep_domain::entity::{EntityRef, EntityType, VersionedEntityRef};
+use aep_domain::entity::{EntityLocator, EntityRef, EntityType, VersionedEntityRef};
 use aep_domain::ids::{CommandId, CorrelationId, IdempotencyKey};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness};
+use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
 use crate::report::SuiteReport;
 
+/// How many commands the suite issues under the activity it then asks about.
+const ISSUED: usize = 3;
+
 /// Runs the correlation suite.
-// A suite is one ordered list of checks, each depending on the state the last one left. Splitting it
-// into helpers would hide that sequence, which is the thing a reader needs to follow.
-#[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     // Two activities against one backend, because "this activity's records" is only a claim if
     // there is another activity that could have been returned and was not.
-    let harness = Harness::new("correlation");
+    let harness = Harness::new(SUITE);
     let elsewhere = Harness::new("correlation-elsewhere");
     let mut report = SuiteReport::new("correlation");
 
@@ -35,13 +35,10 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     let unused = "an identifier no command used returns an empty page";
     let separate = "another activity's records are not returned by this one's identifier";
 
-    let commands = match drive(&harness, backend) {
-        Ok(commands) => commands,
-        Err(detail) => {
-            report.aborted(whole, detail);
-            return report;
-        }
-    };
+    if let Err(detail) = drive(&harness, backend) {
+        report.aborted(whole, detail);
+        return report;
+    }
     let elsewhere_ran = second_activity(&elsewhere, backend);
 
     let records = match block_on(
@@ -71,9 +68,9 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
 
     report.expect(
         whole,
-        records.len() >= commands,
+        records.len() >= ISSUED,
         format!(
-            "{commands} command(s) were issued under {} and the trail returns {} record(s)",
+            "{ISSUED} command(s) were issued under {} and the trail returns {} record(s)",
             harness.correlation(),
             records.len()
         ),
@@ -85,9 +82,8 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
                 unused,
                 page.is_empty(),
                 format!(
-                    "{} was never issued and yet {} record(s) came back, so the filter is not \
-                     being applied",
-                    nobody,
+                    "{nobody} was never issued and yet {} record(s) came back, so the filter is \
+                     not being applied",
                     page.len()
                 ),
             ),
@@ -109,8 +105,8 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
         separate,
         strangers.is_empty() && elsewhere_ran.is_ok() && theirs > 0,
         format!(
-            "the other activity {} has {theirs} record(s) of its own ({:?}), and {} of them were \
-             returned for {}",
+            "the other activity {} has {theirs} record(s) of its own ({:?}), and {} of them came \
+             back for {}",
             elsewhere.correlation(),
             elsewhere_ran.as_ref().err(),
             strangers.len(),
@@ -121,73 +117,74 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     report
 }
 
-/// Issues several commands under one activity, returning how many were issued.
-fn drive<B: Backend>(harness: &Harness, backend: &B) -> Result<usize, String> {
+/// Issues [`ISSUED`] commands under one activity.
+fn drive<B: Backend>(harness: &Harness, backend: &B) -> Result<(), String> {
     let entity_type = EntityType::parse("aep.design/v1").map_err(|error| error.to_string())?;
-    let locator = harness.locator("design");
-    let created = harness
-        .run(
-            backend,
-            Command::CreateEntity(CreateEntity {
-                entity_type,
-                locator: locator.clone(),
-                data: Node::Map(
-                    [
-                        (
-                            "title".to_owned(),
-                            Node::from("A design under one activity"),
-                        ),
-                        ("status".to_owned(), Node::from("in_review")),
-                    ]
-                    .into(),
-                ),
-            }),
-        )
-        .map_err(|error| format!("the entity could not be created: {error}"))?;
+    let locator = address("design", "subject")?;
+    let created = issue(
+        harness,
+        backend,
+        "create",
+        Command::CreateEntity(CreateEntity {
+            entity_type,
+            locator: locator.clone(),
+            data: Node::Map(
+                [
+                    (
+                        "title".to_owned(),
+                        Node::from("A design under one activity"),
+                    ),
+                    ("status".to_owned(), Node::from("in_review")),
+                ]
+                .into(),
+            ),
+        }),
+    )
+    .map_err(|error| format!("the entity could not be created: {error}"))?;
     let design = settle(harness, backend, created.affected.first(), &locator)?;
 
-    for note in ["a first revision of the summary", "a second one"] {
-        harness
-            .run(
-                backend,
-                Command::UpdateEntity(UpdateEntity {
-                    target: design.unversioned(),
-                    changes: [("summary".to_owned(), Node::from(note))].into(),
-                }),
-            )
-            .map_err(|error| format!("the entity could not be updated: {error}"))?;
+    for (tag, note) in [
+        ("first-edit", "a first revision of the summary"),
+        ("second-edit", "a second one"),
+    ] {
+        issue(
+            harness,
+            backend,
+            tag,
+            Command::UpdateEntity(UpdateEntity {
+                target: design.unversioned(),
+                changes: [("summary".to_owned(), Node::from(note))].into(),
+            }),
+        )
+        .map_err(|error| format!("the entity could not be updated: {error}"))?;
     }
 
-    Ok(3)
+    Ok(())
 }
 
 /// Runs one command under a second activity, so the first activity's query has something to exclude.
 fn second_activity<B: Backend>(harness: &Harness, backend: &B) -> Result<(), String> {
     let entity_type = EntityType::parse("aep.story/v1").map_err(|error| error.to_string())?;
-    // Both harnesses generate identifiers from their own counter, so the second one is given keys of
-    // its own: reusing a key for a different command is refused, and rightly so.
-    let key = IdempotencyKey::new("key-correlation-elsewhere").map_err(|e| e.to_string())?;
-    let command_id = CommandId::new("cmd-correlation-elsewhere").map_err(|e| e.to_string())?;
-    let payload = Command::CreateEntity(CreateEntity {
-        entity_type,
-        locator: harness.locator("story"),
-        data: Node::Map([("title".to_owned(), Node::from("Somebody else's work"))].into()),
-    });
-    harness
-        .execute(
-            backend,
-            harness.envelope(command_id, payload, harness.context_with_key(&key)),
-        )
-        .map_err(|error| format!("the second activity's command failed: {error}"))?;
+    issue(
+        harness,
+        backend,
+        "elsewhere",
+        Command::CreateEntity(CreateEntity {
+            entity_type,
+            locator: address("story", "elsewhere")?,
+            data: Node::Map([("title".to_owned(), Node::from("Somebody else's work"))].into()),
+        }),
+    )
+    .map_err(|error| format!("the second activity's command failed: {error}"))?;
     Ok(())
 }
 
-/// Where a create landed, falling back to the locator when the backend reports nothing.
+/// Where a create landed, falling back to the address when the backend reports nothing.
 fn settle<B: Backend>(
     harness: &Harness,
     backend: &B,
     affected: Option<&VersionedEntityRef>,
-    locator: &aep_domain::entity::EntityLocator,
+    locator: &EntityLocator,
 ) -> Result<VersionedEntityRef, String> {
     if let Some(reference) = affected {
         return Ok(reference.clone());
@@ -197,6 +194,44 @@ fn settle<B: Backend>(
         .read(backend, &EntityRef::new(id))?
         .metadata
         .versioned_reference())
+}
+
+/// The name this suite mints into every identifier it creates.
+///
+/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
+/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
+/// for different commands and create entities at the same address; both are refused, and the failure
+/// reads as a fault in the backend rather than as a collision between suites. The same applies to
+/// the two harnesses here, which are two activities and not two runs.
+const SUITE: &str = "correlation";
+
+/// An address no other suite in the same run uses.
+fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
+    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
+        .map_err(|error| error.to_string())
+}
+
+/// An envelope whose command id and idempotency key no other suite in the same run uses.
+fn envelope(
+    harness: &Harness,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandEnvelope<Command>, String> {
+    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
+}
+
+/// Issues a command under identifiers this suite owns.
+fn issue<B: Backend>(
+    harness: &Harness,
+    backend: &B,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandResult, String> {
+    harness
+        .execute(backend, envelope(harness, tag, payload)?)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

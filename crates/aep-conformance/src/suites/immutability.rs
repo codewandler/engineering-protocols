@@ -9,12 +9,14 @@
 //! the second, a review result can be rewritten after the fact, which means it no longer records
 //! what anybody concluded and cannot be used as evidence for anything.
 
+use aep_contract::command::{CommandEnvelope, CommandResult};
 use aep_contract::testing::block_on;
 use aep_domain::command::{ArchiveEntity, Command, CreateEntity, UpdateEntity};
-use aep_domain::entity::{EntityRef, EntityType, VersionedEntityRef};
+use aep_domain::entity::{EntityLocator, EntityRef, EntityType, VersionedEntityRef};
+use aep_domain::ids::{CommandId, IdempotencyKey};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness};
+use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
 use crate::report::SuiteReport;
 
 /// Runs the immutability suite.
@@ -22,7 +24,7 @@ use crate::report::SuiteReport;
 // into helpers would hide that sequence, which is the thing a reader needs to follow.
 #[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new("immutability");
+    let harness = Harness::new(SUITE);
     let mut report = SuiteReport::new("immutability");
 
     archiving_is_not_deletion(&harness, backend, &mut report);
@@ -35,17 +37,14 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
 fn archiving_is_not_deletion<B: Backend>(harness: &Harness, backend: &B, report: &mut SuiteReport) {
     let readable = "an archived entity is still readable, because there is no delete";
     let advances = "archiving advances the revision rather than removing anything";
-    let states = "archiving records a status rather than a disappearance";
+    let flagged = "archiving records a status rather than a disappearance";
 
     let story = match plant(
         harness,
         backend,
-        "aep.story/v1",
         "story",
-        &[
-            ("title", Node::from("A story that has been overtaken")),
-            ("status", Node::from("active")),
-        ],
+        "overtaken",
+        "A story that has been overtaken",
     ) {
         Ok(reference) => reference,
         Err(detail) => {
@@ -54,14 +53,16 @@ fn archiving_is_not_deletion<B: Backend>(harness: &Harness, backend: &B, report:
         }
     };
 
-    if let Err(error) = harness.run(
+    if let Err(detail) = issue(
+        harness,
         backend,
+        "archive",
         Command::ArchiveEntity(ArchiveEntity {
             target: story.unversioned(),
             reason: Some("overtaken by later work".to_owned()),
         }),
     ) {
-        report.aborted(readable, format!("archiving was refused: {error}"));
+        report.aborted(readable, format!("archiving was refused: {detail}"));
         return;
     }
 
@@ -76,7 +77,7 @@ fn archiving_is_not_deletion<B: Backend>(harness: &Harness, backend: &B, report:
 
     let Ok(entity) = archived else {
         report.aborted(advances, "the archived entity could not be read back");
-        report.aborted(states, "the archived entity could not be read back");
+        report.aborted(flagged, "the archived entity could not be read back");
         return;
     };
 
@@ -96,7 +97,7 @@ fn archiving_is_not_deletion<B: Backend>(harness: &Harness, backend: &B, report:
         .and_then(|fields| fields.get("status"))
         .and_then(Node::as_text);
     report.expect(
-        states,
+        flagged,
         recorded_status == Some("archived"),
         format!("the archived entity's `status` reads {recorded_status:?}"),
     );
@@ -115,12 +116,9 @@ fn an_immutable_type_refuses_an_edit<B: Backend>(
     let review = match plant(
         harness,
         backend,
-        "aep.review-result/v1",
         "review-result",
-        &[
-            ("title", Node::from("What the reviewer concluded")),
-            ("status", Node::from("active")),
-        ],
+        "concluded",
+        "What the reviewer concluded",
     ) {
         Ok(reference) => reference,
         Err(detail) => {
@@ -129,17 +127,22 @@ fn an_immutable_type_refuses_an_edit<B: Backend>(
         }
     };
 
-    let attempt = harness.run(
-        backend,
-        Command::UpdateEntity(UpdateEntity {
-            target: review.unversioned(),
-            changes: [(
-                "title".to_owned(),
-                Node::from("What the reviewer would rather have concluded"),
-            )]
-            .into(),
-        }),
-    );
+    let edit = Command::UpdateEntity(UpdateEntity {
+        target: review.unversioned(),
+        changes: [(
+            "title".to_owned(),
+            Node::from("What the reviewer would rather have concluded"),
+        )]
+        .into(),
+    });
+    let attempt = match envelope(harness, "edit", edit) {
+        Ok(envelope) => harness.execute(backend, envelope),
+        Err(detail) => {
+            report.aborted(refused, detail.clone());
+            report.aborted(named, detail);
+            return;
+        }
+    };
 
     match &attempt {
         Ok(result) => {
@@ -183,35 +186,36 @@ fn an_immutable_type_refuses_an_edit<B: Backend>(
     }
 }
 
-/// Creates an entity and reports where it landed.
+/// Creates an entity of `aep.<kind>/v1` and reports where it landed.
 ///
-/// It falls back to resolving the locator when a backend reports no affected entity, so that a
+/// It falls back to resolving the address when a backend reports no affected entity, so that a
 /// backend failing the `command-execution` suite is not failed here for the same reason twice.
 fn plant<B: Backend>(
     harness: &Harness,
     backend: &B,
-    entity_type: &str,
     kind: &str,
-    fields: &[(&str, Node)],
+    tag: &str,
+    title: &str,
 ) -> Result<VersionedEntityRef, String> {
-    let entity_type = EntityType::parse(entity_type).map_err(|error| error.to_string())?;
-    let locator = harness.locator(kind);
-    let data = Node::Map(
-        fields
-            .iter()
-            .map(|(key, value)| ((*key).to_owned(), value.clone()))
-            .collect(),
-    );
-    let result = harness
-        .run(
-            backend,
-            Command::CreateEntity(CreateEntity {
-                entity_type,
-                locator: locator.clone(),
-                data,
-            }),
-        )
-        .map_err(|error| format!("the entity could not be created: {error}"))?;
+    let entity_type = EntityType::parse(&format!("aep.{kind}/v1")).map_err(|e| e.to_string())?;
+    let locator = address(kind, tag)?;
+    let result = issue(
+        harness,
+        backend,
+        tag,
+        Command::CreateEntity(CreateEntity {
+            entity_type,
+            locator: locator.clone(),
+            data: Node::Map(
+                [
+                    ("title".to_owned(), Node::from(title)),
+                    ("status".to_owned(), Node::from("active")),
+                ]
+                .into(),
+            ),
+        }),
+    )
+    .map_err(|error| format!("the entity could not be created: {error}"))?;
     if let Some(reference) = result.affected.first() {
         return Ok(reference.clone());
     }
@@ -220,6 +224,43 @@ fn plant<B: Backend>(
         .read(backend, &EntityRef::new(id))?
         .metadata
         .versioned_reference())
+}
+
+/// The name this suite mints into every identifier it creates.
+///
+/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
+/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
+/// for different commands and create entities at the same address; both are refused, and the failure
+/// reads as a fault in the backend rather than as a collision between suites.
+const SUITE: &str = "immutability";
+
+/// An address no other suite in the same run uses.
+fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
+    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
+        .map_err(|error| error.to_string())
+}
+
+/// An envelope whose command id and idempotency key no other suite in the same run uses.
+fn envelope(
+    harness: &Harness,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandEnvelope<Command>, String> {
+    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
+}
+
+/// Issues a command under identifiers this suite owns.
+fn issue<B: Backend>(
+    harness: &Harness,
+    backend: &B,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandResult, String> {
+    harness
+        .execute(backend, envelope(harness, tag, payload)?)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

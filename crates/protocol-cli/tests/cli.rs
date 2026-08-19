@@ -286,6 +286,40 @@ fn conformance_fails_when_a_property_is_deliberately_broken() {
 }
 
 #[test]
+fn output_survives_a_reader_that_stops_reading() {
+    // `protocol inspect | head -3` must produce three lines, not a stack trace. Rust's `println!`
+    // panics on a closed pipe, which turns an ordinary shell idiom into a crash report.
+    use std::process::Stdio;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_protocol"))
+        .args(["conformance", "--level", "full"])
+        .current_dir(root())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the protocol binary runs");
+
+    // Read one line, then drop the pipe while the child is still writing.
+    {
+        use std::io::{BufRead, BufReader};
+        let stdout = child.stdout.take().expect("stdout is piped");
+        let mut reader = BufReader::new(stdout);
+        let mut first = String::new();
+        reader
+            .read_line(&mut first)
+            .expect("the first line arrives");
+        assert!(!first.is_empty());
+    }
+
+    let output = child.wait_with_output().expect("the child finishes");
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !errors.contains("panicked"),
+        "a reader that stopped reading is not a crash: {errors}"
+    );
+}
+
+#[test]
 fn conformance_rejects_an_unknown_level_or_fault() {
     let level = protocol(&["conformance", "--level", "thorough"]);
     assert_eq!(code(&level), 1);

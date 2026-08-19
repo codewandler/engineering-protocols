@@ -142,6 +142,11 @@ impl Protocol {
             .evidence_kinds
             .extend(base.evidence_kinds.iter().copied());
         merged.verifiers.extend(base.verifiers.iter().cloned());
+        // The floor is inherited, and inheriting it is the whole point: a derived protocol that
+        // forgot to restate it would silently let a profile grant production access outright.
+        merged
+            .approval_floor
+            .extend(base.approval_floor.iter().cloned());
         merged
             .artifact_kinds
             .extend(base.artifact_kinds.iter().cloned());
@@ -312,7 +317,8 @@ mod tests {
 id: aep
 version: 1
 title: Agentic Engineering Protocol
-capabilities: [repository.read, repository.write, tests.execute]
+capabilities: [repository.read, repository.write, tests.execute, production.write, secret.read]
+approval_floor: [production.write]
 evidence_kinds: [test_result, approval]
 verifiers: [test-runner, human-approval]
 observables: ['tests.**', 'task.**']
@@ -325,7 +331,11 @@ scales:
         let parsed = protocol(BASE).expect("validates");
         assert_eq!(parsed.reference().to_string(), "aep/1");
         assert!(parsed.declares_capability(&Capability::TestExecution));
-        assert!(!parsed.declares_capability(&Capability::ProductionWrite));
+        assert!(!parsed.declares_capability(&Capability::TelemetryRead));
+        assert!(
+            parsed.needs_approval_floor(&Capability::ProductionWrite),
+            "declared, but never grantable outright"
+        );
         assert!(parsed.declares_evidence(EvidenceKind::TestResult));
         assert!(parsed.is_observable(&"tests.unit.failed".parse().expect("path")));
         assert!(!parsed.is_observable(&"metric.error_rate".parse().expect("path")));
@@ -400,6 +410,37 @@ observables: ['metric.**', 'service.**']
             merged.scales.compare("high", "low"),
             Some(std::cmp::Ordering::Greater),
             "scales are inherited"
+        );
+        assert!(
+            merged.needs_approval_floor(&Capability::ProductionWrite),
+            "the base protocol's approval floor is inherited; a derived protocol that did not \
+             restate it would silently let a profile grant production access outright"
+        );
+    }
+
+    #[test]
+    fn a_derived_protocol_may_add_to_the_floor_but_not_escape_it() {
+        let base = protocol(BASE).expect("validates");
+        let extension = protocol(
+            r"
+id: adp
+title: Development protocol
+extends: aep/1
+capabilities: [secret.read]
+approval_floor: [secret.read]
+observables: ['build.**']
+",
+        )
+        .expect("validates");
+
+        let merged = extension.extend(&base);
+        assert!(
+            merged.needs_approval_floor(&Capability::SecretRead),
+            "its own addition"
+        );
+        assert!(
+            merged.needs_approval_floor(&Capability::ProductionWrite),
+            "and the base's, which it cannot drop"
         );
     }
 }

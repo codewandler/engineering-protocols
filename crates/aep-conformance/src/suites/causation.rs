@@ -2,23 +2,23 @@
 //!
 //! Correlation gathers an activity into a bag; causation is what gives the bag an order. §38 draws
 //! the chain — a command causes an event, the event causes a protocol decision, the decision causes
-//! the next command — and §78.13 asks that it be walkable afterwards. The difference shows up the
-//! first time somebody asks *why* rather than *what*: with correlation alone the answer is "these
-//! forty things happened during the release", with causation it is "this deploy happened because
-//! that approval was granted because that verification passed". A backend that records a cause it
-//! cannot resolve, or drops the command a record came from, leaves an implementer with a pile of
-//! rows and no way to order them.
+//! the next command — and §78.13 asks that it be walkable afterwards. The difference shows the first
+//! time somebody asks *why* rather than *what*: with correlation alone the answer is "these forty
+//! things happened during the release"; with causation it is "this deploy happened because that
+//! approval was granted because that verification passed". A backend that records a cause nothing
+//! resolves, or drops the command a record came from, leaves an implementer with a pile of rows and
+//! no way to order them.
 
-use aep_contract::command::CausationRef as StatedCause;
+use aep_contract::command::{CausationRef as StatedCause, CommandEnvelope};
 use aep_contract::query::AuditQuery;
 use aep_contract::testing::block_on;
 use aep_domain::audit::{AuditRecord, CausationRef};
 use aep_domain::command::{Command, CreateEntity, UpdateEntity};
-use aep_domain::entity::{EntityRef, EntityType, VersionedEntityRef};
-use aep_domain::ids::CommandId;
+use aep_domain::entity::{EntityLocator, EntityRef, EntityType, VersionedEntityRef};
+use aep_domain::ids::{CommandId, IdempotencyKey};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness};
+use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
 use crate::report::{Check, SuiteReport};
 
 /// What one run of the scenario issued, so the trail can be asked about it by name.
@@ -32,11 +32,8 @@ struct Chain {
 }
 
 /// Runs the causation suite.
-// A suite is one ordered list of checks, each depending on the state the last one left. Splitting it
-// into helpers would hide that sequence, which is the thing a reader needs to follow.
-#[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new("causation");
+    let harness = Harness::new(SUITE);
     let mut report = SuiteReport::new("causation");
 
     let names_command = "an accepted command's audit record names the command it came from";
@@ -167,7 +164,7 @@ fn leads_to(records: &[AuditRecord], record: &AuditRecord, command: &CommandId) 
 /// Issues a command, a second command caused by it, and a third the backend should refuse.
 fn drive<B: Backend>(harness: &Harness, backend: &B) -> Result<Chain, String> {
     let entity_type = EntityType::parse("aep.design/v1").map_err(|error| error.to_string())?;
-    let locator = harness.locator("design");
+    let locator = address("design", "subject")?;
     let body = |title: &str| {
         Node::Map(
             [
@@ -178,20 +175,18 @@ fn drive<B: Backend>(harness: &Harness, backend: &B) -> Result<Chain, String> {
         )
     };
 
-    let first = harness.command_id();
+    let create = envelope(
+        harness,
+        "create",
+        Command::CreateEntity(CreateEntity {
+            entity_type: entity_type.clone(),
+            locator: locator.clone(),
+            data: body("A design at the head of a causal chain"),
+        }),
+    )?;
+    let first = create.command_id.clone();
     let created = harness
-        .execute(
-            backend,
-            harness.envelope(
-                first.clone(),
-                Command::CreateEntity(CreateEntity {
-                    entity_type: entity_type.clone(),
-                    locator: locator.clone(),
-                    data: body("A design at the head of a causal chain"),
-                }),
-                harness.context(),
-            ),
-        )
+        .execute(backend, create)
         .map_err(|error| format!("the entity could not be created: {error}"))?;
     let design = settle(harness, backend, created.affected.first(), &locator)?;
 
@@ -202,35 +197,32 @@ fn drive<B: Backend>(harness: &Harness, backend: &B) -> Result<Chain, String> {
         .first()
         .map_or_else(|| first.to_string(), ToString::to_string);
 
-    let second = harness.command_id();
+    let mut approve = envelope(
+        harness,
+        "approve",
+        Command::UpdateEntity(UpdateEntity {
+            target: design.unversioned(),
+            changes: [("status".to_owned(), Node::from("approved"))].into(),
+        }),
+    )?;
+    let second = approve.command_id.clone();
+    approve.context = approve.context.caused_by(StatedCause(cause));
     harness
-        .execute(
-            backend,
-            harness.envelope(
-                second.clone(),
-                Command::UpdateEntity(UpdateEntity {
-                    target: design.unversioned(),
-                    changes: [("status".to_owned(), Node::from("approved"))].into(),
-                }),
-                harness.context().caused_by(StatedCause(cause)),
-            ),
-        )
+        .execute(backend, approve)
         .map_err(|error| format!("the second command failed: {error}"))?;
 
     // A second entity at an address already taken: refused by any backend that can address entities.
-    let refused = harness.command_id();
-    drop(harness.execute(
-        backend,
-        harness.envelope(
-            refused.clone(),
-            Command::CreateEntity(CreateEntity {
-                entity_type,
-                locator,
-                data: body("A design at somebody else's address"),
-            }),
-            harness.context(),
-        ),
-    ));
+    let duplicate = envelope(
+        harness,
+        "duplicate",
+        Command::CreateEntity(CreateEntity {
+            entity_type,
+            locator,
+            data: body("A design at somebody else's address"),
+        }),
+    )?;
+    let refused = duplicate.command_id.clone();
+    drop(harness.execute(backend, duplicate));
 
     Ok(Chain {
         first,
@@ -239,12 +231,12 @@ fn drive<B: Backend>(harness: &Harness, backend: &B) -> Result<Chain, String> {
     })
 }
 
-/// Where a create landed, falling back to the locator when the backend reports nothing.
+/// Where a create landed, falling back to the address when the backend reports nothing.
 fn settle<B: Backend>(
     harness: &Harness,
     backend: &B,
     affected: Option<&VersionedEntityRef>,
-    locator: &aep_domain::entity::EntityLocator,
+    locator: &EntityLocator,
 ) -> Result<VersionedEntityRef, String> {
     if let Some(reference) = affected {
         return Ok(reference.clone());
@@ -254,6 +246,31 @@ fn settle<B: Backend>(
         .read(backend, &EntityRef::new(id))?
         .metadata
         .versioned_reference())
+}
+
+/// The name this suite mints into every identifier it creates.
+///
+/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
+/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
+/// for different commands and create entities at the same address; both are refused, and the failure
+/// reads as a fault in the backend rather than as a collision between suites.
+const SUITE: &str = "causation";
+
+/// An address no other suite in the same run uses.
+fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
+    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
+        .map_err(|error| error.to_string())
+}
+
+/// An envelope whose command id and idempotency key no other suite in the same run uses.
+fn envelope(
+    harness: &Harness,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandEnvelope<Command>, String> {
+    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
 }
 
 #[cfg(test)]

@@ -1,31 +1,32 @@
 //! A refused command changes nothing and is still recorded.
 //!
-//! §55 is the section that separates an audit trail from a success log. "An agent attempted a
-//! production write and policy denied it" is the row that matters in a security review, an incident
-//! post-mortem and an access audit — and it is precisely the row a system that only writes on
-//! success does not have. The refusal has to be *findable* as a refusal (`AuditQuery::rejected()`),
-//! it has to carry a machine-readable reason, and it must not carry a change record, because a
-//! record claiming a mutation that never happened is worse than no record at all. This suite drives
-//! two refusals a backend cannot talk its way out of — a write against a revision that has moved on,
-//! and a second entity at an address already taken — and then asks the trail about them.
+//! §55 is what separates an audit trail from a success log. "An agent attempted a production write
+//! and policy denied it" is the row that matters in a security review, an incident post-mortem and
+//! an access audit — and it is precisely the row a system that only writes on success does not have.
+//! The refusal has to be findable *as* a refusal (`AuditQuery::rejected()`), it has to carry a
+//! machine-readable reason, and it must not carry a change record: a row claiming a mutation that
+//! never happened is worse than no row at all, which is why `AuditRecord::validate` refuses one that
+//! claims both. This suite drives two refusals a backend cannot talk its way out of — a write
+//! against a revision that has moved on, and a second entity at an address already taken — and then
+//! asks the trail about them.
 
+use aep_contract::command::{CommandEnvelope, CommandResult};
 use aep_contract::query::AuditQuery;
 use aep_contract::testing::block_on;
 use aep_domain::audit::AuditRecord;
 use aep_domain::command::{Command, CreateEntity, UpdateEntity};
-use aep_domain::entity::{EntityRef, EntityRevision, EntityType, VersionedEntityRef};
-use aep_domain::ids::AuditId;
+use aep_domain::entity::{
+    EntityLocator, EntityRef, EntityRevision, EntityType, VersionedEntityRef,
+};
+use aep_domain::ids::{AuditId, CommandId, IdempotencyKey};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness};
+use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
 use crate::report::SuiteReport;
 
 /// Runs the rejected-action audit suite.
-// A suite is one ordered list of checks, each depending on the state the last one left. Splitting it
-// into helpers would hide that sequence, which is the thing a reader needs to follow.
-#[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new("rejected-audit");
+    let harness = Harness::new(SUITE);
     let mut report = SuiteReport::new("rejected-audit");
 
     let left = "a refused command leaves an audit record";
@@ -133,14 +134,14 @@ fn explains_itself(record: &AuditRecord) -> bool {
 
 /// Drives two accepted commands and two refusals, returning the audit ids of the accepted ones.
 ///
-/// Two refusals rather than one on purpose. A stale `expected_revision` is the refusal §78.11 names,
-/// but a backend that ignores revision assertions would turn it into an acceptance and leave this
+/// Two refusals rather than one, on purpose. A stale `expected_revision` is the refusal §78.11
+/// names, but a backend that ignores revision assertions turns it into an acceptance and leaves this
 /// suite with nothing to look at — which is the concurrency suite's finding, not this one's. A
 /// second entity at an address already taken is refused by any backend that can address entities at
 /// all.
 fn refuse_two_commands<B: Backend>(harness: &Harness, backend: &B) -> Result<Vec<AuditId>, String> {
     let entity_type = EntityType::parse("aep.design/v1").map_err(|error| error.to_string())?;
-    let locator = harness.locator("design");
+    let locator = address("design", "target")?;
     let body = |title: &str| {
         Node::Map(
             [
@@ -151,48 +152,51 @@ fn refuse_two_commands<B: Backend>(harness: &Harness, backend: &B) -> Result<Vec
         )
     };
 
-    let created = harness
-        .run(
-            backend,
-            Command::CreateEntity(CreateEntity {
-                entity_type: entity_type.clone(),
-                locator: locator.clone(),
-                data: body("A design two commands will be refused against"),
-            }),
-        )
-        .map_err(|error| format!("the entity could not be created: {error}"))?;
-    let design = settle(harness, backend, &created.affected, &locator)?;
+    let created = issue(
+        harness,
+        backend,
+        "create",
+        Command::CreateEntity(CreateEntity {
+            entity_type: entity_type.clone(),
+            locator: locator.clone(),
+            data: body("A design two commands will be refused against"),
+        }),
+    )
+    .map_err(|error| format!("the entity could not be created: {error}"))?;
+    let design = settle(harness, backend, created.affected.first(), &locator)?;
 
-    let updated = harness
-        .run(
-            backend,
-            Command::UpdateEntity(UpdateEntity {
-                target: design.unversioned(),
-                changes: [("title".to_owned(), Node::from("A design that has moved on"))].into(),
-            }),
-        )
-        .map_err(|error| format!("the entity could not be updated: {error}"))?;
+    let updated = issue(
+        harness,
+        backend,
+        "update",
+        Command::UpdateEntity(UpdateEntity {
+            target: design.unversioned(),
+            changes: [("title".to_owned(), Node::from("A design that has moved on"))].into(),
+        }),
+    )
+    .map_err(|error| format!("the entity could not be updated: {error}"))?;
 
-    // Refusal one: a write against the revision the design was at before the update.
-    let stale = harness
-        .envelope(
-            harness.command_id(),
-            Command::UpdateEntity(UpdateEntity {
-                target: design.unversioned(),
-                changes: [(
-                    "title".to_owned(),
-                    Node::from("Rewritten behind the update's back"),
-                )]
-                .into(),
-            }),
-            harness.context(),
-        )
-        .expecting(EntityRevision::INITIAL);
+    // Refusal one: a write against the revision the design was at before that update.
+    let stale = envelope(
+        harness,
+        "stale",
+        Command::UpdateEntity(UpdateEntity {
+            target: design.unversioned(),
+            changes: [(
+                "title".to_owned(),
+                Node::from("Rewritten behind the update's back"),
+            )]
+            .into(),
+        }),
+    )?
+    .expecting(EntityRevision::INITIAL);
     drop(harness.execute(backend, stale));
 
     // Refusal two: a second entity at an address that is already taken.
-    drop(harness.run(
+    drop(issue(
+        harness,
         backend,
+        "duplicate",
         Command::CreateEntity(CreateEntity {
             entity_type,
             locator,
@@ -200,21 +204,17 @@ fn refuse_two_commands<B: Backend>(harness: &Harness, backend: &B) -> Result<Vec
         }),
     ));
 
-    Ok(created
-        .audit
-        .into_iter()
-        .chain(updated.audit)
-        .collect::<Vec<_>>())
+    Ok(created.audit.into_iter().chain(updated.audit).collect())
 }
 
-/// Where a create landed, falling back to the locator when the backend reports nothing.
+/// Where a create landed, falling back to the address when the backend reports nothing.
 fn settle<B: Backend>(
     harness: &Harness,
     backend: &B,
-    affected: &[VersionedEntityRef],
-    locator: &aep_domain::entity::EntityLocator,
+    affected: Option<&VersionedEntityRef>,
+    locator: &EntityLocator,
 ) -> Result<VersionedEntityRef, String> {
-    if let Some(reference) = affected.first() {
+    if let Some(reference) = affected {
         return Ok(reference.clone());
     }
     let id = block_on(backend.resolve(locator)).map_err(|error| error.to_string())?;
@@ -222,6 +222,43 @@ fn settle<B: Backend>(
         .read(backend, &EntityRef::new(id))?
         .metadata
         .versioned_reference())
+}
+
+/// The name this suite mints into every identifier it creates.
+///
+/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
+/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
+/// for different commands and create entities at the same address; both are refused, and the failure
+/// reads as a fault in the backend rather than as a collision between suites.
+const SUITE: &str = "rejected-audit";
+
+/// An address no other suite in the same run uses.
+fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
+    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
+        .map_err(|error| error.to_string())
+}
+
+/// An envelope whose command id and idempotency key no other suite in the same run uses.
+fn envelope(
+    harness: &Harness,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandEnvelope<Command>, String> {
+    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
+}
+
+/// Issues a command under identifiers this suite owns.
+fn issue<B: Backend>(
+    harness: &Harness,
+    backend: &B,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandResult, String> {
+    harness
+        .execute(backend, envelope(harness, tag, payload)?)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]

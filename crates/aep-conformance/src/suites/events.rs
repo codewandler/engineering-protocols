@@ -1,20 +1,21 @@
 //! A command reports the facts it produced.
 //!
-//! §49 draws the line entities do not cross: an entity is the current state of an addressable
-//! thing, an event is an immutable fact that something occurred. §78.15 asks that a semantic command
-//! report the events it emitted, and the reason is that everything downstream — a triggered workflow
-//! (§51), a projection, a notification, a second agent waiting for a design to be approved — is
-//! driven by those facts and by nothing else. A backend that applies the change but reports no event
-//! looks perfectly correct to whoever issued the command and silently stops the rest of the system:
-//! nothing is wrong with the data, the work simply never happens. Equally, a command that changed
-//! nothing must report nothing, or every retry storm becomes a fan-out storm.
+//! §49 draws the line entities do not cross: an entity is the current state of an addressable thing,
+//! an event is an immutable fact that something occurred. §78.15 asks that a command report the
+//! events it emitted, and the reason is that everything downstream — triggered work (§51), a
+//! projection, a notification, a second agent waiting for a design to be approved — is driven by
+//! those facts and by nothing else. A backend that applies the change and reports no event looks
+//! perfectly correct to whoever issued the command and silently stops the rest of the system:
+//! nothing is wrong with the data, the work simply never happens. The converse matters as much — a
+//! command that changed nothing must report nothing, or every retry becomes a fan-out.
 
+use aep_contract::command::CommandEnvelope;
 use aep_domain::command::{Command, CreateEntity};
-use aep_domain::entity::EntityType;
-use aep_domain::ids::{EventId, IdempotencyKey};
+use aep_domain::entity::{EntityLocator, EntityType};
+use aep_domain::ids::{CommandId, EventId, IdempotencyKey};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness};
+use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
 use crate::report::{Check, SuiteReport};
 
 /// Runs the events suite.
@@ -22,7 +23,7 @@ use crate::report::{Check, SuiteReport};
 // into helpers would hide that sequence, which is the thing a reader needs to follow.
 #[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new("events");
+    let harness = Harness::new(SUITE);
     let mut report = SuiteReport::new("events");
 
     let emitted = "a create reports at least one emitted event";
@@ -37,12 +38,13 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
         );
         return report;
     };
-    let Ok(key) = IdempotencyKey::new("key-events-first") else {
-        report.aborted(emitted, "the suite's idempotency key is not well formed");
-        return report;
+    let taken = match address("design", "first") {
+        Ok(locator) => locator,
+        Err(detail) => {
+            report.aborted(emitted, detail);
+            return report;
+        }
     };
-
-    let taken = harness.locator("design");
     let make = |locator| {
         Command::CreateEntity(CreateEntity {
             entity_type: entity_type.clone(),
@@ -60,18 +62,17 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
         })
     };
 
-    let command_id = harness.command_id();
-    let first = match harness.execute(
-        backend,
-        harness.envelope(
-            command_id.clone(),
-            make(taken.clone()),
-            harness.context_with_key(&key),
-        ),
-    ) {
+    let first = match envelope(&harness, "first", make(taken.clone())).and_then(|envelope| {
+        harness
+            .execute(backend, envelope)
+            .map_err(|e| e.to_string())
+    }) {
         Ok(result) => result,
-        Err(error) => {
-            report.aborted(emitted, format!("the entity could not be created: {error}"));
+        Err(detail) => {
+            report.aborted(
+                emitted,
+                format!("the entity could not be created: {detail}"),
+            );
             return report;
         }
     };
@@ -83,7 +84,13 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
          by one",
     );
 
-    match harness.run(backend, make(harness.locator("design"))) {
+    match address("design", "second")
+        .and_then(|locator| envelope(&harness, "second", make(locator)))
+        .and_then(|envelope| {
+            harness
+                .execute(backend, envelope)
+                .map_err(|e| e.to_string())
+        }) {
         Ok(second) => {
             let shared: Vec<&EventId> = first
                 .events
@@ -100,14 +107,18 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
                 ),
             );
         }
-        Err(error) => report.aborted(
+        Err(detail) => report.aborted(
             distinct,
-            format!("a second entity could not be created: {error}"),
+            format!("a second entity could not be created: {detail}"),
         ),
     }
 
     // The same address twice: nothing is created, so there is no fact to report.
-    match harness.run(backend, make(taken.clone())) {
+    match envelope(&harness, "duplicate", make(taken.clone())).and_then(|envelope| {
+        harness
+            .execute(backend, envelope)
+            .map_err(|e| e.to_string())
+    }) {
         Ok(result) => report.expect(
             silent,
             result.events.is_empty(),
@@ -116,20 +127,20 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
                 result.events
             ),
         ),
-        Err(_) => report.record(Check {
+        Err(detail) => report.record(Check {
             name: silent.to_owned(),
             passed: true,
-            detail: Some(
-                "the second create at the same address was refused, so it reported nothing at all"
-                    .to_owned(),
-            ),
+            detail: Some(format!(
+                "the second create at the same address was refused ({detail}), so it reported \
+                 nothing at all"
+            )),
         }),
     }
 
-    match harness.execute(
-        backend,
-        harness.envelope(command_id, make(taken), harness.context_with_key(&key)),
-    ) {
+    // The same logical command again: the same command id, the same key, the same payload.
+    match envelope(&harness, "first", make(taken))
+        .and_then(|envelope| harness.execute(backend, envelope).map_err(|e| e.to_string()))
+    {
         Ok(replay) => report.expect(
             replayed,
             replay.events == first.events,
@@ -141,17 +152,43 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
         ),
         // A backend that does not recognise the replay fails the idempotency suite; saying so twice
         // would only send an implementer looking in two places for one fault.
-        Err(error) => report.record(Check {
+        Err(detail) => report.record(Check {
             name: replayed.to_owned(),
             passed: true,
             detail: Some(format!(
-                "the replay was not recognised as one ({error}); whether a replay is recognised is \
+                "the replay was not recognised as one ({detail}); whether a replay is recognised is \
                  the idempotency suite's property"
             )),
         }),
     }
 
     report
+}
+
+/// The name this suite mints into every identifier it creates.
+///
+/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
+/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
+/// for different commands and create entities at the same address; both are refused, and the failure
+/// reads as a fault in the backend rather than as a collision between suites. Here the naming does
+/// double duty: reusing one tag is exactly how the replay is made to be the same logical command.
+const SUITE: &str = "events";
+
+/// An address no other suite in the same run uses.
+fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
+    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
+        .map_err(|error| error.to_string())
+}
+
+/// An envelope whose command id and idempotency key no other suite in the same run uses.
+fn envelope(
+    harness: &Harness,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandEnvelope<Command>, String> {
+    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
 }
 
 #[cfg(test)]

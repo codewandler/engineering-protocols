@@ -9,7 +9,17 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **The approval floor was inert for every `adp/1` and `aop/1` profile.** `Protocol::extend` merged
+  capabilities, evidence kinds, verifiers, phases, observables and scales — but not the approval
+  floor, and neither derived protocol declares one of its own. A profile written against `adp/1`
+  could therefore grant `production.write` outright and resolution would accept it, while three
+  documents claimed that was impossible. The shipped profiles were unaffected because each
+  hand-writes `require_approval`; the check meant to make the mistake impossible was doing nothing.
+  Now inherited, with a regression test over the real documents that fails without the fix.
+- **The CLI crashed when its reader stopped reading.** `protocol inspect | head -3` ended in a panic
+  and a stack trace, because Rust's `println!` panics on a closed pipe. Output now ends quietly.
 
 ## [0.2.0-wave-3] — 2026-08-20
 

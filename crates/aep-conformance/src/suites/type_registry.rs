@@ -5,24 +5,23 @@
 //! may it have, is it immutable?", a backend answers from data — so an organisation can add an
 //! entity type nobody here ever heard of and the tooling keeps working. §78.16 makes that promise
 //! checkable. The `mutable` flag is the part with teeth: a harness that cannot discover that a
-//! review result may not be edited will happily offer an edit, and the refusal arrives as a
+//! review result may not be edited will happily offer an edit, and the refusal then arrives as a
 //! surprise at the point of use rather than as a fact about the type.
 
+use aep_contract::command::CommandEnvelope;
 use aep_contract::registry::TypeDescriptor;
 use aep_contract::testing::block_on;
 use aep_domain::command::{Command, CreateEntity};
-use aep_domain::entity::{EntityRef, EntityType};
+use aep_domain::entity::{EntityLocator, EntityRef, EntityType};
+use aep_domain::ids::{CommandId, IdempotencyKey};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness};
+use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
 use crate::report::SuiteReport;
 
 /// Runs the type-registry suite.
-// A suite is one ordered list of checks, each depending on the state the last one left. Splitting it
-// into helpers would hide that sequence, which is the thing a reader needs to follow.
-#[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new("type-registry");
+    let harness = Harness::new(SUITE);
     let mut report = SuiteReport::new("type-registry");
 
     let describable = "a type an entity was created with can be described";
@@ -42,7 +41,17 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     };
 
     let descriptor = match block_on(backend.describe_type(&design)) {
-        Ok(descriptor) => Some(descriptor),
+        Ok(descriptor) => {
+            report.expect(
+                describable,
+                descriptor.entity_type == design,
+                format!(
+                    "asking about `{design}` returned a descriptor for `{}`",
+                    descriptor.entity_type
+                ),
+            );
+            Some(descriptor)
+        }
         Err(error) => {
             report.expect(
                 describable,
@@ -52,17 +61,6 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
             None
         }
     };
-
-    if let Some(descriptor) = descriptor.as_ref() {
-        report.expect(
-            describable,
-            descriptor.entity_type == design,
-            format!(
-                "asking about `{design}` returned a descriptor for `{}`",
-                descriptor.entity_type
-            ),
-        );
-    }
 
     report.expect(
         commands,
@@ -119,7 +117,7 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
                 unknown,
                 error.code() == "not_found",
                 format!(
-                    "describing an undeclared type failed with `{}`",
+                    "describing an undeclared type failed with `{}` rather than `not_found`",
                     error.code()
                 ),
             ),
@@ -138,27 +136,31 @@ fn mutability(descriptor: Option<&TypeDescriptor>) -> String {
     )
 }
 
-/// Creates an entity of `kind` and reports the type the backend says it has.
+/// Creates an entity of `aep.<kind>/v1` and reports the type the backend says it has.
 fn observe<B: Backend>(harness: &Harness, backend: &B, kind: &str) -> Result<EntityType, String> {
     let entity_type = EntityType::parse(&format!("aep.{kind}/v1")).map_err(|e| e.to_string())?;
-    let locator = harness.locator(kind);
+    let locator = address(kind, "sample")?;
     harness
-        .run(
+        .execute(
             backend,
-            Command::CreateEntity(CreateEntity {
-                entity_type,
-                locator: locator.clone(),
-                data: Node::Map(
-                    [
-                        (
-                            "title".to_owned(),
-                            Node::from("An entity of a discoverable type"),
-                        ),
-                        ("status".to_owned(), Node::from("active")),
-                    ]
-                    .into(),
-                ),
-            }),
+            envelope(
+                harness,
+                kind,
+                Command::CreateEntity(CreateEntity {
+                    entity_type,
+                    locator: locator.clone(),
+                    data: Node::Map(
+                        [
+                            (
+                                "title".to_owned(),
+                                Node::from("An entity of a discoverable type"),
+                            ),
+                            ("status".to_owned(), Node::from("active")),
+                        ]
+                        .into(),
+                    ),
+                }),
+            )?,
         )
         .map_err(|error| format!("an entity of `aep.{kind}/v1` could not be created: {error}"))?;
     let id = block_on(backend.resolve(&locator)).map_err(|error| error.to_string())?;
@@ -166,6 +168,31 @@ fn observe<B: Backend>(harness: &Harness, backend: &B, kind: &str) -> Result<Ent
         .read(backend, &EntityRef::new(id))?
         .metadata
         .entity_type)
+}
+
+/// The name this suite mints into every identifier it creates.
+///
+/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
+/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
+/// for different commands and create entities at the same address; both are refused, and the failure
+/// reads as a fault in the backend rather than as a collision between suites.
+const SUITE: &str = "type-registry";
+
+/// An address no other suite in the same run uses.
+fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
+    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
+        .map_err(|error| error.to_string())
+}
+
+/// An envelope whose command id and idempotency key no other suite in the same run uses.
+fn envelope(
+    harness: &Harness,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandEnvelope<Command>, String> {
+    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
 }
 
 #[cfg(test)]

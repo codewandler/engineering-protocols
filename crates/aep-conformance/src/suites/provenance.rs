@@ -4,27 +4,25 @@
 //! creation attribution, update attribution, executor attribution where one was given, and no
 //! collapsing of `actor` into `executor`. The audit trail can reconstruct all of this by replaying
 //! records, but that is the expensive answer to a question asked constantly — "who owns this, who
-//! last changed it, and was it a person or an agent?" — and a backend that keeps only a single
+//! last changed it, and was it a person or an agent?" — and a backend that keeps a single
 //! `modified_by` field has quietly overwritten the creator of everything that was ever edited. In
 //! agentic work `actor: human:alice, executor: agent:release-agent-17` is the ordinary case, and a
-//! backend that stores one field can say neither who is accountable nor what actually ran.
+//! backend that stores one of them can say neither who is accountable nor what actually ran.
 
+use aep_contract::command::CommandEnvelope;
 use aep_contract::testing::block_on;
 use aep_domain::command::{Command, CreateEntity, UpdateEntity};
-use aep_domain::entity::{EntityRef, EntityType, VersionedEntityRef};
+use aep_domain::entity::{EntityLocator, EntityRef, EntityType, VersionedEntityRef};
 use aep_domain::ids::{CommandId, IdempotencyKey};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness};
+use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
 use crate::report::SuiteReport;
 
 /// Runs the provenance suite.
-// A suite is one ordered list of checks, each depending on the state the last one left. Splitting it
-// into helpers would hide that sequence, which is the thing a reader needs to follow.
-#[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     // Two actors, because "the creator survives an edit" is only a claim when somebody else edits.
-    let creator = Harness::new("provenance");
+    let creator = Harness::new(SUITE);
     let editor = Harness::new("provenance-editor");
     let mut report = SuiteReport::new("provenance");
 
@@ -56,20 +54,18 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     }
 
     if let Err(detail) = amend(&creator, &editor, backend, &design) {
-        report.aborted(keeps_creator, detail.clone());
-        report.aborted(names_editor, detail.clone());
-        report.aborted(keeps_executor, detail.clone());
-        report.aborted(ordered, detail);
+        for property in [keeps_creator, names_editor, keeps_executor, ordered] {
+            report.aborted(property, detail.clone());
+        }
         return report;
     }
 
     let entity = match creator.read(backend, &design.unversioned()) {
         Ok(entity) => entity,
         Err(detail) => {
-            report.aborted(keeps_creator, detail.clone());
-            report.aborted(names_editor, detail.clone());
-            report.aborted(keeps_executor, detail.clone());
-            report.aborted(ordered, detail);
+            for property in [keeps_creator, names_editor, keeps_executor, ordered] {
+                report.aborted(property, detail.clone());
+            }
             return report;
         }
     };
@@ -123,24 +119,28 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
 /// Creates the entity whose provenance the suite is about.
 fn plant<B: Backend>(harness: &Harness, backend: &B) -> Result<VersionedEntityRef, String> {
     let entity_type = EntityType::parse("aep.design/v1").map_err(|error| error.to_string())?;
-    let locator = harness.locator("design");
+    let locator = address("design", "subject")?;
     let result = harness
-        .run(
+        .execute(
             backend,
-            Command::CreateEntity(CreateEntity {
-                entity_type,
-                locator: locator.clone(),
-                data: Node::Map(
-                    [
-                        (
-                            "title".to_owned(),
-                            Node::from("A design with a history of hands"),
-                        ),
-                        ("status".to_owned(), Node::from("in_review")),
-                    ]
-                    .into(),
-                ),
-            }),
+            envelope(
+                harness,
+                "create",
+                Command::CreateEntity(CreateEntity {
+                    entity_type,
+                    locator: locator.clone(),
+                    data: Node::Map(
+                        [
+                            (
+                                "title".to_owned(),
+                                Node::from("A design with a history of hands"),
+                            ),
+                            ("status".to_owned(), Node::from("in_review")),
+                        ]
+                        .into(),
+                    ),
+                }),
+            )?,
         )
         .map_err(|error| format!("the entity could not be created: {error}"))?;
     if let Some(reference) = result.affected.first() {
@@ -160,34 +160,53 @@ fn amend<B: Backend>(
     backend: &B,
     design: &VersionedEntityRef,
 ) -> Result<(), String> {
-    // Both harnesses generate identifiers from their own counter, so the second one is given a key
-    // of its own: reusing a key for a different command is refused, and rightly so.
-    let key = IdempotencyKey::new("key-provenance-editor").map_err(|e| e.to_string())?;
-    let command_id = CommandId::new("cmd-provenance-editor").map_err(|e| e.to_string())?;
-    let mut context = editor.context_with_key(&key);
-    // The two harnesses also keep separate clocks. Taking this timestamp from the creator's puts the
+    let mut change = envelope(
+        editor,
+        "amend",
+        Command::UpdateEntity(UpdateEntity {
+            target: design.unversioned(),
+            changes: [(
+                "title".to_owned(),
+                Node::from("A design somebody else has been at"),
+            )]
+            .into(),
+        }),
+    )?;
+    // The two harnesses keep separate clocks. Taking this timestamp from the creator's puts the
     // change observably after the creation, which is what makes the ordering check mean something
     // without anybody sleeping.
-    context.issued_at = creator.now();
+    change.context.issued_at = creator.now();
 
     editor
-        .execute(
-            backend,
-            editor.envelope(
-                command_id,
-                Command::UpdateEntity(UpdateEntity {
-                    target: design.unversioned(),
-                    changes: [(
-                        "title".to_owned(),
-                        Node::from("A design somebody else has been at"),
-                    )]
-                    .into(),
-                }),
-                context,
-            ),
-        )
+        .execute(backend, change)
         .map_err(|error| format!("the second actor's change failed: {error}"))?;
     Ok(())
+}
+
+/// The name this suite mints into every identifier it creates.
+///
+/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
+/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
+/// for different commands and create entities at the same address; both are refused, and the failure
+/// reads as a fault in the backend rather than as a collision between suites. The same applies to
+/// the two harnesses here, which are two actors and not two runs.
+const SUITE: &str = "provenance";
+
+/// An address no other suite in the same run uses.
+fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
+    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
+        .map_err(|error| error.to_string())
+}
+
+/// An envelope whose command id and idempotency key no other suite in the same run uses.
+fn envelope(
+    harness: &Harness,
+    tag: &str,
+    payload: Command,
+) -> Result<CommandEnvelope<Command>, String> {
+    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
+    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
 }
 
 #[cfg(test)]

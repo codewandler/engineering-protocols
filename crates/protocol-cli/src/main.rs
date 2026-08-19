@@ -271,6 +271,41 @@ enum EntityCommand {
     },
 }
 
+/// Writes to standard output, treating a closed pipe as a normal end rather than a crash.
+///
+/// Rust's `println!` panics when the reader goes away, so `protocol inspect | head -3` ends in a
+/// stack trace instead of three lines. A consumer that stopped reading is not an error this program
+/// has anything to say about, so it exits quietly.
+fn write_out(text: &str, newline: bool) {
+    use std::io::Write;
+
+    let stdout = std::io::stdout();
+    let mut handle = stdout.lock();
+    let outcome = if newline {
+        writeln!(handle, "{text}")
+    } else {
+        write!(handle, "{text}")
+    };
+    if let Err(error) = outcome {
+        if error.kind() == std::io::ErrorKind::BrokenPipe {
+            std::process::exit(0);
+        }
+        eprintln!("error: cannot write to stdout: {error}");
+        std::process::exit(1);
+    }
+}
+
+/// `println!`, but a closed pipe ends the program quietly.
+macro_rules! outln {
+    () => { write_out("", true) };
+    ($($arg:tt)*) => { write_out(&format!($($arg)*), true) };
+}
+
+/// `print!`, but a closed pipe ends the program quietly.
+macro_rules! out {
+    ($($arg:tt)*) => { write_out(&format!($($arg)*), false) };
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
@@ -360,9 +395,9 @@ fn conformance(
 
     match format {
         Format::Text => {
-            println!("{report}");
+            outln!("{report}");
             if let Some(fault) = fault {
-                println!(
+                outln!(
                     "injected fault: {} — expected to be caught by the `{}` suite",
                     fault.describe(),
                     fault.caught_by()
@@ -462,7 +497,7 @@ fn validate(root: &Path, artifacts: Option<&Path>, format: Format) -> Result<Exi
 
     match format {
         Format::Text => {
-            println!(
+            outln!(
                 "{} file(s): {} protocol(s), {} principle(s), {} workflow(s), {} profile(s), {} \
                  lifecycle(s)",
                 summary.files_read,
@@ -473,11 +508,11 @@ fn validate(root: &Path, artifacts: Option<&Path>, format: Format) -> Result<Exi
                 summary.lifecycles
             );
             if problems.is_empty() {
-                println!("valid");
+                outln!("valid");
             } else {
-                println!("{} problem(s):", problems.len());
+                outln!("{} problem(s):", problems.len());
                 for problem in &problems {
-                    println!("  - {problem}");
+                    outln!("  - {problem}");
                 }
             }
         }
@@ -509,15 +544,16 @@ fn resolve(args: &ExecutionArgs) -> Result<ExitCode> {
 
     match args.format {
         Format::Text => {
-            println!("task        {} ({})", plan.task.id, plan.task.kind);
-            println!("objective   {}", plan.task.objective);
-            println!("protocol    {}", plan.protocol.reference());
-            println!("profile     {}", plan.profile.id);
-            println!(
+            outln!("task        {} ({})", plan.task.id, plan.task.kind);
+            outln!("objective   {}", plan.task.objective);
+            outln!("protocol    {}", plan.protocol.reference());
+            outln!("profile     {}", plan.profile.id);
+            outln!(
                 "workflow    {} (initial: {})",
-                plan.workflow.id, plan.workflow.initial
+                plan.workflow.id,
+                plan.workflow.initial
             );
-            println!(
+            outln!(
                 "principles  {}",
                 plan.principles
                     .iter()
@@ -526,7 +562,7 @@ fn resolve(args: &ExecutionArgs) -> Result<ExitCode> {
                     .join(", ")
             );
             if !plan.dropped_principles.is_empty() {
-                println!(
+                outln!(
                     "dropped     {}",
                     plan.dropped_principles
                         .iter()
@@ -535,12 +571,12 @@ fn resolve(args: &ExecutionArgs) -> Result<ExitCode> {
                         .join(", ")
                 );
             }
-            println!("obligations {}", plan.obligations.len());
-            println!("capabilities");
+            outln!("obligations {}", plan.obligations.len());
+            outln!("capabilities");
             for (capability, decision) in plan.capability_summary() {
                 // `Display` for the decision writes directly, which ignores a width specifier, so
                 // the padding has to happen on an owned string.
-                println!("  {:<18} {capability}", decision.to_string());
+                outln!("  {:<18} {capability}", decision.to_string());
             }
         }
         Format::Yaml | Format::Json => print_serialised(&plan, args.format)?,
@@ -554,16 +590,16 @@ fn inspect(root: &Path, reference: Option<&str>, format: Format) -> Result<ExitC
 
     let Some(reference) = reference else {
         for protocol in registry.protocols() {
-            println!("protocol   {}", protocol.reference());
+            outln!("protocol   {}", protocol.reference());
         }
         for principle in registry.principles() {
-            println!("principle  {}  {}", principle.id, principle.title);
+            outln!("principle  {}  {}", principle.id, principle.title);
         }
         for workflow in registry.workflows() {
-            println!("workflow   {}  {}", workflow.id, workflow.title);
+            outln!("workflow   {}  {}", workflow.id, workflow.title);
         }
         for profile in registry.profiles() {
-            println!("profile    {}  {}", profile.id, profile.title);
+            outln!("profile    {}  {}", profile.id, profile.title);
         }
         return Ok(ExitCode::SUCCESS);
     };
@@ -646,7 +682,7 @@ fn evaluate(args: &ExecutionArgs, action: Option<&str>) -> Result<ExitCode> {
         let decision = engine.authorize(&mut execution, &request);
         let explanation = Engine::<aep_engine::SystemClock>::explain_decision(&decision);
         match args.format {
-            Format::Text => println!("{explanation}"),
+            Format::Text => outln!("{explanation}"),
             Format::Yaml | Format::Json => print_serialised(&explanation, args.format)?,
         }
         return Ok(exit_code(decision.is_allowed()));
@@ -655,19 +691,20 @@ fn evaluate(args: &ExecutionArgs, action: Option<&str>) -> Result<ExitCode> {
     let evaluation = engine.evaluate(&execution);
     match args.format {
         Format::Text => {
-            println!(
+            outln!(
                 "state       {} ({})",
-                evaluation.state, evaluation.state_title
+                evaluation.state,
+                evaluation.state_title
             );
             if !evaluation.requirements.is_empty() {
-                println!("owed here");
+                outln!("owed here");
                 for requirement in &evaluation.requirements {
-                    println!("  {}", requirement.line());
+                    outln!("  {}", requirement.line());
                 }
             }
-            println!("transitions");
+            outln!("transitions");
             if evaluation.transitions.is_empty() {
-                println!("  (none: this state is terminal)");
+                outln!("  (none: this state is terminal)");
             }
             for transition in &evaluation.transitions {
                 let mark = if transition.permitted {
@@ -675,12 +712,12 @@ fn evaluate(args: &ExecutionArgs, action: Option<&str>) -> Result<ExitCode> {
                 } else {
                     "blocked"
                 };
-                println!("  {} -> {} [{mark}]", evaluation.state, transition.to);
+                outln!("  {} -> {} [{mark}]", evaluation.state, transition.to);
                 for reason in transition.unmet() {
-                    println!("      {reason}");
+                    outln!("      {reason}");
                 }
             }
-            println!("{}", engine.explain_completion(&execution));
+            outln!("{}", engine.explain_completion(&execution));
         }
         Format::Yaml | Format::Json => print_serialised(&evaluation, args.format)?,
     }
@@ -697,7 +734,7 @@ fn schema(name: Option<&str>) -> Result<ExitCode> {
     match name {
         None => {
             for entry in schemas {
-                println!("{:<24} {}", entry.filename, entry.describes);
+                outln!("{:<24} {}", entry.filename, entry.describes);
             }
         }
         Some(name) => {
@@ -706,7 +743,7 @@ fn schema(name: Option<&str>) -> Result<ExitCode> {
                 .into_iter()
                 .find(|entry| entry.filename == wanted || entry.name == name)
                 .with_context(|| format!("no schema is called `{name}`"))?;
-            print!("{}", entry.to_json().context("serialising the schema")?);
+            out!("{}", entry.to_json().context("serialising the schema")?);
         }
     }
     Ok(ExitCode::SUCCESS)
@@ -768,18 +805,19 @@ fn entity_get(args: &BackendArgs, reference: &str) -> Result<ExitCode> {
 
     match args.format {
         Format::Text => {
-            println!("id         {}", entity.metadata.id);
-            println!("type       {}", entity.metadata.entity_type);
-            println!("locator    {}", entity.metadata.locator);
-            println!("revision   {}", entity.metadata.revision);
-            println!(
+            outln!("id         {}", entity.metadata.id);
+            outln!("type       {}", entity.metadata.entity_type);
+            outln!("locator    {}", entity.metadata.locator);
+            outln!("revision   {}", entity.metadata.revision);
+            outln!(
                 "created    {} by {}",
-                entity.metadata.created_at, entity.metadata.provenance.created_by
+                entity.metadata.created_at,
+                entity.metadata.provenance.created_by
             );
-            println!("body");
+            outln!("body");
             let body = serde_yaml::to_string(&entity.data).context("rendering the body")?;
             for line in body.lines() {
-                println!("  {line}");
+                outln!("  {line}");
             }
         }
         Format::Yaml | Format::Json => print_serialised(&entity, args.format)?,
@@ -915,30 +953,31 @@ fn describe(args: &BackendArgs, entity_type: &str) -> Result<ExitCode> {
 
     match args.format {
         Format::Text => {
-            println!("type       {}", descriptor.entity_type);
-            println!("summary    {}", descriptor.summary);
-            println!(
+            outln!("type       {}", descriptor.entity_type);
+            outln!("summary    {}", descriptor.summary);
+            outln!(
                 "mutable    {}",
                 if descriptor.mutable { "yes" } else { "no" }
             );
             if !descriptor.commands.is_empty() {
-                println!("commands");
+                outln!("commands");
                 for command in &descriptor.commands {
                     let guard = if command.revision_guarded {
                         "revision-guarded"
                     } else {
                         "unguarded"
                     };
-                    println!(
+                    outln!(
                         "  {:<28} {guard:<17} {}",
-                        command.command_type, command.summary
+                        command.command_type,
+                        command.summary
                     );
                 }
             }
             if !descriptor.relations.is_empty() {
-                println!("relations");
+                outln!("relations");
                 for relation in &descriptor.relations {
-                    println!("  {}", relation.kind);
+                    outln!("  {}", relation.kind);
                 }
             }
         }
@@ -1033,7 +1072,7 @@ fn print_table(rows: &[Vec<String>]) {
                 }
             })
             .collect();
-        println!("{}", cells.join("  "));
+        outln!("{}", cells.join("  "));
     }
 }
 
@@ -1181,7 +1220,7 @@ fn action_request(capability: &str) -> Result<ActionRequest> {
 fn print_document<T: serde::Serialize>(document: &T, format: Format) -> Result<()> {
     match format {
         Format::Text | Format::Yaml => {
-            print!(
+            out!(
                 "{}",
                 serde_yaml::to_string(document).context("rendering the document")?
             );
@@ -1195,12 +1234,12 @@ fn print_document<T: serde::Serialize>(document: &T, format: Format) -> Result<(
 fn print_serialised<T: serde::Serialize>(value: &T, format: Format) -> Result<()> {
     match format {
         Format::Json => {
-            println!(
+            outln!(
                 "{}",
                 serde_json::to_string_pretty(value).context("rendering as JSON")?
             );
         }
-        _ => print!(
+        _ => out!(
             "{}",
             serde_yaml::to_string(value).context("rendering as YAML")?
         ),
