@@ -10,14 +10,32 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use aep_backend_memory::{seed, MemoryBackend};
+use aep_contract::consistency::QueryConsistency;
+use aep_contract::query::{AuditQuery, EntityQuery, QueryService, RelationQuery};
+use aep_contract::testing::block_on;
 use aep_domain::action::{Action, ActionRequest, ProductionMutate};
 use aep_domain::artifact::ArtifactGraph;
 use aep_domain::capability::Capability;
+use aep_domain::entity::{ActorRef, EntityId, EntityLocator, EntityRef};
 use aep_domain::task::Task;
+use aep_domain::time::Timestamp;
 use aep_engine::engine::{EvidenceSubmission, ProtocolEngine, TransitionResult};
 use aep_engine::{load_tree_report, Engine, Registry};
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+
+/// Who the entity surface seeds as.
+///
+/// Fixed, and a `service:` actor rather than a person: nobody authorised these writes, the CLI made
+/// them to have something to answer about.
+const SEED_ACTOR: &str = "service:protocol-cli";
+
+/// When the entity surface seeds.
+///
+/// Fixed so two runs over the same manifest produce byte-identical output. A wall clock here would
+/// make every `--format json` diff noise.
+const SEED_AT: Timestamp = Timestamp::EPOCH;
 
 /// Reference CLI for the Agentic Engineering Protocol.
 #[derive(Debug, Parser)]
@@ -73,6 +91,29 @@ struct ExecutionArgs {
     format: Format,
 }
 
+/// What the entity and audit surface needs in order to answer.
+///
+/// The manifest is required because the backend is in-memory: without one there is nothing to
+/// answer about.
+#[derive(Debug, Args)]
+struct BackendArgs {
+    /// The document tree; a relative `--artifacts` path is resolved against it.
+    #[arg(long, default_value = ".")]
+    root: PathBuf,
+    /// The artifact manifest to seed the in-memory backend from.
+    #[arg(long)]
+    artifacts: PathBuf,
+    /// The organisation the seeded locators live under.
+    #[arg(long, default_value = "local")]
+    organisation: String,
+    /// The space the seeded locators live under.
+    #[arg(long, default_value = "manifest")]
+    space: String,
+    /// How to render the result.
+    #[arg(long, value_enum, default_value_t = Format::Text)]
+    format: Format,
+}
+
 /// The available subcommands.
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -112,6 +153,41 @@ enum Command {
         #[arg(long)]
         action: Option<String>,
     },
+    /// Ask the reference backend about the entities an artifact manifest describes.
+    Entity {
+        /// Which question to ask about them.
+        #[command(subcommand)]
+        command: EntityCommand,
+    },
+    /// Show the audit trail, oldest first.
+    ///
+    /// The backend is in-memory, so this run seeds it from `--artifacts` and then reads: what you
+    /// see is the seeding itself, not a durable past.
+    Audit {
+        /// Where the manifest is and how to render.
+        #[command(flatten)]
+        backend: BackendArgs,
+        /// Only records from this activity; the seeding run is `seed-manifest`.
+        #[arg(long)]
+        correlation: Option<String>,
+        /// Only records about one entity, by locator or identity.
+        #[arg(long)]
+        entity: Option<String>,
+        /// Only refused attempts — what something tried to do and was stopped from doing.
+        #[arg(long)]
+        rejected: bool,
+    },
+    /// Describe an entity type: what it is, whether it may change, and what may target it.
+    ///
+    /// This is how a harness asks what a design *is* rather than hard-coding it. The manifest is
+    /// still seeded, because the answer comes from the same backend that holds the entities.
+    Describe {
+        /// Where the manifest is and how to render.
+        #[command(flatten)]
+        backend: BackendArgs,
+        /// The type to describe, such as `aep.design/v1`.
+        entity_type: String,
+    },
     /// Print the generated JSON Schemas.
     Schema {
         /// Which schema, by file stem, such as `workflow`. Omitted lists them all.
@@ -119,6 +195,51 @@ enum Command {
     },
     /// Run the conformance suites against a backend.
     Conformance,
+}
+
+/// The questions the entity surface answers.
+///
+/// Every one of them seeds an in-memory backend from `--artifacts` and then reads it back. Nothing
+/// here is durable: `protocol entity history` shows this run's seeding, and running it again
+/// produces the same answer rather than a longer history.
+#[derive(Debug, Subcommand)]
+enum EntityCommand {
+    /// List every entity the manifest seeds, with its type, locator and revision.
+    List {
+        /// Where the manifest is and how to render.
+        #[command(flatten)]
+        backend: BackendArgs,
+        /// Only entities of this type, such as `aep.design/v1`.
+        #[arg(long = "type")]
+        entity_type: Option<String>,
+    },
+    /// Print one entity, addressed by locator or by identity.
+    Get {
+        /// Where the manifest is and how to render.
+        #[command(flatten)]
+        backend: BackendArgs,
+        /// A locator such as `ep://local/manifest/design/passkeys-auth`, or an entity identity.
+        reference: String,
+    },
+    /// Show an entity's revision records, oldest first.
+    History {
+        /// Where the manifest is and how to render.
+        #[command(flatten)]
+        backend: BackendArgs,
+        /// A locator or an entity identity.
+        reference: String,
+    },
+    /// Show what an entity points at, or — with `--incoming` — what points at it.
+    Relations {
+        /// Where the manifest is and how to render.
+        #[command(flatten)]
+        backend: BackendArgs,
+        /// A locator or an entity identity.
+        reference: String,
+        /// Answer "what points at this?" instead.
+        #[arg(long)]
+        incoming: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -148,6 +269,22 @@ fn run() -> Result<ExitCode> {
         } => inspect(&root, reference.as_deref(), format),
         Command::Evaluate(args) => evaluate(&args, None),
         Command::Explain { execution, action } => evaluate(&execution, action.as_deref()),
+        Command::Entity { command } => entity(&command),
+        Command::Audit {
+            backend,
+            correlation,
+            entity,
+            rejected,
+        } => audit(
+            &backend,
+            correlation.as_deref(),
+            entity.as_deref(),
+            rejected,
+        ),
+        Command::Describe {
+            backend,
+            entity_type,
+        } => describe(&backend, &entity_type),
         Command::Schema { name } => schema(name.as_deref()),
         Command::Conformance => bail!(
             "conformance suites are not implemented yet; they need the command/query contract \
@@ -427,6 +564,331 @@ fn schema(name: Option<&str>) -> Result<ExitCode> {
         }
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol entity`
+fn entity(command: &EntityCommand) -> Result<ExitCode> {
+    match command {
+        EntityCommand::List {
+            backend,
+            entity_type,
+        } => entity_list(backend, entity_type.as_deref()),
+        EntityCommand::Get { backend, reference } => entity_get(backend, reference),
+        EntityCommand::History { backend, reference } => entity_history(backend, reference),
+        EntityCommand::Relations {
+            backend,
+            reference,
+            incoming,
+        } => entity_relations(backend, reference, *incoming),
+    }
+}
+
+/// `protocol entity list`
+fn entity_list(args: &BackendArgs, entity_type: Option<&str>) -> Result<ExitCode> {
+    let backend = seeded(args)?;
+
+    let mut query = EntityQuery::default();
+    if let Some(name) = entity_type {
+        query.entity_type = Some(name.parse().map_err(|error| anyhow::anyhow!("{error}"))?);
+    }
+    let page = block_on(backend.query(&query)).map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    match args.format {
+        Format::Text => print_table(
+            &page
+                .items
+                .iter()
+                .map(|entity| {
+                    vec![
+                        entity.metadata.id.to_string(),
+                        entity.metadata.entity_type.to_string(),
+                        entity.metadata.locator.to_string(),
+                        format!("r{}", entity.metadata.revision),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        ),
+        Format::Yaml | Format::Json => print_serialised(&page.items, args.format)?,
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol entity get`
+fn entity_get(args: &BackendArgs, reference: &str) -> Result<ExitCode> {
+    let backend = seeded(args)?;
+    let target = resolve_entity(&backend, reference)?;
+    let entity = block_on(backend.get(&target, QueryConsistency::Current))
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    match args.format {
+        Format::Text => {
+            println!("id         {}", entity.metadata.id);
+            println!("type       {}", entity.metadata.entity_type);
+            println!("locator    {}", entity.metadata.locator);
+            println!("revision   {}", entity.metadata.revision);
+            println!(
+                "created    {} by {}",
+                entity.metadata.created_at, entity.metadata.provenance.created_by
+            );
+            println!("body");
+            let body = serde_yaml::to_string(&entity.data).context("rendering the body")?;
+            for line in body.lines() {
+                println!("  {line}");
+            }
+        }
+        Format::Yaml | Format::Json => print_serialised(&entity, args.format)?,
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol entity history`
+fn entity_history(args: &BackendArgs, reference: &str) -> Result<ExitCode> {
+    let backend = seeded(args)?;
+    let target = resolve_entity(&backend, reference)?;
+    let history = block_on(backend.history(&target)).map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    match args.format {
+        Format::Text => print_table(
+            &history
+                .iter()
+                .map(|record| {
+                    vec![
+                        format!("r{}", record.revision),
+                        record.at.to_string(),
+                        record.actor.to_string(),
+                        record
+                            .command_id
+                            .as_ref()
+                            .map_or_else(|| "-".to_owned(), ToString::to_string),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        ),
+        Format::Yaml | Format::Json => print_serialised(&history, args.format)?,
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol entity relations`
+fn entity_relations(args: &BackendArgs, reference: &str, incoming: bool) -> Result<ExitCode> {
+    let backend = seeded(args)?;
+    let target = resolve_entity(&backend, reference)?;
+
+    let query = if incoming {
+        RelationQuery::to(target)
+    } else {
+        RelationQuery::from(target)
+    };
+    let page = block_on(backend.relations(&query)).map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    match args.format {
+        Format::Text => {
+            let mut rows = Vec::new();
+            for relation in &page.items {
+                // The other end, since one end is what was asked about.
+                let other = if incoming {
+                    &relation.source
+                } else {
+                    &relation.target
+                };
+                rows.push(vec![
+                    relation.kind.to_string(),
+                    if incoming { "<-" } else { "->" }.to_owned(),
+                    other.id.to_string(),
+                    locator_of(&backend, other),
+                ]);
+            }
+            print_table(&rows);
+        }
+        Format::Yaml | Format::Json => print_serialised(&page.items, args.format)?,
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol audit`
+fn audit(
+    args: &BackendArgs,
+    correlation: Option<&str>,
+    entity: Option<&str>,
+    rejected: bool,
+) -> Result<ExitCode> {
+    let backend = seeded(args)?;
+
+    let mut query = AuditQuery {
+        rejected_only: rejected,
+        ..AuditQuery::default()
+    };
+    if let Some(correlation) = correlation {
+        query.correlation_id = Some(
+            correlation
+                .parse()
+                .map_err(|error| anyhow::anyhow!("{error}"))?,
+        );
+    }
+    if let Some(entity) = entity {
+        query.entity = Some(resolve_entity(&backend, entity)?);
+    }
+    let page = block_on(backend.audit(&query)).map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    match args.format {
+        Format::Text => print_table(
+            &page
+                .items
+                .iter()
+                .map(|record| {
+                    vec![
+                        record.audit_id.to_string(),
+                        record.kind.as_str().to_owned(),
+                        record.occurred_at.to_string(),
+                        record.actor.to_string(),
+                        record
+                            .command_id
+                            .as_ref()
+                            .map_or_else(|| "-".to_owned(), ToString::to_string),
+                        record
+                            .subject
+                            .as_ref()
+                            .map_or_else(|| "-".to_owned(), |subject| subject.id.to_string()),
+                    ]
+                })
+                .collect::<Vec<_>>(),
+        ),
+        Format::Yaml | Format::Json => print_serialised(&page.items, args.format)?,
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol describe`
+fn describe(args: &BackendArgs, entity_type: &str) -> Result<ExitCode> {
+    let backend = seeded(args)?;
+    let entity_type = entity_type
+        .parse()
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    let descriptor = block_on(backend.describe_type(&entity_type))
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    match args.format {
+        Format::Text => {
+            println!("type       {}", descriptor.entity_type);
+            println!("summary    {}", descriptor.summary);
+            println!(
+                "mutable    {}",
+                if descriptor.mutable { "yes" } else { "no" }
+            );
+            if !descriptor.commands.is_empty() {
+                println!("commands");
+                for command in &descriptor.commands {
+                    let guard = if command.revision_guarded {
+                        "revision-guarded"
+                    } else {
+                        "unguarded"
+                    };
+                    println!(
+                        "  {:<28} {guard:<17} {}",
+                        command.command_type, command.summary
+                    );
+                }
+            }
+            if !descriptor.relations.is_empty() {
+                println!("relations");
+                for relation in &descriptor.relations {
+                    println!("  {}", relation.kind);
+                }
+            }
+        }
+        Format::Yaml | Format::Json => print_serialised(&descriptor, args.format)?,
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Seeds an in-memory backend from the manifest, so there is something to answer about.
+///
+/// Every invocation starts from nothing: the backend keeps no state between runs, which is why the
+/// seeding is visible in the history and the audit trail rather than hidden.
+fn seeded(args: &BackendArgs) -> Result<MemoryBackend> {
+    let path = if args.artifacts.is_absolute() {
+        args.artifacts.clone()
+    } else {
+        args.root.join(&args.artifacts)
+    };
+    let graph = read_artifacts(&path)?;
+    let actor: ActorRef = SEED_ACTOR
+        .parse()
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    let backend = MemoryBackend::new();
+    seed::from_manifest(
+        &backend,
+        &graph,
+        &args.organisation,
+        &args.space,
+        SEED_AT,
+        &actor,
+    )
+    .map_err(|error| anyhow::anyhow!("{error}"))
+    .with_context(|| format!("seeding the backend from {}", path.display()))?;
+    Ok(backend)
+}
+
+/// Resolves a locator or a raw identity to an entity that exists.
+///
+/// Both spellings are accepted because both are how people arrive: a locator is what an
+/// organisation knows a thing by, an identity is what a previous command printed.
+fn resolve_entity(backend: &MemoryBackend, reference: &str) -> Result<EntityRef> {
+    if let Ok(locator) = reference.parse::<EntityLocator>() {
+        return match block_on(backend.resolve(&locator)) {
+            Ok(id) => Ok(EntityRef::new(id)),
+            Err(_) => bail!("nothing seeded from this manifest is addressed by `{reference}`"),
+        };
+    }
+    if let Ok(id) = reference.parse::<EntityId>() {
+        let target = EntityRef::new(id);
+        if block_on(backend.get(&target, QueryConsistency::Current)).is_ok() {
+            return Ok(target);
+        }
+        bail!("no entity seeded from this manifest has the identity `{reference}`");
+    }
+    bail!("`{reference}` is neither a locator (`ep://…`) nor an entity identity")
+}
+
+/// The locator an entity is addressed by, for output that names both ends of an edge.
+fn locator_of(backend: &MemoryBackend, reference: &EntityRef) -> String {
+    block_on(backend.get(reference, QueryConsistency::Current)).map_or_else(
+        |_| "-".to_owned(),
+        |entity| entity.metadata.locator.to_string(),
+    )
+}
+
+/// Prints one record per line, in columns wide enough for the widest cell.
+///
+/// Aligned because the surface exists to be scanned: a reader looking for one design among sixty
+/// entities finds it by column position, not by reading every line.
+fn print_table(rows: &[Vec<String>]) {
+    let mut widths: Vec<usize> = Vec::new();
+    for row in rows {
+        for (index, cell) in row.iter().enumerate() {
+            let width = cell.chars().count();
+            match widths.get_mut(index) {
+                Some(current) => *current = (*current).max(width),
+                None => widths.push(width),
+            }
+        }
+    }
+
+    for row in rows {
+        let cells: Vec<String> = row
+            .iter()
+            .enumerate()
+            .map(|(index, cell)| {
+                if index + 1 == row.len() {
+                    cell.clone()
+                } else {
+                    format!("{cell:width$}", width = widths[index])
+                }
+            })
+            .collect();
+        println!("{}", cells.join("  "));
+    }
 }
 
 /// Loads a document tree, failing if anything is wrong with it.

@@ -1,5 +1,7 @@
 # Wave 2 — identity, the interaction contract and a reference backend
 
+> **Delivered.** Status after: ≈83%. The one deviation from this plan: conformance suites moved to wave 3 (see `wave-3-conformance.md` for why a suite written before an implementation tests what its author imagined).
+
 Goal: **make the protocol's objects addressable and its mutations auditable.** After wave 1 the
 engine can decide; it cannot yet say *which* design was approved, by whom, on whose behalf, in which
 revision, or prove that a retried command did not create a second one.

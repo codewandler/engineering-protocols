@@ -25,10 +25,11 @@
 //! failed before any code changed" as a checkable fact rather than as a comment.
 
 use aep_domain::artifact::ArtifactGraph;
+use aep_domain::entity::{ActorRef, EntityRef};
 use aep_domain::event::{EventEnvelope, ProtocolEvent};
 use aep_domain::evidence::{ApprovalDecision, Evidence, EvidenceKind, EvidenceRecord};
 use aep_domain::facts::{FactPath, FactSource, FactStore, FactValue};
-use aep_domain::ids::{ExecutionId, StateId};
+use aep_domain::ids::{EvidenceId, ExecutionId, StateId};
 use aep_domain::plan::ExecutionPlan;
 use aep_domain::predicate::Truth;
 use aep_domain::requirement::{EvidenceRequirement, RequirementContext, RequirementSet};
@@ -67,6 +68,14 @@ pub struct Snapshot {
     pub events: Vec<EventEnvelope>,
     /// The next event sequence number.
     pub next_seq: u64,
+    /// On whose behalf the execution was running.
+    #[serde(default = "default_actor")]
+    pub actor: ActorRef,
+}
+
+/// Serde default for a snapshot taken before executions recorded an actor.
+fn default_actor() -> ActorRef {
+    ActorRef::System
 }
 
 /// A task being executed under a protocol.
@@ -74,6 +83,7 @@ pub struct Snapshot {
 pub struct Execution {
     id: ExecutionId,
     plan: ExecutionPlan,
+    actor: ActorRef,
     state: StateId,
     entered: Vec<StateId>,
     evidence: Vec<RecordedEvidence>,
@@ -82,6 +92,7 @@ pub struct Execution {
     next_seq: u64,
     facts: FactStore,
     records: Vec<EvidenceRecord>,
+    evidence_entities: std::collections::BTreeMap<EvidenceId, EntityRef>,
 }
 
 impl Execution {
@@ -91,6 +102,7 @@ impl Execution {
         let mut execution = Self {
             id,
             plan,
+            actor: ActorRef::System,
             state: state.clone(),
             entered: vec![state],
             evidence: Vec::new(),
@@ -99,6 +111,7 @@ impl Execution {
             next_seq: 1,
             facts: FactStore::new(),
             records: Vec::new(),
+            evidence_entities: std::collections::BTreeMap::new(),
         };
         execution.refresh_facts();
         execution
@@ -107,6 +120,20 @@ impl Execution {
     /// Which execution this is.
     pub fn id(&self) -> &ExecutionId {
         &self.id
+    }
+
+    /// On whose behalf this execution is running.
+    ///
+    /// Defaults to [`ActorRef::System`]. A harness that knows who asked should say so, because every
+    /// decision the engine records is attributed to this actor, and "the system decided" is not an
+    /// answer anyone can act on.
+    pub fn actor(&self) -> &ActorRef {
+        &self.actor
+    }
+
+    /// Sets who this execution is running on behalf of.
+    pub fn set_actor(&mut self, actor: ActorRef) {
+        self.actor = actor;
     }
 
     /// The plan being executed.
@@ -161,6 +188,16 @@ impl Execution {
         &self.facts
     }
 
+    /// Records that a piece of evidence is stored as an entity.
+    pub fn link_evidence(&mut self, evidence: EvidenceId, entity: EntityRef) {
+        self.evidence_entities.insert(evidence, entity);
+    }
+
+    /// The entity a piece of evidence is stored as, when a backend holds it.
+    pub fn evidence_entity(&self, evidence: &EvidenceId) -> Option<&EntityRef> {
+        self.evidence_entities.get(evidence)
+    }
+
     /// Records evidence as arriving in the current state.
     pub fn record_evidence(&mut self, record: EvidenceRecord) {
         self.evidence.push(RecordedEvidence {
@@ -212,6 +249,7 @@ impl Execution {
             evidence: self.evidence.clone(),
             events: self.events.clone(),
             next_seq: self.next_seq,
+            actor: self.actor.clone(),
         }
     }
 
@@ -239,6 +277,7 @@ impl Execution {
         let mut execution = Self {
             id: snapshot.execution,
             plan,
+            actor: snapshot.actor.clone(),
             state: snapshot.state,
             entered: snapshot.entered,
             evidence: snapshot.evidence,
@@ -247,6 +286,7 @@ impl Execution {
             next_seq: snapshot.next_seq,
             facts: FactStore::new(),
             records: Vec::new(),
+            evidence_entities: std::collections::BTreeMap::new(),
         };
         execution.refresh_facts();
         Ok(execution)

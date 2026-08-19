@@ -169,6 +169,24 @@ pub enum ValidationCode {
     VersionMismatch,
     /// A rollback failure policy is declared with no way to identify what to roll back to.
     IncompleteRollbackPolicy,
+    /// Something references itself where that cannot mean anything.
+    SelfReference,
+    /// A command would change nothing, so accepting it produces a revision nobody can explain.
+    EmptyChange,
+    /// An audit record says an action was refused and also records a change.
+    RefusalMutatedState,
+    /// An audit record says an entity changed without recording what changed.
+    UnreconstructableChange,
+    /// A record of a decision does not say what was decided.
+    UnexplainedDecision,
+    /// An audit record's redaction fields contradict each other.
+    RedactionInconsistent,
+    /// An event's declared type does not match what its payload asserts.
+    EventPayloadMismatch,
+    /// An event names a subject without the revision it describes, or the reverse.
+    IncompleteEventSubject,
+    /// An event caused by a command does not name that command as its cause.
+    MissingCausation,
 }
 
 impl ValidationCode {
@@ -197,6 +215,15 @@ impl ValidationCode {
             Self::UnknownPhase => "unknown_phase",
             Self::VersionMismatch => "version_mismatch",
             Self::IncompleteRollbackPolicy => "incomplete_rollback_policy",
+            Self::SelfReference => "self_reference",
+            Self::EmptyChange => "empty_change",
+            Self::RefusalMutatedState => "refusal_mutated_state",
+            Self::UnreconstructableChange => "unreconstructable_change",
+            Self::UnexplainedDecision => "unexplained_decision",
+            Self::RedactionInconsistent => "redaction_inconsistent",
+            Self::EventPayloadMismatch => "event_payload_mismatch",
+            Self::IncompleteEventSubject => "incomplete_event_subject",
+            Self::MissingCausation => "missing_causation",
         }
     }
 }
@@ -353,3 +380,103 @@ impl fmt::Display for ValidationErrors {
 }
 
 impl std::error::Error for ValidationErrors {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every code this build can produce.
+    ///
+    /// Listed by hand on purpose: adding a variant without adding it here fails the test below,
+    /// which is the point — a code with no stable string is a code nothing downstream can match on.
+    const ALL: &[ValidationCode] = &[
+        ValidationCode::EmptyWorkflow,
+        ValidationCode::UnknownInitialState,
+        ValidationCode::UnknownState,
+        ValidationCode::DeadEndState,
+        ValidationCode::UnreachableState,
+        ValidationCode::DuplicateTransition,
+        ValidationCode::UnknownPrinciple,
+        ValidationCode::DuplicatePrinciple,
+        ValidationCode::UnknownProfile,
+        ValidationCode::UnknownWorkflow,
+        ValidationCode::UnknownProtocol,
+        ValidationCode::UnsupportedProtocolVersion,
+        ValidationCode::UndeclaredCapability,
+        ValidationCode::UndeclaredEvidenceKind,
+        ValidationCode::NoVerifierForEvidence,
+        ValidationCode::RollbackOnIrreversibleState,
+        ValidationCode::CapabilityConflict,
+        ValidationCode::ProductionWriteWithoutApproval,
+        ValidationCode::UnobservableFact,
+        ValidationCode::UnknownPhase,
+        ValidationCode::VersionMismatch,
+        ValidationCode::IncompleteRollbackPolicy,
+        ValidationCode::SelfReference,
+        ValidationCode::EmptyChange,
+        ValidationCode::RefusalMutatedState,
+        ValidationCode::UnreconstructableChange,
+        ValidationCode::UnexplainedDecision,
+        ValidationCode::RedactionInconsistent,
+        ValidationCode::EventPayloadMismatch,
+        ValidationCode::IncompleteEventSubject,
+        ValidationCode::MissingCausation,
+    ];
+
+    #[test]
+    fn every_code_has_a_distinct_stable_string() {
+        let mut seen: Vec<&str> = Vec::new();
+        for code in ALL {
+            let rendered = code.as_str();
+            assert!(
+                !rendered.is_empty()
+                    && rendered.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "{code:?} renders as {rendered:?}, which is not a snake_case code"
+            );
+            assert!(
+                !seen.contains(&rendered),
+                "two codes both render as {rendered:?}; a caller matching on it cannot tell them apart"
+            );
+            seen.push(rendered);
+        }
+    }
+
+    #[test]
+    fn the_serialised_form_matches_the_string_form() {
+        for code in ALL {
+            let json = serde_json::to_string(code).expect("serialises");
+            assert_eq!(
+                json,
+                format!("\"{}\"", code.as_str()),
+                "a code's wire form and its display form must not drift apart"
+            );
+        }
+    }
+
+    #[test]
+    fn errors_accumulate_and_report_every_problem() {
+        let mut errors = ValidationErrors::new();
+        assert!(errors.is_empty());
+        errors.push(ValidationError::new(
+            ValidationCode::UnknownState,
+            "workflow.transitions[0].to",
+            "`ghost` is not a declared state",
+        ));
+        errors.push(
+            ValidationError::new(
+                ValidationCode::DeadEndState,
+                "workflow.states.a",
+                "`a` has no outgoing transition",
+            )
+            .with_hint("add a transition, or mark it terminal"),
+        );
+
+        assert_eq!(errors.len(), 2);
+        assert!(errors.contains(ValidationCode::DeadEndState));
+        assert!(!errors.contains(ValidationCode::UnreachableState));
+
+        let rendered = errors.to_string();
+        assert!(rendered.contains("2 validation errors"), "{rendered}");
+        assert!(rendered.contains("hint: add a transition"), "{rendered}");
+    }
+}

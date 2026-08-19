@@ -13,6 +13,8 @@ name = "protocol"
 path = "src/main.rs"
 
 [dependencies]
+aep-backend-memory.workspace = true
+aep-contract.workspace = true
 aep-domain.workspace = true
 aep-engine.workspace = true
 aep-schema.workspace = true

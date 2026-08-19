@@ -11,6 +11,61 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **Identity.** Every addressable thing now has an opaque `EntityId`, a logical `EntityLocator`
+  (`ep://acme/payments/design/passkeys-auth`), a versioned `EntityType` (`aep.design/v1`) and a
+  monotonic `EntityRevision`. `AUTH-142` is a key in a locator, not identity — so two repositories can
+  refer to the same design, and an approval can name the exact revision it approved.
+- **`ActorRef`** — `human:alice`, `agent:planning-agent`, `service:release-controller`, `system`.
+  Distinct from an evidence `Producer`: an actor bears responsibility, a producer made an observation.
+  Commands carry both an actor and an executor, so "alice authorised it, agent-17 ran it" is
+  answerable, and a trail that collapses them can answer neither question.
+- **`aep-contract`** — the storage-independent interaction contract: `CommandService` and
+  `QueryService`, command envelopes with the six identifiers that make a trail reconstructable,
+  consistency tokens giving read-your-writes without sleeps, a typed failure taxonomy, and
+  `TypeDescriptor` so a harness can ask what a design is instead of hard-coding it.
+- **Commands** (`aep-domain::command`) — six generic (`CreateEntity`, `UpdateEntity`,
+  `CreateRelation`, `RemoveRelation`, `ArchiveEntity`, `SupersedeEntity`) and three domain
+  (`SubmitDesignReview`, `ApproveDesign`, `AcceptAdr`). A domain command can be validated where a
+  generic patch cannot: `ApproveDesign{design@7, review}` checks that the review is about *that*
+  revision.
+- **Domain events** (`aep-domain::domain_event`) — a versioned event vocabulary with an open
+  `Custom` variant, separate from the protocol's execution events. An event caused by a command
+  names that command as its cause.
+- **Audit records** (`aep-domain::audit`) — actor and executor, correlation and causation, decision
+  records and change records with before/after revisions, and **rejected attempts**: a denied command
+  changes nothing and still leaves a record, which is the half most systems lose.
+- **`aep-backend-memory`** — a complete in-memory implementation of both contract surfaces, so the
+  contract is exercised by something before anyone builds a durable backend. It passes the
+  specification's nineteen-step reference scenario, including idempotent replay, stale-revision
+  conflicts and the audit record a refusal leaves behind.
+- **`aep-engine::trail`** — protocol decisions become audit records, and a command issued during an
+  execution inherits its correlation, execution and task. A refusal by the protocol and a refusal by
+  a backend now land in the same trail, queryable the same way.
+- Evidence may be submitted as an entity reference, so the trail points at the stored evidence rather
+  than at the engine's copy of it.
+- `RelationKind::Delivers`, and `ArtifactKind::entity_type()` mapping the human-facing artifact
+  vocabulary onto entity types.
+- **CLI**: `protocol entity list|get|history|relations`, `protocol audit [--correlation|--entity|
+  --rejected]` and `protocol describe <type>`, backed by an in-memory backend seeded from an artifact
+  manifest through real commands — so seeding produces history and audit records like anything else.
+
+### Changed
+
+- **Nine new `ValidationCode`s** — `self_reference`, `empty_change`, `refusal_mutated_state`,
+  `unreconstructable_change`, `unexplained_decision`, `redaction_inconsistent`,
+  `event_payload_mismatch`, `incomplete_event_subject`, `missing_causation`. Previously these
+  failures all reported `unknown_state`, so a caller could not tell "this audit record claims a
+  refusal changed something" from "this workflow references a state that does not exist".
+- Minimum supported Rust version is 1.85 (`Waker::noop`, which lets the contract define `async fn`
+  traits without an executor dependency or a line of `unsafe`).
+- A protocol may declare an **approval floor** — capabilities no profile may grant outright.
+  `aep/1` declares `production.write` and `deployment.create:production`, and a profile that grants
+  one fails to resolve.
+
+## [0.2.0-wave-1] — 2026-08-20
+
+### Added
+
 - **The execution core.** `aep-engine` resolves a task against a document tree and answers what is
   owed, what may be done, which transitions are permitted and whether the task is complete:
   - `registry` — the documents in force, with the cross-document checks (unknown references, pinned

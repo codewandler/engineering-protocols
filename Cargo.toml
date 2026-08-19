@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/aep-domain",
     "crates/aep-contract",
+    "crates/aep-backend-memory",
     "crates/aep-engine",
     "crates/aep-schema",
     "crates/aep-conformance",
@@ -15,7 +16,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.85"
 license = "Apache-2.0"
 repository = "https://github.com/timofriedlberlin/engineering-protocols"
 authors = ["Timo Friedl <1379383+timofriedlberlin@users.noreply.github.com>"]
@@ -23,6 +24,7 @@ authors = ["Timo Friedl <1379383+timofriedlberlin@users.noreply.github.com>"]
 [workspace.dependencies]
 aep-domain = { path = "crates/aep-domain", version = "0.1.0" }
 aep-contract = { path = "crates/aep-contract", version = "0.1.0" }
+aep-backend-memory = { path = "crates/aep-backend-memory", version = "0.1.0" }
 aep-engine = { path = "crates/aep-engine", version = "0.1.0" }
 aep-conformance = { path = "crates/aep-conformance", version = "0.1.0" }
 aep-schema = { path = "crates/aep-schema", version = "0.1.0" }

@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use aep_domain::action::ActionRequest;
 use aep_domain::artifact::ArtifactGraph;
 use aep_domain::capability::CapabilityPolicy;
+use aep_domain::entity::EntityRef;
 use aep_domain::event::ProtocolEvent;
 use aep_domain::evidence::{
     ApprovalDecision, Evidence, EvidenceKind, EvidenceRecord, Producer, Provenance,
@@ -55,6 +56,12 @@ pub struct EvidenceSubmission {
     pub subject: Option<SubjectRef>,
     /// How it was obtained.
     pub provenance: Provenance,
+    /// The entity this evidence is stored as, when a backend holds it.
+    ///
+    /// The specification's engine interface submits evidence *by reference* for exactly this case:
+    /// a test run recorded as an entity has identity, revision and provenance of its own, and the
+    /// audit trail should point at it rather than at a copy the engine happens to hold.
+    pub entity: Option<EntityRef>,
 }
 
 impl EvidenceSubmission {
@@ -65,7 +72,15 @@ impl EvidenceSubmission {
             producer,
             subject: None,
             provenance: Provenance::default(),
+            entity: None,
         }
+    }
+
+    /// Names the entity this evidence is stored as, builder-style.
+    #[must_use]
+    pub fn stored_as(mut self, entity: EntityRef) -> Self {
+        self.entity = Some(entity);
+        self
     }
 
     /// Attaches a subject, builder-style.
@@ -331,6 +346,9 @@ impl<C: Clock> ProtocolEngine for Engine<C> {
             provenance: submission.provenance,
         };
         let state = execution.state_id().clone();
+        if let Some(entity) = submission.entity.clone() {
+            execution.link_evidence(id.clone(), entity);
+        }
         execution.record_evidence(record);
 
         execution.emit(

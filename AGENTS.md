@@ -17,11 +17,10 @@ deviation. Add to that list rather than diverging silently.
 
 See the status table in [`README.md`](README.md); keep it accurate when you land work.
 
-* Implemented and gated: `aep-domain`, `aep-schema`, `aep-engine`, `protocol-cli`, `xtask schema`,
-  and the document tree (`protocols/`, `principles/`, `workflows/`, `profiles/`,
-  `artifacts/lifecycles/`).
-* Skeletons with documented planned surfaces: `aep-contract`, `aep-conformance`, `adp-domain`,
-  `aop-domain`.
+* Implemented and gated: `aep-domain`, `aep-schema`, `aep-engine`, `aep-contract`,
+  `aep-backend-memory`, `protocol-cli`, `xtask schema`, and the document tree (`protocols/`,
+  `principles/`, `workflows/`, `profiles/`, `artifacts/lifecycles/`).
+* Skeletons with documented planned surfaces: `aep-conformance`, `adp-domain`, `aop-domain`.
 * Work order: [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) §4.
 
 ## Invariants
@@ -51,6 +50,13 @@ These hold across the workspace. Breaking one is a design change, not a refactor
 11. **Every public item is documented** (`missing_docs = "warn"`) and the workspace is
     clippy-pedantic clean.
 12. **No `unsafe`** (`unsafe_code = "forbid"`).
+13. **Identity is opaque.** An `EntityId` is never parsed for meaning. A human-readable key belongs in
+    the `EntityLocator`; the moment code reads structure out of an id, identity has become a key again.
+14. **Every mutation is a command.** There is no second write path, because a second path is a second
+    place to forget validation, authorisation, idempotency, provenance and audit.
+15. **A refused command changes nothing and is still recorded.** `AuditRecord::validate` rejects a
+    rejection that carries a change record.
+16. **Nothing is physically deleted.** `ArchiveEntity` and `SupersedeEntity` are the vocabulary.
 
 ## Gate
 

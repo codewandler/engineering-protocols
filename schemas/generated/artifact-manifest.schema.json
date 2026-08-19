@@ -278,6 +278,9 @@
         },
         {
           "supersedes": "design:passkeys-auth"
+        },
+        {
+          "delivers": "design:passkeys-auth"
         }
       ],
       "type": "object",

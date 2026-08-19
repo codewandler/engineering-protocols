@@ -715,6 +715,13 @@
           "enum": [
             "supersedes"
           ]
+        },
+        {
+          "description": "Produces the outcome something asked for.",
+          "type": "string",
+          "enum": [
+            "delivers"
+          ]
         }
       ]
     },

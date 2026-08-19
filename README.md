@@ -31,24 +31,24 @@ The agent may be probabilistic. The protocol semantics are not.
 
 ## Status
 
-**Roughly 62% implemented.** There is a runnable end-to-end path: resolve a task against the document
-tree, submit evidence, be told what is owed, what is permitted and whether the work is done. The
-interaction contract and conformance suites are not written yet.
+**Roughly 83% implemented.** A task resolves against the document tree, evidence decides what may be
+done and whether the work is finished, and every object it touches has identity, revision and an
+audit trail. The reusable conformance suite is not written yet.
 
 | Component | Weight | Done | State |
 |---|---:|---:|---|
-| `aep-domain` — core model | 25% | 100% | 22 modules, 91 tests |
+| `aep-domain` — core model | 25% | 100% | 26 modules, 150 tests |
 | `aep-engine` — resolution, evaluation, transitions | 15% | 100% | 38 unit + 16 integration tests |
 | Protocol, principle, workflow and profile documents | 10% | 100% | 49 documents, validated in CI |
-| `protocol-cli` | 7% | 100% | 7 subcommands, 14 integration tests |
+| `protocol-cli` | 7% | 100% | 13 subcommands, 25 integration tests |
 | `aep-schema` + `xtask` — documents and generated schemas | 6% | 100% | 10 schemas, drift-checked |
-| `aep-contract` — command/query contract | 12% | 0% | crate skeleton |
+| `aep-contract` — command/query contract | 12% | 100% | 21 tests |
+| Entity identity, locators and types | 5% | 100% | 14 tests; commands, events and audit add 57 more |
+| In-memory reference backend | 3% | 100% | passes the §104 reference scenario |
 | `aep-conformance` — black-box backend suites | 12% | 0% | crate skeleton |
-| Entity identity, locators and types | 5% | 0% | specified in v0.2 §13–18 |
 | `adp-domain`, `aop-domain` | 5% | 0% | crate skeletons |
-| In-memory reference backend | 3% | 0% | — |
 
-163 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
+276 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
 the "done" column with `task check`.
 
 ### What works today
@@ -77,10 +77,16 @@ production.write denied
 * 49 documents — 3 protocols, 21 principles, 4 workflows, 5 profiles, 5 artifact lifecycles — each
   validated against the protocol vocabulary in CI.
 
+* **Every mutation goes through one boundary.** `CommandService` carries actor *and* executor,
+  correlation and causation, an idempotency key and an asserted revision — so a retry is recognised, a
+  stale write is refused rather than merged, and a refusal leaves a record.
+* **Nothing is deleted.** `ArchiveEntity` and `SupersedeEntity` are the vocabulary; an engineering
+  record whose history can be erased is not a record.
+
 ### What does not work yet
 
-There is no command/query contract, no backend and no conformance suite, so nothing yet *stores* an
-execution beyond a snapshot file. Entities have no canonical identity or locator. See
+There is no reusable conformance suite (the reference scenario is one test, not a suite a third-party
+backend can run against itself), no durable backend, and no ADP/AOP-specific types. See
 [`docs/plan/`](docs/plan/) for what is next.
 
 ## Design decisions worth knowing
@@ -113,6 +119,7 @@ crates/
   aep-contract/     storage-independent command/query contract
   aep-engine/       resolution, evaluation, transition logic
   aep-schema/       document reading and JSON Schema generation
+  aep-backend-memory/ in-memory reference implementation of the contract
   aep-conformance/  black-box conformance suites for backends
   adp-domain/       development-specific types (ADP)
   aop-domain/       operations-specific types (AOP)

@@ -312,6 +312,70 @@ identifier!(
 );
 
 identifier!(
+    /// Identifier of one logical command.
+    ///
+    /// A retry of the same logical command reuses its command id; a new attempt at the transport
+    /// level gets a new [`RequestId`]. Keeping the two apart is what lets an audit trail show three
+    /// attempts at one intended change rather than three changes.
+    CommandId,
+    Charset::Loose,
+    "command",
+    "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+);
+
+identifier!(
+    /// Identifier of one transport attempt.
+    RequestId,
+    Charset::Loose,
+    "request",
+    "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+);
+
+identifier!(
+    /// Identifier shared by everything belonging to one activity.
+    ///
+    /// Correlation answers "what belongs together"; causation answers "what directly caused this".
+    /// A design command, the review event it triggers, the protocol decision that follows and the
+    /// implementation command after that share one correlation id and form a causation chain.
+    CorrelationId,
+    Charset::Loose,
+    "correlation",
+    "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+);
+
+identifier!(
+    /// A client-chosen key that makes a mutation safe to retry.
+    IdempotencyKey,
+    Charset::Loose,
+    "idempotency key",
+    "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+);
+
+identifier!(
+    /// Identifier of one audit record.
+    AuditId,
+    Charset::Loose,
+    "audit",
+    "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+);
+
+identifier!(
+    /// Identifier of one domain event.
+    EventId,
+    Charset::Loose,
+    "event",
+    "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+);
+
+identifier!(
+    /// Identifier of one relation in the entity graph.
+    RelationId,
+    Charset::Loose,
+    "relation",
+    "^[A-Za-z0-9]([A-Za-z0-9]|[./_-][A-Za-z0-9])*$"
+);
+
+identifier!(
     /// Identifier of a task, such as `AUTH-142`.
     TaskId,
     Charset::Loose,

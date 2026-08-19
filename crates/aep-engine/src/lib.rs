@@ -27,6 +27,7 @@
 //! | [`explain`] | human- and machine-readable explanations |
 //! | [`engine`] | the [`ProtocolEngine`](engine::ProtocolEngine) trait and its implementation |
 //! | [`clock`] | injected time, so executions replay |
+//! | [`trail`] | protocol decisions as audit records, and the context commands inherit |
 
 #[cfg(test)]
 pub(crate) mod fixtures;
@@ -41,6 +42,7 @@ pub mod load;
 pub mod policy;
 pub mod registry;
 pub mod resolve;
+pub mod trail;
 
 pub use clock::{Clock, FixedClock, SteppingClock, SystemClock};
 pub use engine::{Engine, EvidenceSubmission, ProtocolEngine, TransitionResult};
@@ -52,3 +54,4 @@ pub use load::{load_tree, load_tree_report, LoadErrors, LoadFailure, LoadOutcome
 pub use policy::{Decision, DecisionReason};
 pub use registry::Registry;
 pub use resolve::resolve;
+pub use trail::{audit_trail, command_context, correlation_id, decision_record};

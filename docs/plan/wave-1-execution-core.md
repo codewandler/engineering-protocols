@@ -1,5 +1,7 @@
 # Wave 1 — the execution core
 
+> **Delivered** in `ee5f8a3`. Status after: ≈62%.
+
 Goal: **a runnable end-to-end path.** At the end of this wave you can hand the CLI a task, a document
 tree and a stream of evidence, and be told — deterministically, with reasons — what the agent may do,
 what it still owes, which transition is permitted, and whether the task is complete.

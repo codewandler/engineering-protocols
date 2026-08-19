@@ -1,6 +1,6 @@
 [package]
-name = "aep-engine"
-description = "Principle resolution, workflow evaluation and transition logic for AEP."
+name = "aep-backend-memory"
+description = "In-memory reference backend for the AEP interaction contract."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,21 +11,10 @@ authors.workspace = true
 [dependencies]
 aep-domain.workspace = true
 aep-contract.workspace = true
-aep-schema.workspace = true
 serde.workspace = true
-thiserror.workspace = true
 
 [dev-dependencies]
-serde_yaml.workspace = true
 serde_json.workspace = true
-
-[[test]]
-name = "documents"
-path = "tests/documents.rs"
-
-[[test]]
-name = "end_to_end"
-path = "tests/end_to_end.rs"
 
 [lints]
 workspace = true

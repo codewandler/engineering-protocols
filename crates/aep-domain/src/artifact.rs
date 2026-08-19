@@ -512,6 +512,16 @@ impl ArtifactKind {
         )
     }
 
+    /// The entity type this artifact kind corresponds to, such as `aep.design/v1`.
+    ///
+    /// Artifact kinds are the human-facing vocabulary; entity types are what the interaction
+    /// contract addresses. One maps onto the other so a manifest written in kinds can be stored as
+    /// entities without a translation table anybody has to maintain.
+    pub fn entity_type(&self) -> crate::entity::EntityType {
+        crate::entity::EntityType::new("aep", self.as_str(), 1)
+            .unwrap_or_else(|error| panic!("artifact kinds are valid type names: {error}"))
+    }
+
     /// `true` when this kind belongs to intent decomposition rather than to engineering output.
     ///
     /// AEP models these but does not own them: they usually live in a planning system.
@@ -902,6 +912,8 @@ pub enum RelationKind {
     DependsOn,
     /// Replaces something.
     Supersedes,
+    /// Produces the outcome something asked for.
+    Delivers,
 }
 
 impl RelationKind {
@@ -919,6 +931,7 @@ impl RelationKind {
         Self::Blocks,
         Self::DependsOn,
         Self::Supersedes,
+        Self::Delivers,
     ];
 
     /// The relation as written in documents.
@@ -936,6 +949,7 @@ impl RelationKind {
             Self::Blocks => "blocks",
             Self::DependsOn => "depends_on",
             Self::Supersedes => "supersedes",
+            Self::Delivers => "delivers",
         }
     }
 
@@ -976,6 +990,7 @@ impl RelationKind {
             Self::Blocks => "blocked by",
             Self::DependsOn => "depended on by",
             Self::Supersedes => "superseded by",
+            Self::Delivers => "delivered by",
         }
     }
 }

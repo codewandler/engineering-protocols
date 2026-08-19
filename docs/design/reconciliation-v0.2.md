@@ -100,6 +100,10 @@ types; D6 is new.
 
 ## 4. Order of work
 
+**Status:** steps 1–4 are delivered (waves 1 and 2 — see `docs/plan/`). Step 5 is wave 3, step 6
+follows it.
+
+
 1. **Finish the execution core** — `aep-engine` (registry, resolution, execution, evaluation,
    explanation), the protocol/principle/workflow/profile documents, `protocol-cli`, `xtask schema`.
    Everything above depends on being able to resolve and evaluate a task at all, and none of it is
