@@ -9,20 +9,18 @@
 //! agentic work `actor: human:alice, executor: agent:release-agent-17` is the ordinary case, and a
 //! backend that stores one of them can say neither who is accountable nor what actually ran.
 
-use aep_contract::command::CommandEnvelope;
 use aep_contract::testing::block_on;
 use aep_domain::command::{Command, CreateEntity, UpdateEntity};
-use aep_domain::entity::{EntityLocator, EntityRef, EntityType, VersionedEntityRef};
-use aep_domain::ids::{CommandId, IdempotencyKey};
+use aep_domain::entity::{EntityRef, EntityType, VersionedEntityRef};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
+use crate::harness::{Backend, Harness};
 use crate::report::SuiteReport;
 
 /// Runs the provenance suite.
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
     // Two actors, because "the creator survives an edit" is only a claim when somebody else edits.
-    let creator = Harness::new(SUITE);
+    let creator = Harness::new("provenance");
     let editor = Harness::new("provenance-editor");
     let mut report = SuiteReport::new("provenance");
 
@@ -119,28 +117,24 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
 /// Creates the entity whose provenance the suite is about.
 fn plant<B: Backend>(harness: &Harness, backend: &B) -> Result<VersionedEntityRef, String> {
     let entity_type = EntityType::parse("aep.design/v1").map_err(|error| error.to_string())?;
-    let locator = address("design", "subject")?;
+    let locator = harness.locator("design");
     let result = harness
-        .execute(
+        .run(
             backend,
-            envelope(
-                harness,
-                "create",
-                Command::CreateEntity(CreateEntity {
-                    entity_type,
-                    locator: locator.clone(),
-                    data: Node::Map(
-                        [
-                            (
-                                "title".to_owned(),
-                                Node::from("A design with a history of hands"),
-                            ),
-                            ("status".to_owned(), Node::from("in_review")),
-                        ]
-                        .into(),
-                    ),
-                }),
-            )?,
+            Command::CreateEntity(CreateEntity {
+                entity_type,
+                locator: locator.clone(),
+                data: Node::Map(
+                    [
+                        (
+                            "title".to_owned(),
+                            Node::from("A design with a history of hands"),
+                        ),
+                        ("status".to_owned(), Node::from("in_review")),
+                    ]
+                    .into(),
+                ),
+            }),
         )
         .map_err(|error| format!("the entity could not be created: {error}"))?;
     if let Some(reference) = result.affected.first() {
@@ -160,9 +154,13 @@ fn amend<B: Backend>(
     backend: &B,
     design: &VersionedEntityRef,
 ) -> Result<(), String> {
-    let mut change = envelope(
-        editor,
-        "amend",
+    // The two harnesses keep separate clocks. Taking this timestamp from the creator's puts the
+    // change observably after the creation, which is what makes the ordering check mean something
+    // without anybody sleeping.
+    let mut context = editor.context();
+    context.issued_at = creator.now();
+    let change = editor.envelope(
+        editor.command_id(),
         Command::UpdateEntity(UpdateEntity {
             target: design.unversioned(),
             changes: [(
@@ -171,42 +169,13 @@ fn amend<B: Backend>(
             )]
             .into(),
         }),
-    )?;
-    // The two harnesses keep separate clocks. Taking this timestamp from the creator's puts the
-    // change observably after the creation, which is what makes the ordering check mean something
-    // without anybody sleeping.
-    change.context.issued_at = creator.now();
+        context,
+    );
 
     editor
         .execute(backend, change)
         .map_err(|error| format!("the second actor's change failed: {error}"))?;
     Ok(())
-}
-
-/// The name this suite mints into every identifier it creates.
-///
-/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
-/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
-/// for different commands and create entities at the same address; both are refused, and the failure
-/// reads as a fault in the backend rather than as a collision between suites. The same applies to
-/// the two harnesses here, which are two actors and not two runs.
-const SUITE: &str = "provenance";
-
-/// An address no other suite in the same run uses.
-fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
-    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
-        .map_err(|error| error.to_string())
-}
-
-/// An envelope whose command id and idempotency key no other suite in the same run uses.
-fn envelope(
-    harness: &Harness,
-    tag: &str,
-    payload: Command,
-) -> Result<CommandEnvelope<Command>, String> {
-    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
-    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
-    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
 }
 
 #[cfg(test)]

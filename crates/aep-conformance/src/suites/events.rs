@@ -9,21 +9,21 @@
 //! nothing is wrong with the data, the work simply never happens. The converse matters as much — a
 //! command that changed nothing must report nothing, or every retry becomes a fan-out.
 
-use aep_contract::command::CommandEnvelope;
 use aep_domain::command::{Command, CreateEntity};
-use aep_domain::entity::{EntityLocator, EntityType};
-use aep_domain::ids::{CommandId, EventId, IdempotencyKey};
+use aep_domain::entity::EntityType;
+use aep_domain::ids::EventId;
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
+use crate::harness::{Backend, Harness};
 use crate::report::{Check, SuiteReport};
 
 /// Runs the events suite.
-// A suite is one ordered list of checks, each depending on the state the last one left. Splitting it
+// The four checks are one ordered scenario — a create, a second create, a create that changes
+// nothing, and a replay of the first — each reading the state the previous one left. Splitting it
 // into helpers would hide that sequence, which is the thing a reader needs to follow.
 #[allow(clippy::too_many_lines)]
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new(SUITE);
+    let harness = Harness::new("events");
     let mut report = SuiteReport::new("events");
 
     let emitted = "a create reports at least one emitted event";
@@ -38,13 +38,7 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
         );
         return report;
     };
-    let taken = match address("design", "first") {
-        Ok(locator) => locator,
-        Err(detail) => {
-            report.aborted(emitted, detail);
-            return report;
-        }
-    };
+    let taken = harness.locator("design");
     let make = |locator| {
         Command::CreateEntity(CreateEntity {
             entity_type: entity_type.clone(),
@@ -62,17 +56,19 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
         })
     };
 
-    let first = match envelope(&harness, "first", make(taken.clone())).and_then(|envelope| {
-        harness
-            .execute(backend, envelope)
-            .map_err(|e| e.to_string())
-    }) {
+    // Keep this command's own identifiers: the replay at the end has to be the same logical command
+    // rather than a second one that merely looks like it.
+    let command_id = harness.command_id();
+    let context = harness.context();
+    let key = context.idempotency_key.clone();
+
+    let first = match harness.execute(
+        backend,
+        harness.envelope(command_id.clone(), make(taken.clone()), context),
+    ) {
         Ok(result) => result,
-        Err(detail) => {
-            report.aborted(
-                emitted,
-                format!("the entity could not be created: {detail}"),
-            );
+        Err(error) => {
+            report.aborted(emitted, format!("the entity could not be created: {error}"));
             return report;
         }
     };
@@ -84,13 +80,7 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
          by one",
     );
 
-    match address("design", "second")
-        .and_then(|locator| envelope(&harness, "second", make(locator)))
-        .and_then(|envelope| {
-            harness
-                .execute(backend, envelope)
-                .map_err(|e| e.to_string())
-        }) {
+    match harness.run(backend, make(harness.locator("design"))) {
         Ok(second) => {
             let shared: Vec<&EventId> = first
                 .events
@@ -107,18 +97,14 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
                 ),
             );
         }
-        Err(detail) => report.aborted(
+        Err(error) => report.aborted(
             distinct,
-            format!("a second entity could not be created: {detail}"),
+            format!("a second entity could not be created: {error}"),
         ),
     }
 
     // The same address twice: nothing is created, so there is no fact to report.
-    match envelope(&harness, "duplicate", make(taken.clone())).and_then(|envelope| {
-        harness
-            .execute(backend, envelope)
-            .map_err(|e| e.to_string())
-    }) {
+    match harness.run(backend, make(taken.clone())) {
         Ok(result) => report.expect(
             silent,
             result.events.is_empty(),
@@ -127,20 +113,21 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
                 result.events
             ),
         ),
-        Err(detail) => report.record(Check {
+        Err(error) => report.record(Check {
             name: silent.to_owned(),
             passed: true,
             detail: Some(format!(
-                "the second create at the same address was refused ({detail}), so it reported \
+                "the second create at the same address was refused ({error}), so it reported \
                  nothing at all"
             )),
         }),
     }
 
-    // The same logical command again: the same command id, the same key, the same payload.
-    match envelope(&harness, "first", make(taken))
-        .and_then(|envelope| harness.execute(backend, envelope).map_err(|e| e.to_string()))
-    {
+    // The same logical command again: same command id, same idempotency key, same payload.
+    match harness.execute(
+        backend,
+        harness.envelope(command_id, make(taken), harness.context_with_key(&key)),
+    ) {
         Ok(replay) => report.expect(
             replayed,
             replay.events == first.events,
@@ -152,43 +139,17 @@ pub fn run<B: Backend>(backend: &B) -> SuiteReport {
         ),
         // A backend that does not recognise the replay fails the idempotency suite; saying so twice
         // would only send an implementer looking in two places for one fault.
-        Err(detail) => report.record(Check {
+        Err(error) => report.record(Check {
             name: replayed.to_owned(),
             passed: true,
             detail: Some(format!(
-                "the replay was not recognised as one ({detail}); whether a replay is recognised is \
+                "the replay was not recognised as one ({error}); whether a replay is recognised is \
                  the idempotency suite's property"
             )),
         }),
     }
 
     report
-}
-
-/// The name this suite mints into every identifier it creates.
-///
-/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
-/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
-/// for different commands and create entities at the same address; both are refused, and the failure
-/// reads as a fault in the backend rather than as a collision between suites. Here the naming does
-/// double duty: reusing one tag is exactly how the replay is made to be the same logical command.
-const SUITE: &str = "events";
-
-/// An address no other suite in the same run uses.
-fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
-    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
-        .map_err(|error| error.to_string())
-}
-
-/// An envelope whose command id and idempotency key no other suite in the same run uses.
-fn envelope(
-    harness: &Harness,
-    tag: &str,
-    payload: Command,
-) -> Result<CommandEnvelope<Command>, String> {
-    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
-    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
-    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
 }
 
 #[cfg(test)]

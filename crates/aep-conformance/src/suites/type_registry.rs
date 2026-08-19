@@ -8,20 +8,18 @@
 //! review result may not be edited will happily offer an edit, and the refusal then arrives as a
 //! surprise at the point of use rather than as a fact about the type.
 
-use aep_contract::command::CommandEnvelope;
 use aep_contract::registry::TypeDescriptor;
 use aep_contract::testing::block_on;
 use aep_domain::command::{Command, CreateEntity};
-use aep_domain::entity::{EntityLocator, EntityRef, EntityType};
-use aep_domain::ids::{CommandId, IdempotencyKey};
+use aep_domain::entity::{EntityRef, EntityType};
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
+use crate::harness::{Backend, Harness};
 use crate::report::SuiteReport;
 
 /// Runs the type-registry suite.
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new(SUITE);
+    let harness = Harness::new("type-registry");
     let mut report = SuiteReport::new("type-registry");
 
     let describable = "a type an entity was created with can be described";
@@ -139,28 +137,24 @@ fn mutability(descriptor: Option<&TypeDescriptor>) -> String {
 /// Creates an entity of `aep.<kind>/v1` and reports the type the backend says it has.
 fn observe<B: Backend>(harness: &Harness, backend: &B, kind: &str) -> Result<EntityType, String> {
     let entity_type = EntityType::parse(&format!("aep.{kind}/v1")).map_err(|e| e.to_string())?;
-    let locator = address(kind, "sample")?;
+    let locator = harness.locator(kind);
     harness
-        .execute(
+        .run(
             backend,
-            envelope(
-                harness,
-                kind,
-                Command::CreateEntity(CreateEntity {
-                    entity_type,
-                    locator: locator.clone(),
-                    data: Node::Map(
-                        [
-                            (
-                                "title".to_owned(),
-                                Node::from("An entity of a discoverable type"),
-                            ),
-                            ("status".to_owned(), Node::from("active")),
-                        ]
-                        .into(),
-                    ),
-                }),
-            )?,
+            Command::CreateEntity(CreateEntity {
+                entity_type,
+                locator: locator.clone(),
+                data: Node::Map(
+                    [
+                        (
+                            "title".to_owned(),
+                            Node::from("An entity of a discoverable type"),
+                        ),
+                        ("status".to_owned(), Node::from("active")),
+                    ]
+                    .into(),
+                ),
+            }),
         )
         .map_err(|error| format!("an entity of `aep.{kind}/v1` could not be created: {error}"))?;
     let id = block_on(backend.resolve(&locator)).map_err(|error| error.to_string())?;
@@ -168,31 +162,6 @@ fn observe<B: Backend>(harness: &Harness, backend: &B, kind: &str) -> Result<Ent
         .read(backend, &EntityRef::new(id))?
         .metadata
         .entity_type)
-}
-
-/// The name this suite mints into every identifier it creates.
-///
-/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
-/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
-/// for different commands and create entities at the same address; both are refused, and the failure
-/// reads as a fault in the backend rather than as a collision between suites.
-const SUITE: &str = "type-registry";
-
-/// An address no other suite in the same run uses.
-fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
-    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
-        .map_err(|error| error.to_string())
-}
-
-/// An envelope whose command id and idempotency key no other suite in the same run uses.
-fn envelope(
-    harness: &Harness,
-    tag: &str,
-    payload: Command,
-) -> Result<CommandEnvelope<Command>, String> {
-    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
-    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
-    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
 }
 
 #[cfg(test)]

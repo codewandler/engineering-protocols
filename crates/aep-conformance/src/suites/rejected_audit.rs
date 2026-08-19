@@ -10,7 +10,6 @@
 //! against a revision that has moved on, and a second entity at an address already taken — and then
 //! asks the trail about them.
 
-use aep_contract::command::{CommandEnvelope, CommandResult};
 use aep_contract::query::AuditQuery;
 use aep_contract::testing::block_on;
 use aep_domain::audit::AuditRecord;
@@ -18,15 +17,15 @@ use aep_domain::command::{Command, CreateEntity, UpdateEntity};
 use aep_domain::entity::{
     EntityLocator, EntityRef, EntityRevision, EntityType, VersionedEntityRef,
 };
-use aep_domain::ids::{AuditId, CommandId, IdempotencyKey};
+use aep_domain::ids::AuditId;
 use aep_domain::node::Node;
 
-use crate::harness::{Backend, Harness, ORGANISATION, SPACE};
+use crate::harness::{Backend, Harness};
 use crate::report::SuiteReport;
 
 /// Runs the rejected-action audit suite.
 pub fn run<B: Backend>(backend: &B) -> SuiteReport {
-    let harness = Harness::new(SUITE);
+    let harness = Harness::new("rejected-audit");
     let mut report = SuiteReport::new("rejected-audit");
 
     let left = "a refused command leaves an audit record";
@@ -141,7 +140,7 @@ fn explains_itself(record: &AuditRecord) -> bool {
 /// all.
 fn refuse_two_commands<B: Backend>(harness: &Harness, backend: &B) -> Result<Vec<AuditId>, String> {
     let entity_type = EntityType::parse("aep.design/v1").map_err(|error| error.to_string())?;
-    let locator = address("design", "target")?;
+    let locator = harness.locator("design");
     let body = |title: &str| {
         Node::Map(
             [
@@ -152,51 +151,48 @@ fn refuse_two_commands<B: Backend>(harness: &Harness, backend: &B) -> Result<Vec
         )
     };
 
-    let created = issue(
-        harness,
-        backend,
-        "create",
-        Command::CreateEntity(CreateEntity {
-            entity_type: entity_type.clone(),
-            locator: locator.clone(),
-            data: body("A design two commands will be refused against"),
-        }),
-    )
-    .map_err(|error| format!("the entity could not be created: {error}"))?;
+    let created = harness
+        .run(
+            backend,
+            Command::CreateEntity(CreateEntity {
+                entity_type: entity_type.clone(),
+                locator: locator.clone(),
+                data: body("A design two commands will be refused against"),
+            }),
+        )
+        .map_err(|error| format!("the entity could not be created: {error}"))?;
     let design = settle(harness, backend, created.affected.first(), &locator)?;
 
-    let updated = issue(
-        harness,
-        backend,
-        "update",
-        Command::UpdateEntity(UpdateEntity {
-            target: design.unversioned(),
-            changes: [("title".to_owned(), Node::from("A design that has moved on"))].into(),
-        }),
-    )
-    .map_err(|error| format!("the entity could not be updated: {error}"))?;
+    let updated = harness
+        .run(
+            backend,
+            Command::UpdateEntity(UpdateEntity {
+                target: design.unversioned(),
+                changes: [("title".to_owned(), Node::from("A design that has moved on"))].into(),
+            }),
+        )
+        .map_err(|error| format!("the entity could not be updated: {error}"))?;
 
     // Refusal one: a write against the revision the design was at before that update.
-    let stale = envelope(
-        harness,
-        "stale",
-        Command::UpdateEntity(UpdateEntity {
-            target: design.unversioned(),
-            changes: [(
-                "title".to_owned(),
-                Node::from("Rewritten behind the update's back"),
-            )]
-            .into(),
-        }),
-    )?
-    .expecting(EntityRevision::INITIAL);
+    let stale = harness
+        .envelope(
+            harness.command_id(),
+            Command::UpdateEntity(UpdateEntity {
+                target: design.unversioned(),
+                changes: [(
+                    "title".to_owned(),
+                    Node::from("Rewritten behind the update's back"),
+                )]
+                .into(),
+            }),
+            harness.context(),
+        )
+        .expecting(EntityRevision::INITIAL);
     drop(harness.execute(backend, stale));
 
     // Refusal two: a second entity at an address that is already taken.
-    drop(issue(
-        harness,
+    drop(harness.run(
         backend,
-        "duplicate",
         Command::CreateEntity(CreateEntity {
             entity_type,
             locator,
@@ -207,7 +203,7 @@ fn refuse_two_commands<B: Backend>(harness: &Harness, backend: &B) -> Result<Vec
     Ok(created.audit.into_iter().chain(updated.audit).collect())
 }
 
-/// Where a create landed, falling back to the address when the backend reports nothing.
+/// Where a create landed, falling back to the locator when the backend reports nothing.
 fn settle<B: Backend>(
     harness: &Harness,
     backend: &B,
@@ -222,43 +218,6 @@ fn settle<B: Backend>(
         .read(backend, &EntityRef::new(id))?
         .metadata
         .versioned_reference())
-}
-
-/// The name this suite mints into every identifier it creates.
-///
-/// A full run drives all sixteen suites against one backend, and the harness numbers its generated
-/// identifiers from zero for each of them. Two suites using them raw issue the same idempotency key
-/// for different commands and create entities at the same address; both are refused, and the failure
-/// reads as a fault in the backend rather than as a collision between suites.
-const SUITE: &str = "rejected-audit";
-
-/// An address no other suite in the same run uses.
-fn address(kind: &str, tag: &str) -> Result<EntityLocator, String> {
-    EntityLocator::new(ORGANISATION, SPACE, kind, format!("{kind}-{SUITE}-{tag}"))
-        .map_err(|error| error.to_string())
-}
-
-/// An envelope whose command id and idempotency key no other suite in the same run uses.
-fn envelope(
-    harness: &Harness,
-    tag: &str,
-    payload: Command,
-) -> Result<CommandEnvelope<Command>, String> {
-    let command_id = CommandId::new(format!("cmd-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
-    let key = IdempotencyKey::new(format!("key-{SUITE}-{tag}")).map_err(|e| e.to_string())?;
-    Ok(harness.envelope(command_id, payload, harness.context_with_key(&key)))
-}
-
-/// Issues a command under identifiers this suite owns.
-fn issue<B: Backend>(
-    harness: &Harness,
-    backend: &B,
-    tag: &str,
-    payload: Command,
-) -> Result<CommandResult, String> {
-    harness
-        .execute(backend, envelope(harness, tag, payload)?)
-        .map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
