@@ -145,6 +145,9 @@ fn apply_valid(
         }
 
         Command::UpdateEntity(update) => {
+            // A generic patch is the one command that could quietly edit evidence, so the type's
+            // own answer to "may this be changed?" is asked before anything is touched.
+            require_mutable(store, &update.target)?;
             let reference = mutate(
                 store,
                 envelope,
@@ -412,6 +415,25 @@ fn require_entity(store: &Store, reference: &EntityRef) -> Result<(), CommandErr
         });
     }
     Ok(())
+}
+
+/// Fails when an entity's type does not permit editing.
+fn require_mutable(store: &Store, reference: &EntityRef) -> Result<(), CommandError> {
+    let entity = store
+        .entity(&reference.id)
+        .ok_or_else(|| CommandError::NotFound {
+            entity: reference.clone(),
+        })?;
+    if crate::query::is_mutable(&entity.metadata.entity_type) {
+        return Ok(());
+    }
+    Err(CommandError::Conflict {
+        reason: format!(
+            "`{}` is a {}, which is immutable: a record that can be edited after the fact is not \
+             evidence. Archive it, or supersede it with a new one.",
+            reference, entity.metadata.entity_type
+        ),
+    })
 }
 
 /// Fails when an entity is not at the revision a command names.

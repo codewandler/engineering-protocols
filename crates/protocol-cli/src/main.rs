@@ -194,7 +194,24 @@ enum Command {
         name: Option<String>,
     },
     /// Run the conformance suites against a backend.
-    Conformance,
+    ///
+    /// Runs against the in-memory reference backend. `--inject` deliberately breaks one property, to
+    /// show that the suite responsible for it actually fails — a suite that passes everything tells
+    /// you nothing.
+    Conformance {
+        /// How much of the contract to check: core, audited or full.
+        #[arg(long, default_value = "full")]
+        level: String,
+        /// Run one suite by name instead of a whole level.
+        #[arg(long)]
+        suite: Option<String>,
+        /// Break one property on purpose, to see which suite catches it.
+        #[arg(long)]
+        inject: Option<String>,
+        /// How to render the result.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
 }
 
 /// The questions the entity surface answers.
@@ -205,6 +222,9 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum EntityCommand {
     /// List every entity the manifest seeds, with its type, locator and revision.
+    ///
+    /// The backend is in-memory: this run seeds it from `--artifacts` and then answers. Every
+    /// entity here was created moments ago by this process.
     List {
         /// Where the manifest is and how to render.
         #[command(flatten)]
@@ -214,6 +234,9 @@ enum EntityCommand {
         entity_type: Option<String>,
     },
     /// Print one entity, addressed by locator or by identity.
+    ///
+    /// The backend is in-memory: this run seeds it from `--artifacts` and then answers. Exits 1
+    /// when nothing the manifest seeds is addressed by what was asked for.
     Get {
         /// Where the manifest is and how to render.
         #[command(flatten)]
@@ -222,6 +245,9 @@ enum EntityCommand {
         reference: String,
     },
     /// Show an entity's revision records, oldest first.
+    ///
+    /// The backend is in-memory: what this shows is *the seeding*, not a durable past. Every
+    /// entity is therefore at revision 1, and running the command again does not lengthen it.
     History {
         /// Where the manifest is and how to render.
         #[command(flatten)]
@@ -230,6 +256,9 @@ enum EntityCommand {
         reference: String,
     },
     /// Show what an entity points at, or — with `--incoming` — what points at it.
+    ///
+    /// The backend is in-memory: this run seeds it from `--artifacts` and then answers. The edges
+    /// are the manifest's own `relations`, stored as relation commands.
     Relations {
         /// Where the manifest is and how to render.
         #[command(flatten)]
@@ -286,11 +315,128 @@ fn run() -> Result<ExitCode> {
             entity_type,
         } => describe(&backend, &entity_type),
         Command::Schema { name } => schema(name.as_deref()),
-        Command::Conformance => bail!(
-            "conformance suites are not implemented yet; they need the command/query contract \
-             (docs/design/reconciliation-v0.2.md §4)"
-        ),
+        Command::Conformance {
+            level,
+            suite,
+            inject,
+            format,
+        } => conformance(&level, suite.as_deref(), inject.as_deref(), format),
     }
+}
+
+/// `protocol conformance`
+fn conformance(
+    level: &str,
+    suite: Option<&str>,
+    inject: Option<&str>,
+    format: Format,
+) -> Result<ExitCode> {
+    use aep_conformance::{FaultyBackend, Level};
+
+    let level = Level::parse(level).with_context(|| {
+        format!(
+            "`{level}` is not a conformance level; expected one of {}",
+            Level::ALL
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    })?;
+
+    let fault = match inject {
+        None => None,
+        Some(name) => Some(parse_fault(name)?),
+    };
+
+    let backend = aep_backend_memory::MemoryBackend::new();
+    let report = match fault {
+        None => run_conformance(&backend, level, suite)?,
+        Some(fault) => {
+            let faulty = FaultyBackend::new(backend, fault);
+            run_conformance(&faulty, level, suite)?
+        }
+    };
+
+    match format {
+        Format::Text => {
+            println!("{report}");
+            if let Some(fault) = fault {
+                println!(
+                    "injected fault: {} — expected to be caught by the `{}` suite",
+                    fault.describe(),
+                    fault.caught_by()
+                );
+            }
+        }
+        Format::Yaml | Format::Json => print_serialised(&report, format)?,
+    }
+
+    Ok(exit_code(report.passed()))
+}
+
+/// Runs a level, or one named suite within it.
+fn run_conformance<B: aep_conformance::Backend>(
+    backend: &B,
+    level: aep_conformance::Level,
+    suite: Option<&str>,
+) -> Result<aep_conformance::ConformanceReport> {
+    match suite {
+        None => Ok(aep_conformance::run(backend, level)),
+        Some(name) => {
+            let report = aep_conformance::run_suite(backend, name).with_context(|| {
+                format!(
+                    "`{name}` is not a suite; known suites are {}",
+                    aep_conformance::suites::all()
+                        .iter()
+                        .map(|suite| suite.name)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })?;
+            Ok(aep_conformance::ConformanceReport {
+                level,
+                suites: vec![report],
+            })
+        }
+    }
+}
+
+/// Parses a fault name, such as `replay-applies`.
+fn parse_fault(name: &str) -> Result<aep_conformance::Fault> {
+    // `replay-applies`, `replay_applies` and `ReplayApplies` all name the same fault; separators are
+    // a spelling choice, not part of the name.
+    let normalised = name.replace(['-', '_'], "").to_ascii_lowercase();
+    aep_conformance::Fault::ALL
+        .iter()
+        .copied()
+        .find(|fault| format!("{fault:?}").to_ascii_lowercase() == normalised)
+        .with_context(|| {
+            format!(
+                "`{name}` is not a fault; known faults are {}",
+                aep_conformance::Fault::ALL
+                    .iter()
+                    .map(|fault| kebab(&format!("{fault:?}")))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+}
+
+/// Renders a `CamelCase` name in kebab-case, for command-line use.
+fn kebab(value: &str) -> String {
+    let mut rendered = String::new();
+    for (index, character) in value.chars().enumerate() {
+        if character.is_ascii_uppercase() {
+            if index > 0 {
+                rendered.push('-');
+            }
+            rendered.push(character.to_ascii_lowercase());
+        } else {
+            rendered.push(character);
+        }
+    }
+    rendered
 }
 
 /// `protocol validate`

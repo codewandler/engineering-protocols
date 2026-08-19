@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 aep-backend-memory.workspace = true
+aep-conformance.workspace = true
 aep-contract.workspace = true
 aep-domain.workspace = true
 aep-engine.workspace = true

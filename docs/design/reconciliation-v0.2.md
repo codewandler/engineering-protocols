@@ -140,3 +140,30 @@ Recorded here so they are decisions rather than drift:
    `test_execution` alongside `test_result`) are accepted, because both spellings appear in the
    design documents and neither is worth forcing on a document author. Canonical forms are what the
    engine emits.
+
+8. **Development types are namespaced `adp.`, not `aep.`.** §16 spells a specification
+   `aep.specification/v1`. `adp-domain` publishes `adp.specification/v1`, because the typed body it
+   ships is the development protocol's, and a base-protocol name would claim the base protocol
+   defines that shape. The artifact *kind* `specification` still maps to `aep.specification/v1`
+   through `ArtifactKind::entity_type()`; the two coexist and mean different things — one is an
+   artifact in the graph, the other a typed body in the development SDK layer.
+
+9. **`LifecycleDescriptor` cannot express the operations ladders.** It is typed to `ArtifactStatus`,
+   which has no word for `canary` or `triaged`. `aop-domain` therefore publishes `lifecycle: None`
+   for incidents and releases and exposes its ladders as `descriptor::incident_transitions()` and
+   `release_transitions()`, rather than advertising a lifecycle a harness could act on and be wrong
+   about. Making this fit properly means a status-agnostic `LifecycleDescriptor` in `aep-contract`.
+
+10. **`RollbackRelease` is scoped to production.** The command carries no environment, so it requires
+    `deployment.rollback:production`. Requiring the unscoped capability would be *stricter*, not
+    laxer — a grant of `deployment.rollback:production` would then satisfy nothing — so a staging
+    rollback needs an environment field on the command rather than a widened capability.
+
+11. **A domain event's causation is a string.** `audit::CausationRef` landed after
+    `domain_event.rs`; the field is typed loosely and documented as such. Tightening it changes the
+    `from_command` constructor and the equality check in `validate`, not just the type.
+
+12. **The in-memory backend enforces type immutability.** Nothing in the specification says a backend
+    must refuse an update to a review result; §43 says such records *may* be immutable. The reference
+    backend refuses it, because a descriptor that says `mutable: false` while the backend accepts
+    edits is a claim the system does not keep. Archiving remains available.

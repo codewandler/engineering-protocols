@@ -257,12 +257,49 @@ fn json_output_is_machine_readable() {
 }
 
 #[test]
-fn conformance_says_plainly_that_it_is_not_implemented() {
-    let output = protocol(&["conformance"]);
-    assert_eq!(code(&output), 1);
+fn conformance_runs_the_suites_against_the_reference_backend() {
+    let output = protocol(&["conformance", "--level", "full"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("conformance full"), "{text}");
+    assert!(text.contains("properties hold"), "{text}");
+}
+
+#[test]
+fn conformance_fails_when_a_property_is_deliberately_broken() {
+    // The point of shipping a faulty backend: a suite that passes everything tells you nothing, and
+    // this is how a reader checks that for themselves in one command.
+    let output = protocol(&[
+        "conformance",
+        "--suite",
+        "idempotency",
+        "--inject",
+        "replay-applies",
+    ]);
+    assert_eq!(code(&output), 1, "a broken property is a non-zero exit");
+    let text = stdout(&output);
+    assert!(text.contains("do not hold"), "{text}");
     assert!(
-        stderr(&output).contains("not implemented yet"),
-        "a stub must not look like a pass: {}",
-        stderr(&output)
+        text.contains("expected to be caught by the `idempotency` suite"),
+        "{text}"
+    );
+}
+
+#[test]
+fn conformance_rejects_an_unknown_level_or_fault() {
+    let level = protocol(&["conformance", "--level", "thorough"]);
+    assert_eq!(code(&level), 1);
+    assert!(
+        stderr(&level).contains("is not a conformance level"),
+        "{}",
+        stderr(&level)
+    );
+
+    let fault = protocol(&["conformance", "--inject", "nonsense"]);
+    assert_eq!(code(&fault), 1);
+    assert!(
+        stderr(&fault).contains("is not a fault"),
+        "{}",
+        stderr(&fault)
     );
 }

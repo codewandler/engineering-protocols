@@ -10,6 +10,13 @@ authors.workspace = true
 
 [dependencies]
 aep-domain.workspace = true
+aep-contract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

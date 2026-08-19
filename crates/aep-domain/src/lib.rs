@@ -81,8 +81,8 @@ pub use capability::{Capability, CapabilityDecision, CapabilityPolicy, Environme
 pub use command::{Command, CommandKind};
 pub use domain_event::{DomainEvent, DomainEventEnvelope, DomainEventType};
 pub use entity::{
-    ActorRef, Entity, EntityId, EntityLocator, EntityMetadata, EntityProvenance, EntityRef,
-    EntityRevision, EntityType, VersionedEntityRef,
+    ActorRef, Entity, EntityBody, EntityId, EntityLocator, EntityMetadata, EntityProvenance,
+    EntityRef, EntityRevision, EntityType, VersionedEntityRef,
 };
 pub use error::{ParseError, ValidationCode, ValidationError, ValidationErrors};
 pub use event::{EventEnvelope, ProtocolEvent};

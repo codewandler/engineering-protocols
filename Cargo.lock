@@ -6,7 +6,11 @@ version = 4
 name = "adp-domain"
 version = "0.1.0"
 dependencies = [
+ "aep-contract",
  "aep-domain",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -23,7 +27,11 @@ dependencies = [
 name = "aep-conformance"
 version = "0.1.0"
 dependencies = [
+ "aep-backend-memory",
+ "aep-contract",
  "aep-domain",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -133,7 +141,11 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "aop-domain"
 version = "0.1.0"
 dependencies = [
+ "aep-contract",
  "aep-domain",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -254,6 +266,7 @@ name = "protocol-cli"
 version = "0.1.0"
 dependencies = [
  "aep-backend-memory",
+ "aep-conformance",
  "aep-contract",
  "aep-domain",
  "aep-engine",

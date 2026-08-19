@@ -916,6 +916,49 @@ impl<T> Entity<T> {
     }
 }
 
+/// A typed body that can live inside an [`Entity`].
+///
+/// The interaction contract moves entities with untyped bodies, because a generic backend cannot know
+/// what a design *is*. This trait is the other half: a typed layer that converts, so an application
+/// works with `Specification` and `Incident` while the contract still moves [`Node`](crate::node::Node)s.
+///
+/// Implementing it is what makes a type addressable through the contract, so the pair of methods is
+/// deliberately total: a body that can be written must be readable back, and a round trip that loses
+/// a field is a bug the implementation's own tests should catch.
+pub trait EntityBody: Sized {
+    /// The versioned type this body belongs to.
+    fn entity_type() -> EntityType;
+
+    /// Renders the body for the wire.
+    fn to_node(&self) -> crate::node::Node;
+
+    /// Reads a body back.
+    fn from_node(node: &crate::node::Node) -> Result<Self, ParseError>;
+}
+
+/// Reads a required string field from a body mapping.
+///
+/// Shared by the typed bodies in `adp-domain` and `aop-domain`, so their error messages agree.
+pub fn required_text(
+    node: &crate::node::Node,
+    field: &str,
+    type_name: &str,
+) -> Result<String, ParseError> {
+    node.as_map()
+        .and_then(|entries| entries.get(field))
+        .and_then(crate::node::Node::as_text)
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| ParseError::shape(format!("{type_name}.{field}"), "a string", "nothing"))
+}
+
+/// Reads an optional string field from a body mapping.
+pub fn optional_text(node: &crate::node::Node, field: &str) -> Option<String> {
+    node.as_map()
+        .and_then(|entries| entries.get(field))
+        .and_then(crate::node::Node::as_text)
+        .map(ToOwned::to_owned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

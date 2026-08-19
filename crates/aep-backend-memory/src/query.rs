@@ -226,6 +226,18 @@ impl QueryService for MemoryBackend {
     }
 }
 
+/// `true` when entities of this type may be edited.
+///
+/// A review result records what someone concluded at a moment. Editing it afterwards would change
+/// what the record says a person decided, which is why the type is immutable and why an update
+/// targeting one is refused rather than merely discouraged. Archiving stays available: keeping a
+/// record and editing it are different acts.
+pub fn is_mutable(entity_type: &EntityType) -> bool {
+    !ArtifactKind::NAMED
+        .iter()
+        .any(|kind| &kind.entity_type() == entity_type && *kind == ArtifactKind::ReviewResult)
+}
+
 /// Wraps a stored entity for the wire.
 fn envelope(entity: &StoredEntity) -> EntityEnvelope {
     Entity::new(entity.metadata.clone(), entity.data.clone())

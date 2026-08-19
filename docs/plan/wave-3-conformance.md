@@ -1,6 +1,6 @@
 # Wave 3 — conformance, and the domain profiles
 
-> **Planned.**
+> **Delivered.** Status after: the v0.2 scope is implemented. 424 tests.
 
 Goal: **let a backend nobody in this repository wrote prove it implements the contract.** Wave 2
 delivered the contract and one implementation of it. A contract with exactly one implementation is a

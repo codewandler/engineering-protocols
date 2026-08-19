@@ -31,24 +31,24 @@ The agent may be probabilistic. The protocol semantics are not.
 
 ## Status
 
-**Roughly 83% implemented.** A task resolves against the document tree, evidence decides what may be
-done and whether the work is finished, and every object it touches has identity, revision and an
-audit trail. The reusable conformance suite is not written yet.
+**The v0.2 scope is implemented.** A task resolves against the document tree, evidence decides what
+may be done and whether the work is finished, every object it touches has identity, revision and an
+audit trail, and a backend can prove it implements the contract by running a suite against itself.
 
 | Component | Weight | Done | State |
 |---|---:|---:|---|
 | `aep-domain` — core model | 25% | 100% | 26 modules, 150 tests |
 | `aep-engine` — resolution, evaluation, transitions | 15% | 100% | 38 unit + 16 integration tests |
 | Protocol, principle, workflow and profile documents | 10% | 100% | 49 documents, validated in CI |
-| `protocol-cli` | 7% | 100% | 13 subcommands, 25 integration tests |
+| `protocol-cli` | 7% | 100% | 14 subcommands, 27 integration tests |
 | `aep-schema` + `xtask` — documents and generated schemas | 6% | 100% | 10 schemas, drift-checked |
 | `aep-contract` — command/query contract | 12% | 100% | 21 tests |
 | Entity identity, locators and types | 5% | 100% | 14 tests; commands, events and audit add 57 more |
 | In-memory reference backend | 3% | 100% | passes the §104 reference scenario |
-| `aep-conformance` — black-box backend suites | 12% | 0% | crate skeleton |
-| `adp-domain`, `aop-domain` | 5% | 0% | crate skeletons |
+| `aep-conformance` — black-box backend suites | 12% | 100% | 16 suites, 3 levels, a faulty backend that proves they bite |
+| `adp-domain`, `aop-domain` | 5% | 100% | 93 tests |
 
-276 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
+424 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
 the "done" column with `task check`.
 
 ### What works today
@@ -83,11 +83,22 @@ production.write denied
 * **Nothing is deleted.** `ArchiveEntity` and `SupersedeEntity` are the vocabulary; an engineering
   record whose history can be erased is not a record.
 
+* **A backend can prove it conforms.** Sixteen suites, three levels, and a deliberately broken
+  backend the suites are checked against — because a suite that passes everything tells you nothing:
+
+```console
+$ protocol conformance --suite idempotency --inject replay-applies
+  ✗ a replay does not advance the revision — the command left the entity at revision 2, and after
+    replaying it the entity is at revision 3
+injected fault: a replayed command is applied a second time — expected to be caught by the
+`idempotency` suite
+```
+
 ### What does not work yet
 
-There is no reusable conformance suite (the reference scenario is one test, not a suite a third-party
-backend can run against itself), no durable backend, and no ADP/AOP-specific types. See
-[`docs/plan/`](docs/plan/) for what is next.
+No durable backend — the only implementation is in memory. No federated artifact graphs across
+repositories. See [`docs/plan/`](docs/plan/) for what was built and in what order, and
+[`docs/guide/`](docs/guide/) for how to use what exists.
 
 ## Design decisions worth knowing
 
@@ -160,6 +171,7 @@ Without `task`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-ta
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |
 | [`examples/development-passkeys/`](examples/development-passkeys/) | a worked example with real command output |
 | [`docs/design/archive/`](docs/design/archive/) | v0.1 draft and artifact-model extension, kept for provenance |
+| [`docs/guide/`](docs/guide/) | how to adopt the protocol, wire a harness, and implement and prove a backend |
 | [`AGENTS.md`](AGENTS.md) | working agreement for humans and agents contributing here |
 
 ## Licence

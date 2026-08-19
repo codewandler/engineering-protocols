@@ -9,7 +9,44 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Wave 3 — conformance suites, `adp-domain` and `aop-domain`. See `docs/plan/wave-3-conformance.md`.
+Nothing yet.
+
+## [0.2.0-wave-3] — 2026-08-20
+
+### Added
+
+- **`aep-conformance`** — sixteen black-box suites a backend runs against itself to prove it
+  implements the contract: identity, command execution, idempotency, optimistic concurrency, query,
+  consistency, relations, history, immutability, audit, rejected-action audit, correlation, causation,
+  provenance, events and type discovery. Reports name the *property* that failed, not the assertion,
+  so a failure says what to fix.
+- **Conformance levels** — `core`, `audited`, `full`. A backend states what it claims and the suite
+  proves or refutes it, instead of a README asserting it.
+- **`FaultyBackend`** — a wrapper that breaks exactly one property at a time. The crate's own tests
+  assert that the suite responsible for each fault fails and the others still pass, because a suite
+  that passes everything tells you nothing about whether it would catch anything.
+- **`protocol conformance --level core|audited|full [--suite <name>] [--inject <fault>]`** — runs the
+  suites, and can deliberately break a property to show which suite catches it.
+- **`adp-domain`** — development types (`adp.specification/v1`, `adp.test-plan/v1`,
+  `adp.acceptance-criteria/v1`, `adp.change/v1`) and commands (`adp.story.start/v1`,
+  `adp.story.complete/v1`, `adp.test-plan.record/v1`, `adp.specification.satisfy/v1`). A
+  specification declared satisfied by no evidence is refused — the exact claim the protocol exists to
+  stop.
+- **`aop-domain`** — operations types (`aop.incident/v1`, `aop.runbook/v1`, `aop.release/v1`) with
+  their status ladders, and commands (`aop.incident.acknowledge|mitigate|resolve/v1`,
+  `aop.release.promote|rollback/v1`). Promoting to production without naming an approval is refused
+  at the command, which is a second defence beside the protocol's approval floor.
+- **`docs/guide/`** — how to adopt the protocol, wire a harness to the engine, and implement and
+  prove a backend.
+- `Fault::caught_by()` names the suite responsible for each fault, and the crate's own tests assert
+  that suite fails when the fault is injected. `DropAffected` fails eight suites, which is a finding
+  about how load-bearing `affected` is rather than a flaw in the suites, and is recorded as such.
+
+### Changed
+
+- The in-memory backend now **refuses an update to an immutable type**. A review result records what
+  someone concluded at a moment; editing it afterwards changes what the record says a person decided.
+  Archiving stays available — keeping a record and editing it are different acts.
 
 ## [0.2.0-wave-2] — 2026-08-20
 
@@ -130,7 +167,8 @@ Wave 3 — conformance suites, `adp-domain` and `aop-domain`. See `docs/plan/wav
 - **`xtask schema [--check]`** — schemas are generated from the Rust types, and CI proves they match.
 - Repository scaffolding: workspace, `Taskfile.yml` gate, Apache-2.0 licence, `AGENTS.md`.
 
-[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-2...HEAD
+[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-3...HEAD
+[0.2.0-wave-3]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-2...0.2.0-wave-3
 [0.2.0-wave-2]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-1...0.2.0-wave-2
 [0.2.0-wave-1]: https://github.com/codewandler/engineering-protocols/compare/0.1.0...0.2.0-wave-1
 [0.1.0]: https://github.com/codewandler/engineering-protocols/releases/tag/0.1.0

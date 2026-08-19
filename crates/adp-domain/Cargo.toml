@@ -10,6 +10,15 @@ authors.workspace = true
 
 [dependencies]
 aep-domain.workspace = true
+# For `descriptor::type_descriptors`: type discovery (§47) is a contract concern, and ADP answers it
+# for its own types rather than making the contract crate know about development work.
+aep-contract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
