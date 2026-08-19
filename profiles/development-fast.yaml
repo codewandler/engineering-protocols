@@ -1,0 +1,44 @@
+# The floor for development work, not a relaxed mode. Everything here is what remains after removing
+# every check that can be removed while still being able to say afterwards what the change was
+# supposed to do, that it does it, and who made it.
+id: development.fast
+version: 1
+title: Fast development
+summary: >-
+  Choose this over `development.standard` for work whose blast radius is contained and whose contract
+  surface is private: internal tooling, scripts, tests, docs generators, a spike whose output is
+  meant to be thrown away. Choose `development.standard` instead as soon as the change touches an
+  interface someone else calls, data that outlives the process, or anything a customer can reach —
+  the extra cost there is contract and property testing, and it is cheaper than one breaking change
+  shipped to a consumer.
+protocol: adp/1
+workflow: adp/default
+
+principles:
+  - spec-driven
+  - test-driven
+  - static-analysis
+  - least-privilege
+  - provenance-tracking
+
+capabilities:
+  # No `review.request` or `approval.request`: this profile cannot summon a human, so its review state
+  # is satisfied by whatever automated review the harness produces. That is the deliberate difference
+  # between fast and standard — `development.standard` adds the ability to ask, and the obligation.
+  #
+  # Everything not listed is denied, so there is nothing here to say about production or secrets.
+  allow:
+    - repository.read
+    - repository.write
+    - tests.execute
+    - artifact.read
+    - artifact.write
+
+completion:
+  all:
+    - tests.unit.failed == 0
+    - static_analysis.errors == 0
+    # The provenance condition, and the one that makes the other two mean anything: every piece of
+    # evidence some rule in force asked for has actually been produced. Without it a profile can be
+    # satisfied by a green suite that never ran the code in question.
+    - evidence.missing == 0

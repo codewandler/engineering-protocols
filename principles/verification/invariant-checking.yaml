@@ -1,0 +1,31 @@
+id: invariant-checking
+version: 1
+title: Invariant checking
+summary: >-
+  An invariant stated in a design document is a comment until something checks it. This obliges the
+  stated invariants to be machine-checked, and obliges them to have been stated in the first place.
+
+requires:
+  before_completion:
+    predicates:
+      # The claim as a verifier established it. The detailed `invariant.**` family is declared only by
+      # adp/1, so keying on it would make this principle unusable for a base aep/1 profile.
+      - verification.invariant.passed
+    artifacts:
+      # An invariant nobody wrote down cannot be checked, and an unapproved one is a draft opinion.
+      # This is the half of the rule that fails loudly when a team checks whatever the code happens to
+      # do instead of what it was supposed to guarantee.
+      # `approved` is satisfied by accepted, active or implemented; any design subkind counts.
+      - kind: design
+        status: approved
+
+evidence:
+  # Left unpinned on purpose: a model checker and a property tester are both acceptable establishers
+  # here, and a requirement set cannot express an alternation of verifiers. `independent` still rules
+  # out the agent asserting its own invariants.
+  # NOT checked: that the checked invariants are the ones the approved design states. Nothing in the
+  # protocol relates a claim id to a sentence in a document.
+  - kind: verification
+    independent: true
+
+on_failure: block

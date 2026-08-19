@@ -1,0 +1,39 @@
+# Timed before implementation rather than before completion on purpose: a specification approved
+# after the code exists describes what was built and can no longer reject any of it. Moving this
+# obligation later would turn it into paperwork.
+id: spec-driven
+version: 1
+title: Specification before implementation
+summary: >-
+  An approved specification must exist before implementation starts, and every requirement it
+  states must be satisfied before the task completes. Without it, "done" means whatever the
+  implementer remembers wanting.
+
+# Work that changes behaviour needs a specification. Investigation and documentation tasks are
+# excluded deliberately: there is nothing to specify, and requiring one anyway teaches people to
+# write specifications nobody reads.
+applies_when:
+  task.kind:
+    any_of: [feature, bugfix, refactor, migration]
+
+requires:
+  before_implementation:
+    artifacts:
+      # `approved` is also satisfied by `accepted`, `active` and `implemented`, so a specification
+      # already in force does not have to be re-approved for each task that implements it.
+      - kind: specification
+        status: approved
+
+  before_completion:
+    predicates:
+      # The requirement-by-requirement verdict, not a summary of it. NOT checked: that the
+      # specification's requirements are the right ones — only that each one it states was met.
+      - specification.satisfied
+
+evidence:
+  # A specification record maps each stated requirement to the evidence satisfying it. Without one
+  # `specification.satisfied` is unobserved, and an unobserved fact blocks completion rather than
+  # passing it.
+  - kind: specification
+
+on_failure: block

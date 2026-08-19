@@ -1,0 +1,28 @@
+id: property-based-testing
+version: 1
+title: Property-based testing
+summary: >-
+  Named properties must hold over generated inputs, not just over the examples someone thought of.
+  A suite of examples documents the cases its author imagined and says nothing about the rest.
+
+requires:
+  before_completion:
+    predicates:
+      # A principle cannot name the properties it wants: `session_isolation` means nothing outside a
+      # task that has sessions. So the general obligation is that at least one property was actually
+      # run, and the profile or the task adds the named checks it cares about, in the form
+      #   - property_test.session_isolation.passed
+      #
+      # NOT checked here: that the properties run are the *right* properties. Nothing in the protocol
+      # can decide that; a reviewer reading the task's own predicates can.
+      - evidence.count.property_test_result >= 1
+
+evidence:
+  # Pinned to the property tester rather than left open, because a model checker's proof of the same
+  # claim is a different verification route with different assumptions: a profile that wants to
+  # accept it should say so explicitly rather than inherit it here.
+  - kind: property_test_result
+    independent: true
+    verifier: property-tester
+
+on_failure: block

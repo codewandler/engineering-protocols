@@ -1,0 +1,38 @@
+id: differential-testing
+version: 1
+title: Differential testing
+summary: >-
+  A change that claims to preserve behaviour must be shown to preserve it, by running the old and the
+  new implementation against the same inputs. Otherwise "pure refactor" is an assertion by the party
+  least able to check it.
+
+applies_when:
+  any:
+    - task.kind == refactor
+    # Work that is not filed as a refactor can still claim behaviour preservation. Note the
+    # consequence of three-valued evaluation: when a task declares nothing, this branch is Unknown,
+    # and unknown applicability leaves a principle in force. A task that really does change observable
+    # behaviour rules the principle out by saying so — `change.behaviour_preserving: false` among its
+    # constraint facts.
+    - change.behaviour_preserving
+
+requires:
+  before_completion:
+    predicates:
+      - tests.differential.failed == 0
+      # The claim as a verifier stated it. `verification.<claim>` is the form the engine projects;
+      # the richer `differential.**` family — cases compared, divergences found — is declared only by
+      # adp/1, so a predicate over it would not even validate for a profile on the base protocol.
+      #
+      # NOT checked: how much of the input space the comparison covered. Zero divergences over two
+      # inputs satisfies this rule and proves very little.
+      - verification.differential.passed
+
+evidence:
+  - kind: test_result
+    independent: true
+    verifier: test-runner
+  - kind: verification
+    independent: true
+
+on_failure: block

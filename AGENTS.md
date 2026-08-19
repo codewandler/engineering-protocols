@@ -17,9 +17,11 @@ deviation. Add to that list rather than diverging silently.
 
 See the status table in [`README.md`](README.md); keep it accurate when you land work.
 
-* Implemented and gated: `aep-domain`, `aep-schema`, `xtask schema`.
-* Skeletons with documented planned surfaces: `aep-engine`, `aep-contract`, `aep-conformance`,
-  `adp-domain`, `aop-domain`, `protocol-cli`.
+* Implemented and gated: `aep-domain`, `aep-schema`, `aep-engine`, `protocol-cli`, `xtask schema`,
+  and the document tree (`protocols/`, `principles/`, `workflows/`, `profiles/`,
+  `artifacts/lifecycles/`).
+* Skeletons with documented planned surfaces: `aep-contract`, `aep-conformance`, `adp-domain`,
+  `aop-domain`.
 * Work order: [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) §4.
 
 ## Invariants
@@ -70,10 +72,28 @@ when there is, releases require a green full suite, not component gates.
 * **Task runner is `Taskfile.yml`** (go-task). Do not add a Makefile.
 * **Comments explain why**, and only where the reason is not evident from the code. Doc comments on
   public items explain what the type is *for*, and where a design decision is embedded in it, why.
+* **Claim ids are singular and shared.** A verification claim is a fact path segment
+  (`verification.<claim>.passed`), so `invariant` and `invariants` are different claims and evidence
+  for one does not satisfy a requirement for the other. Existing claims: `precondition`,
+  `postcondition`, `invariant`, `hypothesis`, `recovery`, `blast-radius`, `clean-room`,
+  `differential`, `mutation`, `migration`, `dry-run`. Reuse one before inventing another.
+* **`<claim>_verified` is projected but not observable.** The engine emits it, but no protocol
+  declares the bare namespace, so a predicate cannot read it — except `recovery_verified`, which
+  `aop/1` declares explicitly for the incident profile. Write `verification.<claim>.passed` instead.
 * **Wire-format aliases are deliberate.** `unit_tests.failed` alongside `tests.unit.failed`,
   `test_execution` alongside `test_result`: both spellings appear in the design documents. Canonical
   forms are what the engine emits; aliases are only accepted on input, and each is documented on the
   type that projects it.
+
+## Changelog
+
+`CHANGELOG.md` is maintained with the work, not reconstructed before a release. Every change that
+alters what a *user of the protocol* sees — a new document type, a changed fact spelling, a rule that
+now refuses something it used to allow — gets a line under `## [Unreleased]` in the same commit that
+makes the change. Internal refactors that change nothing observable do not.
+
+Write the entry for the person hitting the behaviour, not for the person who wrote it: "an approval
+of version 3 no longer satisfies a review requirement for version 7", not "added freshness check".
 
 ## Commits
 

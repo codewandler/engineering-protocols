@@ -1,0 +1,36 @@
+# Advisory until the artifact validator reads these files — see `design.yaml` for the same caveat.
+#
+# `architecture-design` is a subkind of `design`, so a requirement for `design` is satisfied by one of
+# these. It is not a separate universe: the extra sections exist because the scope crosses ownership
+# boundaries, and a design that spans teams has to say whose boundary moves.
+kind: architecture-design
+title: Architecture design
+summary: >-
+  A design whose scope crosses system or ownership boundaries, and which therefore has to state the
+  boundaries and invariants it changes, not only the change.
+
+required_sections:
+  - Context
+  - System Context
+  - Goals
+  - Non-Goals
+  - Current State
+  - Target vs Current State
+  - Proposed Design
+  - Boundaries
+  - Ownership
+  - Cross-System Invariants
+  - Interfaces
+  - Data Model
+  - Failure Modes
+  - Security
+  - Observability
+  - Migration
+  - Rollout
+  - Rollback
+  - Open Questions
+
+# Same reasoning as `design`, and it bites harder here: a governing document that can be amended after
+# sign-off would let a boundary move without anyone re-approving the move.
+freshness: bound_to_revision
+review_required: true

@@ -1,0 +1,12 @@
+# The change itself. Produced by an agent, and recorded as such — authorship is not a judgement about
+# correctness, but it is what lets a later reader tell an agent's claim from a verifier's finding.
+- kind: diff
+  files_changed: 6
+  lines_added: 214
+  lines_removed: 18
+  paths:
+    - crates/auth/src/passkey.rs
+    - crates/auth/src/session.rs
+  producer:
+    producer: agent
+    id: opus-5

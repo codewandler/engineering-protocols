@@ -1,0 +1,33 @@
+id: mutation-testing
+version: 1
+title: Mutation testing
+summary: >-
+  Tests must be shown to detect defects, not merely to pass. A suite that stays green while the code
+  under it is broken on purpose is a suite that would not have caught the bug you are about to ship.
+
+# No `applies_when`: whether a mutation run is worth its cost is a profile's call, not a task's, and
+# the profile expresses that by dropping the principle (`without_principles: [mutation-testing]`)
+# rather than by leaving it in force with a condition that never fires.
+
+requires:
+  before_completion:
+    predicates:
+      # A surviving mutant is a failure of the suite, not of the code: a defect was introduced and
+      # nothing noticed. Counting survivors as `failed` is what makes that gate on the same fact
+      # every other suite reports.
+      - tests.mutation.failed == 0
+      # The score and the survivor list live in the adp/1-only `mutation.**` family, which a base
+      # aep/1 profile cannot read; this keys on the claim, which every profile can.
+      #
+      # NOT checked: the surviving-mutant threshold. "Zero survivors" and "95% killed" are different
+      # rules, and only the profile knows which one it is buying.
+      - verification.mutation.passed
+
+evidence:
+  - kind: test_result
+    independent: true
+    verifier: test-runner
+  - kind: verification
+    independent: true
+
+on_failure: block

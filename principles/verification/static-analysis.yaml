@@ -1,0 +1,29 @@
+# The cheapest verifier in the set: it costs seconds and it reads every path, including the ones no
+# test exercises. There is no task shape for which that is a bad trade, so this principle declares no
+# `applies_when` — a profile that genuinely has no analyser drops it by name instead.
+id: static-analysis
+version: 1
+title: Static analysis
+summary: >-
+  No task completes with an unresolved static-analysis error. Without it, a defect the compiler or
+  the linter already found ships anyway, because nobody was obliged to read the output.
+
+requires:
+  before_completion:
+    predicates:
+      # Errors, not warnings. Warning policy belongs to a repository's own gate; a rule every profile
+      # inherits cannot decide that an unused import should stop a release.
+      - static_analysis.errors == 0
+
+evidence:
+  # `independent` is the substance of the rule: an agent reporting "the linter is clean" is not a
+  # clean linter run, and only a non-agent producer satisfies this.
+  #
+  # The verifier is deliberately left open. Both the static analyser and the compiler legitimately
+  # establish this kind, a requirement set cannot say "either of these two", and pinning one would
+  # reject the other's perfectly good report.
+  # NOT checked: which of the two spoke, and that it ran over the whole change rather than one file.
+  - kind: static_analysis
+    independent: true
+
+on_failure: block

@@ -1349,6 +1349,16 @@ impl LifecycleRegistry {
             .find_map(|candidate| self.lifecycles.get(candidate))
     }
 
+    /// The lifecycle registered for exactly this kind, without hierarchy fallback.
+    pub fn for_kind_exact(&self, kind: &ArtifactKind) -> Option<&ArtifactLifecycle> {
+        self.lifecycles.get(kind)
+    }
+
+    /// How many lifecycles are registered.
+    pub fn len(&self) -> usize {
+        self.lifecycles.len()
+    }
+
     /// `true` when nothing is registered.
     pub fn is_empty(&self) -> bool {
         self.lifecycles.is_empty()

@@ -1,0 +1,35 @@
+id: progressive-delivery
+version: 1
+title: Progressive delivery
+summary: >-
+  Production is the last environment a release reaches, and each stage is watched before the next one
+  starts. Without it "we canaried it" means the change was in front of 1% of users for as long as it
+  took to click promote — every user gets the bad version, just in two batches.
+applies_when:
+  task.kind: {eq: release}
+requires:
+  before_promotion:
+    predicates:
+      # Somewhere that is not production must have taken this change successfully first. `test`
+      # counts: not every pipeline has a staging environment, and refusing to name it would make the
+      # rule unsatisfiable rather than strict.
+      - any:
+          - deployment.staging.status == succeeded
+          - deployment.test.status == succeeded
+    evidence:
+      - kind: deployment_result
+        at_least: 1
+        independent: true
+  during_observation:
+    evidence:
+      # Timed `during`, so it is checked on the way out of the stage. A canary with no observation
+      # window is not progressive delivery, it is a slower deploy: the measurement taken while the
+      # change is small is the entire product of the stage.
+      - kind: metric_observation
+        at_least: 1
+        verifier: telemetry-query
+# The protocol's approval floor already refuses to grant this outright; restated here so the release
+# rule is self-contained, and because a principle may only restrict further.
+capabilities:
+  require_approval: [deployment.create:production]
+on_failure: block

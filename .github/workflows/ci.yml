@@ -1,0 +1,58 @@
+# The `gate` job below mirrors `task check` in Taskfile.yml, step for step and in the same order. The
+# two must stay in step: a contributor who runs `task check` locally and lands a green change should
+# never be told something different by CI. If you add a step here, add it to the Taskfile, and the
+# other way round.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref — a force-push should not leave stale jobs burning minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gate:
+    name: Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Ordered cheapest-first, as the Taskfile is: formatting tells you in seconds, tests take
+      # minutes, and there is no point compiling a branch that will fail on a missing newline.
+      - name: Format
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+  # Its own job so schema drift reads as schema drift. Folded into the gate it would surface as "one of
+  # four steps failed" behind a test log; here the failing check's name says that `schemas/generated/`
+  # no longer matches the Rust types, and the fix is `cargo xtask schema`.
+  schemas:
+    name: Schemas up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check generated schemas
+        run: cargo xtask schema --check

@@ -1,0 +1,82 @@
+# The relation vocabulary of the artifact graph, with the kind pairings each relation is meant for.
+#
+# What the engine enforces today: that every relation *target exists*, that nothing supersedes itself,
+# and that no single relation kind forms a cycle — a design cannot transitively design itself. The
+# `source` / `target` lists below are **advisory guidance for humans** until the artifact validator
+# reads them; an unusual pairing is a smell to argue about, not currently a validation error.
+#
+# Why pairings matter anyway: the direction of an edge is what makes a requirement legible. `relation:
+# {kind: designs, target_kind: specification}` means "a design that designs *this* spec" — get the
+# direction backwards and the requirement is satisfiable by an unrelated artifact.
+
+relations:
+  - relation: informed_by
+    meaning: Shaped by, without being derived from — read and taken into account.
+    source: [any]
+    target: [any]
+    note: >-
+      The weakest edge, and the honest one for "we read the incident report before designing this".
+      Prefer it over `derived_from` when nothing was actually traced through.
+
+  - relation: derived_from
+    meaning: Produced from a higher-level artifact, whose intent it carries down.
+    source: [specification, design, epic, story, task, acceptance-criteria]
+    target: [vision, product-requirements, initiative, epic, specification, design]
+
+  - relation: decomposes
+    meaning: Breaks a larger artifact into smaller work.
+    source: [epic, story, task]
+    target: [initiative, epic, story, specification]
+
+  - relation: specifies
+    meaning: States the required behaviour of something.
+    source: [specification, acceptance-criteria]
+    target: [product-requirements, epic, story, task, design]
+
+  - relation: designs
+    meaning: Proposes how to satisfy something.
+    source: [design, feature-design, component-design, architecture-design, api-design, data-design]
+    target: [specification, epic, story, product-requirements]
+
+  - relation: implements
+    meaning: Realises something in the system.
+    source: [story, task]
+    target: [specification, design, acceptance-criteria, architecture-decision-record]
+
+  - relation: decides
+    meaning: Records a decision taken within something.
+    source: [architecture-decision-record]
+    target: [design, architecture-design, specification, epic, incident-report]
+
+  - relation: reviews
+    meaning: Assesses something.
+    source: [review-result, approval-record]
+    target: [any]
+    note: >-
+      A review artifact with no `reviews` edge is rejected by graph validation: a review that does not
+      say what it reviewed cannot be evidence for anything.
+
+  - relation: verifies
+    meaning: Establishes that something holds.
+    source: [verification-report, test-plan, evaluation-plan]
+    target: [specification, acceptance-criteria, design, story, architecture-decision-record]
+
+  - relation: blocks
+    meaning: Prevents progress on something.
+    source: [any]
+    target: [story, task, epic, release-plan, migration-plan]
+
+  - relation: depends_on
+    meaning: Needs something else first.
+    source: [any]
+    target: [any]
+    note: Ordering, not causation — use `blocks` for a hard stop and `depends_on` for sequence.
+
+  - relation: supersedes
+    meaning: Replaces something, which becomes superseded.
+    source: [any]
+    target: [any]
+    note: >-
+      The only relation with a lifecycle consequence attached: an artifact marked `superseded` must
+      have a successor declaring `supersedes:` it, so the replacement is always discoverable from the
+      thing it replaced. Same kind on both ends in practice — an ADR supersedes an ADR.

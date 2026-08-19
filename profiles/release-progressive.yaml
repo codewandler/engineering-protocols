@@ -1,0 +1,48 @@
+# Shipping to production in increments, with telemetry deciding whether each increment continues.
+# The profile's job is to make the two dangerous actions — creating a production deployment and
+# rolling one back — require a recorded human decision, while leaving everything needed to observe
+# the release freely available.
+id: release.progressive
+version: 1
+title: Progressive release
+summary: >-
+  Choose this for any deployment of a service that carries live traffic. Staging deployments are
+  granted outright; production deployment and production rollback both require a recorded approval,
+  and the release is not complete until the promoted revision has been observed healthy rather than
+  merely reported deployed.
+protocol: aop/1
+workflow: release/progressive
+
+principles:
+  - progressive-delivery
+  - reversible-changes
+  - blast-radius-limitation
+  - contract-testing
+  - provenance-tracking
+  - approval-gates
+  - verify-after-action
+
+capabilities:
+  allow:
+    - telemetry.read
+    - production.read
+    # Scoped to staging. An unscoped `deployment.create` would mean every environment, production
+    # included, which is exactly the grant the approval floor exists to prevent.
+    - deployment.create:staging
+    - approval.request
+  require_approval:
+    - deployment.create:production
+    # Rollback is gated too, which looks like friction on the recovery path and is deliberate: an
+    # unattended rollback during a partial promotion can leave two revisions serving at once, and the
+    # decision needs someone who can see the whole rollout. The approval is on the action, not on
+    # observing the failure, so nothing here delays detection.
+    - deployment.rollback:production
+
+completion:
+  all:
+    - deployment.succeeded
+    - service.health == healthy
+    # The release's own audit trail: every metric observation, approval and deployment record the
+    # rules in force asked for is present, so the question "what did we ship and on what evidence?"
+    # has an answer later.
+    - evidence.missing == 0

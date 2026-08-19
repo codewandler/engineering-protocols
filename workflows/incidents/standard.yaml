@@ -1,0 +1,116 @@
+# Incident response, as a state machine an agent can be held to.
+#
+# The order is the point: mitigation comes after a tested hypothesis, not after a plausible one, and
+# `learn` is a state rather than a follow-up someone means to write. An incident workflow that ends
+# at `recover` produces the same incident again.
+id: incident/standard
+version: 1
+title: Standard incident response
+summary: >-
+  Detect, triage, diagnose, mitigate, recover, verify and learn — with telemetry and health facts,
+  not an agent's confidence, deciding when each stage is finished.
+
+initial: detect
+
+states:
+  detect:
+    title: Detect
+    summary: Something is wrong and there is an observation that says so.
+    phases: [detection]
+
+  triage:
+    title: Triage
+    summary: >-
+      Establish scope and severity: what is affected, how badly, and how far it can spread.
+    phases: [triage]
+
+  diagnose:
+    title: Diagnose
+    summary: >-
+      Form a hypothesis and test it. An untested hypothesis acted on under pressure is how an
+      incident acquires a second cause.
+    phases: [diagnosis]
+
+  mitigate:
+    title: Mitigate
+    # Marked reversible because the mitigations this workflow is meant to reach for — a feature flag,
+    # a config revert, a rollback to the previous revision, shedding load — can be undone. Several
+    # things commonly done under this heading cannot be: purging a cache, deleting or rewriting
+    # corrupt rows, failing over a database with replication lag, expiring sessions, revoking
+    # credentials. Those are irreversible steps wearing a mitigation label; they need an approval and
+    # a forward-recovery plan, and a workflow that models them belongs alongside
+    # `migration/forward-only` rather than here.
+    irreversible: false
+    summary: Stop the bleeding. Restoring full service is the next state's job, not this one's.
+    phases: [mitigation]
+    on_failure:
+      action: rollback
+      rollback:
+        require: [deployment.previous_revision.exists]
+
+  recover:
+    title: Recover
+    summary: Return the service to normal operation, including whatever the mitigation degraded.
+    phases: [recovery]
+
+  verify:
+    title: Verify
+    summary: >-
+      Confirm recovery against telemetry rather than against the absence of new alerts — an alert
+      that stopped firing is not the same fact as a service that is serving.
+    phases: [verification]
+
+  learn:
+    title: Learn
+    terminal: true
+    summary: >-
+      Record what happened and what changes because of it. This is a state and not an aspiration
+      because the postmortem is the only output of an incident that prevents the next one.
+    phases: [learning, completion]
+
+transitions:
+  - from: detect
+    to: triage
+    description: >-
+      Triage starts from a recorded observation. Requiring telemetry here is what stops a rumour in
+      a channel from consuming the response.
+    when: evidence.count.metric_observation >= 1
+
+  - from: triage
+    to: diagnose
+    description: >-
+      Service health has been observed, so the blast radius is known rather than assumed.
+    when: evidence.count.health_observation >= 1
+
+  - from: diagnose
+    to: mitigate
+    description: >-
+      A hypothesis has been tested and held. Acting on an untested theory is the common path to
+      making an incident worse, so the guard is the test result, not the theory.
+    when: verification.hypothesis.passed
+    requires:
+      evidence:
+        - kind: verification
+          independent: true
+
+  - from: mitigate
+    to: recover
+    description: >-
+      The service is no longer down. `degraded` is deliberately enough to leave this state: holding
+      out for full health here would keep an incident open while a working workaround serves users.
+    when: service.health >= degraded
+
+  - from: recover
+    to: verify
+    description: Health is back to normal; now prove it with something other than an eyeball.
+    when: service.health == healthy
+
+  - from: verify
+    to: learn
+    description: >-
+      Recovery is verified and the error rate is back under its objective. Both, because a service
+      can report healthy while still failing a fraction of requests.
+    when:
+      all:
+        - recovery_verified
+        - error_rate < service.slo.error_threshold

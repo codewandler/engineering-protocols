@@ -1,0 +1,53 @@
+# What this buys a person: an engineer shipping a reimplementation under this principle is not
+# relying on an agent's promise that it never looked at the original. `network.read` is withdrawn, so
+# the original cannot be fetched at all — the licence-contaminated copy never enters the tree, and
+# the engineer is not the one who has to prove, later and under legal questioning, that it didn't.
+#
+# adp/1 declares a `clean_room.**` fact family for a harness that compares the reimplementation
+# against the original and reports similarity findings. Nothing projects those facts yet, so this
+# document reads the claim fact a policy engine or model checker does produce
+# (`verification.clean-room.passed`) rather than stating an obligation nothing could ever satisfy.
+id: clean-room
+version: 1
+title: Clean-room reimplementation
+summary: >-
+  A reimplementation is built from the specification alone: the original is not fetched, and
+  something other than the agent has to state that it wasn't.
+
+# Declared by the task, not observed — nothing can tell from a diff that a piece of work is meant to
+# be clean-room. An unstated `change.clean_room` leaves this Unknown, and a principle that cannot
+# rule itself out stays in force, so the failure mode is a task blocked until someone says what it
+# is, not a clean-room task quietly running without the constraint.
+applies_when:
+  change.clean_room: true
+
+requires:
+  before_implementation:
+    artifacts:
+      # The specification is the only permitted source, so it has to exist before implementation.
+      # Clean-room without one means building from nothing.
+      - kind: specification
+        status: approved
+
+  before_completion:
+    predicates:
+      - verification.clean-room.passed
+
+evidence:
+  # The one requirement that cannot be relaxed: the agent under the constraint is not an acceptable
+  # witness to having kept it.
+  - kind: verification
+    independent: true
+
+capabilities:
+  # The deny is the enforcement. Everything above it is bookkeeping around this line.
+  deny: [network.read]
+
+# `block`, not `abort`: the capability layer already refuses the fetch, so an unmet obligation here
+# means the verifier has not spoken yet, and the right response to that is to wait.
+on_failure: block
+
+# NOT checked: `repository.read` stays granted, because nothing can be built without it. An original
+# vendored into the same repository, a copy pasted into the agent's context, or a reviewer who has
+# read both are all outside what this principle can stop. It closes the network route and produces an
+# auditable claim; it does not make contamination impossible.

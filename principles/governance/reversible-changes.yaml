@@ -1,0 +1,30 @@
+# Timed before completion rather than before `promotion`/`mitigation`: this principle is in force
+# under development and operations profiles alike, and the development workflow declares neither
+# phase. An obligation timed against a phase no state declares fails resolution — the rule would not
+# be strict, it would be absent.
+id: reversible-changes
+version: 1
+title: Reversible changes
+summary: >-
+  A change either has a known previous revision to go back to, or it is not finished. Without it the
+  recovery plan gets invented while the service is down, by whoever happens to be awake.
+requires:
+  before_completion:
+    conditional:
+      # Guarded on something having deployed at all. `deployment.previous_revision.exists` is
+      # unobservable until a deployment record exists, and an unobservable requirement blocks rather
+      # than passes, so an ungated version of this would stall every task that deploys nothing.
+      - when: defined(deployment.revision)
+        require:
+          - deployment.previous_revision.exists
+# A rollback policy has to state what makes rollback possible; one that does not is rejected as
+# incomplete. The failure that rejection prevents is a policy which "rolls back" a first-ever
+# deployment — doing nothing, while reporting recovery.
+#
+# NOT CHECKED: the forward-recovery path itself. A runbook's steps are prose. What is checkable is
+# whether there is a revision to return to, so that is what is checked and the rest is a human's job.
+on_failure:
+  action: rollback
+  rollback:
+    require:
+      - deployment.previous_revision.exists

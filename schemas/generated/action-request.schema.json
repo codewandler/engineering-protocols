@@ -274,6 +274,33 @@
           }
         },
         {
+          "description": "Change production state directly.",
+          "type": "object",
+          "required": [
+            "action",
+            "target"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "production_mutate"
+              ]
+            },
+            "change": {
+              "description": "What the change is.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "target": {
+              "description": "What is being changed, such as a flag name or a table.",
+              "type": "string"
+            }
+          }
+        },
+        {
           "description": "Read a secret.",
           "type": "object",
           "required": [

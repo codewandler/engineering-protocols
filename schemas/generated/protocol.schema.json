@@ -8,6 +8,15 @@
     "title"
   ],
   "properties": {
+    "approval_floor": {
+      "description": "Capabilities no profile may grant outright.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Capability"
+      },
+      "uniqueItems": true
+    },
     "artifact_kinds": {
       "description": "Artifact kinds this protocol reasons about.",
       "default": [],

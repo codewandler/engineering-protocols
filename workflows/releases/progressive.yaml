@@ -1,0 +1,127 @@
+# Progressive release: the same artifact moves to a larger share of traffic only while telemetry
+# keeps saying it is safe.
+#
+# The design decision embedded here is that `observe` is a state and not a pause. Deploying to a
+# canary and promoting in the same breath is not progressive delivery — the canary only buys anything
+# if the workflow cannot leave observation until real traffic has been measured against the objective.
+id: release/progressive
+version: 1
+title: Progressive release
+summary: >-
+  Qualify, stage, canary, observe, promote, verify, complete — with rollback preconditions stated at
+  the two states where a bad release is still recoverable.
+
+initial: qualify
+
+states:
+  qualify:
+    title: Qualify
+    summary: >-
+      Decide whether this build is a candidate at all: suites green, contracts intact, provenance
+      recorded.
+    phases: [qualification]
+
+  stage:
+    title: Stage
+    summary: Deploy to staging, where a broken deployment costs nothing but time.
+    phases: [staging]
+
+  canary:
+    title: Canary
+    summary: Deploy to a small, real slice of production traffic.
+    phases: [canary]
+
+  observe:
+    title: Observe
+    summary: >-
+      Watch the canary against its service objectives for long enough to have evidence rather than
+      an impression.
+    phases: [observation]
+    # The state where a bad release is cheapest to undo, so this is where the rollback route is
+    # declared — and it names its precondition, because "roll back" is not a plan when there is no
+    # previous revision to roll back to.
+    on_failure:
+      action: rollback
+      rollback:
+        require: [deployment.previous_revision.exists]
+
+  promote:
+    title: Promote
+    summary: Move the release to the whole of production.
+    phases: [promotion]
+    # Still reversible: a promotion is a deployment, and the previous revision is still deployable.
+    on_failure:
+      action: rollback
+      rollback:
+        require: [deployment.previous_revision.exists]
+
+  verify:
+    title: Verify
+    summary: Confirm the fully promoted release is healthy, not merely deployed.
+    phases: [verification]
+
+  complete:
+    title: Complete
+    terminal: true
+    summary: The release is live, verified and evidenced.
+    phases: [completion]
+
+transitions:
+  - from: qualify
+    to: stage
+    description: >-
+      Regression suite green and no contract failures. Contracts gate here rather than later because
+      a breaking change found in staging is a wasted deployment, and one found in canary is an
+      incident.
+    when:
+      all:
+        - tests.regression.failed == 0
+        - contracts.failed == 0
+
+  - from: stage
+    to: canary
+    description: The staging deployment actually succeeded — not started, succeeded.
+    when: deployment.staging.status == succeeded
+
+  - from: canary
+    to: observe
+    description: The canary is deployed and the service is serving; now measure it.
+    when:
+      all:
+        - deployment.succeeded
+        - service.health == healthy
+
+  - from: observe
+    to: promote
+    description: >-
+      Error rate under its objective and the service healthy, on evidence a telemetry query
+      produced.
+    when:
+      all:
+        - service.health == healthy
+        - error_rate < service.slo.error_threshold
+    requires:
+      evidence:
+        # Two observations, from the telemetry system rather than from the deploying agent. One
+        # sample cannot distinguish a healthy canary from a lucky scrape, and a self-reported metric
+        # cannot distinguish either from wishful thinking.
+        - kind: metric_observation
+          at_least: 2
+          independent: true
+          verifier: telemetry-query
+
+  - from: promote
+    to: verify
+    description: Production carries the new revision.
+    when: deployment.production.status == succeeded
+
+  - from: verify
+    to: complete
+    description: >-
+      Healthy under full traffic, within the error objective, with nothing outstanding in the
+      evidence record.
+    when:
+      all:
+        - service.health == healthy
+        - error_rate < service.slo.error_threshold
+        - evidence.missing == 0

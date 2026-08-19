@@ -1,0 +1,22 @@
+# No `applies_when`: a privilege rule with exceptions is not a privilege rule. It holds for every
+# task under every profile.
+id: least-privilege
+version: 1
+title: Least privilege
+summary: >-
+  An agent holds the capabilities its task needs and nothing else, so the damage a wrong instruction
+  can do is bounded by the task rather than by the token.
+capabilities:
+  # An agent that can read the credential store can put a customer's live API token into a log line,
+  # a diff or a chat message, and there is no undo: every place that token is used has to be rotated
+  # by people who do not yet know it leaked. Nothing an engineering task legitimately needs is worth
+  # that, so this is a denial and not an approval gate.
+  deny: [secret.read]
+
+  # These are what operational work is actually made of, so denying them would just mean the rule is
+  # dropped. Behind approval instead: each one is a change somebody outside this run has to be
+  # willing to own.
+  require_approval:
+    - production.write
+    - deployment.create
+    - network.write

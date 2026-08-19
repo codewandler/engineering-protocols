@@ -60,6 +60,13 @@ pub struct Protocol {
     pub extends: Option<ProtocolRef>,
     /// Capabilities a profile may mention.
     pub capabilities: BTreeSet<Capability>,
+    /// Capabilities no profile may grant outright: they must be behind approval, or denied.
+    ///
+    /// This is the protocol-level floor under every profile. It is why a resolved plan cannot
+    /// authorise an agent to write production without an approval gate — the check does not depend
+    /// on anyone remembering to add one.
+    #[serde(skip_serializing_if = "BTreeSet::is_empty")]
+    pub approval_floor: BTreeSet<Capability>,
     /// Evidence kinds a requirement may mention.
     pub evidence_kinds: BTreeSet<EvidenceKind>,
     /// Verifiers available to establish evidence.
@@ -102,6 +109,17 @@ impl Protocol {
         kind.default_verifiers()
             .iter()
             .any(|verifier| self.verifiers.contains(verifier))
+    }
+
+    /// `true` when `capability` must never be granted outright.
+    ///
+    /// Overlap is enough, in either direction: a floor on `deployment.create:production` is
+    /// violated by granting `deployment.create` for every environment, not only by granting
+    /// production specifically.
+    pub fn needs_approval_floor(&self, capability: &Capability) -> bool {
+        self.approval_floor
+            .iter()
+            .any(|floor| floor.covers(capability) || capability.covers(floor))
     }
 
     /// `true` when a predicate may read `path`.
@@ -158,6 +176,9 @@ pub struct RawProtocol {
     /// Capabilities a profile may mention.
     #[serde(default)]
     pub capabilities: BTreeSet<Capability>,
+    /// Capabilities no profile may grant outright.
+    #[serde(default, alias = "approval_required")]
+    pub approval_floor: BTreeSet<Capability>,
     /// Evidence kinds a requirement may mention.
     #[serde(default)]
     pub evidence_kinds: BTreeSet<EvidenceKind>,
@@ -238,6 +259,7 @@ impl TryFrom<RawProtocol> for Protocol {
             summary: raw.summary,
             extends: raw.extends,
             capabilities: raw.capabilities,
+            approval_floor: raw.approval_floor,
             evidence_kinds: raw.evidence_kinds,
             verifiers: raw.verifiers,
             artifact_kinds: raw.artifact_kinds,

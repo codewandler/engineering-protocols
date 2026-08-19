@@ -1,0 +1,23 @@
+# The development profile of AEP. Extension is additive: everything aep/1 declares remains available,
+# because a principle written against the base protocol has to keep working here.
+id: adp
+version: 1
+title: Agentic Development Protocol
+summary: >-
+  AEP for software development work: specification, decomposition, test-driven implementation,
+  contract and property verification, and review.
+extends: aep/1
+
+phases:
+  - decomposition
+  - verification-setup
+  - adversarial-verification
+
+# Development-specific fact families, on top of the base protocol's.
+observables:
+  - 'mutation.**'
+  - 'differential.**'
+  - 'invariant.**'
+  - 'clean_room.**'
+  - 'build.**'
+  - 'types.**'

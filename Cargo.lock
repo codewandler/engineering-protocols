@@ -39,6 +39,11 @@ name = "aep-engine"
 version = "0.1.0"
 dependencies = [
  "aep-domain",
+ "aep-schema",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
 ]
 
 [[package]]
@@ -234,9 +239,13 @@ name = "protocol-cli"
 version = "0.1.0"
 dependencies = [
  "aep-domain",
+ "aep-engine",
  "aep-schema",
  "anyhow",
  "clap",
+ "serde",
+ "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]

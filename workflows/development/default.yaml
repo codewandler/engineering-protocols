@@ -1,0 +1,139 @@
+# The workflow every ADP profile runs on. Its order encodes the two sequencing rules that most
+# development work gets wrong: a specification exists before work is broken up, and the verifiers
+# exist before the code they are meant to judge.
+#
+# The `verify → implement` back-edge is deliberate. A workflow that can only go forwards is a lie
+# about how engineering works: verification does fail, and if the model has no route back, the only
+# ways out are to weaken the check or to declare victory anyway. Making the retreat an explicit,
+# guarded transition keeps a failing suite from becoming an argument for a smaller suite.
+id: adp/default
+version: 1
+title: Standard development workflow
+summary: >-
+  Specification, decomposition, verifier setup, implementation, verification, adversarial
+  verification and review, with an explicit route back to implementation when verification fails.
+
+initial: receive
+
+states:
+  receive:
+    title: Receive
+    summary: Take in the request and record what is being asked for, unedited.
+    phases: [intake]
+
+  specify:
+    title: Specify
+    summary: >-
+      State the required behaviour. Anything left only in the prompt cannot be checked later, so
+      this is where an objective becomes something a verifier can disagree with.
+    phases: [specification]
+
+  decompose:
+    title: Decompose
+    summary: >-
+      Break the specification into units that can each be implemented and verified on their own.
+    phases: [decomposition, planning]
+
+  establish_verifiers:
+    title: Establish verifiers
+    summary: >-
+      Write the tests, contracts and checks that will decide whether the work is done — before
+      there is an implementation for them to be shaped around.
+    phases: [verification-setup]
+
+  implement:
+    title: Implement
+    summary: Make the smallest change that satisfies the decomposed unit and its verifiers.
+    phases: [implementation]
+
+  verify:
+    title: Verify
+    summary: Run the verifiers established earlier against the change.
+    phases: [verification]
+
+  adversarial_verify:
+    title: Adversarial verify
+    summary: >-
+      Try to break what the previous state just declared working: mutants, edge cases, property
+      violations, contract drift.
+    phases: [adversarial-verification]
+    requires:
+      evidence:
+        # Independence is the entire point of this state. Entering it on the implementing agent's
+        # own assertion that the tests passed would make the author and the adversary one actor,
+        # which is exactly the failure the state exists to catch.
+        - kind: test_result
+          independent: true
+          verifier: test-runner
+
+  review:
+    title: Review
+    summary: Judge the change as a whole — intent, fit and risk, not just green checks.
+    phases: [review]
+
+  complete:
+    title: Complete
+    terminal: true
+    summary: The change is verified, reviewed and accounted for.
+    phases: [completion]
+
+transitions:
+  - from: receive
+    to: specify
+    description: Intake is done when there is something to specify; nothing else gates it.
+
+  - from: specify
+    to: decompose
+    description: Work is only broken up once there is a specification to break up.
+    when: artifact.specification.exists
+
+  - from: decompose
+    to: establish_verifiers
+    description: With units identified, each one's acceptance check can be written.
+
+  - from: establish_verifiers
+    to: implement
+    description: >-
+      A test must exist before implementation begins. This is the mechanical form of test-driven
+      work: the guard, not the agent's good intentions, is what enforces the order.
+    when: test.exists
+
+  - from: implement
+    to: verify
+    description: There is nothing to verify until the working tree has actually changed.
+    when: diff.exists
+
+  - from: verify
+    to: adversarial_verify
+    description: >-
+      Unit and contract suites green and static analysis clean. Contracts are in the guard because
+      a change that passes its own tests can still break a consumer.
+    when:
+      all:
+        - tests.unit.failed == 0
+        - tests.contract.failed == 0
+        - static_analysis.errors == 0
+
+  - from: verify
+    to: implement
+    description: >-
+      Verification failed, so the work goes back to implementation. Any failing check sends it
+      back, not just the unit suite — a static-analysis error is a defect that has not been
+      symptomatic yet.
+    when:
+      any:
+        - tests.unit.failed > 0
+        - tests.contract.failed > 0
+        - static_analysis.errors > 0
+
+  - from: adversarial_verify
+    to: review
+    description: >-
+      No required evidence outstanding. A reviewer reading a change with gaps in its evidence is
+      being asked to guess, and will guess in favour of the author.
+    when: evidence.missing == 0
+
+  - from: review
+    to: complete
+    description: Review concluded in approval.
+    when: review.approved

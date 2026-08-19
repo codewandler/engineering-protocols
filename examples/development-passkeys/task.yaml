@@ -1,0 +1,30 @@
+# A worked example: adding passkey authentication under the standard development profile.
+#
+# The task names what it is and which protocol governs it. Everything else — the workflow, the rules
+# in force, what the agent may do, what counts as finished — is derived from the profile, which is the
+# point: none of it is restated here where it could drift.
+id: AUTH-142
+kind: feature
+objective: add-passkey-support
+
+protocol: adp/1
+profile: development.standard
+
+# Where the work came from, and what constrains it. These are references, not copies: the protocol
+# resolves them, it does not own them.
+derived_from:
+  - story:AUTH-141
+context:
+  product_requirements:
+    - prd:passkeys
+
+manifest: examples/development-passkeys/artifacts.yaml
+
+constraints:
+  facts:
+    # Declared by the task because nothing can observe it: whether this change touches an interface
+    # someone else calls. The contract-testing principle reads it.
+    change.public_contract: true
+    change.architectural: false
+  notes:
+    - Existing password authentication must keep working for the whole rollout.

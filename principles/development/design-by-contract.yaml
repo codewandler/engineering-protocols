@@ -1,0 +1,53 @@
+# adp/1 adds an `invariant.**` fact family, for a harness that reports invariant checking directly;
+# it is not declared by aep/1, which is why this principle belongs to the development profiles.
+# Nothing projects those facts yet, so predicating on them would produce an obligation that can never
+# be satisfied rather than a strict one. What is written below reads the claim facts a model checker
+# or a property tester actually produces, which are observable today and mean the same thing.
+id: design-by-contract
+version: 1
+title: Design by contract
+summary: >-
+  Preconditions, postconditions and invariants are written down in an approved design and then
+  checked by a machine. Unchecked, a contract is a comment, and the caller who violates it finds out
+  in production.
+
+applies_when:
+  task.kind:
+    any_of: [feature, bugfix, refactor, migration]
+
+requires:
+  before_implementation:
+    artifacts:
+      # Any design subkind satisfies this: a feature, component, api, data or architecture design
+      # all count as a design.
+      - kind: design
+        status: approved
+    predicates:
+      # "Stated" is only checkable through the design kind's required sections, which an artifact
+      # validator reports on. NOT checked: what those sections contain — if the design template ever
+      # loses its pre/postcondition sections, this obligation quietly weakens to "a design exists".
+      - artifact.design.sections_present
+
+  before_completion:
+    predicates:
+      # A requirement set conjoins, so naming both verifiers in a `verification:` block would demand
+      # a model checker on every task that has a property tester and vice versa. The disjunction
+      # lives here instead: a model checker files a `verification` record and a property tester files
+      # a `property_test_result`, and either one establishes the claim.
+      #
+      # Claim ids are singular and shared with `invariant-checking`, so one model-checker record
+      # named `invariant` satisfies both principles instead of each needing its own spelling.
+      - any:
+          - verification.precondition.passed
+          - property_test.precondition.result == passed
+      - any:
+          - verification.postcondition.passed
+          - property_test.postcondition.result == passed
+      - any:
+          - verification.invariant.passed
+          - property_test.invariant.result == passed
+
+# NOT checked: that the claims verified are the claims the design stated. The engine can see that a
+# claim named `invariant` passed; it cannot see that the invariants behind that name are the
+# ones in the design document.
+on_failure: block

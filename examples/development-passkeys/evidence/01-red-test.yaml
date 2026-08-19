@@ -1,0 +1,13 @@
+# The failing test, submitted before any code changes. Ordering is what makes this checkable: the
+# engine records submission order, so `evidence.first_seq.test_result < evidence.first_seq.diff` is a
+# fact, not an intention.
+- kind: test_result
+  suite: unit
+  passed: 0
+  failed: 1
+  producer:
+    producer: verifier
+    verifier: test-runner
+  about: task:AUTH-142
+  provenance:
+    command: cargo test -p auth passkey_credential_is_scoped_to_one_user

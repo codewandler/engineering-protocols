@@ -1,0 +1,30 @@
+id: provenance-tracking
+version: 1
+title: Provenance tracking
+summary: >-
+  Every claim a finished run makes points at the thing that produced it. Without it, six months later
+  nobody can tell whether a test result came from a test runner or from an agent's summary of one, and
+  the only way to find out is to run everything again.
+requires:
+  before_completion:
+    evidence:
+      # `independent: true` is what "traceable" reduces to mechanically: the producer has to be a
+      # verifier rather than the agent that wanted the claim to hold.
+      - kind: verification
+        at_least: 1
+        independent: true
+    conditional:
+      # A diff is owed by work that changes something. An incident mitigation can be a restart or a
+      # flag flip with no repository change, and a governance rule that blocks the end of an incident
+      # over a missing diff fires on the wrong thing and gets switched off.
+      #
+      # No `independent` on the diff: the agent that made the change is usually also what reported
+      # it, and demanding otherwise would require a verifier that does not exist.
+      - when: {task.kind: {none_of: [incident]}}
+        require:
+          evidence:
+            - kind: diff
+              at_least: 1
+# NOT CHECKED: that the recorded diff is the change that actually shipped. The engine can check that a
+# diff was recorded and who produced it, not that it matches the deployed revision.
+on_failure: block

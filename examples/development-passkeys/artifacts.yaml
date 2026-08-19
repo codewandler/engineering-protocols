@@ -1,0 +1,69 @@
+# The artifact graph for AUTH-142. Note what is *not* here: no copies of the documents themselves.
+# A manifest points at artifacts and states how they relate; the design lives in docs/, the PRD lives
+# in a planning tool, and neither has to move for the protocol to reason about them.
+#
+# The design is at version 7 deliberately. The review in this manifest approved version 3, which is
+# what makes the freshness rule visible: an approval names the revision it approved, so version 7 is
+# not covered by it.
+version: aep.artifacts/1
+
+artifacts:
+  - id: prd:passkeys
+    kind: product-requirements
+    status: active
+    location:
+      provider: linear
+      reference: PASSKEYS-PRD
+    metadata:
+      title: Passwordless sign-in
+
+  - id: story:AUTH-141
+    kind: story
+    status: active
+    location:
+      provider: linear
+      reference: AUTH-141
+    relations:
+      - derived_from: prd:passkeys
+
+  - id: spec:passkeys-auth
+    kind: specification
+    status: approved
+    location:
+      path: docs/specs/passkeys-auth.md
+    relations:
+      - specifies: story:AUTH-141
+    metadata:
+      summary: >-
+        Passkey credentials are scoped to exactly one user; failed authentication never creates a
+        session; password authentication remains supported; the authentication API stays backward
+        compatible.
+
+  - id: design:passkeys-auth
+    kind: design
+    status: approved
+    version: "7"
+    freshness: bound_to_revision
+    location:
+      path: docs/designs/passkeys-auth.md
+    relations:
+      - designs: spec:passkeys-auth
+
+  - id: adr:0042
+    kind: architecture-decision-record
+    status: accepted
+    location:
+      path: docs/adr/0042-passkey-credential-ownership.md
+    relations:
+      - decides: design:passkeys-auth
+    metadata:
+      title: Store passkey credentials in the identity service
+
+  - id: review:design-passkeys-auth
+    kind: review-result
+    status: active
+    location:
+      provider: github
+      reference: review-9181
+    relations:
+      - reviews: design:passkeys-auth

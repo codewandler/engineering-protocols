@@ -1,0 +1,54 @@
+# The ordering is the whole principle, and the ordering is what an agent reliably gets wrong: it
+# writes the code, then writes a test that passes, and reports test-driven development. Two facts
+# make that detectable instead of a matter of trust.
+#
+#   * `test.first_result` is the first test outcome ever recorded for the task, so a later green run
+#     cannot launder a suite that was never red.
+#   * `evidence.first_seq.<kind>` is submission order, so "the test came before the code" reduces to
+#     arithmetic on two integers.
+id: test-driven
+version: 1
+title: Test-driven development
+summary: >-
+  A failing test must exist before the implementation that makes it pass, and the suite must be
+  green at completion. Without the ordering, a passing test only proves the code does what it does.
+
+# Refactors and migrations are excluded on purpose: their tests already exist and already pass, so
+# demanding a new red test first would force someone to write a fake one.
+applies_when:
+  task.kind:
+    any_of: [feature, bugfix]
+
+requires:
+  before_implementation:
+    predicates:
+      - test.exists
+      - test.first_result == failed
+
+  before_completion:
+    predicates:
+      - tests.unit.failed == 0
+      - regression_suite.result == passed
+      # Red before green, as a checkable fact rather than a comment: the first test result was
+      # recorded before the first diff. If either side is unobserved this stays Unknown, and
+      # Unknown blocks — the engine never reads a missing fact as a pass.
+      - evidence.first_seq.test_result < evidence.first_seq.diff
+
+evidence:
+  # `independent: true` is the entire difference between this principle and an honour system: an
+  # agent's own claim that the tests passed is not a test result.
+  - kind: test_result
+    verifier: test-runner
+    independent: true
+  # Without a diff on the log there is nothing for the ordering predicate to compare against, and an
+  # agent could satisfy the ordering by never declaring that it changed any code.
+  - kind: diff
+
+verification:
+  - verifier: test-runner
+
+# NOT checked: that the failing test is a test *of the change*. Evidence subjects can pin a record
+# to a subject, but nothing observable ties a test to the behaviour a specification asked for, so a
+# task could satisfy the ordering with an unrelated red test. Specification satisfaction
+# (`spec-driven`) is what covers that gap.
+on_failure: block

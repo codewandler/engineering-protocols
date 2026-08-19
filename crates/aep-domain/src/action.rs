@@ -131,6 +131,24 @@ pub struct Rollback {
     pub to_revision: Option<String>,
 }
 
+/// Changing production state directly, outside a deployment.
+///
+/// Configuration flags, a database migration run by hand, a queue drained: the things that are not a
+/// deployment but change what production does. They need their own action because `deployment.create`
+/// is not an honest description of them, and a policy that only names deployments would let them
+/// through.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct ProductionMutate {
+    /// What is being changed, such as a flag name or a table.
+    pub target: String,
+    /// What the change is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change: Option<String>,
+}
+
 /// Reading a secret.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -215,6 +233,8 @@ pub enum Action {
     Deploy(Deploy),
     /// Roll a deployment back.
     Rollback(Rollback),
+    /// Change production state directly.
+    ProductionMutate(ProductionMutate),
     /// Read a secret.
     SecretRead(SecretRead),
     /// Create or update an artifact.
@@ -242,6 +262,7 @@ impl Action {
             Self::TelemetryQuery(_) => Capability::TelemetryRead,
             Self::Deploy(deploy) => Capability::Deploy(deploy.environment.clone()),
             Self::Rollback(rollback) => Capability::Rollback(rollback.environment.clone()),
+            Self::ProductionMutate(_) => Capability::ProductionWrite,
             Self::SecretRead(_) => Capability::SecretRead,
             Self::ArtifactWrite(_) => Capability::ArtifactWrite,
             Self::ReviewRequest(_) => Capability::ReviewRequest,
@@ -272,6 +293,10 @@ impl Action {
                 Some(revision) => format!("roll {} back to {revision}", rollback.environment),
                 None => format!("roll {} back", rollback.environment),
             },
+            Self::ProductionMutate(mutation) => match &mutation.change {
+                Some(change) => format!("change production {}: {change}", mutation.target),
+                None => format!("change production {}", mutation.target),
+            },
             Self::SecretRead(secret) => format!("read secret {}", secret.secret),
             Self::ArtifactWrite(write) => format!("write {} {}", write.kind, write.artifact),
             Self::ReviewRequest(review) => format!("request review of {}", review.subject),
@@ -288,6 +313,7 @@ impl Action {
         matches!(
             self,
             Self::RepositoryWrite(_)
+                | Self::ProductionMutate(_)
                 | Self::Deploy(_)
                 | Self::Rollback(_)
                 | Self::ArtifactWrite(_)

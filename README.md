@@ -31,42 +31,57 @@ The agent may be probabilistic. The protocol semantics are not.
 
 ## Status
 
-**Roughly 30% implemented.** The domain model and the document layer are done and gated; execution,
-the interaction contract and conformance are not yet written.
+**Roughly 62% implemented.** There is a runnable end-to-end path: resolve a task against the document
+tree, submit evidence, be told what is owed, what is permitted and whether the work is done. The
+interaction contract and conformance suites are not written yet.
 
 | Component | Weight | Done | State |
 |---|---:|---:|---|
-| `aep-domain` — core model | 25% | 100% | 13.2k lines, 91 tests, clippy-pedantic clean |
-| `aep-schema` + `xtask` — documents and generated schemas | 6% | 100% | 7 tests, 10 schemas generated |
-| `aep-engine` — resolution, evaluation, transitions | 15% | 0% | crate skeleton, planned surface documented |
+| `aep-domain` — core model | 25% | 100% | 22 modules, 91 tests |
+| `aep-engine` — resolution, evaluation, transitions | 15% | 100% | 38 unit + 16 integration tests |
+| Protocol, principle, workflow and profile documents | 10% | 100% | 49 documents, validated in CI |
+| `protocol-cli` | 7% | 100% | 7 subcommands, 14 integration tests |
+| `aep-schema` + `xtask` — documents and generated schemas | 6% | 100% | 10 schemas, drift-checked |
 | `aep-contract` — command/query contract | 12% | 0% | crate skeleton |
 | `aep-conformance` — black-box backend suites | 12% | 0% | crate skeleton |
-| Protocol, principle, workflow and profile documents | 10% | 0% | directories in place, no documents yet |
-| `protocol-cli` | 7% | 0% | subcommands declared, each reports "not implemented" |
 | Entity identity, locators and types | 5% | 0% | specified in v0.2 §13–18 |
 | `adp-domain`, `aop-domain` | 5% | 0% | crate skeletons |
 | In-memory reference backend | 3% | 0% | — |
 
-Weights are an effort estimate, not a measurement. Verify the "done" column with `task check`.
+163 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
+the "done" column with `task check`.
 
 ### What works today
 
-* Every AEP document type parses and is semantically validated: protocols, principles, workflows,
-  profiles, tasks, artifact manifests and artifact lifecycles.
-* The predicate language, in both its compact form (`tests.unit.failed == 0`) and its structured
-  form, with three-valued evaluation and minimal-cause explanations.
-* The engineering artifact graph: kinds with a subtype hierarchy, statuses, per-kind lifecycles,
-  typed relations, cycle and dangling-edge detection, and projection into facts.
-* Requirements over evidence, artifacts, reviews, approvals, and conditions
-  (`if change.architectural then an architecture design and an ADR are required`).
-* Capability policy with default-deny and `deny > require_approval > allow` precedence.
-* Evidence with provenance, and its projection into the fact vocabulary predicates read.
-* 10 published JSON Schemas, regenerated from the Rust types and checked in CI.
+```console
+$ protocol explain --task examples/development-passkeys/task.yaml --action production.write
+production.write denied
+  operation: change production state
+  reason:    principle approval-gates rule production-write-requires-approval
+  missing:   approval for capability production.write
+  state:     receive
+```
+
+* **A task resolves into a plan**: `extends` chains merged, principles filtered by whether they apply,
+  capabilities composed with the document responsible recorded for every entry, obligations collected,
+  and the whole configuration refused if any rule in it could never fire.
+* **Evidence drives transitions.** A workflow advances when the evidence satisfies the guard, and the
+  refusal names what is missing.
+* **Ordering is checkable.** `evidence.first_seq.test_result < evidence.first_seq.diff` is how
+  red-before-green is enforced — a fact, not an instruction.
+* **An agent cannot verify itself.** `independent: true` on an evidence requirement is not satisfied
+  by the agent's own report of a green suite.
+* **An approval names the revision it approved**, so an approval of design version 3 stops satisfying
+  a review requirement once the design is at version 7.
+* **Every decision is explainable**, as a `✓ / ✗ / ?` checklist or as a machine-readable refusal.
+* 49 documents — 3 protocols, 21 principles, 4 workflows, 5 profiles, 5 artifact lifecycles — each
+  validated against the protocol vocabulary in CI.
 
 ### What does not work yet
 
-There is no runnable end-to-end path: you cannot yet resolve a task, submit evidence and be told
-whether a transition is permitted. That is `aep-engine`, and it is next.
+There is no command/query contract, no backend and no conformance suite, so nothing yet *stores* an
+execution beyond a snapshot file. Entities have no canonical identity or locator. See
+[`docs/plan/`](docs/plan/) for what is next.
 
 ## Design decisions worth knowing
 
@@ -133,6 +148,10 @@ Without `task`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-ta
 |---|---|
 | [`docs/design/consolidated-design-v0.2.md`](docs/design/consolidated-design-v0.2.md) | authoritative specification |
 | [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) | what is implemented, what v0.2 adds, work order, recorded deviations |
+| [`docs/plan/wave-1-execution-core.md`](docs/plan/wave-1-execution-core.md) | the wave just delivered, with its acceptance criteria |
+| [`docs/plan/document-authoring-brief.md`](docs/plan/document-authoring-brief.md) | how to write a valid principle, workflow, profile or lifecycle |
+| [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |
+| [`examples/development-passkeys/`](examples/development-passkeys/) | a worked example with real command output |
 | [`docs/design/archive/`](docs/design/archive/) | v0.1 draft and artifact-model extension, kept for provenance |
 | [`AGENTS.md`](AGENTS.md) | working agreement for humans and agents contributing here |
 

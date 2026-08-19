@@ -1,0 +1,13 @@
+# The review that approved version 3 of the design. The manifest has the design at version 7, so this
+# approval does not cover what exists now — which is the point of recording the version at all.
+- kind: review
+  subject: design:passkeys-auth
+  subject_kind: design
+  reviewer:
+    reviewer: human
+    id: ada
+  disposition: approved
+  reviewed_version: "3"
+  producer:
+    producer: human
+    id: ada

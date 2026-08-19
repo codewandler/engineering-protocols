@@ -1,0 +1,33 @@
+id: preserve-evidence
+version: 1
+title: Preserve evidence
+summary: >-
+  The state that explains the failure is destroyed by the thing that fixes it, so it gets captured
+  first. Without it the postmortem is written from memory, and the outage recurs because nobody could
+  say what caused the first one.
+applies_when:
+  task.kind: {eq: incident}
+requires:
+  # `mitigation` is an operations phase, and this document also resolves under development profiles.
+  # That is safe only because of the applicability above: a principle that is not in force
+  # contributes no obligations, so nothing is ever timed against a phase the development workflow
+  # does not declare. Widening `applies_when` without retiming this would break resolution.
+  before_mitigation:
+    evidence:
+      - kind: metric_observation
+        at_least: 1
+        verifier: telemetry-query
+      - kind: artifact
+        at_least: 1
+    # The evidence requirement above cannot say *which* artifact — pinning an evidence subject needs
+    # a concrete artifact id, which nobody knows when the rule is written — so the kind is pinned
+    # here, against the artifact graph.
+    artifacts:
+      - kind: incident-report
+# No capability policy. Restarting the service is not the wrong action; doing it before the capture is.
+# This principle is about ordering, and taking a capability away would be answering a different
+# question.
+#
+# Stated rather than inherited, because a reader will want to know: yes, this does mean a fix waits on
+# a capture. That is the trade, and it is bounded by two evidence records.
+on_failure: block

@@ -1,0 +1,30 @@
+# Deliberately unscoped: a release that breaks the service breaks it exactly the way an incident fix
+# does, so this applies to every operational task rather than only to incidents.
+id: verify-after-action
+version: 1
+title: Verify after action
+summary: >-
+  A production change is not finished until something other than the agent that made it says the
+  service is healthy. Without it the run ends green on its own say-so, and the first party to
+  discover the service is still down is a customer.
+requires:
+  before_completion:
+    predicates:
+      - service.health == healthy
+      # A reading and a conclusion are separate: someone has to have claimed recovery, not just
+      # sampled a gauge that happened to look fine.
+      - verification.recovery.passed
+    evidence:
+      # `independent: true` is the load-bearing part. An agent asserting the service recovered is an
+      # opinion about its own work, and the engine will not count it as an observation.
+      - kind: health_observation
+        at_least: 1
+        independent: true
+      - kind: verification
+        at_least: 1
+        independent: true
+# A service that is not verifiably healthy after a change is not a retryable condition. It needs
+# someone who can decide between rolling forward and rolling back.
+on_failure:
+  action: escalate
+  to: oncall

@@ -1,0 +1,48 @@
+# For work where the expensive failure is the one nobody notices. Every addition here answers the
+# question "how would we know if the tests were wrong?": mutation testing checks the tests,
+# differential testing checks the new implementation against the old, invariant checking covers the
+# inputs nobody wrote a case for, and a human reviews the design before any of it is trusted.
+id: development.critical
+version: 1
+title: Critical development
+summary: >-
+  Choose this when a silent defect is worse than a late delivery: authentication and authorisation,
+  money movement, data migration, anything cryptographic, anything whose failure mode is wrong output
+  rather than an error. The cost is real — mutation and differential runs plus a human design review —
+  so use `development.standard` where a defect would announce itself.
+protocol: adp/1
+extends: development.standard
+
+principles:
+  - mutation-testing
+  - differential-testing
+  - invariant-checking
+  - adversarial-verification
+  - design-by-contract
+
+completion:
+  predicates:
+    # A surviving mutant is reported as a failure by the runner: the tests did not notice a change in
+    # behaviour, which means they would not have noticed the defect either.
+    - tests.mutation.failed == 0
+    # Behaviour is compared against the implementation being replaced, so "it passes its own tests"
+    # cannot stand in for "it does what the old one did".
+    - tests.differential.failed == 0
+    # The claim an invariant run records itself under, whether a model checker or a property suite
+    # produced it.
+    - verification.invariant.passed
+  artifacts:
+    # Approved, and specifically a design *for this specification* — without the relation the
+    # requirement is satisfied by any approved design in the graph, including one for other work.
+    - kind: design
+      status: approved
+      relation:
+        kind: designs
+        target_kind: specification
+  reviews:
+    # `human: true` is the point of this entry, and `fresh: true` is what stops it from decaying: an
+    # approval of an earlier version of the design is not an approval of the one being built.
+    - subject_kind: design
+      result: approved
+      human: true
+      fresh: true

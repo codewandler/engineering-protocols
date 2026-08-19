@@ -1,0 +1,99 @@
+# A migration that cannot be undone, modelled as one.
+#
+# `migrate` is marked irreversible and its failure policy escalates rather than rolls back. That is
+# the whole reason this workflow exists separately: once rows have been rewritten or dropped, "roll
+# back" describes a wish, not an operation. An irreversible step needs a forward-recovery plan — a
+# fix-forward script, a restore-from-backup runbook, a human who owns the decision — and declaring
+# rollback on it is how a migration turns into an outage, because the response reaches for a lever
+# that is not connected to anything.
+#
+# The engine enforces the mechanical half of this: a state marked `irreversible: true` may not carry
+# a rollback policy. The rest is what `prepare` is for.
+id: migration/forward-only
+version: 1
+title: Forward-only migration
+summary: >-
+  Plan, prepare, migrate, verify, complete — for changes whose recovery path is forward, with
+  escalation rather than rollback when the irreversible step fails.
+
+initial: plan
+
+states:
+  plan:
+    title: Plan
+    summary: >-
+      Write down the change, its order of operations, its verification and — because there is no
+      undo — how the system is recovered if the migration half-completes.
+    phases: [planning]
+
+  prepare:
+    title: Prepare
+    summary: >-
+      Everything that makes the irreversible step survivable: a backup that has been restored at
+      least once, a dry run against representative data, a reversible-read path for consumers.
+    phases: [preparation]
+
+  migrate:
+    title: Migrate
+    summary: Execute the migration. This is the point of no return.
+    phases: [migration]
+    irreversible: true
+    # Escalation, not rollback. A half-applied migration is a state a person has to look at: the
+    # correct next action depends on how far it got, and no policy in a document can know that.
+    on_failure:
+      action: escalate
+      to: oncall
+
+  verify:
+    title: Verify
+    summary: >-
+      Prove the migrated system is correct, against the plan's stated checks. The failure mode this
+      catches is a migration that ran to completion and produced the wrong data.
+    phases: [verification]
+
+  complete:
+    title: Complete
+    terminal: true
+    summary: The migration is applied, verified and recorded.
+    phases: [completion]
+
+transitions:
+  - from: plan
+    to: prepare
+    description: >-
+      An approved migration plan exists. Approval gates here rather than at `migrate` because by
+      then the only remaining question is whether to proceed, and the answer is always yes.
+    when: artifact.migration-plan.approved
+    requires:
+      artifacts:
+        - kind: migration-plan
+          status: approved
+
+  - from: prepare
+    to: migrate
+    description: >-
+      The dry run passed. It is the only rehearsal available for a step that gets exactly one
+      attempt, so it is a hard gate rather than a recommendation.
+    when: verification.dry-run.passed
+    requires:
+      evidence:
+        - kind: verification
+          independent: true
+
+  - from: migrate
+    to: verify
+    description: >-
+      Unconditional, and that is the honest modelling: the change has already happened, so there is
+      no fact that could hold execution here. The only question left is whether it worked, which is
+      the next state's.
+
+  - from: verify
+    to: complete
+    description: >-
+      The migration's own checks passed, the regression suite still passes, and no required evidence
+      is outstanding.
+    when:
+      all:
+        - verification.migration.passed
+        - tests.regression.failed == 0
+        - evidence.missing == 0

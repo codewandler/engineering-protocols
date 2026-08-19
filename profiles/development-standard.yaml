@@ -1,0 +1,38 @@
+# The default for work other people depend on. It differs from `development.fast` in one respect that
+# matters: it does not accept the implementation's own tests as the definition of correct. Contracts
+# describe what consumers were promised, properties describe what must hold for inputs nobody thought
+# to write a test for, and a human can be asked before the result is accepted.
+id: development.standard
+version: 1
+title: Standard development
+summary: >-
+  Choose this for anything with an external consumer, persisted data or a customer-visible path — it
+  is the sensible default. Drop to `development.fast` only for contained internal work; move up to
+  `development.critical` when a defect would be expensive to discover late: authentication,
+  authorisation, money, data migration, anything whose failure is silent.
+protocol: adp/1
+# Workflow, capabilities, principles and completion conditions are inherited from `development.fast`;
+# extension can add and tighten, never grant back.
+extends: development.fast
+
+principles:
+  - contract-testing
+  - property-based-testing
+  - approval-gates
+  - reversible-changes
+
+capabilities:
+  # The two capabilities that make `approval-gates` more than a comment. A gate an agent cannot
+  # request is a gate that silently never opens, which in practice means the rule gets removed rather
+  # than obeyed.
+  allow:
+    - review.request
+    - approval.request
+
+completion:
+  all:
+    # Not "the tests pass" but "the stated requirements are satisfied". The inherited suite conditions
+    # cannot tell the difference between a passing suite and a suite that covers the wrong thing.
+    - specification.satisfied
+    # Consumers first: a change can be correct in its own terms and still be a breaking change.
+    - contracts.failed == 0

@@ -1,0 +1,41 @@
+# Applicability is the one real decision in this document.
+#
+# The narrow form — apply only when a task declares `change.public_contract` — hands the switch to
+# the party most likely to be wrong about it. "Did I change a published interface?" is exactly the
+# question an agent answers by eyeballing its own diff, and a task that answers `false` turns the
+# check off entirely. The person who finds out is whoever's client breaks on the next release.
+#
+# So this applies to all change work, and the contract runner — not the author of the change —
+# decides whether anything published moved.
+id: contract-testing
+version: 1
+title: Contract testing
+summary: >-
+  Published interfaces stay compatible: contract checks pass and report no breaking change before a
+  task can complete. Without it, a compatible-looking refactor ships as someone else's outage.
+
+applies_when:
+  task.kind:
+    any_of: [feature, bugfix, refactor]
+
+requires:
+  before_completion:
+    predicates:
+      # A run that checked nothing also has zero failures, so the number of checks is part of the
+      # obligation. Without this line an empty contract suite satisfies the principle.
+      - contracts.checked > 0
+      - contracts.failed == 0
+      - contracts.breaking_changes == 0
+
+evidence:
+  - kind: contract_result
+    verifier: contract-runner
+    independent: true
+
+verification:
+  - verifier: contract-runner
+
+# NOT checked: whether the contract set covers every published interface. `contracts.checked` is a
+# count, not a coverage measure, so a project that publishes ten endpoints and has contracts for
+# three satisfies this. Closing that needs a coverage fact the protocol does not declare.
+on_failure: block

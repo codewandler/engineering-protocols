@@ -1,0 +1,31 @@
+# The gate sits before `mitigation`, not before completion. Telemetry that arrives with the
+# postmortem explains the outage; it did not steer the fix.
+id: hypothesis-driven-diagnosis
+version: 1
+title: Hypothesis-driven diagnosis
+summary: >-
+  Nothing changes in production until someone has said what they think is wrong and pointed at the
+  telemetry that says so. Without it the first action taken is the one that felt plausible, and the
+  restart that "fixed" it also destroyed the evidence that would have contradicted it.
+applies_when:
+  task.kind: {eq: incident}
+requires:
+  before_mitigation:
+    predicates:
+      # A named claim, because the fact spellings a harness emits for its own telemetry vary and a
+      # claim id does not: `verification.hypothesis.*` is the same path in every harness.
+      - verification.hypothesis.passed
+    evidence:
+      # A measurement and a statement about it are different things. A metric on its own is a number
+      # nobody committed to an explanation of; a hypothesis with no metric is a guess with a
+      # verifier's name on it.
+      - kind: metric_observation
+        at_least: 1
+        verifier: telemetry-query
+      - kind: verification
+        at_least: 1
+        independent: true
+verification:
+  - verifier: telemetry-query
+    before: {phase: mitigation}
+on_failure: block

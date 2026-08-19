@@ -1,0 +1,48 @@
+# Incident response under time pressure, which is when process is abandoned and when the abandonment
+# is most expensive. The capability policy is the load-bearing part: it lets an agent read everything
+# about production and change nothing in it without a recorded approval.
+id: incident.standard
+version: 1
+title: Standard incident response
+summary: >-
+  Choose this for any live service impairment: it grants full read access to telemetry and production
+  state, requires a recorded approval before any production write, and does not consider the incident
+  finished until health and error rate are back within objective and recovery has been verified by
+  something other than the responder.
+protocol: aop/1
+workflow: incident/standard
+
+principles:
+  # Evidence first, because the fastest mitigation usually destroys the state that explains the
+  # incident — restart the process and the heap that would have named the cause is gone.
+  - preserve-evidence
+  - least-privilege
+  - hypothesis-driven-diagnosis
+  - reversible-changes
+  - blast-radius-limitation
+  - verify-after-action
+  - provenance-tracking
+
+capabilities:
+  allow:
+    - telemetry.read
+    - production.read
+    - repository.read
+    # So the responder can ask for the production write it is not allowed to perform.
+    - approval.request
+  require_approval:
+    # The protocol's approval floor forbids granting this outright, and this is the profile where the
+    # temptation is strongest: the change most likely to fix the incident is also the one most likely
+    # to widen it.
+    - production.write
+  deny:
+    # Denied outright rather than gated. Diagnosis does not need credential values, and a secret read
+    # during an incident is a second incident — one that ends in a rotation.
+    - secret.read
+
+completion:
+  all:
+    - service.health == healthy
+    - error_rate < service.slo.error_threshold
+    # Not "we believe it recovered". A verification record, from a verifier, that recovery held.
+    - recovery_verified == true

@@ -1,0 +1,35 @@
+# The operations profile of AEP.
+id: aop
+version: 1
+title: Agentic Operations Protocol
+summary: >-
+  AEP for operational and SRE work: telemetry, hypothesis-driven diagnosis, blast-radius control,
+  reversible change, health verification and rollback.
+extends: aep/1
+
+phases:
+  - detection
+  - triage
+  - diagnosis
+  - mitigation
+  - recovery
+  - qualification
+  - staging
+  - canary
+  - observation
+  - promotion
+  - preparation
+  - migration
+
+observables:
+  - 'incident.**'
+  - 'blast_radius.**'
+  - 'slo.**'
+  - 'release.**'
+  - 'rollout.**'
+  - 'runbook.**'
+  - 'migration.**'
+  # The design documents write these bare in completion conditions; both are aliases the engine
+  # projects from metric and verification evidence.
+  - error_rate
+  - recovery_verified

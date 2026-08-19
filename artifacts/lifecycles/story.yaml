@@ -1,0 +1,15 @@
+# Stories are the one artifact kind an organisation is most likely to keep in a planning tool rather
+# than in the repository, so this ladder is intentionally close to what those tools already model:
+# refinement, agreement, work in flight, done.
+kind: story
+initial: draft
+
+transitions:
+  draft: [proposed, archived]
+  # `proposed` means refined and agreed enough to pick up; `rejected` means it will not be done, which
+  # is a different fact from being dropped from a backlog.
+  proposed: [draft, active, rejected]
+  active: [implemented, archived]
+  implemented: [archived]
+  rejected: [archived]
+  archived: []

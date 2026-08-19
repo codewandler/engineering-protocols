@@ -1,0 +1,40 @@
+# Timed before implementation rather than during adp/1's `decomposition` phase, so the principle also
+# holds in a profile whose workflow has no separate decomposition state. The obligation is the same
+# either way: the pieces and their acceptance criteria exist before any code does.
+id: incremental-decomposition
+version: 1
+title: Incremental decomposition
+summary: >-
+  Work is broken into named pieces with stated acceptance criteria before it is built. Without it,
+  review happens once, at the end, on everything — which is the point at which nobody can say
+  whether a change was in scope.
+
+applies_when:
+  task.kind:
+    any_of: [feature, bugfix, refactor, migration]
+
+requires:
+  before_implementation:
+    predicates:
+      # An artifact requirement matches one kind at a time, so "a story or a task" can only be said
+      # as a predicate over the artifact graph. A `conditional` per kind would be worse: the gate on
+      # the kind that is absent evaluates Unknown, and Unknown blocks, so a task-only decomposition
+      # would be refused for not being a story.
+      - any:
+          - artifact.story.exists
+          - artifact.task.exists
+    artifacts:
+      # The output of decomposition that later obligations can be checked against: criteria written
+      # before the code, not fitted to it afterwards.
+      - kind: acceptance-criteria
+
+# NOT checked, and deliberately not faked:
+#
+#   * That the story or task actually decomposes the specification. `relation: {kind: decomposes,
+#     target_kind: specification}` attaches to a single artifact kind, and the disjunction above
+#     cannot carry it.
+#   * Any bound on diff size. `diff.files_changed` is observable, but the number to compare it
+#     against is not — a threshold written here would be one guess applied to every repository. The
+#     honest place for a limit is a task constraint fact. What is enforced instead is that acceptance
+#     criteria existed before the code, which is what makes a large diff reviewable at all.
+on_failure: block

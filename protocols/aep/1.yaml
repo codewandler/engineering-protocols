@@ -1,0 +1,151 @@
+# The base protocol: the vocabulary every profile, principle and workflow is checked against.
+#
+# Nothing here enforces anything on its own. Its job is to make a typo in a completion condition or a
+# capability name a validation error instead of a rule that silently never fires.
+id: aep
+version: 1
+title: Agentic Engineering Protocol
+summary: >-
+  Common protocol model for agentic engineering work: tasks, principles, workflows, states,
+  transitions, capabilities, evidence, verification, approvals and completion.
+
+# Capabilities a profile may mention. A capability absent from this list cannot be granted, because
+# no harness would know what it meant.
+capabilities:
+  - repository.read
+  - repository.write
+  - tests.execute
+  - command.execute
+  - network.read
+  - network.write
+  - telemetry.read
+  - production.read
+  - production.write
+  - deployment.create
+  - deployment.rollback
+  - secret.read
+  - artifact.read
+  - artifact.write
+  - planning.read
+  - planning.write
+  - review.request
+  - approval.request
+
+# Capabilities no profile may grant outright: they must be behind approval, or denied. This is the
+# floor under every profile — anyone acting under this protocol needs a recorded approval before
+# production changes, and no profile can forget to say so.
+approval_floor:
+  - production.write
+  - deployment.create:production
+
+evidence_kinds:
+  - test_result
+  - static_analysis
+  - contract_result
+  - property_test_result
+  - deployment_result
+  - metric_observation
+  - health_observation
+  - approval
+  - diff
+  - artifact
+  - review
+  - verification
+  - specification
+
+# Who may establish facts. A required evidence kind with no verifier here is a validation error.
+verifiers:
+  - compiler
+  - test-runner
+  - contract-runner
+  - static-analyzer
+  - property-tester
+  - model-checker
+  - telemetry-query
+  - policy-engine
+  - human-approval
+  - human-review
+  - artifact-validator
+
+artifact_kinds:
+  - vision
+  - product-requirements
+  - initiative
+  - epic
+  - story
+  - task
+  - specification
+  - acceptance-criteria
+  - design
+  - feature-design
+  - component-design
+  - architecture-design
+  - api-design
+  - data-design
+  - architecture-decision-record
+  - test-plan
+  - evaluation-plan
+  - verification-report
+  - review-result
+  - approval-record
+  - release-plan
+  - migration-plan
+  - runbook
+  - incident-report
+  - postmortem
+
+# Phases are the join between principles and workflows: a principle times an obligation against a
+# phase, and any workflow that declares that phase is bound by it.
+phases:
+  - intake
+  - specification
+  - planning
+  - implementation
+  - verification
+  - review
+  - learning
+  - completion
+
+# Fact families a predicate may read. Canonical spellings only, plus the three aliases the design
+# documents use in examples; prefer `tests.<suite>.*` in new documents.
+observables:
+  - 'task.**'
+  - 'change.**'
+  - risk
+  - severity
+  - 'state.**'
+  - 'workflow.**'
+  - 'principle.**'
+  - 'evidence.**'
+  - 'required_evidence.**'
+  - 'tests.**'
+  - 'test.**'
+  - 'unit_tests.**'
+  - 'contract_tests.**'
+  - 'regression_suite.**'
+  - 'static_analysis.**'
+  - 'contracts.**'
+  - 'property_test.**'
+  - 'coverage.**'
+  - 'specification.**'
+  - 'diff.**'
+  - 'source_diff.**'
+  - 'artifact.**'
+  - 'review.**'
+  - 'verification.**'
+  - 'approval.**'
+  - 'approvals.**'
+  - 'deployment.**'
+  - 'metric.**'
+  - 'service.**'
+
+# Ordered scales, so `risk >= medium` has a defined meaning. Without a scale, ordering two strings
+# would either be arbitrary or silently wrong.
+scales:
+  risk: [low, medium, high, critical]
+  severity: [info, low, medium, high, critical]
+  health: [unhealthy, degraded, healthy]
+
+# Blocking is the safe default: an unmet requirement stops the workflow rather than being retried or
+# worked around.
+default_failure_policy: block

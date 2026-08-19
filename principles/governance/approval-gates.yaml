@@ -1,0 +1,38 @@
+# The protocol's approval floor already refuses to let any profile grant `production.write` or
+# `deployment.create:production` outright — that is the floor's whole job. What the floor cannot do is
+# say *which* approval, or insist a person granted it: it does not know what the approval is called.
+# That is this principle.
+#
+# Timed before completion because it is in force under development and operations profiles alike, and
+# their workflows share no earlier phase.
+id: approval-gates
+version: 1
+title: Approval gates
+summary: >-
+  Production mutation and irreversible steps need an approval a person actually granted, recorded
+  where an auditor can find it. Without it, the record of who agreed to the change is whatever the
+  agent wrote in its own summary.
+requires:
+  before_completion:
+    conditional:
+      # Guarded with `defined(...)` on purpose: the guard has to be two-valued. A bare
+      # `deployment.production.status == succeeded` is Unknown before anything deploys, an Unknown
+      # guard is not a False guard, and the requirement would then demand a production approval from
+      # every feature branch that never went near production.
+      - when: defined(deployment.production.status)
+        require:
+          approvals:
+            - approval: production-change
+              human: true
+          evidence:
+            - kind: approval
+              at_least: 1
+              independent: true
+              verifier: human-approval
+# NOT CHECKED: a production write that leaves no deployment record behind. No fact reveals it, so the
+# recorded-approval obligation cannot see it; the capability gate below is the only thing standing in
+# front of it, and it stands there in the moment rather than at completion.
+capabilities:
+  require_approval:
+    - production.write
+    - deployment.create:production

@@ -1,0 +1,27 @@
+id: adversarial-verification
+version: 1
+title: Adversarial verification
+summary: >-
+  A finding counts only once something independent has tried to refute it and failed. The agent that
+  produced the work is the worst available judge of whether the work is right.
+
+requires:
+  during_verification:
+    evidence:
+      # `independent` is the entire mechanism: a record whose producer is the agent under review does
+      # not satisfy this requirement, however confidently it is worded.
+      #
+      # Timed during the verification phase rather than before adp/1's dedicated
+      # `adversarial-verification` phase, because naming that phase makes the principle unresolvable
+      # for any profile running a base aep/1 workflow, which has no such phase. A profile on adp/1
+      # gets the stricter timing by placing its refutation state in that phase.
+      #
+      # The verifier is left open: a human reviewer and a policy engine are both acceptable
+      # adversaries, and a requirement set cannot say "either".
+      # NOT checked: that the refutation attempt was serious, or that it targeted the finding rather
+      # than restating it.
+      - kind: verification
+        independent: true
+        at_least: 1
+
+on_failure: block

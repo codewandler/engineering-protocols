@@ -1,0 +1,42 @@
+# Timed before completion rather than before `mitigation`/`promotion`: this principle is in force for
+# incident, release and migration tasks, and those three workflows share no phase earlier than
+# completion. An obligation timed against a phase no state declares fails resolution, which would
+# take the rule out of force for the other two kinds entirely.
+id: blast-radius-limitation
+version: 1
+title: Blast-radius limitation
+summary: >-
+  A change acts through the narrowest mechanism that can fix the problem, and how far it reaches is
+  measured before it is made. Without it a fault in one service is answered with a fleet-wide
+  restart, and the outage ends up bigger than the bug.
+applies_when:
+  task.kind: {any_of: [incident, release, migration]}
+requires:
+  before_completion:
+    predicates:
+      - verification.blast-radius.passed
+      # "Measured before it is made" is the rule, so the order is checked, not just the presence:
+      # no deployment may precede the first verification record.
+      #
+      # NOT CHECKED exactly: submission order is per evidence kind, not per claim, so an unrelated
+      # verification arriving first also satisfies this. It is exact about the failure that matters
+      # — deploying with no verification recorded at all.
+      - any:
+          - not defined(evidence.first_seq.deployment_result)
+          - evidence.first_seq.verification < evidence.first_seq.deployment_result
+    evidence:
+      - kind: verification
+        at_least: 1
+        independent: true
+# NOT CHECKED: "only where a narrower path exists". Whether a narrower mechanism was available is not
+# a fact any verifier reports. So the wide one is denied outright and the narrow ones —
+# `deployment.create`, `deployment.rollback` — are left as the way through, which is the same
+# outcome without the unobservable condition.
+#
+# Consequence to know about: a denial cannot be granted back by a profile. Work that genuinely needs
+# raw production writes — some data migrations do — has to run under a profile that does not carry
+# this principle, not under one that tries to re-allow the capability.
+capabilities:
+  deny: [production.write]
+  require_approval: [deployment.create]
+on_failure: block

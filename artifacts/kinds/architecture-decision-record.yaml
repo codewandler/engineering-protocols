@@ -1,0 +1,21 @@
+# Advisory until the artifact validator reads these files — see `design.yaml` for the same caveat.
+kind: architecture-decision-record
+title: Architecture decision record
+summary: >-
+  What was decided, why, what else was considered, and what the decision costs. One decision per
+  record.
+
+# `Alternatives` is not optional padding: an ADR without the rejected options records an outcome but
+# not a decision, and cannot tell a later reader whether their idea was already tried.
+required_sections:
+  - Title
+  - Status
+  - Context
+  - Decision
+  - Alternatives
+  - Consequences
+
+# An ADR is never edited into currency — it stays valid as a record of its moment until a successor
+# supersedes it, which is why its freshness does not bind to a revision the way a design's does.
+freshness: until_superseded
+review_required: true

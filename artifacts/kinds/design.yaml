@@ -1,0 +1,32 @@
+# Advisory until the artifact validator reads these files. Nothing in this document is enforced today:
+# the engine checks statuses against `artifacts/lifecycles/`, and relations against the artifact graph,
+# but `required_sections` is not yet consulted by any verifier. It is here so that the expectation is
+# written down once, in data, rather than re-invented in each template and each reviewer's head.
+kind: design
+title: Design
+summary: >-
+  How we intend to satisfy a specification: the proposed shape, the interfaces it exposes, and what
+  happens when it fails.
+
+# Section names, not Markdown headings. A profile may require the semantics without dictating the
+# document's typography; `artifacts/templates/design.md` is one rendering of this list.
+required_sections:
+  - Context
+  - Goals
+  - Non-Goals
+  - Current State
+  - Proposed Design
+  - Interfaces
+  - Data Model
+  - Failure Modes
+  - Security
+  - Observability
+  - Migration
+  - Rollout
+  - Rollback
+  - Open Questions
+
+# An approval of version 3 must not silently approve version 7: editing a design after review
+# invalidates the review, because the thing that was reviewed no longer exists.
+freshness: bound_to_revision
+review_required: true
