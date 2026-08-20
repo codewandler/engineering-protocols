@@ -716,6 +716,65 @@ mod tests {
     }
 
     #[test]
+    fn a_denied_capability_is_not_downgraded_to_requiring_an_approval() {
+        // The middle link of `deny > require_approval > allow` is only observable when one
+        // capability sits in both `deny` and `approval_required`, and no document in this
+        // repository does that — so the state has to be composed here, the way the documents
+        // compose it: a profile grants, one principle puts the grant behind approval, a second
+        // principle denies it outright.
+        let mut policy = CapabilityPolicy::allowing([Capability::ProductionWrite]);
+        policy.restrict(&CapabilityPolicy {
+            approval_required: [Capability::ProductionWrite].into(),
+            ..CapabilityPolicy::empty()
+        });
+        policy.restrict(&CapabilityPolicy::denying([Capability::ProductionWrite]));
+
+        assert!(
+            policy.allow.contains(&Capability::ProductionWrite)
+                && policy
+                    .approval_required
+                    .contains(&Capability::ProductionWrite)
+                && policy.deny.contains(&Capability::ProductionWrite),
+            "the fixture must hold production.write in all three sets, or the precedence between \
+             deny and require_approval is not what is being tested: {policy:?}"
+        );
+        assert_eq!(
+            policy.decide(&Capability::ProductionWrite),
+            CapabilityDecision::Denied,
+            "a principle that denies production writes must stay a denial: downgrading it to \
+             `ask someone` is not a safety envelope, because someone can always be asked"
+        );
+        assert!(
+            policy.production_mutations().is_empty(),
+            "a denied production write is not a granted production mutation"
+        );
+    }
+
+    #[test]
+    fn a_wildcard_denial_is_not_reopened_by_an_approval_on_one_environment() {
+        // The same precedence where the two entries are not the same value: a principle denies
+        // every environment, a profile puts production deployment behind approval.
+        let policy = CapabilityPolicy {
+            allow: [Capability::Deploy(Environment::Production)].into(),
+            approval_required: [Capability::Deploy(Environment::Production)].into(),
+            deny: [Capability::Deploy(Environment::Any)].into(),
+        };
+
+        assert_eq!(
+            policy.decide(&Capability::Deploy(Environment::Production)),
+            CapabilityDecision::Denied,
+            "`deployment.create` denied for every environment covers production, and an approval \
+             recorded against production cannot reopen it"
+        );
+        assert_eq!(
+            policy.matching_entry(&Capability::Deploy(Environment::Production)),
+            Some(&Capability::Deploy(Environment::Any)),
+            "the entry reported as the reason must be the deny that decided, not the approval it \
+             beat"
+        );
+    }
+
+    #[test]
     fn an_environment_wildcard_covers_named_environments() {
         let policy = CapabilityPolicy::allowing([Capability::Deploy(Environment::Any)]);
         assert!(policy

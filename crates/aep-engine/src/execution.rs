@@ -474,7 +474,9 @@ mod tests {
     use super::*;
     use crate::fixtures;
     use crate::resolve::resolve;
-    use aep_domain::evidence::{ChangeSet, Producer, TestResult, TestSuite};
+    use aep_domain::evidence::{
+        ApprovalDecision, ApprovalRecord, ChangeSet, Producer, TestResult, TestSuite,
+    };
     use aep_domain::facts::FactPath;
     use aep_domain::ids::EvidenceId;
     use aep_domain::verification::Verifier;
@@ -665,6 +667,46 @@ mod tests {
             fact(&restored, "tests.unit.result"),
             Some(FactValue::text("passed")),
             "facts are rebuilt from the evidence, not carried in the snapshot"
+        );
+    }
+
+    #[test]
+    fn a_refused_approval_is_not_counted_among_the_granted_ones() {
+        // `approvals.granted` is a fact completion conditions read — `approvals.granted >= 1` is
+        // how a gate is written. Counting the approval that said *no* would let the refusal
+        // satisfy the gate it refused, which is the same defect as in `policy::approval_recorded`
+        // and a second place it can be introduced.
+        let approval = |ordinal: usize, decision| {
+            record(
+                ordinal,
+                Producer::Human {
+                    id: "ada".to_owned(),
+                },
+                Evidence::Approval(ApprovalRecord {
+                    approval: "production-change".parse().expect("approval id"),
+                    approver: Producer::Human {
+                        id: "ada".to_owned(),
+                    },
+                    decision,
+                    subject: Some("capability:production-write".parse().expect("subject")),
+                    note: None,
+                }),
+            )
+        };
+
+        let mut execution = execution();
+        execution.record_evidence(approval(1, ApprovalDecision::Denied));
+        assert_eq!(
+            fact(&execution, "approvals.granted"),
+            Some(FactValue::count(0)),
+            "a reviewer refusing a change has not granted it"
+        );
+
+        execution.record_evidence(approval(2, ApprovalDecision::Granted));
+        assert_eq!(
+            fact(&execution, "approvals.granted"),
+            Some(FactValue::count(1)),
+            "and the grant that follows counts once, not twice"
         );
     }
 

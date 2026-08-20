@@ -249,7 +249,49 @@ impl fmt::Display for Operand {
     }
 }
 
+/// How deep `all`/`any`/`not` nesting may go before a predicate is refused.
+///
+/// Both spellings let a document choose the parser's recursion depth. The structured form nests
+/// mappings, which `serde_yaml` caps at 128 on its own; the string form is one scalar, so
+/// `not not not …` is bounded by nothing but the file size. Measured on this machine, a debug build
+/// of [`Predicate::parse_expression`] overflows the 8 MiB main-thread stack between 2 500 and 3 000
+/// prefixes and the 2 MiB a spawned worker gets between 600 and 800. A stack overflow aborts the
+/// process with no diagnostic, which is the opposite of what this parser does with every other bad
+/// input.
+///
+/// 32 because the deepest predicate anybody writes is an `all` of `any`s of comparisons — three or
+/// four — and because `MAX_TYPE_DEPTH` and `ess-domain`'s `WRAPPER_LIMIT` are also 32: one number
+/// across the workspace is easier to defend, and to remember, than three. It sits an order of
+/// magnitude under the smallest measured floor and well under `serde_yaml`'s 128, so a document
+/// nested past it is refused here, with a code and a limit, rather than by the deserializer.
+pub const MAX_PREDICATE_DEPTH: usize = 32;
+
+/// A one-level rendering of a node, for an error that must not walk what it is refusing.
+///
+/// [`Display`] on a [`Node`] recurses, and the node being refused here is by definition the deep
+/// one — rendering it to describe it would take exactly the stack the refusal exists to save.
+fn shallow(node: &Node) -> String {
+    match node {
+        Node::Text(text) => text.clone(),
+        Node::Seq(items) => format!("a list of {}", items.len()),
+        Node::Map(entries) => entries
+            .keys()
+            .next()
+            .map_or_else(|| "an empty mapping".to_owned(), |key| format!("{key}: …")),
+        scalar => scalar.type_name().to_owned(),
+    }
+}
+
 /// A condition over facts.
+///
+/// # Depth
+///
+/// Every predicate a document can produce is at most [`MAX_PREDICATE_DEPTH`] deep: the two parsers
+/// below are the only routes from a document to one, [`serde::Deserialize`] goes through
+/// [`Predicate::from_node`], and [`Predicate::all`], [`Predicate::any`] and [`Predicate::not`]
+/// simplify rather than deepen — `not not x` is `x`. That is what lets [`Predicate::evaluate`],
+/// [`Predicate::outcome`], [`Predicate::fact_paths`], [`Predicate::to_node`],
+/// [`Display`](fmt::Display) and the walkers in `ess-domain` recurse without counting.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum Predicate {
     /// Always holds. The default where a document omits a condition.
@@ -550,22 +592,39 @@ impl Predicate {
     }
 
     /// Parses a predicate from a document fragment.
+    ///
+    /// Refuses nesting beyond [`MAX_PREDICATE_DEPTH`] with [`ParseError::TooDeep`]. The budget is
+    /// shared with [`Self::parse_expression`], because the two forms interleave: `{not: {not: "not
+    /// not a.b"}}` is four levels of one predicate written two ways, and two counters would let a
+    /// document alternate between them to buy twice the depth.
     pub fn from_node(node: &Node) -> Result<Self, ParseError> {
+        Self::from_node_nested(node, 0)
+    }
+
+    /// [`Self::from_node`], counting how deep it already is.
+    fn from_node_nested(node: &Node, depth: usize) -> Result<Self, ParseError> {
+        if depth > MAX_PREDICATE_DEPTH {
+            return Err(ParseError::too_deep(
+                "predicate",
+                &shallow(node),
+                MAX_PREDICATE_DEPTH,
+            ));
+        }
         match node {
             Node::Bool(true) => Ok(Self::Always),
             Node::Bool(false) => Ok(Self::Never),
-            Node::Text(expression) => Self::parse_expression(expression),
+            Node::Text(expression) => Self::parse_expression_nested(expression, depth),
             Node::Seq(items) => {
                 let children = items
                     .iter()
-                    .map(Self::from_node)
+                    .map(|item| Self::from_node_nested(item, depth + 1))
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Self::all(children))
             }
             Node::Map(entries) => {
                 let mut children = Vec::new();
                 for (key, value) in entries {
-                    children.push(Self::from_entry(key, value)?);
+                    children.push(Self::from_entry(key, value, depth)?);
                 }
                 Ok(Self::all(children))
             }
@@ -583,13 +642,14 @@ impl Predicate {
     }
 
     /// Parses one `key: value` entry of a predicate mapping.
-    fn from_entry(key: &str, value: &Node) -> Result<Self, ParseError> {
+    fn from_entry(key: &str, value: &Node, depth: usize) -> Result<Self, ParseError> {
+        let nested = |node: &Node| Self::from_node_nested(node, depth + 1);
         match key {
             "all" | "and" | "all_of" => {
                 let children = value
                     .as_seq_or_single()
                     .into_iter()
-                    .map(Self::from_node)
+                    .map(nested)
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Self::all(children))
             }
@@ -597,16 +657,16 @@ impl Predicate {
                 let children = value
                     .as_seq_or_single()
                     .into_iter()
-                    .map(Self::from_node)
+                    .map(nested)
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Self::any(children))
             }
-            "not" => Ok(Self::not(Self::from_node(value)?)),
+            "not" => Ok(Self::not(nested(value)?)),
             "none" | "none_of_these" => {
                 let children = value
                     .as_seq_or_single()
                     .into_iter()
-                    .map(Self::from_node)
+                    .map(nested)
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Self::not(Self::any(children)))
             }
@@ -719,8 +779,24 @@ impl Predicate {
     }
 
     /// Parses the compact string form of a predicate.
+    ///
+    /// Refuses a `not` prefix stacked deeper than [`MAX_PREDICATE_DEPTH`] with
+    /// [`ParseError::TooDeep`]. This is the string half of the same budget
+    /// [`Self::from_node`] spends.
     pub fn parse_expression(expression: &str) -> Result<Self, ParseError> {
+        Self::parse_expression_nested(expression, 0)
+    }
+
+    /// [`Self::parse_expression`], counting how deep it already is.
+    fn parse_expression_nested(expression: &str, depth: usize) -> Result<Self, ParseError> {
         let trimmed = expression.trim();
+        if depth > MAX_PREDICATE_DEPTH {
+            return Err(ParseError::too_deep(
+                "predicate",
+                trimmed,
+                MAX_PREDICATE_DEPTH,
+            ));
+        }
         if trimmed.is_empty() {
             return Err(ParseError::predicate(expression, "expression is empty"));
         }
@@ -730,7 +806,7 @@ impl Predicate {
             _ => {}
         }
         if let Some(rest) = trimmed.strip_prefix("not ") {
-            return Ok(Self::not(Self::parse_expression(rest)?));
+            return Ok(Self::not(Self::parse_expression_nested(rest, depth + 1)?));
         }
         for (function, negate) in [("defined", false), ("exists", false), ("missing", true)] {
             if let Some(inner) = call_argument(trimmed, function) {
@@ -1231,6 +1307,168 @@ mod tests {
 
         let other = store(&[("task.kind", FactValue::text("release"))]);
         assert_eq!(predicate.evaluate(&other), Truth::False);
+    }
+
+    #[test]
+    fn negating_unknown_leaves_it_unknown() {
+        // Invariant 5, asserted as the whole table rather than as a sample: `not Unknown == True`
+        // would mean `not deployment.failed` permits a transition *because* nothing has run, which
+        // is the collapse of unobserved into false that the third value exists to prevent.
+        for (input, expected) in [
+            (Truth::True, Truth::False),
+            (Truth::False, Truth::True),
+            (Truth::Unknown, Truth::Unknown),
+        ] {
+            assert_eq!(
+                input.not(),
+                expected,
+                "not {input:?} must be {expected:?}, was {:?}",
+                input.not()
+            );
+        }
+    }
+
+    #[test]
+    fn conjunction_follows_the_kleene_table_in_all_nine_rows() {
+        for (left, right, expected) in [
+            (Truth::True, Truth::True, Truth::True),
+            (Truth::True, Truth::False, Truth::False),
+            (Truth::True, Truth::Unknown, Truth::Unknown),
+            (Truth::False, Truth::True, Truth::False),
+            (Truth::False, Truth::False, Truth::False),
+            // `False` dominates `Unknown`: a failed suite is a failure whether or not the rest ran.
+            (Truth::False, Truth::Unknown, Truth::False),
+            (Truth::Unknown, Truth::True, Truth::Unknown),
+            (Truth::Unknown, Truth::False, Truth::False),
+            (Truth::Unknown, Truth::Unknown, Truth::Unknown),
+        ] {
+            assert_eq!(
+                left.and(right),
+                expected,
+                "{left:?} and {right:?} must be {expected:?}, was {:?}",
+                left.and(right)
+            );
+        }
+    }
+
+    #[test]
+    fn disjunction_follows_the_kleene_table_in_all_nine_rows() {
+        for (left, right, expected) in [
+            (Truth::True, Truth::True, Truth::True),
+            (Truth::True, Truth::False, Truth::True),
+            // `True` dominates `Unknown`: one branch that holds is enough, unobserved or not.
+            (Truth::True, Truth::Unknown, Truth::True),
+            (Truth::False, Truth::True, Truth::True),
+            (Truth::False, Truth::False, Truth::False),
+            (Truth::False, Truth::Unknown, Truth::Unknown),
+            (Truth::Unknown, Truth::True, Truth::True),
+            (Truth::Unknown, Truth::False, Truth::Unknown),
+            (Truth::Unknown, Truth::Unknown, Truth::Unknown),
+        ] {
+            assert_eq!(
+                left.or(right),
+                expected,
+                "{left:?} or {right:?} must be {expected:?}, was {:?}",
+                left.or(right)
+            );
+        }
+    }
+
+    #[test]
+    fn only_true_satisfies_a_transition() {
+        assert!(Truth::True.is_satisfied());
+        assert!(!Truth::False.is_satisfied());
+        assert!(
+            !Truth::Unknown.is_satisfied(),
+            "unknown never advances a workflow"
+        );
+    }
+
+    #[test]
+    fn a_predicate_nested_past_the_limit_is_refused_rather_than_overflowing_the_stack() {
+        // The string form: one YAML scalar, so nothing above this parser bounds it. 10 000 `not`
+        // prefixes overflowed an 8 MiB stack before this bound existed.
+        let stacked = format!("{}a.b", "not ".repeat(10_000));
+        let error = Predicate::parse_expression(&stacked).expect_err("nesting past the limit");
+        assert!(
+            matches!(
+                error,
+                ParseError::TooDeep {
+                    kind: "predicate",
+                    limit: MAX_PREDICATE_DEPTH,
+                    ..
+                }
+            ),
+            "the refusal names the construct and the limit: {error:?}"
+        );
+
+        // The structured form: nested mappings.
+        let mut node = Node::Bool(true);
+        for _ in 0..(MAX_PREDICATE_DEPTH + 2) {
+            node = Node::Map([("not".to_owned(), node)].into_iter().collect());
+        }
+        let error = Predicate::from_node(&node).expect_err("nesting past the limit");
+        assert!(
+            matches!(
+                error,
+                ParseError::TooDeep {
+                    kind: "predicate",
+                    limit: MAX_PREDICATE_DEPTH,
+                    ..
+                }
+            ),
+            "the refusal names the construct and the limit: {error:?}"
+        );
+    }
+
+    #[test]
+    fn the_two_predicate_forms_share_one_depth_budget() {
+        // `{not: {not: "not not a.b"}}` is one predicate written two ways. Two counters would let a
+        // document alternate between the forms and buy twice the depth, which is the whole bound.
+        let half = MAX_PREDICATE_DEPTH / 2;
+        let mut node = Node::Text(format!("{}a.b", "not ".repeat(half + 2)));
+        for _ in 0..(half + 2) {
+            node = Node::Map([("not".to_owned(), node)].into_iter().collect());
+        }
+        let error = Predicate::from_node(&node).expect_err("the two forms together exceed 32");
+        assert!(
+            matches!(
+                error,
+                ParseError::TooDeep {
+                    kind: "predicate",
+                    ..
+                }
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_predicate_as_deep_as_anybody_writes_is_still_accepted() {
+        // The failure mode of a depth bound is refusing a good document. This is deeper than
+        // anything in `protocols/` or `examples/`, and it parses.
+        let written = "
+            all:
+              - any:
+                  - all:
+                      - not: change.architectural
+                      - service.health == healthy
+                  - risk: {gte: medium}
+              - task.kind: {any_of: [feature, bugfix]}
+        ";
+        let node: Node = serde_yaml::from_str(written).expect("well formed");
+        Predicate::from_node(&node).expect("a realistic predicate");
+
+        // And the whole budget, exactly, one level short of the refusal.
+        let mut at_limit = Node::Bool(true);
+        for _ in 0..MAX_PREDICATE_DEPTH {
+            at_limit = Node::Map([("not".to_owned(), at_limit)].into_iter().collect());
+        }
+        assert_eq!(
+            Predicate::from_node(&at_limit).expect("at the limit"),
+            Predicate::Always,
+            "{MAX_PREDICATE_DEPTH} levels is the limit, not one past it"
+        );
     }
 
     #[test]

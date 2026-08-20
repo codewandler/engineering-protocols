@@ -16,14 +16,18 @@
 //!
 //! # How an approval is satisfied
 //!
-//! A capability behind approval becomes exercisable when an approval has been **recorded as
-//! evidence**, matched either by subject — `subject: capability:<slug>` — or by the approval's own
-//! id being that slug, where the slug is the capability in kebab-case:
+//! A capability behind approval becomes exercisable when an approval **granting** it has been
+//! recorded as evidence, matched either by subject — `subject: capability:<slug>` — or by the
+//! approval's own id being that slug, where the slug is the capability in kebab-case:
 //!
 //! ```text
 //! production.write                 → production-write
 //! deployment.create:production     → deployment-create-production
 //! ```
+//!
+//! The decision on the record is read, not merely its existence: an approval whose decision is
+//! `denied` is a reviewer refusing the change, and treating it as a grant would mean the act of
+//! refusing a production write is what permits it.
 //!
 //! The engine does not invent approvals; a harness submits one like any other evidence.
 
@@ -266,12 +270,21 @@ profile: test.guarded
     }
 
     fn approval(subject: Option<&str>, id: &str) -> EvidenceRecord {
+        decided(subject, id, ApprovalDecision::Granted)
+    }
+
+    /// An approval record with the decision spelled out.
+    ///
+    /// Separate from [`approval`] because a fixture that can only say `Granted` cannot reach the
+    /// state where the decision is load-bearing — which is exactly why a rule that ignored the
+    /// decision survived every test in this module.
+    fn decided(subject: Option<&str>, id: &str, decision: ApprovalDecision) -> EvidenceRecord {
         let record = ApprovalRecord {
             approval: id.parse().expect("approval id"),
             approver: Producer::Human {
                 id: "ada".to_owned(),
             },
-            decision: aep_domain::evidence::ApprovalDecision::Granted,
+            decision,
             subject: subject.map(|value| value.parse().expect("subject")),
             note: None,
         };
@@ -461,6 +474,67 @@ profile: test.release
         }));
         execution.record_evidence(approval(None, "repository-write"));
         assert!(authorize(&execution, &request).is_allowed());
+    }
+
+    #[test]
+    fn a_reviewer_who_refuses_a_production_change_has_not_thereby_permitted_it() {
+        // Delete the `decision != Granted` guard in `approval_recorded` and this is what happens:
+        // a reviewer reads the change, refuses it, records the refusal — and the refusal is the
+        // evidence that unlocks the production write. Every other test here records `Granted`, so
+        // none of them can reach the state where that check does any work.
+        let mut execution = execution(GUARDED_PROFILE);
+        execution.record_evidence(decided(
+            Some("capability:production-write"),
+            "production-change",
+            ApprovalDecision::Denied,
+        ));
+        let request = ActionRequest::new(Action::ProductionMutate(
+            aep_domain::action::ProductionMutate {
+                target: "checkout.feature_flag".to_owned(),
+                change: Some("disable".to_owned()),
+            },
+        ));
+        let decision = authorize(&execution, &request);
+
+        assert!(!decision.is_allowed(), "a refusal is not a permission");
+        assert_eq!(decision.decision, CapabilityDecision::RequiresApproval);
+        assert_eq!(
+            decision.missing,
+            vec!["approval for capability production.write".to_owned()],
+            "the approval is still owed; the refusal did not pay it"
+        );
+        let reason = decision.reason.expect("attributed");
+        assert_eq!(reason.rule, "production-write-requires-approval");
+        assert_eq!(
+            reason.source,
+            PolicySource::Principle {
+                principle: "least-privilege".parse().expect("id")
+            }
+        );
+    }
+
+    #[test]
+    fn a_refused_approval_matched_by_its_identifier_unlocks_nothing_either() {
+        // `approval_recorded` matches on a subject *or* on the approval's own id. Two ways in is
+        // two places the decision could go unread, so the refusal is checked through both.
+        let mut execution = execution(GUARDED_PROFILE);
+        execution.record_evidence(decided(None, "repository-write", ApprovalDecision::Denied));
+        let request = ActionRequest::new(Action::RepositoryWrite(RepositoryWrite {
+            paths: vec!["src/lib.rs".to_owned()],
+            intent: None,
+        }));
+        let refused = authorize(&execution, &request);
+        assert!(!refused.is_allowed(), "a refusal is not a permission");
+        assert_eq!(
+            refused.missing,
+            vec!["approval for capability repository.write".to_owned()]
+        );
+
+        execution.record_evidence(approval(None, "repository-write"));
+        assert!(
+            authorize(&execution, &request).is_allowed(),
+            "and a real grant still unlocks it, so the guard is not just refusing everything"
+        );
     }
 
     #[test]

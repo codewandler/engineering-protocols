@@ -805,4 +805,64 @@ transitions:
             "every completion requirement is met once the evidence exists: {explanation}"
         );
     }
+
+    #[test]
+    fn a_refused_approval_enters_the_audit_trail_as_a_refusal() {
+        // The third place the same rule lives. The event stream is what an audit reads back, so
+        // emitting `approval_granted` for a decision of `denied` would put a grant in the
+        // permanent record of a refusal — and the record is the only thing left once everyone has
+        // forgotten the conversation.
+        let engine = engine();
+        let mut execution = engine
+            .initialize(fixtures::standard_task())
+            .expect("initialises");
+
+        let submit = |execution: &mut Execution, decision| {
+            engine
+                .submit_evidence(
+                    execution,
+                    EvidenceSubmission::new(
+                        Evidence::Approval(aep_domain::evidence::ApprovalRecord {
+                            approval: "production-change".parse().expect("approval id"),
+                            approver: Producer::Human {
+                                id: "ada".to_owned(),
+                            },
+                            decision,
+                            subject: Some("capability:production-write".parse().expect("subject")),
+                            note: None,
+                        }),
+                        Producer::Human {
+                            id: "ada".to_owned(),
+                        },
+                    ),
+                )
+                .expect("recorded")
+        };
+
+        submit(&mut execution, ApprovalDecision::Denied);
+        let names = |execution: &Execution| {
+            execution
+                .events()
+                .iter()
+                .map(|event| event.event.name().to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert!(
+            names(&execution).contains(&"approval_denied".to_owned()),
+            "the refusal has to be findable: {:?}",
+            names(&execution)
+        );
+        assert!(
+            !names(&execution).contains(&"approval_granted".to_owned()),
+            "and it must not be recorded as its opposite: {:?}",
+            names(&execution)
+        );
+
+        submit(&mut execution, ApprovalDecision::Granted);
+        assert!(
+            names(&execution).contains(&"approval_granted".to_owned()),
+            "a real grant is still recorded as one: {:?}",
+            names(&execution)
+        );
+    }
 }

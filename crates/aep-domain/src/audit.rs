@@ -292,7 +292,7 @@ pub struct DecisionRecord {
     /// Which document decided it.
     ///
     /// This also carries "which principle refused this":
-    /// [`PolicySource::Principle`](crate::capability::PolicySource::Principle) names it, so the
+    /// [`PolicySource::Principle`] names it, so the
     /// record does not need a separate principle field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<PolicySource>,
@@ -901,6 +901,42 @@ mod tests {
             "unexpected message: {}",
             error.message
         );
+    }
+
+    #[test]
+    fn a_record_whose_decision_refused_the_action_may_not_carry_a_change() {
+        // `is_rejection` is true either because the kind says so or because the decision does,
+        // and every other fixture here is built from `rejection()`, whose kind is already a
+        // refusal. This is the other disjunct: a kind that claims a mutation, carrying a decision
+        // that says the action was refused. It is the record a security reviewer must never find
+        // — "the policy refused this" beside the rows it changed.
+        let mut record = AuditRecord::entity_changed(
+            audit_id(),
+            AuditKind::EntityUpdated,
+            at(),
+            alice(),
+            correlation(),
+            ChangeRecord::updated(entity(), revision(3), revision(4)),
+        );
+        record.decision = Some(denial());
+
+        assert!(
+            !record.kind.is_refusal(),
+            "the fixture's kind must not be a refusal on its own, or the decision-based half of \
+             the rule is not what is being tested"
+        );
+        assert!(
+            record.is_rejection(),
+            "a record carrying a decision that was not allowed is a refusal"
+        );
+
+        let errors = record.validate().expect_err(
+            "a refused action must not mutate state, whichever field says it was refused",
+        );
+        assert_eq!(errors.len(), 1, "{errors}");
+        let error = &errors.as_slice()[0];
+        assert_eq!(error.code, ValidationCode::RefusalMutatedState);
+        assert_eq!(error.location, "audit.change");
     }
 
     #[test]
