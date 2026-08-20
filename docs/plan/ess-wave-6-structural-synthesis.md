@@ -69,6 +69,11 @@ against the generated workspace linked with hand-written obligation implementati
 Then the falsifiability half: one obligation implementation deliberately corrupted, and the same
 suite fails the scenario that exists to catch it. Both results land in CI via `synth-check`.
 
+One constraint on the linker, decided in [`gap-register.md`](gap-register.md) D-2: it never
+chooses. Zero implementations for an obligation is an unsatisfied obligation; two is an ambiguity
+error naming both. Selection among alternatives is `Realization` material and stays proposed with
+it.
+
 ## What is deliberately not in this wave
 
 Behavioural synthesis, any second transport, obligation-as-artifact and the ADP task integration,

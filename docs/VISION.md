@@ -115,8 +115,9 @@ self-declared `Producer` (`crates/aep-domain/src/evidence.rs`); nothing binds a 
 the evidence it submits, and the harness guide says so outright — the engine will record a test result
 the harness invented. Closing it means attested
 evidence: a signature over the record and a key the protocol already knows. There is no signature, no
-key and no attestation anywhere in the workspace, and no plan document proposes one, so this is a gap
-rather than a horizon.
+key and no attestation anywhere in the workspace. A proposed shape now exists —
+[`docs/plan/gap-register.md`](plan/gap-register.md) D-3 — and is not accepted, so this is a gap with
+an owner rather than a horizon.
 
 ## Where this stands
 
