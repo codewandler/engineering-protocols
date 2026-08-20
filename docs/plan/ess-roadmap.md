@@ -314,6 +314,41 @@ commit (register D-4); the input→event-payload model gap closes, so the one fa
 gets a scenario that catches it; value-object invariant scenarios synthesise, as the refusal text
 already promises; and `proptest` phase 1 lands with the model changes it was queued behind.
 
+## ESS wave 7 — the loop closed over generated code
+
+> **Scheduled, 2026-08-20, by operator instruction: run 7.1 through 7.4, then stop.** 7.5 exists on
+> the gap register as D-3 (attested evidence) and is *not* scheduled — it adds a dependency class,
+> and that acceptance is Timo's, not a wave's. Starts after wave 6.5 and the public-docs sweep.
+
+### W7.1 The diff learns about generated artifacts
+
+`contract_digest` becomes code: generated artifacts — projections, suites, synthesised workspaces —
+carry the digest of the model slice they derive from, and `ess impact` narrows "the specification
+moved, the whole workspace is owed" to the artifacts whose slice moved. Same polarity as everything:
+narrow, never survive. This closes the loop wave 6 opens, by the same argument that put the diff
+ahead of synthesis.
+
+### W7.2 Entities and commands join the delta
+
+Register D-1 executed: predicate comparison as conservative canonical equality. Equal says nothing;
+different says *changed* with no direction; implication stays refused. Entities, commands, views and
+bindings enter the six-family comparison, which stops being six.
+
+### W7.3 A second emitter, and the seam proves itself
+
+**Go, by decision** — reversible, and chosen *because* it lacks sum types: every outcome enum and
+tagged union forces the emitter to either encode honestly or refuse at the target stage, which is
+the first real test of "a target-specific refusal never masquerades as unsynthesizable". The plan
+does not change; that is the whole point of the seam, and W7.3 fails if it has to.
+
+### W7.4 Obligations become artifacts, and tasks
+
+The deferred half of the synthesis design's §13–§23, now safe to take: an obligation from the plan
+becomes an AEP artifact with identity and a contract digest (which W7.1 provides), and an ADP task
+can require its resolution the way it already requires conformance. Invalidation reuses
+revision-bound approval (`ReviewResult::covers`) rather than mirroring it — review finding 9. §28
+stays refused; obligations never grant capabilities.
+
 ## What is not in these six waves
 
 Behavioural synthesis (§32 phase 7), formal verification, topology generation, the compatibility
