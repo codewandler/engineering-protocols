@@ -26,14 +26,16 @@ use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
 use ess_conformance::scenario::{
     BindingAspect, BindingRef, CommandRef, ConformanceScenario, ConformanceSuite, DeclaredTypeRef,
-    ErrorRef, EssSemanticRef, EventRef, OutcomeRef, ScenarioId, ScenarioPurpose, ScenarioStep,
-    ScenarioValue, SuiteFormat, SuiteProvenance, TransitionRef, ViewExpectation,
+    ErrorRef, EssSemanticRef, EventRef, Holds, LeafShape, OutcomeRef, PayloadShape, ScenarioId,
+    ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteFormat, SuiteProvenance, TransitionRef,
+    ViewExpectation,
 };
 use ess_domain::binding::BindingName;
 use ess_domain::command::OutcomeName;
 use ess_domain::name::QualifiedName;
 use ess_domain::spec::{RawSpecFile, Specification};
 use ess_domain::system::Source;
+use ess_domain::types::Primitive;
 
 // ---- the billing example, compiled -----------------------------------------------------------
 
@@ -150,6 +152,24 @@ fn outcome_ref(command: &ResolvedCommand, handle: &CommandHandle, branch: &str) 
 ///
 /// Every reference is minted from a handle the IR handed over, which is the one-way door §21
 /// describes — and nothing built here holds the handle afterwards.
+/// What `billing.invoice.InvoiceCreated` declares it carries, flattened as synthesis flattens it.
+///
+/// Written out by hand here for the same reason the rest of this example is: it is what §13's claim
+/// looks like as data — a newtype is transparent, so `invoice_id` is a `Uuid` and not an
+/// `InvoiceId`, and a struct contributes its fields under `amount.amount` and `amount.currency`.
+fn invoice_created_shape() -> PayloadShape {
+    let mut shape = PayloadShape::new();
+    for (path, kind) in [
+        ("invoice_id", Primitive::Uuid),
+        ("customer_email", Primitive::String),
+        ("amount.amount", Primitive::Decimal),
+        ("amount.currency", Primitive::String),
+    ] {
+        shape.insert(path, LeafShape::required(Holds::Primitive { kind }));
+    }
+    shape
+}
+
 fn worked_example(ir: &EssIr) -> ConformanceSuite {
     let mut suite = ConformanceSuite::new(SuiteProvenance::of(ir));
     let handle = command_handle(ir, "billing.invoice.CreateInvoice");
@@ -201,6 +221,7 @@ fn worked_example(ir: &EssIr) -> ConformanceSuite {
                     ScenarioStep::ExpectEvent {
                         event: created.clone(),
                         payload: BTreeMap::from([("amount".to_owned(), money(120))]),
+                        shape: invoice_created_shape(),
                     },
                 ],
                 [

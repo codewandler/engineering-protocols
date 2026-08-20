@@ -92,16 +92,19 @@
 //!
 //! A green run against a correct target shows only that the suite asks for nothing a correct target
 //! cannot answer. [`faulty`] is the other half — §25 and §26 — and it is what makes the rest of this
-//! crate evidence rather than a claim: ten implementations that are wrong in exactly one way, and
+//! crate evidence rather than a claim: eleven implementations that are wrong in exactly one way, and
 //! `tests/faults.rs`, which asserts per fault **which named scenario fails** and **how many
 //! unrelated ones still pass**, against an allowance that has to be changed with a reason.
 //!
-//! Three of the ten are caught by **nothing at all**, and those are the rows worth reading. They
-//! share one root: a synthesised suite asserts that an event was published and never what it
-//! carried, and asks for the absence of exactly one event per refused transition and of nothing
-//! else. [`Caught::Nothing`] records each with its reason, and the matrix
-//! asserts they are *still* uncaught, so closing one of the holes forces the row to be rewritten
-//! rather than forgotten.
+//! Exactly one of the eleven is caught by **nothing at all**, and that is the row worth reading:
+//! `wrong-event-payload` publishes an invoice's creation with an amount nobody submitted. Every
+//! field the event declares is present and every one is of its declared type, and **nothing in the
+//! model says where a payload field's value comes from** — so the check that would catch it is a
+//! match on a shared field name, which is the inference this crate refuses everywhere else.
+//! [`Caught::Nothing`] records it with that reason, and the matrix asserts it is *still* uncaught,
+//! so closing the hole forces the row to be rewritten rather than forgotten. Two rows that sat
+//! beside it have already moved: an event a branch does not declare, and a read-your-writes demand
+//! that used to lapse into a weaker read.
 //!
 //! # What is deliberately not here
 //!
@@ -136,8 +139,9 @@ pub use report::{
 };
 pub use runner::{AdvancingClock, Clock, Ids, Runner, RunnerConfig};
 pub use scenario::{
-    BindingAspect, ConformanceScenario, ConformanceSuite, EssSemanticRef, InstanceName, ScenarioId,
-    ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance, ViewExpectation,
+    BindingAspect, ConformanceScenario, ConformanceSuite, EssSemanticRef, Holds, InstanceName,
+    LeafShape, PayloadShape, ScenarioId, ScenarioPurpose, ScenarioStep, ScenarioValue,
+    SuiteProvenance, ViewExpectation,
 };
 pub use synthesize::{
     synthesize, BindingGap, InstanceNeed, Refusal, RefusalCause, Synthesis, Unreachable,

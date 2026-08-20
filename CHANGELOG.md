@@ -47,6 +47,20 @@ belongs in the commit message or in `docs/design/`.
   outcome. Seven are caught by the scenario that exists to catch them — named, not merely "the run
   went red" — and the matrix asserts each fault's blast radius against an allowance, so a suite that
   starts over-reaching fails rather than looking thorough.
+- **Two of those three faults are now caught.** A command may no longer announce an event belonging to
+  a branch it did not take: every event the specification declares and the branch does not emit is
+  asserted absent, scoped to that invocation. And a read-your-writes view whose command returned no
+  consistency token is no longer quietly read at whatever is current — the check fails, naming the
+  command that owes the token, because a weaker read that passes is a skip wearing a pass's clothes.
+- **An event's payload is checked for shape.** Every declared field must be present and of its
+  declared type, down to the leaves. Its *value* still is not, and cannot be: nothing in the model
+  relates a command's input to an emitted event's payload, so `InvoiceCreated.amount` matching
+  `CreateInvoice.amount` is a coincidence of field names rather than something the specification says.
+  Closing that needs a construct in the shape `mapping:` already has, and until then the fault stays
+  recorded as uncaught with its reason narrowed.
+- **A view assertion names the instance the scenario acted on**, rather than meaning "the view holds
+  some row". The weaker form was correct only because scenarios are isolated, and would have passed
+  against a shared target for reasons unrelated to the rule being tested.
 - **Three faults are caught by nothing, and the matrix records that too.** An event may be published
   with any payload, and a command may announce an event belonging to a branch it did not take, because
   synthesis asserts an event by name and writes no payload; and a target that returns no consistency

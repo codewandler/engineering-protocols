@@ -150,6 +150,9 @@ pub enum CheckCode {
     Error,
     /// A branch published an event it declares it emits.
     Event,
+    /// A published event carried every field its declaration says it carries, and each is of the
+    /// declared type.
+    Payload,
     /// A branch published an event nothing declares it emits.
     NoEvent,
     /// A consequence the specification declares became observable within the run's deadline.
@@ -175,10 +178,11 @@ impl CheckCode {
     ///
     /// Public for the reason `BindingAspect::ALL` is: a list nobody iterates is a list that goes
     /// stale, and this is what makes "every rule the runner checks has a name" assertable.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Outcome,
         Self::Error,
         Self::Event,
+        Self::Payload,
         Self::NoEvent,
         Self::EventualEvent,
         Self::View,
@@ -196,6 +200,7 @@ impl CheckCode {
             Self::Outcome => "ESS-CF-OUTCOME",
             Self::Error => "ESS-CF-ERROR",
             Self::Event => "ESS-CF-EVENT",
+            Self::Payload => "ESS-CF-PAYLOAD",
             Self::NoEvent => "ESS-CF-NO-EVENT",
             Self::EventualEvent => "ESS-CF-EVENTUAL-EVENT",
             Self::View => "ESS-CF-VIEW",
@@ -217,6 +222,10 @@ impl CheckCode {
                             declares"
             }
             Self::Event => "a branch publishes every event it declares it emits",
+            Self::Payload => {
+                "an event carries every field it declares, each holding a value of \
+                              the declared type"
+            }
             Self::NoEvent => "a branch publishes no event it does not declare it emits",
             Self::EventualEvent => {
                 "a declared consequence becomes observable within the run's \

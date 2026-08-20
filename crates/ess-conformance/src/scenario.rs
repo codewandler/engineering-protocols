@@ -74,6 +74,7 @@ use ess_domain::command::OutcomeName;
 use ess_domain::component::ComponentName;
 use ess_domain::entity::StateName;
 use ess_domain::name::{QualifiedName, Version};
+use ess_domain::types::Primitive;
 
 // ---- the suite -----------------------------------------------------------------------------
 
@@ -1015,6 +1016,168 @@ impl ScenarioValue {
     }
 }
 
+// ---- payload shapes -------------------------------------------------------------------------
+
+/// What the specification declares a payload is made of, flattened to the leaves that can be
+/// checked with nothing but the suite in hand.
+///
+/// # Why a shape and not values
+///
+/// An event declares its fields and their types; the command that publishes it declares its input.
+/// **Nothing in the model relates one to the other** — no construct says where a payload field's
+/// value comes from — so `InvoiceCreated.amount == CreateInvoice.amount` is a name match, and a name
+/// match is the inference this crate refuses everywhere else. Asserting a *value* would therefore be
+/// a guess dressed as a reading, and a suite that guesses fails correct implementations.
+///
+/// What survives that argument is the half the model does state: the payload's declared fields are
+/// present, and each holds a value of the type it was declared with. That is what this carries, and
+/// it is why [`ScenarioStep::ExpectEvent`] has both a `payload` (values, always a reading of
+/// something else the model said) and a `shape` (types, always available).
+///
+/// # Flattened, and why the leaves are dotted paths
+///
+/// The same deep-path rule [`flatten`](crate::flatten) applies to a command's input, so a payload
+/// and an input are held to one reading of what `Optional<Money>` exposes rather than to two:
+/// a newtype is transparent, an `Optional` marks its leaves absentable, a struct contributes its
+/// fields under `parent.child`, and a list, a map and a union contribute one leaf that says only
+/// what container it is. `billing.invoice.InvoiceCreated` therefore flattens to `invoice_id`,
+/// `customer_email`, `amount.amount` and `amount.currency`.
+///
+/// # An undeclared field is not refused
+///
+/// Only what the specification declares is required. An implementation that publishes an extra
+/// field is not contradicting anything the model says — an event's payload is not a closed set here
+/// — so a suite that refused one would be enforcing a rule no document wrote.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(transparent)]
+pub struct PayloadShape {
+    leaves: BTreeMap<String, LeafShape>,
+}
+
+impl PayloadShape {
+    /// A shape that requires nothing.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Requires `path` to hold what `leaf` describes.
+    pub fn insert(&mut self, path: impl Into<String>, leaf: LeafShape) {
+        self.leaves.insert(path.into(), leaf);
+    }
+
+    /// Every leaf, by the dotted path that reaches it.
+    pub fn leaves(&self) -> &BTreeMap<String, LeafShape> {
+        &self.leaves
+    }
+
+    /// `true` when the declaration reaches no checkable leaf at all.
+    pub fn is_empty(&self) -> bool {
+        self.leaves.is_empty()
+    }
+}
+
+/// One leaf of a declared payload: what may sit there, and whether anything has to.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LeafShape {
+    /// What the declared type admits.
+    #[serde(flatten)]
+    pub holds: Holds,
+    /// Whether the declaration permits it to be absent.
+    ///
+    /// `true` where an `Optional` was walked through on the way down, including one wrapping the
+    /// struct this leaf is a field of: if the whole value is absent, so is every leaf under it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub optional: bool,
+}
+
+impl LeafShape {
+    /// A leaf that must be present.
+    pub fn required(holds: Holds) -> Self {
+        Self {
+            holds,
+            optional: false,
+        }
+    }
+
+    /// The same leaf, permitted to be absent.
+    #[must_use]
+    pub fn optional(mut self) -> Self {
+        self.optional = true;
+        self
+    }
+
+    /// Whether `value` is one the declaration admits there.
+    ///
+    /// `None` means nothing was published at that path, which conforms only where the declaration
+    /// said it might be absent.
+    pub fn admits(&self, value: Option<&Node>) -> bool {
+        match value {
+            None | Some(Node::Null) => self.optional,
+            Some(value) => self.holds.admits(value),
+        }
+    }
+}
+
+/// What a declared type admits at one leaf.
+///
+/// The five cases [`flatten`](crate::flatten)'s table already distinguishes, carried as data so that
+/// a runner holding only a suite can check them — including one written in another language, which
+/// is the whole point of §21. A `DeclaredTypeRef` here would have been a name a runner cannot
+/// resolve without the specification, and a suite that only means something beside the document it
+/// came from is a cache rather than an artifact.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "holds", rename_all = "snake_case")]
+pub enum Holds {
+    /// A primitive, after every newtype on the way down has been walked through.
+    Primitive {
+        /// Which one.
+        kind: Primitive,
+    },
+    /// One of a fixed set of names, as text.
+    Enum {
+        /// The names, in declaration order.
+        variants: Vec<String>,
+    },
+    /// An ordered sequence. Its elements are not described: a path has no index to name one by.
+    List,
+    /// A mapping with primitive keys. Its values are not described, for the same reason.
+    Map,
+    /// A tagged union. Only that it is a mapping is checked, exactly as
+    /// [`flatten`](crate::flatten) checks one.
+    Union,
+}
+
+impl Holds {
+    /// Whether `value` is of the shape this admits.
+    ///
+    /// The primitive table is [`crate::input`]'s own, called rather than restated: a payload and a
+    /// command input disagreeing about whether `1.5` is an `Integer` would be two readings of one
+    /// rule, and the second one is wrong eventually.
+    pub fn admits(&self, value: &Node) -> bool {
+        match self {
+            Self::Primitive { kind } => crate::input::primitive_value(*kind, value).is_some(),
+            Self::Enum { variants } => value
+                .as_text()
+                .is_some_and(|text| variants.iter().any(|variant| variant == text)),
+            Self::List => matches!(value, Node::Seq(_)),
+            Self::Map | Self::Union => matches!(value, Node::Map(_)),
+        }
+    }
+}
+
+impl fmt::Display for Holds {
+    /// Reads as the tail of "`InvoiceCreated.amount.amount` holds …".
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Primitive { kind } => write!(f, "a {kind}"),
+            Self::Enum { variants } => write!(f, "one of {}", variants.join(", ")),
+            Self::List => f.write_str("a list"),
+            Self::Map => f.write_str("a mapping"),
+            Self::Union => f.write_str("a tagged union, as a mapping"),
+        }
+    }
+}
+
 // ---- steps ---------------------------------------------------------------------------------
 
 /// One thing a scenario does or requires.
@@ -1118,13 +1281,20 @@ pub enum ScenarioStep {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         fields: BTreeMap<String, Node>,
     },
-    /// Require that this event was observed (§13).
+    /// Require that this event was observed (§13), carrying what it declares it carries.
     ExpectEvent {
         /// Which event.
         event: EventRef,
         /// The payload fields to compare, by name. Partial, as [`ExpectError`](Self::ExpectError) is.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         payload: BTreeMap<String, Node>,
+        /// The declared fields that must be present, and what each must hold.
+        ///
+        /// Separate from `payload` because the two are different kinds of claim, and only one of
+        /// them is free: a *value* is assertable only where some construct says where it comes
+        /// from, and a *type* is declared outright. [`PayloadShape`] argues it in full.
+        #[serde(default, skip_serializing_if = "PayloadShape::is_empty")]
+        shape: PayloadShape,
     },
     /// Require that this event was **not** observed.
     ///
@@ -1244,6 +1414,10 @@ pub enum ScenarioStep {
         /// The payload fields to compare, by name.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         payload: BTreeMap<String, Node>,
+        /// The declared fields the occurrence must carry, as
+        /// [`ExpectEvent`](Self::ExpectEvent) requires them.
+        #[serde(default, skip_serializing_if = "PayloadShape::is_empty")]
+        shape: PayloadShape,
     },
     /// Read a view until it satisfies the expectation, or the deadline expires (§14).
     ///
@@ -1264,13 +1438,28 @@ pub enum ScenarioStep {
 /// Rows are matched by the fields the suite names, not by a key: a view declares a filter and the
 /// fields it projects, and nothing in the model declares query parameters. Inventing them here would
 /// be the kind of invention §11 refuses; when the model gains them, this gains a variant.
+///
+/// # A field may name the instance the scenario made, and that is what makes it an assertion
+///
+/// The values are [`ScenarioValue`]s, not [`Node`]s, for the same reason
+/// [`ExecuteCommand`](ScenarioStep::ExecuteCommand)'s input is: the identity a scenario is about is
+/// the target's to assign, and no generator knows it. With literals only, `Contains {}` means "the
+/// view holds *a* row" and `Excludes {}` means "the view holds none at all" — correct only because
+/// isolation is per scenario (§8), and wrong the moment a target is shared with anything else,
+/// which §8 permits a target to be as long as scenarios do not interfere.
+///
+/// Naming the instance costs a runner exactly what an instance-valued command input already costs
+/// it: the reference has to be resolved against what earlier steps bound before the comparison, and
+/// a reference nothing bound is a **suite** defect rather than a failed assertion. A runner that
+/// understood only literals could execute no scenario in this vocabulary already, so nothing new is
+/// required of one.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "expect", rename_all = "snake_case")]
 pub enum ViewExpectation {
     /// A row with these field values is present.
     Contains {
         /// The fields to match, by name.
-        fields: BTreeMap<String, Node>,
+        fields: BTreeMap<String, ScenarioValue>,
     },
     /// No row with these field values is present.
     ///
@@ -1278,7 +1467,7 @@ pub enum ViewExpectation {
     /// cannot see.
     Excludes {
         /// The fields to match, by name.
-        fields: BTreeMap<String, Node>,
+        fields: BTreeMap<String, ScenarioValue>,
     },
     /// Every row the view holds satisfies this predicate, and it holds at least one.
     ///
@@ -1665,6 +1854,8 @@ semantic_ref_from! {
 
 #[cfg(test)]
 mod tests {
+    use aep_domain::facts::Number;
+
     use super::*;
 
     /// `billing.invoice.CreateInvoice`, parsed.
@@ -1678,6 +1869,89 @@ mod tests {
             command(command_name),
             OutcomeName::new(branch).expect("a valid outcome name"),
         )
+    }
+
+    #[test]
+    fn a_declared_leaf_admits_what_its_type_admits_and_absence_only_where_the_type_permits_it() {
+        // The claim `PayloadShape` is worth anything for: a field declared `Decimal` and carrying a
+        // string is a contradiction of the specification, and a field the declaration marks
+        // `Optional` is not one when it is missing. Both directions, because a check that admitted
+        // everything would pass exactly as green as one that checked the right thing.
+        let amount = LeafShape::required(Holds::Primitive {
+            kind: Primitive::Decimal,
+        });
+        assert!(amount.admits(Some(&Node::Number(Number::new(1.5).expect("finite")))));
+        assert!(!amount.admits(Some(&Node::Text("1.5".to_owned()))));
+        assert!(
+            !amount.admits(None),
+            "a field the declaration does not mark optional has to be there"
+        );
+        assert!(
+            !amount.admits(Some(&Node::Null)),
+            "and null is absence spelled differently, not a decimal"
+        );
+        assert!(amount.clone().optional().admits(None));
+
+        // An `Integer` that is not integral is refused rather than rounded — `crate::input`'s rule,
+        // called rather than restated, so a payload and a command input cannot disagree about it.
+        let count = LeafShape::required(Holds::Primitive {
+            kind: Primitive::Integer,
+        });
+        assert!(!count.admits(Some(&Node::Number(Number::new(1.5).expect("finite")))));
+
+        let channel = LeafShape::required(Holds::Enum {
+            variants: vec!["Email".to_owned(), "Post".to_owned()],
+        });
+        assert!(channel.admits(Some(&Node::Text("Post".to_owned()))));
+        assert!(
+            !channel.admits(Some(&Node::Text("Fax".to_owned()))),
+            "a closed set of names is closed, which is the whole reason to declare one"
+        );
+
+        // The three containers say only what container they are: a fact path has no index and no
+        // key selector, so nothing deeper is describable and nothing deeper is claimed.
+        assert!(LeafShape::required(Holds::List).admits(Some(&Node::Seq(Vec::new()))));
+        assert!(!LeafShape::required(Holds::List).admits(Some(&Node::Map(BTreeMap::new()))));
+        assert!(LeafShape::required(Holds::Map).admits(Some(&Node::Map(BTreeMap::new()))));
+        assert!(LeafShape::required(Holds::Union).admits(Some(&Node::Map(BTreeMap::new()))));
+        assert!(!LeafShape::required(Holds::Union).admits(Some(&Node::Text("person".to_owned()))));
+    }
+
+    #[test]
+    fn a_payload_shape_round_trips_through_the_form_a_suite_is_stored_in() {
+        // §21: a suite is read back by a later process, so a shape that only meant something to the
+        // build that wrote it would be a cache. `optional: false` is left out of the artifact, which
+        // is a default rather than an omission — this is what says the two are the same value.
+        let mut shape = PayloadShape::new();
+        shape.insert(
+            "amount.amount",
+            LeafShape::required(Holds::Primitive {
+                kind: Primitive::Decimal,
+            }),
+        );
+        shape.insert(
+            "note",
+            LeafShape::required(Holds::Primitive {
+                kind: Primitive::String,
+            })
+            .optional(),
+        );
+
+        let written = serde_json::to_string(&shape).expect("a shape serialises");
+        assert!(
+            !written.contains(
+                r#""amount.amount":{"holds":"primitive","kind":"decimal","optional":false}"#
+            ),
+            "the default is left out rather than repeated on every leaf: {written}"
+        );
+        assert!(
+            written.contains(r#""optional":true"#),
+            "and the one that is not the default is written down: {written}"
+        );
+        assert_eq!(
+            serde_json::from_str::<PayloadShape>(&written).expect("and reads back"),
+            shape
+        );
     }
 
     #[test]

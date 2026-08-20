@@ -67,8 +67,8 @@ use crate::report::{
 };
 use crate::scenario::{
     ActorRef, BindingRef, CommandRef, ConformanceScenario, ConformanceSuite, EntityRef, ErrorRef,
-    EventRef, InstanceName, OutcomeRef, ScenarioId, ScenarioStep, ScenarioValue, ViewExpectation,
-    ViewRef,
+    EventRef, InstanceName, OutcomeRef, PayloadShape, ScenarioId, ScenarioStep, ScenarioValue,
+    ViewExpectation, ViewRef,
 };
 use crate::target::{
     ConformanceTarget, Deadline, EventObservationRequest, ExternalOutcomeControl,
@@ -387,7 +387,11 @@ impl<C: Clock> Runner<C> {
             } => execute_command(command, actor.as_ref(), input, run, target),
             ScenarioStep::ExpectOutcome { outcome } => expect_outcome(outcome, run),
             ScenarioStep::ExpectError { error, fields } => expect_error(error, fields, run),
-            ScenarioStep::ExpectEvent { event, payload } => expect_event(event, payload, run),
+            ScenarioStep::ExpectEvent {
+                event,
+                payload,
+                shape,
+            } => expect_event(event, payload, shape, run),
             ScenarioStep::ExpectNoEvent { event } => expect_no_event(event, run),
             ScenarioStep::CaptureInstance {
                 instance,
@@ -403,9 +407,11 @@ impl<C: Clock> Runner<C> {
             } => self.expect_invocation(binding, command, input, run, target),
             ScenarioStep::QueryView { view } => self.query_view(view, run, target),
             ScenarioStep::ExpectView { view, expectation } => expect_view(view, expectation, run),
-            ScenarioStep::EventuallyEvent { event, payload } => {
-                self.eventually_event(event, payload, run, target)
-            }
+            ScenarioStep::EventuallyEvent {
+                event,
+                payload,
+                shape,
+            } => self.eventually_event(event, payload, shape, run, target),
             ScenarioStep::EventuallyView { view, expectation } => {
                 self.eventually_view(view, expectation, run, target)
             }
@@ -511,17 +517,34 @@ impl<C: Clock> Runner<C> {
     /// The consistency is not a choice made here: a `read_your_writes` view is the only kind
     /// synthesis writes this step for, and demanding `AtLeast(token)` is what makes the target — not
     /// the runner — responsible for waiting until it can answer.
+    ///
+    /// # A command that returns no token is not read at `Current` instead
+    ///
+    /// It would be the easy thing, and it is the "skip that looks like a pass". §14's whole claim is
+    /// that the query sees the command that just returned; with no token in hand, `Current` asks a
+    /// weaker question, gets a green tick and reports a check that was never made. So the read is
+    /// **not** issued, and [`expect_view`] records what actually happened — see there for why that
+    /// is `failed` rather than `unsupported`. The target owns satisfying `AtLeast(T)`; a target that
+    /// will not say what `T` is has not left it anything to satisfy.
     fn query_view<T: ConformanceTarget>(
         &mut self,
         view: &ViewRef,
         run: &mut Run,
         target: &T,
     ) -> Flow {
-        let consistency = run
-            .last_command
-            .as_ref()
-            .and_then(|executed| executed.result.consistency.clone())
-            .map_or(QueryConsistency::Current, QueryConsistency::at_least);
+        let consistency = match run.last_command.as_ref() {
+            // Nothing has been written in this scenario, so there is no write to read no older
+            // than. Synthesis never produces this, and a suite that does means it.
+            None => QueryConsistency::Current,
+            Some(executed) => {
+                let Some(token) = executed.result.consistency.clone() else {
+                    run.unreadable = Some((view.clone(), executed.command.clone()));
+                    run.last_view = None;
+                    return Flow::Continue;
+                };
+                QueryConsistency::at_least(token)
+            }
+        };
         let deadline = self.deadline();
         let request = SemanticViewRequest {
             view: view.clone(),
@@ -531,6 +554,7 @@ impl<C: Clock> Runner<C> {
         };
         match target.query_view(request) {
             Ok(result) => {
+                run.unreadable = None;
                 run.last_view = Some((view.clone(), result));
                 Flow::Continue
             }
@@ -550,6 +574,7 @@ impl<C: Clock> Runner<C> {
         &mut self,
         event: &EventRef,
         payload: &BTreeMap<String, Node>,
+        shape: &PayloadShape,
         run: &mut Run,
         target: &T,
     ) -> Flow {
@@ -574,14 +599,20 @@ impl<C: Clock> Runner<C> {
                 }
             };
             run.remember(&observed);
-            if observed
+            let carried = observed
                 .iter()
-                .any(|seen| &seen.event == event && matches(&seen.payload, payload))
-            {
+                .find(|seen| &seen.event == event && matches(&seen.payload, payload))
+                .map(|seen| seen.payload.clone());
+            if let Some(carried) = carried {
                 run.record(CheckResult::passed(
                     CheckCode::EventualEvent,
                     format!("event {event}, eventually"),
                 ));
+                // The occurrence that arrived is held to the same declaration an immediate one is:
+                // crossing a component boundary changes when a consequence is observable, not what
+                // it carries.
+                let executing = run.last_command.as_ref().map(Executed::quoted);
+                expect_payload(event, &carried, shape, executing, run);
                 return Flow::Continue;
             }
             if deadline.has_passed(self.clock.now()) {
@@ -614,6 +645,13 @@ impl<C: Clock> Runner<C> {
         run: &mut Run,
         target: &T,
     ) -> Flow {
+        let required = match Required::of(expectation, run) {
+            Ok(required) => required,
+            Err(reason) => {
+                run.record(unresolvable(view, &run.id, &reason));
+                return Flow::Stop;
+            }
+        };
         let deadline = self.deadline();
         let mut asks = 0_u32;
         loop {
@@ -637,7 +675,7 @@ impl<C: Clock> Runner<C> {
                     return Flow::Stop;
                 }
             };
-            let verdict = decide(expectation, &result);
+            let verdict = decide(&required, &result);
             match verdict {
                 Verdict::Satisfied | Verdict::Undecidable { .. } => {
                     run.last_view = Some((view.clone(), result));
@@ -645,20 +683,15 @@ impl<C: Clock> Runner<C> {
                         CheckCode::EventualView,
                         &run.id,
                         view,
-                        expectation,
+                        &required,
                         &verdict,
                     ));
                     return Flow::Continue;
                 }
                 Verdict::Unsatisfied(_) if deadline.has_passed(self.clock.now()) => {
                     run.last_view = Some((view.clone(), result));
-                    let mut check = view_check(
-                        CheckCode::EventualView,
-                        &run.id,
-                        view,
-                        expectation,
-                        &verdict,
-                    );
+                    let mut check =
+                        view_check(CheckCode::EventualView, &run.id, view, &required, &verdict);
                     if let Some(diagnostic) = check.diagnostic.take() {
                         check.diagnostic =
                             Some(diagnostic.observed(format!("still so after {asks} reads")));
@@ -803,7 +836,12 @@ fn expect_error(error: &ErrorRef, fields: &BTreeMap<String, Node>, run: &mut Run
 }
 
 /// Requires that the last command published an event it declares it emits (§13).
-fn expect_event(event: &EventRef, payload: &BTreeMap<String, Node>, run: &mut Run) -> Flow {
+fn expect_event(
+    event: &EventRef,
+    payload: &BTreeMap<String, Node>,
+    shape: &PayloadShape,
+    run: &mut Run,
+) -> Flow {
     let Some(executed) = run.last_command.as_ref() else {
         run.record(no_command(&run.id, "an event"));
         return Flow::Stop;
@@ -813,10 +851,9 @@ fn expect_event(event: &EventRef, payload: &BTreeMap<String, Node>, run: &mut Ru
         .result
         .direct_events
         .iter()
-        .any(|observed| &observed.event == event && matches(&observed.payload, payload));
-    if found {
-        run.record(CheckResult::passed(CheckCode::Event, about));
-    } else {
+        .find(|observed| &observed.event == event && matches(&observed.payload, payload))
+        .map(|observed| observed.payload.clone());
+    let Some(carried) = found else {
         let mut diagnostic = Diagnostic::new(CheckCode::Event, run.id.clone())
             .declared_by(event.clone())
             .executing(executed.quoted())
@@ -824,12 +861,121 @@ fn expect_event(event: &EventRef, payload: &BTreeMap<String, Node>, run: &mut Ru
         for (field, value) in payload {
             diagnostic = diagnostic.expected(format!("{event}.{field} = {}", quote(value)));
         }
+        let observed = published(&executed.result);
+        run.record(CheckResult::failed(about, diagnostic.observed(observed)));
+        return Flow::Continue;
+    };
+    let executing = executed.quoted();
+    run.record(CheckResult::passed(CheckCode::Event, about));
+    // A separate check, and separately named: "the event happened" and "the event carried what it
+    // declares" are two rules, and a report that folded them into one would say `ESS-CF-EVENT`
+    // failed for a system that published exactly the right event with half a payload.
+    expect_payload(event, &carried, shape, Some(executing), run);
+    Flow::Continue
+}
+
+/// Requires that an occurrence carried every field it declares, each of the declared type (§13).
+///
+/// # What is not checked here, and why
+///
+/// A **value**. `PayloadShape` argues it in full: the model relates a command's input to no payload
+/// field, so `InvoiceCreated.amount == CreateInvoice.amount` is a name match rather than a reading,
+/// and a suite that asserted it would fail an implementation that is doing nothing wrong.
+///
+/// An **undeclared** field, for the mirror-image reason: nothing in the model closes an event's
+/// payload, so refusing an extra field would enforce a rule no document wrote.
+fn expect_payload(
+    event: &EventRef,
+    carried: &BTreeMap<String, Node>,
+    shape: &PayloadShape,
+    executing: Option<String>,
+    run: &mut Run,
+) {
+    if shape.is_empty() {
+        return;
+    }
+    let about = format!("payload of {event}");
+    let mut diagnostic =
+        Diagnostic::new(CheckCode::Payload, run.id.clone()).declared_by(event.clone());
+    if let Some(executing) = executing {
+        diagnostic = diagnostic.executing(executing);
+    }
+    // Accumulated rather than stopped at the first, as every other validation in this workspace is:
+    // an event with three fields of the wrong type is three repairs, and reporting one makes the
+    // other two look like consequences of it.
+    let mut wrong = Vec::new();
+    for (path, leaf) in shape.leaves() {
+        let reached = reach_into(carried, path);
+        let admitted = match &reached {
+            Reached::Value(value) => leaf.admits(Some(value)),
+            Reached::Absent => leaf.admits(None),
+            Reached::Blocked { .. } => false,
+        };
+        if admitted {
+            continue;
+        }
+        diagnostic = diagnostic.expected(format!("{event}.{path} holds {}", leaf.holds));
+        wrong.push(match reached {
+            Reached::Value(value) => format!("{path} = {}", quote(value)),
+            Reached::Absent => format!("{path} was not carried"),
+            Reached::Blocked { at, found } => {
+                format!("{at} holds {found}, so {path} is not there to read")
+            }
+        });
+    }
+    if wrong.is_empty() {
+        run.record(CheckResult::passed(CheckCode::Payload, about));
+    } else {
         run.record(CheckResult::failed(
             about,
-            diagnostic.observed(published(&executed.result)),
+            diagnostic.observed(wrong.join("; ")),
         ));
     }
-    Flow::Continue
+}
+
+/// What a dotted leaf path finds in a payload.
+enum Reached<'a> {
+    /// A value sits there.
+    Value(&'a Node),
+    /// Nothing was carried under that path, and the walk got as far as it could.
+    Absent,
+    /// A prefix of the path holds something a field cannot be read out of.
+    Blocked {
+        /// The prefix.
+        at: String,
+        /// What it holds instead.
+        found: &'static str,
+    },
+}
+
+/// Walks `path` into a payload, segment by segment.
+///
+/// A field name cannot contain a dot — the model holds one to `Field::PATTERN` — so splitting on one
+/// is a reading of the path rather than a parse that could go wrong.
+fn reach_into<'a>(payload: &'a BTreeMap<String, Node>, path: &str) -> Reached<'a> {
+    let mut walked = String::new();
+    let mut at: Option<&Node> = None;
+    for segment in path.split('.') {
+        let here = match at {
+            None => payload.get(segment),
+            Some(Node::Map(fields)) => fields.get(segment),
+            Some(value) => {
+                return Reached::Blocked {
+                    at: walked,
+                    found: value.type_name(),
+                }
+            }
+        };
+        if !walked.is_empty() {
+            walked.push('.');
+        }
+        walked.push_str(segment);
+        match here {
+            Some(value) => at = Some(value),
+            None => return Reached::Absent,
+        }
+    }
+    at.map_or(Reached::Absent, Reached::Value)
 }
 
 /// Requires that the last command published no such event (§10).
@@ -926,6 +1072,46 @@ fn redeliver_event<T: ConformanceTarget>(event: &EventRef, run: &mut Run, target
 /// is refused rather than silently asserted against whatever happened to be in hand — which would be
 /// a mis-assertion nobody could see in a passing run.
 fn expect_view(view: &ViewRef, expectation: &ViewExpectation, run: &mut Run) -> Flow {
+    // §14's demand could not be made, and the read was therefore not made at all. `failed` rather
+    // than `unsupported`, and the distinction is the finding rather than a formality: `unsupported`
+    // is for an observation the **target** cannot expose, and a target that cannot expose
+    // consistency at all says so by refusing `query_view` — which still lands as `unsupported`, on
+    // the path below. Answering a command with no token is a different thing. The specification
+    // declares this view `read_your_writes`, which is a claim about the implementation, and §9 gives
+    // a command result a token so that claim can be held to something. A result without one has
+    // declined the guarantee it declared, which is the implementation contradicting the
+    // specification.
+    if run
+        .unreadable
+        .as_ref()
+        .is_some_and(|(named, _)| named == view)
+    {
+        let command = run
+            .unreadable
+            .as_ref()
+            .map_or_else(String::new, |(_, command)| command.clone());
+        run.record(CheckResult::failed(
+            format!("view {view}"),
+            Diagnostic::new(CheckCode::View, run.id.clone())
+                .declared_by(view.clone())
+                .expected(format!(
+                    "`{command}` names the write `{view}` is then read no older than, which is what \
+                     `read_your_writes` promises a caller (§14)"
+                ))
+                .observed(format!(
+                    "`{command}` returned no consistency token, so the read was not made: asking at \
+                     `Current` instead would answer a weaker question and report it as this one"
+                )),
+        ));
+        return Flow::Continue;
+    }
+    let required = match Required::of(expectation, run) {
+        Ok(required) => required,
+        Err(reason) => {
+            run.record(unresolvable(view, &run.id, &reason));
+            return Flow::Stop;
+        }
+    };
     let Some((queried, result)) = run.last_view.as_ref() else {
         run.record(CheckResult::errored(
             format!("view {view}"),
@@ -946,10 +1132,23 @@ fn expect_view(view: &ViewRef, expectation: &ViewExpectation, run: &mut Run) -> 
         ));
         return Flow::Stop;
     }
-    let verdict = decide(expectation, result);
-    let check = view_check(CheckCode::View, &run.id, view, expectation, &verdict);
+    let verdict = decide(&required, result);
+    let check = view_check(CheckCode::View, &run.id, view, &required, &verdict);
     run.record(check);
     Flow::Continue
+}
+
+/// The suite defect of an expectation naming something no earlier step established.
+fn unresolvable(view: &ViewRef, id: &ScenarioId, reason: &str) -> CheckResult {
+    CheckResult::errored(
+        format!("view {view}"),
+        Diagnostic::new(CheckCode::Suite, id.clone())
+            .declared_by(view.clone())
+            .expected(format!(
+                "every field `{view}` is matched on refers to something an earlier step established"
+            ))
+            .observed(reason.to_owned()),
+    )
 }
 
 // ---- per-scenario state ----------------------------------------------------------------------
@@ -983,6 +1182,8 @@ struct Run {
     context: ScenarioContext,
     last_command: Option<Executed>,
     last_view: Option<(ViewRef, SemanticViewResult)>,
+    /// The view a read-your-writes read could not be made of, and the command that owes the token.
+    unreadable: Option<(ViewRef, String)>,
     instances: BTreeMap<InstanceName, Node>,
     seen: Vec<ObservedEvent>,
     checks: Vec<CheckResult>,
@@ -995,6 +1196,7 @@ impl Run {
             context,
             last_command: None,
             last_view: None,
+            unreadable: None,
             instances: BTreeMap::new(),
             seen: Vec::new(),
             checks: Vec::new(),
@@ -1126,23 +1328,59 @@ enum Verdict {
 /// no amount of re-reading changes it. So it is reported where it is met, even inside an
 /// [`EventuallyView`](ScenarioStep::EventuallyView), where the temptation is to poll to the deadline
 /// and report a timeout: the same defect in a slower, less legible costume.
-fn decide(expectation: &ViewExpectation, result: &SemanticViewResult) -> Verdict {
-    match expectation {
-        ViewExpectation::Contains { fields } => {
+fn decide(required: &Required, result: &SemanticViewResult) -> Verdict {
+    match required {
+        Required::Contains(fields) => {
             if result.rows.iter().any(|row| matches(row, fields)) {
                 Verdict::Satisfied
             } else {
                 Verdict::Unsatisfied(rows(result))
             }
         }
-        ViewExpectation::Excludes { fields } => {
+        Required::Excludes(fields) => {
             if result.rows.iter().any(|row| matches(row, fields)) {
                 Verdict::Unsatisfied(rows(result))
             } else {
                 Verdict::Satisfied
             }
         }
-        ViewExpectation::Satisfies { predicate } => satisfies(predicate, result),
+        Required::Satisfies(predicate) => satisfies(predicate, result),
+    }
+}
+
+/// A view expectation with every reference the suite carried resolved to what this run bound.
+///
+/// The suite says "the row whose `invoice_id` is the invoice step one created"; only the run knows
+/// which invoice that is. Resolving once, before the query in an
+/// [`EventuallyView`](ScenarioStep::EventuallyView) is retried, also means a reference nothing bound
+/// is a **suite** defect reported once rather than the same complaint on every ask.
+enum Required {
+    /// A row matching these values is present.
+    Contains(BTreeMap<String, Node>),
+    /// No row matching these values is present.
+    Excludes(BTreeMap<String, Node>),
+    /// Every row satisfies this, and there is at least one.
+    Satisfies(Predicate),
+}
+
+impl Required {
+    /// Resolves every reference an expectation carries against what this run has bound.
+    fn of(expectation: &ViewExpectation, run: &Run) -> Result<Self, String> {
+        let resolve = |fields: &BTreeMap<String, ScenarioValue>| {
+            fields
+                .iter()
+                .map(|(field, value)| {
+                    run.resolve(value)
+                        .map(|node| (field.clone(), node))
+                        .map_err(|reason| format!("`{field}`: {reason}"))
+                })
+                .collect::<Result<BTreeMap<String, Node>, String>>()
+        };
+        Ok(match expectation {
+            ViewExpectation::Contains { fields } => Self::Contains(resolve(fields)?),
+            ViewExpectation::Excludes { fields } => Self::Excludes(resolve(fields)?),
+            ViewExpectation::Satisfies { predicate } => Self::Satisfies(predicate.clone()),
+        })
     }
 }
 
@@ -1194,7 +1432,7 @@ fn view_check(
     code: CheckCode,
     id: &ScenarioId,
     view: &ViewRef,
-    expectation: &ViewExpectation,
+    required: &Required,
     verdict: &Verdict,
 ) -> CheckResult {
     let about = format!("view {view}");
@@ -1204,7 +1442,7 @@ fn view_check(
         Verdict::Unsatisfied(observed) => CheckResult::failed(
             about,
             diagnostic
-                .expected(required(view, expectation))
+                .expected(wanted(view, required))
                 .observed(observed.clone()),
         ),
         Verdict::Undecidable {
@@ -1221,22 +1459,22 @@ fn view_check(
     }
 }
 
-/// What a view expectation requires, in one line.
-fn required(view: &ViewRef, expectation: &ViewExpectation) -> String {
-    match expectation {
-        ViewExpectation::Contains { fields } if fields.is_empty() => {
+/// What a view expectation requires, in one line, with its references resolved.
+fn wanted(view: &ViewRef, required: &Required) -> String {
+    match required {
+        Required::Contains(fields) if fields.is_empty() => {
             format!("{view} holds a row")
         }
-        ViewExpectation::Contains { fields } => {
+        Required::Contains(fields) => {
             format!("{view} holds a row where {}", fields_of(fields))
         }
-        ViewExpectation::Excludes { fields } if fields.is_empty() => {
+        Required::Excludes(fields) if fields.is_empty() => {
             format!("{view} holds no rows")
         }
-        ViewExpectation::Excludes { fields } => {
+        Required::Excludes(fields) => {
             format!("{view} holds no row where {}", fields_of(fields))
         }
-        ViewExpectation::Satisfies { predicate } => {
+        Required::Satisfies(predicate) => {
             format!("every row of {view} satisfies `{predicate}`, and it holds at least one")
         }
     }
@@ -1419,7 +1657,7 @@ mod tests {
         // "At least one row" is part of the assertion: every row of an empty view satisfies
         // everything, so a target that published nothing would otherwise pass an invariant check.
         let predicate = Predicate::parse_expression("total.amount >= 0").expect("a predicate");
-        let expectation = ViewExpectation::Satisfies { predicate };
+        let expectation = Required::Satisfies(predicate);
 
         assert_eq!(
             decide(&expectation, &SemanticViewResult::default()),
@@ -1442,7 +1680,7 @@ mod tests {
         // re-reading changes it — so it must not become a timeout, which is the same defect wearing
         // a slower costume.
         let predicate = Predicate::parse_expression("settlement_window >= 0").expect("a predicate");
-        let expectation = ViewExpectation::Satisfies { predicate };
+        let expectation = Required::Satisfies(predicate);
 
         let verdict = decide(&expectation, &SemanticViewResult::of([row(1.0)]));
 
@@ -1499,12 +1737,8 @@ mod tests {
 
     #[test]
     fn an_empty_field_set_means_a_row_exists_and_not_that_anything_will_do() {
-        let contains = ViewExpectation::Contains {
-            fields: BTreeMap::new(),
-        };
-        let excludes = ViewExpectation::Excludes {
-            fields: BTreeMap::new(),
-        };
+        let contains = Required::Contains(BTreeMap::new());
+        let excludes = Required::Excludes(BTreeMap::new());
 
         assert_eq!(
             decide(&contains, &SemanticViewResult::of([row(1.0)])),

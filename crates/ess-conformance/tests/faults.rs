@@ -21,12 +21,18 @@
 //!
 //! # The rows worth reading are the ones nothing catches
 //!
-//! Three faults in [`Fault::ALL`] are marked [`Caught::Nothing`], and
-//! [`a_fault_nothing_catches_is_recorded_rather_than_quietly_dropped`] asserts that a **correct**
-//! run still comes back for each of them. That is not a hole in this file; it is the finding. All
-//! three have one root: a synthesised suite asserts *that* an event was published and never what it
-//! carried, and asks for the absence of exactly one event per refused transition and of nothing
-//! else. `crates/ess-conformance/src/faulty.rs` names each one and what it costs.
+//! A fault in [`Fault::ALL`] marked [`Caught::Nothing`] is not a hole in this file; it is the
+//! finding, and [`a_fault_nothing_catches_is_recorded_rather_than_quietly_dropped`] asserts that a
+//! **correct** run still comes back for it — so the day the gap closes, the row fails here and has
+//! to be rewritten rather than forgotten. That is what happened to two of the three that were
+//! recorded: `extra-event` and `drop-consistency-token` are now caught, and their rows moved.
+//!
+//! One remains, and it is the one that separates what a specification *declares* from what it
+//! merely *names*. `wrong-event-payload` publishes `InvoiceCreated` with an amount nobody submitted;
+//! every field the event declares is present and every one is of its declared type, and nothing in
+//! the model says where a payload field's value comes from — so there is no check to make that is
+//! not a guess. `partial-event-payload` is the same event with a declared field missing, and that
+//! one is caught, because the type *is* declared. `crates/ess-conformance/src/faulty.rs` argues both.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -270,12 +276,26 @@ fn a_faults_blast_radius_is_accounted_for() {
     //                             and `Cancelled`, so one missing guard is two refusals.
     //   IgnoreExternalOutcome  2  the forced failure is what makes the escalation reachable, so the
     //                             binding's failure policy has nothing to observe either.
+    //   DropConsistencyToken   8  every scenario that reads a `read_your_writes` view. The token is
+    //                             missing from *every* command result, so §14's demand can be made
+    //                             nowhere; the row designates one of the eight because a matrix row
+    //                             names a scenario, not because the other seven are collateral.
+    //   ExtraEvent             4  the four scenarios whose asserted command is `CancelInvoice`: its
+    //                             own branch, the `cancel` move, and the two states that move may
+    //                             not run from — where the stray `InvoicePaid` is now caught too,
+    //                             because a command nothing honoured may publish nothing declared.
+    //   PartialEventPayload    2  `PayInvoice/settled` is asserted twice, once as §10's branch and
+    //                             once as §19's move, and an event missing a declared field fails
+    //                             both.
     let allowance: &[(Fault, usize)] = &[
         (Fault::WrongEvent, 22),
+        (Fault::DropConsistencyToken, 8),
         (Fault::DropBinding, 4),
+        (Fault::ExtraEvent, 4),
         (Fault::StaleReadYourWrites, 3),
         (Fault::AllowIllegalTransition, 2),
         (Fault::IgnoreExternalOutcome, 2),
+        (Fault::PartialEventPayload, 2),
     ];
 
     for fault in Fault::ALL {

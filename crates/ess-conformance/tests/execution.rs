@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 use ess_compiler::ir::EssIr;
 use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
+use ess_conformance::faulty::{self, Fault};
 use ess_conformance::reference::Billing;
 use ess_conformance::report::{CheckCode, ConformanceStatus, Status};
 use ess_conformance::runner::{AdvancingClock, Ids, Runner, RunnerConfig};
@@ -28,8 +29,9 @@ use ess_conformance::scenario::{ConformanceSuite, ScenarioId, ScenarioStep, Scen
 use ess_conformance::synthesize::synthesize;
 use ess_conformance::target::{
     ConformanceTarget, EventObservationRequest, ExternalOutcomeControl, ImplementationIdentity,
-    ObservedEvent, RedeliveryRequest, ScenarioContext, SemanticCommandRequest,
-    SemanticCommandResult, SemanticViewRequest, SemanticViewResult, TargetError,
+    InvocationObservationRequest, ObservedEvent, ObservedInvocation, RedeliveryRequest,
+    ScenarioContext, SemanticCommandRequest, SemanticCommandResult, SemanticViewRequest,
+    SemanticViewResult, TargetError, ViewRow,
 };
 use ess_domain::spec::{RawSpecFile, Specification};
 use ess_domain::system::Source;
@@ -146,6 +148,7 @@ fn every_scenario_checked_something_and_no_family_of_them_was_silently_empty() {
         CheckCode::Outcome,
         CheckCode::Error,
         CheckCode::Event,
+        CheckCode::Payload,
         CheckCode::NoEvent,
         CheckCode::EventualEvent,
         CheckCode::View,
@@ -306,6 +309,168 @@ fn a_target_that_cannot_expose_an_observation_fails_the_run_rather_than_skipping
     );
 }
 
+// ---- what an event carries, and what a read is held to --------------------------------------------
+
+#[test]
+fn an_event_missing_a_field_it_declares_is_named_leaf_by_leaf_rather_than_reported_as_absent() {
+    // The half of §13 that needs no model change: `billing.invoice.InvoicePaid` declares an
+    // `amount`, so an occurrence without one contradicts the specification whatever its values are.
+    // The event check still passes — the event *did* happen — and `ESS-CF-PAYLOAD` is the one that
+    // fails, because "you published the wrong thing" and "you published the right thing badly" are
+    // two different repairs.
+    let suite = suite();
+    let report =
+        Runner::for_suite(&suite).run(&suite, &faulty::billing(Fault::PartialEventPayload));
+
+    let settled = ScenarioId::parse("billing.invoice.PayInvoice/outcome/settled").expect("an id");
+    let result = report
+        .scenarios
+        .iter()
+        .find(|result| result.scenario == settled)
+        .expect("the settled scenario ran");
+    assert_eq!(result.status, Status::Failed);
+
+    let codes: Vec<CheckCode> = result
+        .checks
+        .iter()
+        .filter(|check| check.status == Status::Failed)
+        .map(|check| check.code)
+        .collect();
+    assert_eq!(
+        codes,
+        vec![CheckCode::Payload],
+        "the event happened; only what it carried is wrong: {:?}",
+        result
+            .checks
+            .iter()
+            .map(|check| check.code)
+            .collect::<Vec<_>>()
+    );
+
+    let diagnostic = result
+        .diagnostics()
+        .find(|diagnostic| diagnostic.code == CheckCode::Payload)
+        .expect("a payload failure says which field")
+        .to_string();
+    for required in [
+        "ESS-CF-PAYLOAD",
+        "billing.invoice.InvoicePaid.amount.amount holds a Decimal",
+        "amount.amount was not carried",
+        "amount.currency was not carried",
+    ] {
+        assert!(
+            diagnostic.contains(required),
+            "a missing field is only repairable if the report names it and its declared type, and \
+             a struct contributes one leaf per field; {required:?} is missing from:\n{diagnostic}"
+        );
+    }
+}
+
+#[test]
+fn a_value_of_the_wrong_declared_type_is_caught_by_the_same_check_as_a_missing_one() {
+    // The other half of "declared fields, present and well-typed". `invoice_id` is a `Uuid`
+    // underneath a newtype, and a number is not one — which is the same rule `flatten` applies to a
+    // command input, called rather than restated.
+    let suite = suite();
+    let report = Runner::for_suite(&suite).run(&suite, &Perturbed::mistyped());
+
+    let created = ScenarioId::parse("billing.invoice.CreateInvoice/outcome/accepted").expect("id");
+    let result = report
+        .scenarios
+        .iter()
+        .find(|result| result.scenario == created)
+        .expect("the accepted scenario ran");
+    let diagnostic = result
+        .diagnostics()
+        .find(|diagnostic| diagnostic.code == CheckCode::Payload)
+        .expect("a payload failure names the leaf")
+        .to_string();
+    assert!(
+        diagnostic.contains("amount.currency holds a String")
+            && diagnostic.contains("amount.currency = 7"),
+        "a struct's leaf is named by the path that reaches it, and the value that sat there is \
+         quoted:\n{diagnostic}"
+    );
+}
+
+#[test]
+fn a_read_your_writes_view_is_not_quietly_read_at_current_when_no_token_came_back() {
+    // §14, and the "skip that looks like a pass" this milestone has been removing everywhere else.
+    // With no token the runner *could* ask at `Current` and get a green tick for a question nobody
+    // asked. It does not: the read is not made, and the check says which command owes the token.
+    let suite = suite();
+    let report =
+        Runner::for_suite(&suite).run(&suite, &faulty::billing(Fault::DropConsistencyToken));
+
+    let issued = ScenarioId::parse("billing.invoice.IssueInvoice/outcome/issued").expect("an id");
+    let result = report
+        .scenarios
+        .iter()
+        .find(|result| result.scenario == issued)
+        .expect("the issued scenario ran");
+    assert_eq!(
+        result.status,
+        Status::Failed,
+        "a read-your-writes promise nobody can hold the target to is not a passing scenario"
+    );
+
+    let diagnostic = result
+        .diagnostics()
+        .find(|diagnostic| diagnostic.code == CheckCode::View)
+        .expect("the view check says why it could not be made")
+        .to_string();
+    for required in [
+        "billing.invoice.OutstandingInvoices",
+        "billing.invoice.IssueInvoice",
+        "returned no consistency token",
+    ] {
+        assert!(
+            diagnostic.contains(required),
+            "{required:?} is missing from:\n{diagnostic}"
+        );
+    }
+
+    // And the eventual view is untouched: it never demanded a token, so nothing about it changes.
+    let eventual: Vec<CheckCode> = result
+        .checks
+        .iter()
+        .filter(|check| check.status == Status::Passed)
+        .map(|check| check.code)
+        .collect();
+    assert!(
+        eventual.contains(&CheckCode::EventualView),
+        "`InvoiceById` is `eventual` and asks at `Current` by design: {eventual:?}"
+    );
+}
+
+#[test]
+fn a_view_assertion_names_the_instance_the_scenario_created_rather_than_any_row() {
+    // §8 lets a target be shared as long as scenarios do not interfere, and with literal-only field
+    // matches `Contains {}` means "some row" — which passes on a row belonging to something else.
+    // The suite names the identity, so a target holding an unrelated row is not mistaken for a
+    // conformant one.
+    let suite = suite();
+    let report = Runner::for_suite(&suite).run(&suite, &Perturbed::crowded());
+
+    assert_eq!(
+        report.status,
+        ConformanceStatus::Passed,
+        "an unrelated row in a shared view is not this scenario's business:\n{report}"
+    );
+
+    let created = ScenarioId::parse("billing.invoice.CreateInvoice/outcome/accepted").expect("id");
+    let result = report
+        .scenarios
+        .iter()
+        .find(|result| result.scenario == created)
+        .expect("the accepted scenario ran");
+    assert_eq!(
+        result.status,
+        Status::Passed,
+        "`OutstandingInvoices` excludes *this* invoice; the stranger's row is irrelevant:\n{result}"
+    );
+}
+
 // ---- waiting -------------------------------------------------------------------------------------
 
 #[test]
@@ -430,6 +595,126 @@ fn money(amount: f64) -> aep_domain::node::Node {
         aep_domain::node::Node::Text("amount.currency".to_owned()),
     );
     aep_domain::node::Node::Map(fields)
+}
+
+/// The reference with one thing about its answers changed at the boundary.
+///
+/// Not a `faulty::Fault`, and the distinction matters: `Fault::ALL` is the matrix's claim about what
+/// the suite catches, and every row of it is measured. These two are perturbations a *test* needs in
+/// order to reach one check, and putting them there would claim evidence this file is not producing.
+struct Perturbed {
+    inner: Billing,
+    how: How,
+}
+
+/// What one [`Perturbed`] changes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum How {
+    /// `billing.invoice.InvoiceCreated` comes back with `amount.currency` as a number.
+    Mistyped,
+    /// Every view answers with one extra row, belonging to nothing this scenario made.
+    Crowded,
+}
+
+impl Perturbed {
+    /// A target whose events carry a leaf of the wrong declared type.
+    fn mistyped() -> Self {
+        Self {
+            inner: Billing::new(),
+            how: How::Mistyped,
+        }
+    }
+
+    /// A target whose views hold somebody else's invoice as well as this scenario's.
+    ///
+    /// Conformant: §8 requires that scenarios do not interfere, not that a target is empty, and a
+    /// shared staging system is exactly the case the design has in mind.
+    fn crowded() -> Self {
+        Self {
+            inner: Billing::new(),
+            how: How::Crowded,
+        }
+    }
+
+    /// The row belonging to nobody, which satisfies everything `billing.invoice.Invoice` declares.
+    fn stranger() -> ViewRow {
+        let mut row = ViewRow::new();
+        row.insert(
+            "invoice_id".to_owned(),
+            aep_domain::node::Node::Text("00000000-0000-4000-8000-999999999999".to_owned()),
+        );
+        row.insert("total".to_owned(), money(42.0));
+        row
+    }
+}
+
+impl ConformanceTarget for Perturbed {
+    fn identity(&self) -> Result<ImplementationIdentity, TargetError> {
+        self.inner.identity()
+    }
+
+    fn begin_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
+        self.inner.begin_scenario(scenario)
+    }
+
+    fn execute_command(
+        &self,
+        request: SemanticCommandRequest,
+    ) -> Result<SemanticCommandResult, TargetError> {
+        let mut result = self.inner.execute_command(request)?;
+        if self.how == How::Mistyped {
+            for occurrence in &mut result.direct_events {
+                if let Some(aep_domain::node::Node::Map(fields)) =
+                    occurrence.payload.get_mut("amount")
+                {
+                    fields.insert(
+                        "currency".to_owned(),
+                        aep_domain::node::Node::Number(
+                            aep_domain::facts::Number::new(7.0).expect("finite"),
+                        ),
+                    );
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    fn query_view(&self, request: SemanticViewRequest) -> Result<SemanticViewResult, TargetError> {
+        let mut result = self.inner.query_view(request)?;
+        if self.how == How::Crowded {
+            result.rows.push(Self::stranger());
+        }
+        Ok(result)
+    }
+
+    fn observe_events(
+        &self,
+        request: EventObservationRequest,
+    ) -> Result<Vec<ObservedEvent>, TargetError> {
+        self.inner.observe_events(request)
+    }
+
+    fn configure_external_outcome(
+        &self,
+        request: ExternalOutcomeControl,
+    ) -> Result<(), TargetError> {
+        self.inner.configure_external_outcome(request)
+    }
+
+    fn redeliver_event(&self, request: RedeliveryRequest) -> Result<(), TargetError> {
+        self.inner.redeliver_event(request)
+    }
+
+    fn observe_invocations(
+        &self,
+        request: InvocationObservationRequest,
+    ) -> Result<Vec<ObservedInvocation>, TargetError> {
+        self.inner.observe_invocations(request)
+    }
+
+    fn end_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
+        self.inner.end_scenario(scenario)
+    }
 }
 
 /// The reference implementation, minus the one observation §16 refuses to require of anybody.

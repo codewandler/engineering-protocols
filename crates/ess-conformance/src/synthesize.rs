@@ -37,12 +37,25 @@
 //!
 //! # What is asserted, and what is deliberately not
 //!
-//! An outcome scenario asserts the branch, the declared error, every event the branch emits, and —
-//! first class, per §10 — every event a *sibling* branch emits and this one does not. What it does
-//! **not** assert is any payload *value*: nothing in the model relates a command's input to an
-//! event's or an error's payload, so `InvalidAmount.submitted == amount` is an inference, not a
-//! reading. §10's own worked suite asserts `→ InvalidAmount` and no field, and this produces exactly
-//! that. When the model gains a mapping, the fields follow from it rather than from a name match.
+//! An outcome scenario asserts the branch, the declared error, every event the branch emits — with
+//! the payload **shape** the specification declares for it — and, first class per §10, every event
+//! the specification declares that this branch does **not** emit.
+//!
+//! Where the line falls is worth stating, because it is the model's line and not a budget:
+//!
+//! | about an event's payload | asserted | why |
+//! |---|---|---|
+//! | the declared fields are present | yes | the event declares them |
+//! | each holds a value of its declared type | yes | the event declares that too |
+//! | a field carries a particular *value* | **no** | nothing in the model relates a command's input to a payload field |
+//! | no undeclared field is present | **no** | nothing in the model closes an event's payload |
+//!
+//! `InvoiceCreated.amount == CreateInvoice.amount` reads like a reading and is a match on a shared
+//! field name; a specification that called the input `total` would make the same suite wrong. §10's
+//! own worked suite asserts `→ InvalidAmount` and no field, and this produces exactly that. When the
+//! model gains a way to say where a payload field comes from — the shape a binding's `mapping:`
+//! already has for a command input — the values follow from *that* rather than from a name match.
+//! The same holds of a declared error's fields, which are asserted by name and never by value.
 //!
 //! # A lifecycle scenario is a sequence over one instance
 //!
@@ -90,12 +103,26 @@
 //! publishes is unobservable no matter how good the runner is. That is a fact about the
 //! specification, and [`RefusalCause::InvariantUnobservable`] says so with the paths in hand.
 //!
-//! # What is not here yet
+//! # What the model cannot say yet, and what is therefore not asserted
 //!
-//! The runner, and a value object's invariants — `billing.invoice.Money` says `amount >= 0` of every
+//! Two gaps, and both are reported rather than left to be noticed. They are different in kind, and
+//! the difference is what says whether a later slice edits this crate or the model:
+//!
+//! | gap | what is asserted instead | what would close it |
+//! |---|---|---|
+//! | where a payload field's **value** comes from | the field is present and of its declared type | a construct relating an outcome's emitted event to the command's input, in the shape a binding's `mapping:` already has |
+//! | how a command is refused **in the wrong state** | that nothing the specification declares was published | a construct letting a command declare the outcome and the error for a subject in a state its transitions do not run from — [`RefusalCause::RefusalUndeclared`] |
+//!
+//! The second is §19's own words: "the exact rejection mechanism must come from the declared
+//! command/error semantics", and there is nothing declared to come from. Both are refusals or
+//! recorded matrix rows rather than silences, because a suite quietly holding a thinner check than
+//! the specification requires is the one failure a passing run cannot show.
+//!
+//! A value object's invariants are the third: `billing.invoice.Money` says `amount >= 0` of every
 //! `Money` in the system, which is a claim about a *type* rather than about an instance at rest, and
-//! rebasing it onto every entity field that reaches that type is a walk this slice does not do. It
-//! is a refusal ([`RefusalCause::NotSynthesisedYet`]) rather than a silence, for the reason above.
+//! rebasing it onto every entity field that reaches that type is a walk this slice does not do. That
+//! one is a gap in this crate rather than in the model, and it is
+//! [`RefusalCause::NotSynthesisedYet`].
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -113,15 +140,16 @@ use ess_domain::binding::Delivery;
 use ess_domain::command::{OutcomeName, TestStrategy};
 use ess_domain::entity::{EntitySpec, Invariant, StateName};
 use ess_domain::name::QualifiedName;
+use ess_domain::types::MAX_TYPE_DEPTH;
 use ess_domain::view::AssertionStyle;
 
 use crate::decision::{when, Decision, Unevaluable};
 use crate::input::{flatten, resolve_path, ShapeErrors};
 use crate::scenario::{
     ActorRef, BindingAspect, BindingRef, CommandRef, ComponentRef, ConformanceScenario,
-    ConformanceSuite, DeclaredTypeRef, EntityRef, ErrorRef, EssSemanticRef, EventRef, InstanceName,
-    OutcomeRef, ScenarioId, ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance,
-    TransitionRef, ViewExpectation, ViewRef,
+    ConformanceSuite, DeclaredTypeRef, EntityRef, ErrorRef, EssSemanticRef, EventRef, Holds,
+    InstanceName, LeafShape, OutcomeRef, PayloadShape, ScenarioId, ScenarioPurpose, ScenarioStep,
+    ScenarioValue, SuiteProvenance, TransitionRef, ViewExpectation, ViewRef,
 };
 use crate::witness::{candidates, WitnessGap, MAX_CANDIDATES};
 
@@ -320,6 +348,28 @@ pub enum RefusalCause {
         /// The state the entity is in when the assertion would run.
         state: StateName,
     },
+    /// §19's rejection mechanism, which the model has no way to declare.
+    ///
+    /// A command attempted against an instance in a state none of its transitions run from **is**
+    /// refused — that is exactly what makes the combination illegal — and the specification declares
+    /// no outcome and no error for it. So the scenario that exists asserts what it can, that nothing
+    /// the specification declares was published, and cannot assert what §19 asks for: "the exact
+    /// rejection mechanism must come from the declared command/error semantics", and "do not
+    /// generate vague *operation fails* tests if the domain declares a specific error".
+    ///
+    /// It is a refusal beside a scenario rather than instead of one, exactly as
+    /// [`InvariantUnobservable`](Self::InvariantUnobservable) is: the scenario is worth having, and
+    /// a reader who cannot see that it asserts less than the section asks for will read a thin check
+    /// as a thick one. Closing it is a model change and not a synthesizer change — see
+    /// [`RefusalCause::hint`].
+    RefusalUndeclared {
+        /// Whose instance.
+        entity: EntityRef,
+        /// The state it is resting in when the command arrives.
+        state: StateName,
+        /// The command that is not honoured there.
+        command: CommandRef,
+    },
     /// Two scenarios claimed one id. A drift alarm: `ess-domain` refuses a duplicated declaration.
     DuplicateScenario,
     /// The outcome's strategy says an input reaches it and its condition declares no guard.
@@ -361,6 +411,7 @@ impl RefusalCause {
                 Self::WitnessRejected(_) => 9,
                 Self::BindingUnobservable { .. } => 10,
                 Self::InvariantUnobservable { .. } => 11,
+                Self::RefusalUndeclared { .. } => 12,
             },
         )
     }
@@ -394,6 +445,11 @@ impl RefusalCause {
                     "publish the fields the invariant reads in a view of this entity, or state the \
                      invariant over what one already publishes"
                 }
+            }
+            Self::RefusalUndeclared { .. } => {
+                "nothing in the model says what a command answers when its subject is in a state \
+                 its transitions do not run from; a construct in `ess-domain`, resolution in the \
+                 compiler and a rendering in the projections would let it declare the error"
             }
             Self::DuplicateScenario => {
                 "two declarations produced one scenario id; rename one of them"
@@ -443,6 +499,16 @@ impl fmt::Display for RefusalCause {
             } => write!(
                 f,
                 "{construct} is specified in {sections} and not synthesised yet"
+            ),
+            Self::RefusalUndeclared {
+                entity,
+                state,
+                command,
+            } => write!(
+                f,
+                "`{command}` on a `{entity}` in `{state}` is refused and the specification does \
+                 not say how: no outcome and no declared error, so the scenario can only require \
+                 that nothing happened"
             ),
             Self::DuplicateScenario => f.write_str("a second scenario claimed this id"),
             Self::StrategyWithoutGuard { strategy } => {
@@ -770,9 +836,16 @@ fn exercise(
     };
 
     let emitted: Vec<EventRef> = outcome.emits.iter().map(EventRef::from).collect();
-    let absent = siblings_emit(command, outcome, &emitted);
+    let absent = not_emitted(ir, &emitted);
     let actor = run.actor.clone();
-    let (view_steps, views) = view_expectations(ir, outcome, run.after.as_ref(), id, refusals);
+    let (view_steps, views) = view_expectations(
+        ir,
+        outcome,
+        run.after.as_ref(),
+        run.instance.as_ref(),
+        id,
+        refusals,
+    );
 
     let mut steps = run.steps();
     if let Some(error) = &outcome.error {
@@ -785,6 +858,7 @@ fn exercise(
         steps.push(ScenarioStep::ExpectEvent {
             event: event.clone(),
             payload: BTreeMap::new(),
+            shape: payload_shape(ir, event),
         });
     }
     // §10's first-class negative assertion: without it the refusal case passes against an
@@ -819,6 +893,12 @@ struct Run {
     invoke: Vec<ScenarioStep>,
     /// The state the subject is in afterwards, where there is a subject.
     after: Option<StateName>,
+    /// What the arrangement bound the instance as, where it arranged one.
+    ///
+    /// Carried out of the arrangement rather than dropped there, because a view assertion has to
+    /// name the row it is about: "the view holds a row" is only the same claim as "the view holds
+    /// *this* invoice" while nothing else is using the target.
+    instance: Option<InstanceName>,
     /// The actor the command is invoked as, where the specification grants one.
     actor: Option<ActorRef>,
     /// What the arrangement depends on.
@@ -869,6 +949,7 @@ fn run(
         setup: setup.steps,
         invoke,
         after: setup.after,
+        instance: setup.instance,
         actor,
         source: setup.source,
     })
@@ -1310,21 +1391,114 @@ fn rendered(guards: &[&Predicate], satisfy: bool) -> String {
     }
 }
 
-/// Every event a sibling branch emits and this one does not.
-fn siblings_emit(
-    command: &ResolvedCommand,
-    outcome: &ResolvedOutcome,
-    emitted: &[EventRef],
-) -> Vec<EventRef> {
-    command
-        .outcomes
-        .iter()
-        .filter(|other| other.name != outcome.name)
-        .flat_map(|other| other.emits.iter().map(EventRef::from))
+/// Every event this branch must not publish: everything the specification declares, minus its own.
+///
+/// # Why the whole specification and not just the sibling branches
+///
+/// `ESS-CF-NO-EVENT` names the rule "a branch publishes no event it does not declare it emits", and
+/// the sibling set is a narrower claim wearing that sentence: it catches a refusal that announces
+/// the success it refused, and lets a branch announce anything declared elsewhere. An invoice
+/// created and simultaneously announced as cancelled is a defect no downstream consumer survives,
+/// and no sibling of `accepted` emits `InvoiceCancelled`.
+///
+/// # Why it is narrower than "no other event at all", twice over
+///
+/// **It is about one invocation, not about the scenario.** The check reads
+/// `SemanticCommandResult::direct_events` — what §9 says *this* command published — and nothing
+/// else. A scenario legitimately causes other events while it runs: an arrangement creates an
+/// invoice before the branch under test, and a binding invokes a downstream command whose own
+/// events arrive later. Asserting over everything a scenario observed would fail a correct
+/// implementation for doing what the specification told it to.
+///
+/// **It names only declared events.** An implementation may publish occurrences this specification
+/// says nothing about — an audit record, a technical heartbeat — and a suite refusing those would
+/// be enforcing a rule no document wrote. The model closes a *branch's* emissions, not the
+/// system's output.
+fn not_emitted(ir: &EssIr, emitted: &[EventRef]) -> Vec<EventRef> {
+    ir.events
+        .values()
+        .map(|event| EventRef::new(event.name.clone()))
         .filter(|event| !emitted.contains(event))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+/// What the specification declares an event carries, flattened to leaves a runner can check (§13).
+///
+/// The one payload claim that needs no model change. [`PayloadShape`] argues why the *values* are
+/// not here and what the model would have to gain before they could be.
+fn payload_shape(ir: &EssIr, event: &EventRef) -> PayloadShape {
+    let mut shape = PayloadShape::new();
+    // Every `EventRef` a suite carries was minted from this IR's own events, so the lookup finds
+    // one; a shape that described nothing would be a silently weaker assertion, which is the one
+    // failure mode §36 rules out, so the absence is not quietly tolerated.
+    let declared = ir
+        .events
+        .get(event.name())
+        .unwrap_or_else(|| panic!("`{event}` is an event this specification declares"));
+    for field in &declared.fields {
+        describe(ir, &field.type_ref, &field.name, false, 0, &mut shape);
+    }
+    shape
+}
+
+/// One leaf per scalar the declared type reaches, under the dotted path that names it.
+///
+/// The same walk [`crate::input`] documents as a table, so a payload and a command input are held to
+/// one reading of what `Optional<Money>` exposes. A type that refers to itself contributes nothing
+/// past [`MAX_TYPE_DEPTH`]: refusing to describe a leaf is a weaker assertion, never a wrong one.
+fn describe(
+    ir: &EssIr,
+    type_ref: &ResolvedTypeRef,
+    path: &str,
+    optional: bool,
+    depth: usize,
+    shape: &mut PayloadShape,
+) {
+    if depth > MAX_TYPE_DEPTH {
+        return;
+    }
+    let mut leaf = |holds: Holds| {
+        let described = LeafShape::required(holds);
+        shape.insert(
+            path,
+            if optional {
+                described.optional()
+            } else {
+                described
+            },
+        );
+    };
+    match type_ref {
+        // The wrapper marks every leaf underneath absentable, including a struct's fields: a value
+        // that is not there does not have fields that are.
+        ResolvedTypeRef::Optional { of } => describe(ir, of, path, true, depth + 1, shape),
+        ResolvedTypeRef::Primitive { name } => leaf(Holds::Primitive { kind: *name }),
+        ResolvedTypeRef::List { .. } => leaf(Holds::List),
+        ResolvedTypeRef::Map { .. } => leaf(Holds::Map),
+        ResolvedTypeRef::Declared { name } => match &ir.named_type(name).body {
+            // Transparent, exactly as it is to a fact path: a newtype names no member, so the path
+            // does not grow.
+            ResolvedBody::Newtype { of, .. } => describe(ir, of, path, optional, depth + 1, shape),
+            ResolvedBody::Enum { variants } => leaf(Holds::Enum {
+                variants: variants.clone(),
+            }),
+            ResolvedBody::Union { .. } => leaf(Holds::Union),
+            ResolvedBody::Struct { fields, .. } => {
+                for field in fields {
+                    describe(
+                        ir,
+                        &field.type_ref,
+                        &format!("{path}.{}", field.name),
+                        optional,
+                        depth + 1,
+                        shape,
+                    );
+                }
+            }
+        },
+    }
 }
 
 /// The view assertions a branch that changed an entity supports (§14, §20).
@@ -1335,10 +1509,14 @@ fn siblings_emit(
 /// state is a wrong assertion rather than a missing one.
 ///
 /// A branch with no subject changes nothing a view could show, and produces no steps.
+///
+/// `instance` is what the arrangement bound the subject as, and it is what turns "the view holds a
+/// row" into "the view holds *this* one" — see [`identifying`].
 fn view_expectations(
     ir: &EssIr,
     outcome: &ResolvedOutcome,
     after: Option<&StateName>,
+    instance: Option<&InstanceName>,
     id: &ScenarioId,
     refusals: &mut Vec<Refusal>,
 ) -> (Vec<ScenarioStep>, BTreeSet<ViewRef>) {
@@ -1354,15 +1532,16 @@ fn view_expectations(
 
     for view in views {
         let name = ViewRef::new(view.name.clone());
+        let fields = identifying(ir, subject, instance, view);
         let expectation = match shows(view, state) {
             Ok(true) => ViewExpectation::Contains {
-                fields: BTreeMap::new(),
+                fields: fields.clone(),
             },
             // A cancelled invoice that stays in `OutstandingInvoices` is the defect the positive
             // assertion cannot see, and an entity that has not reached the filtered state yet is
             // exactly that case at the other end.
             Ok(false) => ViewExpectation::Excludes {
-                fields: BTreeMap::new(),
+                fields: fields.clone(),
             },
             Err(unbound) => {
                 refusals.push(Refusal::about(
@@ -1398,6 +1577,54 @@ fn view_expectations(
         named.insert(name);
     }
     (steps, named)
+}
+
+/// The field match that names the instance this scenario is about, where the model publishes one.
+///
+/// # Why this is a reading and not a name match
+///
+/// Three declarations meet, and no two of them are being guessed at. The outcome's `instance:` says
+/// where the identity of the instance it acts on is — an input field for `moves:` and `updates:`, a
+/// field of an emitted event for `creates:` — which is the same declaration
+/// [`ScenarioStep::CaptureInstance`] is written from. The entity's `identity:` says what that field
+/// is *called*. And `ess-domain` validates every view field against the entity's observable fields
+/// by that name, so a view projecting `invoice_id` is projecting the identity rather than something
+/// spelled like it.
+///
+/// # What it is worth
+///
+/// Without it, `Contains {}` says "the view holds some row" and `Excludes {}` says "the view holds
+/// none" — claims that are only equivalent to the intended ones because §8 isolates each scenario.
+/// Against a target that shares state with anything else, the first passes on somebody else's row
+/// and the second fails on it.
+///
+/// Empty where the view does not project the identity at all, or where nothing bound one. That is a
+/// weaker assertion rather than a wrong one, and not a refusal: the specification did not ask for a
+/// check this view cannot carry.
+fn identifying(
+    ir: &EssIr,
+    subject: &ResolvedSubject,
+    instance: Option<&InstanceName>,
+    view: &ResolvedView,
+) -> BTreeMap<String, ScenarioValue> {
+    let named = ir.entity(&subject.entity).identity.name.clone();
+    if view.field(&named).is_none() {
+        return BTreeMap::new();
+    }
+    let value = match &subject.instance {
+        // The caller supplied it, so the scenario knows it as whatever the arrangement bound.
+        ResolvedInstance::Supplied { .. } => {
+            let Some(bound) = instance else {
+                return BTreeMap::new();
+            };
+            ScenarioValue::instance(bound.clone())
+        }
+        // The branch published it, and this scenario is the one that ran the branch.
+        ResolvedInstance::Observed { event, field } => {
+            ScenarioValue::observed(EventRef::from(event), field.name.clone())
+        }
+    };
+    [(named, value)].into_iter().collect()
 }
 
 /// Whether a view holds a row for an entity in `state`, or the paths that stop the question being
@@ -1622,10 +1849,11 @@ fn insert(
 /// * There is no `ExpectOutcome`. The specification declares no branch for this case — that is
 ///   precisely what makes the combination illegal — so asserting one would be inventing the
 ///   rejection mechanism §19 says must come from the declared semantics.
-/// * What is asserted is that the events the move would have published did **not** happen. An
-///   outcome with a subject can neither report an error (invariant 15) nor be silent
-///   (`empty_change`), so a mover always emits something, and there is always something to require
-///   the absence of.
+/// * What is asserted is that **no** event the specification declares was published — not merely
+///   that the move's own events were not. No branch was taken here, and every declared event belongs
+///   to a branch, so an invocation that publishes one has published something no branch of it
+///   licensed. The narrower claim let an unhonoured `CancelInvoice` announce that the invoice was
+///   paid, which is the same hole `not_emitted` closes on the branches that *are* declared.
 #[allow(clippy::too_many_arguments)]
 fn refused_here(
     ir: &EssIr,
@@ -1679,10 +1907,7 @@ fn refused_here(
             Some(&arrangement.instance),
         ),
     });
-    let forbidden: BTreeSet<EventRef> = movers
-        .iter()
-        .flat_map(|driver| driver.outcome.emits.iter().map(EventRef::from))
-        .collect();
+    let forbidden = not_emitted(ir, &[]);
     for event in &forbidden {
         steps.push(ScenarioStep::ExpectNoEvent {
             event: event.clone(),
@@ -1699,6 +1924,17 @@ fn refused_here(
     if let Some(actor) = actors.get(command) {
         source.insert(actor.clone().into());
     }
+
+    // Beside the scenario, never instead of it: what the scenario asserts is real, and it is less
+    // than §19 asks for, and only one of those two facts is visible in a passing run.
+    refusals.push(Refusal::about(
+        id,
+        RefusalCause::RefusalUndeclared {
+            entity: entity.clone(),
+            state: state.clone(),
+            command: command_ref,
+        },
+    ));
 
     let text = format!("`{command}` does not move a `{entity}` that is in `{state}`");
     Some(ConformanceScenario::new(clipped(&text), steps, source))
@@ -2065,11 +2301,13 @@ fn flow(ir: &EssIr, invoked: &ResolvedCommand, trigger: &Run, event: &EventRef) 
     steps.push(ScenarioStep::ExpectEvent {
         event: event.clone(),
         payload: BTreeMap::new(),
+        shape: payload_shape(ir, event),
     });
     for event in &published {
         steps.push(ScenarioStep::EventuallyEvent {
             event: event.clone(),
             payload: BTreeMap::new(),
+            shape: payload_shape(ir, event),
         });
     }
 
@@ -2123,6 +2361,7 @@ fn mapping(
     steps.push(ScenarioStep::ExpectEvent {
         event: event.clone(),
         payload: BTreeMap::new(),
+        shape: payload_shape(ir, event),
     });
     steps.push(ScenarioStep::ExpectInvocation {
         binding: BindingRef::new(binding.name.clone()),
@@ -2168,6 +2407,7 @@ fn delivery(
     steps.push(ScenarioStep::ExpectEvent {
         event: event.clone(),
         payload: BTreeMap::new(),
+        shape: payload_shape(ir, event),
     });
     // The second delivery, which is the whole scenario. A total match rather than a wildcard: a
     // second delivery guarantee would mean something different here and must not inherit this.
@@ -2180,6 +2420,7 @@ fn delivery(
         steps.push(ScenarioStep::EventuallyEvent {
             event: event.clone(),
             payload: BTreeMap::new(),
+            shape: payload_shape(ir, event),
         });
     }
 
@@ -2237,6 +2478,7 @@ fn on_failure(
     steps.push(ScenarioStep::ExpectEvent {
         event: event.clone(),
         payload: BTreeMap::new(),
+        shape: payload_shape(ir, event),
     });
 
     let mut source: BTreeSet<EssSemanticRef> = [
@@ -2257,6 +2499,7 @@ fn on_failure(
                 steps.push(ScenarioStep::EventuallyEvent {
                     event: event.clone(),
                     payload: BTreeMap::new(),
+                    shape: payload_shape(ir, event),
                 });
             }
             source.extend(downstream(ir, invoked, reached));
@@ -2272,6 +2515,7 @@ fn on_failure(
             steps.push(ScenarioStep::EventuallyEvent {
                 event: escalation.clone(),
                 payload: BTreeMap::new(),
+                shape: payload_shape(ir, &escalation),
             });
             source.insert(escalation.clone().into());
             format!(

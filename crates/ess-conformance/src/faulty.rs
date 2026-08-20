@@ -15,26 +15,36 @@
 //! from the same lines as the variants, one designated check per fault, and a blast-radius allowance
 //! per fault that has to be updated *with a reason* rather than relaxed.
 //!
-//! # Three of these are not caught by anything, and that is the finding
+//! # One of these is caught by nothing, and that is the finding
 //!
 //! [`Caught::Nothing`] is not a gap in this module. A fault nobody catches is worth more than
 //! another passing row: it says the specification cannot express the property, or that synthesis
-//! does not ask for it. All three that turn up here have one root — the suite asserts *that* an
-//! event was published and, for a refused transition, that one particular event was not; it never
-//! asserts what an event **carried**, and it never asserts that nothing *else* was published.
+//! does not ask for it. Three rows sat here; two have since been closed by teaching synthesis to ask
+//! for more, and the rows moved to the other side of the matrix rather than being deleted:
+//!
+//! | fault | what a client would see | what closed it |
+//! |---|---|---|
+//! | [`ExtraEvent`](Fault::ExtraEvent) | a cancelled invoice is announced as paid | every event the specification declares and this branch does not emit is now asserted absent |
+//! | [`DropConsistencyToken`](Fault::DropConsistencyToken) | a `read_your_writes` view is never actually held to it | a read with no token to demand is `unsupported`, not a weaker read at `Current` |
+//!
+//! One is still uncaught, and it is the one that needs the **model** to change rather than the
+//! synthesizer:
 //!
 //! | fault | what a client would see | why nothing fails |
 //! |---|---|---|
-//! | [`WrongEventPayload`](Fault::WrongEventPayload) | every consumer of `InvoiceCreated` bills the wrong amount | every synthesised event assertion carries an empty payload |
-//! | [`ExtraEvent`](Fault::ExtraEvent) | creating an invoice announces that it was cancelled | `ExpectNoEvent` is only synthesised for the one event a refused transition would have published |
-//! | [`DropConsistencyToken`](Fault::DropConsistencyToken) | a `read_your_writes` view is never actually held to it | with no token the runner reads at `Current`, and §14's whole claim quietly lapses |
+//! | [`WrongEventPayload`](Fault::WrongEventPayload) | every consumer of `InvoiceCreated` bills an amount nobody asked for | `999` is a well-formed `Money` in a field the event declares, and **nothing in the model says where a payload field's value comes from** |
 //!
-//! They are in [`Fault::ALL`] and the matrix asserts they are *still* uncaught, so the day a later
-//! slice closes one of these holes, the row fails and has to be rewritten rather than forgotten.
+//! What synthesis *can* ask for, it now asks: [`PartialEventPayload`](Fault::PartialEventPayload) is
+//! the same event with a declared field left out, and that one is caught. The difference between the
+//! two rows is exactly the difference between a type, which the specification declares, and a value,
+//! which it does not — see `PayloadShape`.
+//!
+//! The uncaught row is in [`Fault::ALL`] and the matrix asserts it is *still* uncaught, so the day a
+//! later slice closes it, the row fails and has to be rewritten rather than forgotten.
 //!
 //! # Boundary or implementation
 //!
-//! Seven of the ten are [`Injection::Boundary`]: [`Faulty`] perturbs what goes into the target and
+//! Nine of the eleven are [`Injection::Boundary`]: [`Faulty`] perturbs what goes into the target and
 //! what comes out of it, and never a broken internal, because that is the same position a real
 //! client is in.
 //!
@@ -67,7 +77,7 @@ use aep_domain::node::Node;
 
 use crate::reference::{
     Billing, Oracle, CANCEL_INVOICE, CREATE_INVOICE, INVOICE_CANCELLED, INVOICE_CREATED,
-    INVOICE_ISSUED,
+    INVOICE_ISSUED, INVOICE_PAID, PAY_INVOICE,
 };
 use crate::scenario::{EventRef, OutcomeRef, ViewRef};
 use crate::target::{
@@ -147,8 +157,9 @@ macro_rules! faults {
     )*) => {
         /// One way an implementation of a specification can be wrong.
         ///
-        /// Seven are design §25's fault table. Three more are faults this slice went looking for and
-        /// found that **nothing catches** — see the [module documentation](self).
+        /// Seven are design §25's fault table. Four more were gone looking for, three of which
+        /// nothing caught when they were written down — see the [module documentation](self) for
+        /// which of those are closed and which one still needs the model to change.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[non_exhaustive]
         pub enum Fault {
@@ -229,36 +240,51 @@ faults! {
 
     /// A published event carries a value the command was never given.
     ///
-    /// Not one of §25's seven. It is here because nothing catches it: every event assertion
-    /// synthesis writes carries an empty payload, so `InvoiceCreated` may announce any amount at all.
+    /// Not one of §25's seven, and the one row still caught by nothing. Every field
+    /// `billing.invoice.InvoiceCreated` declares is present and every one is of its declared type —
+    /// `999` is as well-formed a `Money` as the amount that was submitted. The check that would
+    /// catch it is `InvoiceCreated.amount == CreateInvoice.amount`, and **no construct in the model
+    /// licenses it**: an outcome says which events it emits and never what fills their fields, so
+    /// asserting it would be a match on a shared field name — the inference this crate refuses
+    /// everywhere else, and one that would fail an implementation naming the field differently.
+    ///
+    /// Closing it is a model change: some way for an outcome to say where a payload field comes
+    /// from, in the shape a binding's `mapping:` already says it for a command input.
     WrongEventPayload => "wrong-event-payload", System::Billing, Injection::Boundary,
         Caught::Nothing(
-            "every synthesised event assertion carries an empty payload, so no scenario compares \
-             what an event carried against the input that caused it",
+            "the amount it carries is declared, present and well-typed, so every check the model \
+             licenses passes; a payload field's *value* stays unassertable until some construct \
+             says where it comes from, and matching on a shared field name is not that construct",
         ),
         "a published event carries an amount the command was never given";
 
+    /// A published event leaves out a field its declaration says it carries.
+    ///
+    /// The other half of [`WrongEventPayload`](Fault::WrongEventPayload), and the half the model
+    /// does license: `billing.invoice.InvoicePaid` declares `invoice_id` and `amount`, so an
+    /// occurrence carrying only the first contradicts the specification without any claim about
+    /// where a value comes from. It is here so that "presence and type are asserted" is a row in the
+    /// matrix rather than a sentence in a doc comment.
+    PartialEventPayload => "partial-event-payload", System::Billing, Injection::Boundary,
+        Caught::By("billing.invoice.PayInvoice/outcome/settled"),
+        "a published event leaves out a field its declaration says it carries";
+
     /// A branch publishes an event it does not declare it emits, beside the ones it does.
     ///
-    /// Not one of §25's seven, and uncaught: `ESS-CF-NO-EVENT` names the rule "a branch publishes no
-    /// event it does not declare it emits", and synthesis only ever asks it of the single event a
-    /// refused transition would have published.
+    /// Not one of §25's seven. It was uncaught while `ExpectNoEvent` was synthesised only for the
+    /// events a *sibling* branch emits; the rule `ESS-CF-NO-EVENT` names is wider than that, and
+    /// synthesis now asks it of every event the specification declares and this branch does not.
     ExtraEvent => "extra-event", System::Billing, Injection::Boundary,
-        Caught::Nothing(
-            "`ExpectNoEvent` is synthesised only for the one event a refused transition or a \
-             refusing branch would have published, never for the events a branch does not declare",
-        ),
-        "creating an invoice also announces that it was cancelled";
+        Caught::By("billing.invoice.CancelInvoice/outcome/cancelled"),
+        "cancelling an invoice also announces that it was paid";
 
     /// A command answers without the token a later read would demand.
     ///
-    /// Not one of §25's seven, and uncaught: the runner falls back to `Current` when no token is in
-    /// hand, so a target opts out of every `read_your_writes` check by returning nothing.
+    /// Not one of §25's seven. It was uncaught while the runner fell back to `Current` with no token
+    /// in hand — a weaker read that passes, which is the "skip that looks like a pass". A
+    /// read-your-writes read that cannot be demanded is now `unsupported`, which fails the run.
     DropConsistencyToken => "drop-consistency-token", System::Billing, Injection::Boundary,
-        Caught::Nothing(
-            "with no token the runner reads at `Current`, so §14's read-your-writes demand is never \
-             made and the check silently becomes a weaker one",
-        ),
+        Caught::By("billing.invoice.Invoice/transition/issue/by/billing.invoice.IssueInvoice/issued"),
         "a command returns no consistency token, so no read is ever held to it";
 }
 
@@ -399,19 +425,21 @@ impl<T: ConformanceTarget> ConformanceTarget for Faulty<T> {
                     }
                 }
             }
-            Fault::ExtraEvent if command == CREATE_INVOICE => {
-                // Named after the invoice that was just created, so it is the plausible version of
-                // this defect rather than an obviously stray message.
-                let identity = result
+            Fault::PartialEventPayload if command == PAY_INVOICE => {
+                for occurrence in &mut result.direct_events {
+                    if occurrence.event == event(INVOICE_PAID) {
+                        occurrence.payload.remove("amount");
+                    }
+                }
+            }
+            Fault::ExtraEvent if command == CANCEL_INVOICE => {
+                // Named after the invoice that was just cancelled, so it is the plausible version of
+                // this defect rather than an obviously stray message — and it is the dangerous one:
+                // a consumer that hears `InvoicePaid` stops chasing an invoice nobody paid.
+                let identity = input.get("invoice_id").cloned().unwrap_or_default();
+                result
                     .direct_events
-                    .iter()
-                    .find(|occurrence| occurrence.event == event(INVOICE_CREATED))
-                    .and_then(|occurrence| occurrence.payload.get("invoice_id"))
-                    .cloned()
-                    .unwrap_or_default();
-                result.direct_events.push(
-                    ObservedEvent::new(event(INVOICE_CANCELLED)).with("invoice_id", identity),
-                );
+                    .push(ObservedEvent::new(event(INVOICE_PAID)).with("invoice_id", identity));
             }
             Fault::AllowIllegalTransition
                 if command == CANCEL_INVOICE && result.outcome.is_none() =>
@@ -558,7 +586,7 @@ mod tests {
         // The list is generated from the same lines as the variants, so what is left to check is
         // that no row was declared empty — a fault with no description is a row in a matrix nobody
         // can read.
-        assert_eq!(Fault::ALL.len(), 10);
+        assert_eq!(Fault::ALL.len(), 11);
         for fault in Fault::ALL {
             assert!(!fault.written().is_empty(), "{fault:?} has no written form");
             assert!(!fault.describe().is_empty(), "{fault:?} describes nothing");

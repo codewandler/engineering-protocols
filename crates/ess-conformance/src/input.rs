@@ -491,7 +491,11 @@ fn project(
 }
 
 /// The fact value a primitive-typed node projects to, or `None` when the node is the wrong shape.
-fn primitive_value(primitive: Primitive, value: &Node) -> Option<FactValue> {
+///
+/// Crate-visible rather than private because [`Holds::admits`](crate::Holds::admits) asks the same
+/// question of an event's payload. One table, so that a payload and a command input cannot come to
+/// different conclusions about whether `1.5` is an `Integer`.
+pub(crate) fn primitive_value(primitive: Primitive, value: &Node) -> Option<FactValue> {
     match (primitive, value) {
         (Primitive::Boolean, Node::Bool(flag)) => Some(FactValue::Bool(*flag)),
         (Primitive::Decimal, Node::Number(number)) => Some(FactValue::Number(*number)),

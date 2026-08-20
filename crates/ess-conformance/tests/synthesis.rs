@@ -125,6 +125,19 @@ fn shape(synthesis: &Synthesis, id: &str) -> Vec<&'static str> {
         .collect()
 }
 
+/// The shape of one scenario with its negative event assertions left out.
+///
+/// There is one of those per event the *specification* declares, so pinning them inside every shape
+/// assertion would make an unrelated new event fail half this file with nothing readable in any of
+/// the messages. `the_refusal_branch_asserts_that_no_event_the_specification_declares_occurred` is
+/// where the count and the names are held.
+fn asserted(synthesis: &Synthesis, id: &str) -> Vec<&'static str> {
+    shape(synthesis, id)
+        .into_iter()
+        .filter(|step| *step != "no-event")
+        .collect()
+}
+
 /// The steps of one scenario.
 fn steps<'a>(synthesis: &'a Synthesis, id: &str) -> &'a [ScenarioStep] {
     let id = ScenarioId::parse(id).expect("a scenario id");
@@ -234,16 +247,24 @@ fn every_declared_outcome_is_either_a_scenario_or_a_named_refusal() {
 }
 
 #[test]
-fn the_refusal_branch_asserts_that_the_success_event_did_not_occur() {
+fn the_refusal_branch_asserts_that_no_event_the_specification_declares_occurred() {
     // Design §10's worked example, both halves. The negative assertion is the half that is easy to
     // leave out and impossible to notice missing: without it the scenario passes against an
     // implementation that refuses the command and emits `InvoiceCreated` anyway.
+    //
+    // And it is every declared event, not only the sibling branch's. `ESS-CF-NO-EVENT` names the
+    // rule "a branch publishes no event it does not declare it emits"; asking it only of a sibling
+    // let a refused `CreateInvoice` announce a cancellation, which is the wider hole the same
+    // sentence always covered.
     let synthesis = synthesize(&example("billing"));
 
     assert_eq!(
         shape(&synthesis, "billing.invoice.CreateInvoice/outcome/rejected"),
-        vec!["execute", "outcome", "error", "no-event"],
-        "`→ rejected`, `→ InvalidAmount`, `→ InvoiceCreated must not occur`"
+        vec![
+            "execute", "outcome", "error", "no-event", "no-event", "no-event", "no-event",
+            "no-event", "no-event"
+        ],
+        "`→ rejected`, `→ InvalidAmount`, and none of the six events billing declares"
     );
     assert_eq!(
         shape(&synthesis, "billing.invoice.CreateInvoice/outcome/accepted")
@@ -263,8 +284,30 @@ fn the_refusal_branch_asserts_that_the_success_event_did_not_occur() {
         .collect();
     assert_eq!(
         absent,
-        vec!["billing.invoice.InvoiceCreated"],
-        "the event the *other* branch emits is the one that must not occur"
+        vec![
+            "billing.email.DeliveryEscalated",
+            "billing.email.EmailSent",
+            "billing.invoice.InvoiceCancelled",
+            "billing.invoice.InvoiceCreated",
+            "billing.invoice.InvoiceIssued",
+            "billing.invoice.InvoicePaid",
+        ],
+        "a branch that emits nothing must publish none of them"
+    );
+
+    // The other side of the same rule: the branch that *does* emit one is required to publish that
+    // one and no other, which is what stops this from being a check only refusals get.
+    let accepted: Vec<String> = steps(&synthesis, "billing.invoice.CreateInvoice/outcome/accepted")
+        .iter()
+        .filter_map(|step| match step {
+            ScenarioStep::ExpectNoEvent { event } => Some(event.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !accepted.contains(&"billing.invoice.InvoiceCreated".to_owned())
+            && accepted.contains(&"billing.invoice.InvoiceCancelled".to_owned()),
+        "the event it emits is required present and every other declared one absent: {accepted:?}"
     );
 }
 
@@ -435,11 +478,15 @@ fn an_outcome_no_input_decides_is_reached_by_injection_and_by_nothing_else() {
     ] {
         let synthesis = synthesize(&example(system));
 
+        let steps = shape(&synthesis, scenario);
         assert_eq!(
-            shape(&synthesis, scenario),
-            vec!["inject", "execute", "outcome", "error", "no-event"],
-            "the injection comes first, and the branch still asserts its error and the event that \
-             must not have happened"
+            steps.iter().take(4).copied().collect::<Vec<_>>(),
+            vec!["inject", "execute", "outcome", "error"],
+            "the injection comes first, and the branch still asserts its error"
+        );
+        assert!(
+            steps.len() > 4 && steps[4..].iter().all(|step| *step == "no-event"),
+            "and then that no event this specification declares was published: {steps:?}"
         );
         assert!(
             !shape(&synthesis, other).contains(&"inject"),
@@ -447,6 +494,60 @@ fn an_outcome_no_input_decides_is_reached_by_injection_and_by_nothing_else() {
              control the specification does not claim"
         );
     }
+}
+
+#[test]
+fn an_event_assertion_carries_the_shape_the_specification_declares_and_no_value_at_all() {
+    // §13, and the line the model draws through the middle of an event's payload. What the
+    // specification *declares* is the field set and the types, and that is what the assertion
+    // carries: a newtype is transparent, so `invoice_id` is a `Uuid`, and a struct contributes one
+    // leaf per field under a dotted path.
+    //
+    // What it does not carry is a **value**. Nothing in the model relates a command's input to a
+    // payload field, so `amount = 120` here would be a match on a shared field name — and a suite
+    // that guessed would fail an implementation doing nothing wrong. `wrong-event-payload` in the
+    // fault matrix is that gap, kept visible rather than closed by inference.
+    let synthesis = synthesize(&example("billing"));
+    let created = steps(&synthesis, "billing.invoice.CreateInvoice/outcome/accepted")
+        .iter()
+        .find_map(|step| match step {
+            ScenarioStep::ExpectEvent {
+                event,
+                payload,
+                shape,
+            } if event.to_string() == "billing.invoice.InvoiceCreated" => {
+                Some((payload.clone(), shape.clone()))
+            }
+            _ => None,
+        })
+        .expect("`accepted` asserts the event it emits");
+
+    let (payload, shape) = created;
+    assert!(
+        payload.is_empty(),
+        "a value is asserted only where the model says where it comes from, and it does not: \
+         {payload:?}"
+    );
+
+    let leaves: Vec<(&str, String)> = shape
+        .leaves()
+        .iter()
+        .map(|(path, leaf)| (path.as_str(), leaf.holds.to_string()))
+        .collect();
+    assert_eq!(
+        leaves,
+        vec![
+            ("amount.amount", "a Decimal".to_owned()),
+            ("amount.currency", "a String".to_owned()),
+            ("customer_email", "a String".to_owned()),
+            ("invoice_id", "a Uuid".to_owned()),
+        ],
+        "every declared field, flattened by the same rule `flatten` applies to a command input"
+    );
+    assert!(
+        shape.leaves().values().all(|leaf| !leaf.optional),
+        "none of `InvoiceCreated`'s fields is `Optional`, so none of them may be missing"
+    );
 }
 
 // ---- §14 and §20: views, in the block their consistency decides ----------------------------------
@@ -471,7 +572,7 @@ fn a_view_is_asserted_in_the_block_its_own_consistency_decides() {
         "`OutstandingInvoices` is `read_your_writes`, so the assertion is immediate"
     );
     assert_eq!(
-        shape(&synthesis, created),
+        asserted(&synthesis, created),
         vec![
             "execute",
             "outcome",
@@ -486,10 +587,15 @@ fn a_view_is_asserted_in_the_block_its_own_consistency_decides() {
 }
 
 #[test]
-fn a_view_the_entity_has_not_reached_yet_is_asserted_to_exclude_it() {
+fn a_view_the_entity_has_not_reached_yet_is_asserted_to_exclude_the_instance_by_name() {
     // The negative view assertion, decided rather than assumed: `OutstandingInvoices` filters on
     // `state == Issued` and `CreateInvoice` leaves the invoice in `Draft`, so the filter evaluates
     // to `False` against the one fact the scenario knows.
+    //
+    // And it excludes *this* invoice rather than every row. With an empty field set the assertion
+    // reads "the view is empty", which is the same claim only while §8's isolation holds; against a
+    // target shared with anything else it fails on somebody else's row. The identity comes from the
+    // branch's own `instance:` — `creates:` publishes it in an event — so nothing is guessed.
     let synthesis = synthesize(&example("billing"));
     let (_, expectation) = expectation(
         &synthesis,
@@ -497,9 +603,16 @@ fn a_view_the_entity_has_not_reached_yet_is_asserted_to_exclude_it() {
         "billing.invoice.OutstandingInvoices",
     );
 
-    assert!(
-        matches!(expectation, ViewExpectation::Excludes { fields } if fields.is_empty()),
-        "an invoice in `Draft` must not be outstanding: {expectation:?}"
+    let ViewExpectation::Excludes { fields } = expectation else {
+        panic!("an invoice in `Draft` must not be outstanding: {expectation:?}")
+    };
+    assert_eq!(
+        fields.get("invoice_id"),
+        Some(&ScenarioValue::observed(
+            "billing.invoice.InvoiceCreated".parse().expect("an event"),
+            "invoice_id"
+        )),
+        "the row is named by the identity the creating branch declares it publishes: {fields:?}"
     );
 }
 
@@ -561,8 +674,12 @@ fn a_scenario_that_moves_an_instance_names_the_one_an_earlier_step_created() {
     let synthesis = synthesize(&example("billing"));
     let id = "billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled";
 
+    // The negative assertions are filtered out here and asserted in
+    // `the_refusal_branch_asserts_that_no_event_the_specification_declares_occurred`: they are one
+    // per declared event, and repeating that count in every shape assertion would make an unrelated
+    // new event fail six tests with nothing to read in any of them.
     assert_eq!(
-        shape(&synthesis, id),
+        asserted(&synthesis, id),
         vec![
             "execute",
             "outcome",
@@ -686,13 +803,21 @@ fn a_move_that_is_illegal_in_a_state_is_attempted_with_the_input_that_would_have
     let id = "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.PayInvoice";
 
     assert_eq!(
-        shape(&synthesis, id),
+        asserted(&synthesis, id),
         vec![
-            "execute", "outcome", "capture", "execute", "outcome", "execute", "outcome", "execute",
-            "no-event"
+            "execute", "outcome", "capture", "execute", "outcome", "execute", "outcome", "execute"
         ],
         "drive the invoice to `Paid`, then pay it again — and assert no outcome, because none is \
          declared for this"
+    );
+    let forbidden = shape(&synthesis, id)
+        .into_iter()
+        .filter(|step| *step == "no-event")
+        .count();
+    assert_eq!(
+        forbidden, 6,
+        "and none of the six events billing declares: no branch was taken, so every declared event \
+         belongs to a branch this invocation did not run"
     );
 
     let amount = sent(&synthesis, id)
@@ -731,10 +856,73 @@ fn a_move_that_is_illegal_in_a_state_is_attempted_with_the_input_that_would_have
             _ => None,
         })
         .collect();
+    assert!(
+        absent.contains(&"billing.invoice.InvoicePaid".to_owned()),
+        "what must not happen is first of all the fact the move would have published: {absent:?}"
+    );
     assert_eq!(
-        absent,
-        vec!["billing.invoice.InvoicePaid"],
-        "what must not happen is the fact the move would have published"
+        absent.len(),
+        6,
+        "and every other declared event too — a command nothing honoured took no branch, and every \
+         declared event belongs to a branch, so publishing any of them is publishing one this \
+         invocation never ran: {absent:?}"
+    );
+}
+
+#[test]
+fn an_illegal_move_says_that_the_model_cannot_declare_how_it_is_refused() {
+    // §19 asks for two things of this family, and the model can express only one. "Must not reach
+    // `Cancelled`" is asserted; "the exact rejection mechanism must come from the declared
+    // command/error semantics" is not, because a command has no way to declare what it answers when
+    // its subject is in a state its transitions do not run from.
+    //
+    // So the scenario is produced *and* the gap is reported beside it. §36's rule is about silence,
+    // not about absence: a reader of a passing run cannot otherwise tell a scenario that asserts
+    // everything the section asks for from one that asserts what was left.
+    let synthesis = synthesize(&example("billing"));
+    let id = "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.CancelInvoice";
+
+    assert!(
+        ids(&synthesis).iter().any(|known| known == id),
+        "the scenario is still produced; what it cannot assert is not a reason to drop it"
+    );
+
+    let refusal = synthesis
+        .refused(code(12))
+        .find(|refusal| {
+            refusal
+                .scenario
+                .as_ref()
+                .is_some_and(|scenario| scenario.to_string() == id)
+        })
+        .unwrap_or_else(|| panic!("the mechanism refuses: {:?}", refused(&synthesis)));
+
+    let rendered = refusal.to_string();
+    for required in [
+        "billing.invoice.CancelInvoice",
+        "billing.invoice.Invoice",
+        "Paid",
+        "no outcome and no declared error",
+    ] {
+        assert!(
+            rendered.contains(required),
+            "the refusal names the combination the model cannot describe; {required:?} is missing \
+             from: {rendered}"
+        );
+    }
+    assert!(
+        refusal.hint().contains("ess-domain"),
+        "and says that closing it is a model change rather than a synthesizer change: {}",
+        refusal.hint()
+    );
+
+    assert_eq!(
+        synthesis.refused(code(12)).count(),
+        ids(&synthesis)
+            .iter()
+            .filter(|id| id.contains("/state/"))
+            .count(),
+        "one per illegal-move scenario, because every one of them is missing the same thing"
     );
 }
 
@@ -814,7 +1002,7 @@ fn an_outcome_that_updates_an_instance_acts_on_one_the_scenario_created() {
     let id = "oracle.order.AmendOrder/outcome/amended";
 
     assert_eq!(
-        shape(&synthesis, id),
+        asserted(&synthesis, id),
         vec![
             "execute",
             "outcome",
@@ -1459,6 +1647,12 @@ fn each_example_synthesises_the_families_its_specification_declares() {
     // The count, by family, for both examples — the one assertion that fails when a family stops
     // being produced at all, which no test of one scenario's shape can see. Read as a table because
     // that is what it is: what each specification declares, and what it therefore obliges.
+    //
+    // The refusal count includes one `ESS-SYNTH-012` per illegal-move scenario: those scenarios are
+    // produced *and* assert less than §19 asks for, because no construct in the model lets a command
+    // declare what it answers when its subject is in the wrong state. Nine for billing is eight of
+    // those plus the one value object whose own invariants are not read off the fields that hold
+    // one; fourteen for the oracle fixture is eight plus its six binding refusals.
     for (system, expected, refusals) in [
         (
             "billing",
@@ -1469,7 +1663,7 @@ fn each_example_synthesises_the_families_its_specification_declares() {
                 ("/invariant/", 4),
                 ("/binding/", 4),
             ],
-            1,
+            9,
         ),
         (
             "oracle-fixture",
@@ -1480,7 +1674,7 @@ fn each_example_synthesises_the_families_its_specification_declares() {
                 ("/invariant/", 0),
                 ("/binding/", 11),
             ],
-            6,
+            14,
         ),
     ] {
         let synthesis = synthesize(&example(system));

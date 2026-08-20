@@ -64,7 +64,7 @@ pub(crate) const CREATE_INVOICE: &str = "billing.invoice.CreateInvoice";
 /// `billing.invoice.IssueInvoice`.
 const ISSUE_INVOICE: &str = "billing.invoice.IssueInvoice";
 /// `billing.invoice.PayInvoice`.
-const PAY_INVOICE: &str = "billing.invoice.PayInvoice";
+pub(crate) const PAY_INVOICE: &str = "billing.invoice.PayInvoice";
 /// `billing.invoice.CancelInvoice`.
 pub(crate) const CANCEL_INVOICE: &str = "billing.invoice.CancelInvoice";
 /// `billing.email.SendEmail`.
@@ -80,7 +80,7 @@ pub(crate) const INVOICE_CREATED: &str = "billing.invoice.InvoiceCreated";
 /// `billing.invoice.InvoiceIssued`.
 pub(crate) const INVOICE_ISSUED: &str = "billing.invoice.InvoiceIssued";
 /// `billing.invoice.InvoicePaid`.
-const INVOICE_PAID: &str = "billing.invoice.InvoicePaid";
+pub(crate) const INVOICE_PAID: &str = "billing.invoice.InvoicePaid";
 /// `billing.invoice.InvoiceCancelled`.
 pub(crate) const INVOICE_CANCELLED: &str = "billing.invoice.InvoiceCancelled";
 /// `billing.email.EmailSent`.
