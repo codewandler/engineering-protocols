@@ -1,0 +1,97 @@
+# Decomposition and the three bindings this fixture exists for.
+
+conversions:
+  - from: oracle.order.Email
+    to: oracle.dispatch.Recipient
+    because: >-
+      An order's contact address is where the carrier's notice goes; the dispatch context validates
+      it again on the way out, so the order context does not have to know how.
+
+components:
+  - component: order-service
+    summary: Records orders and moves them through their lifecycle.
+    owns:
+      domains:
+        - oracle.order
+    accepts:
+      commands:
+        - oracle.order.PlaceOrder
+        - oracle.order.AmendOrder
+        - oracle.order.HoldOrder
+        - oracle.order.ShipOrder
+        - oracle.order.CancelOrder
+    publishes:
+      events:
+        - oracle.order.OrderPlaced
+        - oracle.order.OrderAmended
+        - oracle.order.OrderHeld
+        - oracle.order.OrderShipped
+        - oracle.order.OrderCancelled
+
+  - component: dispatch-service
+    summary: Hands orders to a carrier.
+    owns:
+      domains:
+        - oracle.dispatch
+    accepts:
+      commands:
+        - oracle.dispatch.Handoff
+    publishes:
+      events:
+        - oracle.dispatch.HandedOff
+        - oracle.dispatch.HandoffEscalated
+
+# Three bindings, on three different events, with the three different `on_failure` policies the
+# model has. Two properties fall out that one binding cannot give:
+#
+#   * every word `on_failure:` accepts is reachable, so no policy is a word nothing exercises —
+#     including `drop`, which is the one policy with nothing to observe, and therefore the only
+#     input in either example that makes scenario synthesis *refuse* a check (design §18) rather
+#     than emit one;
+#   * a fault that drops one binding leaves the other two green, which is what design §26 means by
+#     "unrelated core scenarios still pass". With a single binding, dropping it fails every binding
+#     scenario there is, and a fault that fails everything proves nothing.
+bindings:
+  - id: handoff-on-placed
+    summary: Ask the carrier to collect a new order.
+    when:
+      event: oracle.order.OrderPlaced
+    invoke:
+      command: oracle.dispatch.Handoff
+    # `event.contact`, not `event.alternate_contact`. Both are `oracle.order.Email`, so the wrong
+    # one here is a document that still compiles and a system that mails the wrong person.
+    mapping:
+      recipient: event.contact
+      label: placed
+    delivery: at_least_once
+    on_failure: retry
+
+  - id: handoff-on-held
+    summary: Tell the carrier a held order is not coming yet.
+    when:
+      event: oracle.order.OrderHeld
+    invoke:
+      command: oracle.dispatch.Handoff
+    mapping:
+      recipient: event.contact
+      label: held
+    delivery: at_least_once
+    on_failure:
+      escalate:
+        emits: oracle.dispatch.HandoffEscalated
+
+  - id: handoff-on-shipped
+    summary: Confirm the handoff of an order that has shipped.
+    when:
+      event: oracle.order.OrderShipped
+    invoke:
+      command: oracle.dispatch.Handoff
+    mapping:
+      recipient: event.contact
+      label: shipped
+    delivery: at_least_once
+    # Legal, and the reason it is here: `drop` declares that a failure is given up on silently.
+    # There is nothing for a scenario to observe, so synthesis has to refuse the failure check by
+    # name rather than invent an assertion — the refusal path design §50 requires and that nothing
+    # in the normative example reaches.
+    on_failure: drop

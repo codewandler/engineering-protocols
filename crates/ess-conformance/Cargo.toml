@@ -1,0 +1,22 @@
+[package]
+name = "ess-conformance"
+description = "Deciding whether a candidate command input satisfies a specification's guard, and refusing when it cannot be decided."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+aep-domain.workspace = true
+ess-compiler.workspace = true
+ess-domain.workspace = true
+
+# No third-party dependency, and that is a decision rather than an absence. The whole crate is a walk
+# over two trees this workspace already owns — a `ResolvedTypeRef` and a `Node` — producing a
+# `FactStore` `aep-domain` already defines. `thiserror` would have bought two `Display` impls that are
+# eleven lines each, and a value tree of its own would have bought a second spelling of `Node`.
+
+[lints]
+workspace = true

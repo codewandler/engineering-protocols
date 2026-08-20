@@ -1,0 +1,69 @@
+domain: oracle.dispatch
+
+summary: Handing an order to a carrier, which may refuse for reasons no input predicts.
+
+types:
+  - name: oracle.dispatch.Recipient
+    kind: newtype
+    of: String
+
+  - name: oracle.dispatch.Label
+    kind: newtype
+    of: String
+
+  - name: oracle.dispatch.HandoffId
+    kind: newtype
+    of: Uuid
+
+errors:
+  - name: oracle.dispatch.NoCapacity
+    summary: The carrier had no capacity for this handoff.
+
+commands:
+  # Every binding in this fixture invokes this one command, and it can be made to fail. That is
+  # deliberate: `retry`, `escalate` and `drop` are three different answers to the same question, and
+  # a scenario can only tell them apart if it can force the same failure under each. Without an
+  # externally decided outcome there is no failure to force, and all three policies would be
+  # unreachable words.
+  - name: oracle.dispatch.Handoff
+
+    naming:
+      wire: handoff
+      display: Hand off
+
+    input:
+      - name: recipient
+        type: oracle.dispatch.Recipient
+      - name: label
+        type: oracle.dispatch.Label
+
+    outcomes:
+      - name: accepted
+        emits:
+          - oracle.dispatch.HandedOff
+        summary: The carrier took it.
+
+      - name: refused
+        external: the carrier has no capacity for this handoff
+        error: oracle.dispatch.NoCapacity
+        summary: The carrier refused; no input decides this, so a scenario injects it.
+
+events:
+  - name: oracle.dispatch.HandedOff
+    fields:
+      - name: handoff_id
+        type: oracle.dispatch.HandoffId
+      - name: recipient
+        type: oracle.dispatch.Recipient
+
+  # What `on_failure: escalate` publishes. Escalation hands the failure to a person; the event is
+  # how the system records that it did.
+  - name: oracle.dispatch.HandoffEscalated
+    naming:
+      display: Handoff escalated
+      summary: The carrier kept refusing and a person was told.
+    fields:
+      - name: recipient
+        type: oracle.dispatch.Recipient
+      - name: label
+        type: oracle.dispatch.Label

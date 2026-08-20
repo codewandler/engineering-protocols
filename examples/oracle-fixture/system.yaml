@@ -1,0 +1,22 @@
+# Not a system anybody would run. A fixture.
+#
+# `examples/billing/` is the normative example and stays readable as the specification of a real
+# system. This one exists so wave 4's oracle has an input for the checks billing cannot make fail —
+# see `README.md` beside this file for the construct-by-construct list and the reason each is here.
+#
+# Nothing generates from this directory: `cargo xtask generate` is pinned to `examples/billing`
+# (`xtask/src/main.rs`, `NORMATIVE_EXAMPLE`), so a corner added here costs no committed output.
+format: ess/1
+system: oracle
+version: v1
+
+summary: >-
+  Orders handed off to a carrier: the smallest specification that holds the constructs the normative
+  example deliberately does not — all three `on_failure` policies, three bindings so dropping one
+  leaves another to stay green, an outcome that updates an entity without moving it, a filtered view
+  at each consistency level, and an event carrying two fields of one type so a mapping can be swapped
+  rather than invented.
+
+domains:
+  - oracle.order
+  - oracle.dispatch

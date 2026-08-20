@@ -364,6 +364,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ess-conformance"
+version = "0.1.0"
+dependencies = [
+ "aep-domain",
+ "ess-compiler",
+ "ess-domain",
+]
+
+[[package]]
 name = "ess-domain"
 version = "0.1.0"
 dependencies = [

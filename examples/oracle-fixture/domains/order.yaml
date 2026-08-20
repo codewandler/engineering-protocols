@@ -1,0 +1,245 @@
+domain: oracle.order
+
+summary: Orders, and the states one passes through on its way out of the building.
+
+naming:
+  wire: orders
+  display: Ordering
+
+types:
+  - name: oracle.order.OrderId
+    kind: newtype
+    of: Uuid
+
+  # Crossed into `oracle.dispatch.Recipient` by every binding — the conversion is declared in
+  # `components.yaml`, as billing declares its own.
+  - name: oracle.order.Email
+    kind: newtype
+    of: String
+
+errors:
+  - name: oracle.order.WeightOutOfRange
+    summary: The weight was negative, so nothing was recorded.
+    fields:
+      - name: submitted
+        type: Integer
+
+entities:
+  - name: oracle.order.Order
+
+    identity:
+      name: order_id
+      type: oracle.order.OrderId
+
+    # `alternate_contact` has the same type as `contact` on purpose. It is what makes a wrong
+    # binding mapping a *swap between two declared sources* rather than a value the target invented:
+    # `recipient: event.alternate_contact` is structurally valid and semantically wrong, which is the
+    # only shape of that fault a specification can distinguish. Billing's `InvoiceCreated` carries
+    # exactly one address, so there is nothing there to swap it with.
+    fields:
+      - name: contact
+        type: oracle.order.Email
+      - name: alternate_contact
+        type: oracle.order.Email
+      - name: weight_grams
+        type: Integer
+
+    # What design §20 evaluates after a state-changing command. `AmendOrder` below is the reason
+    # this fixture exists for that section: it changes the field this invariant reads *without*
+    # moving the entity along its lifecycle, which is the case the normative example has no
+    # instance of.
+    invariants:
+      - weight_grams >= 0
+
+    # `Shipped` is terminal, and `cancel` cannot start there. That is the illegal transition design
+    # §19 asks for a negative check on, and it is reachable: `PlaceOrder` then `ShipOrder` puts an
+    # order in `Shipped`, and `CancelOrder` is the verb that must not move it.
+    lifecycle:
+      initial: Placed
+      states: [Placed, Held, Shipped, Cancelled]
+      terminal: [Shipped, Cancelled]
+      transitions:
+        - name: hold
+          from: [Placed]
+          to: Held
+        - name: ship
+          from: [Placed]
+          to: Shipped
+        - name: cancel
+          from: [Placed, Held]
+          to: Cancelled
+
+commands:
+  - name: oracle.order.PlaceOrder
+
+    naming:
+      wire: place-order
+      display: Place order
+
+    input:
+      - name: contact
+        type: oracle.order.Email
+      - name: alternate_contact
+        type: oracle.order.Email
+      - name: weight_grams
+        type: Integer
+
+    outcomes:
+      - name: accepted
+        when: weight_grams >= 0
+        creates: oracle.order.Order
+        emits:
+          - oracle.order.OrderPlaced
+        summary: The order is recorded, in Placed.
+
+      - name: rejected
+        error: oracle.order.WeightOutOfRange
+        summary: The weight was negative, and nothing was recorded.
+
+  # The third verb. `updates:` changes an order without moving it, so the entity's invariant has to
+  # be re-evaluated with no transition to hang that evaluation on — design §20's case, and the one
+  # `creates:` and `moves:` between them do not produce.
+  - name: oracle.order.AmendOrder
+
+    naming:
+      wire: amend-order
+      display: Amend order
+
+    input:
+      - name: order_id
+        type: oracle.order.OrderId
+      - name: weight_grams
+        type: Integer
+
+    outcomes:
+      - name: amended
+        when: weight_grams >= 0
+        updates: oracle.order.Order
+        emits:
+          - oracle.order.OrderAmended
+        summary: The recorded weight changes; the order stays where it is.
+
+      - name: rejected
+        error: oracle.order.WeightOutOfRange
+        summary: The weight was negative, so the order was left alone.
+
+  - name: oracle.order.HoldOrder
+
+    naming:
+      wire: hold-order
+      display: Hold order
+
+    input:
+      - name: order_id
+        type: oracle.order.OrderId
+
+    outcomes:
+      - name: held
+        moves: oracle.order.Order.hold
+        emits:
+          - oracle.order.OrderHeld
+        summary: The order is held for review.
+
+  - name: oracle.order.ShipOrder
+
+    naming:
+      wire: ship-order
+      display: Ship order
+
+    input:
+      - name: order_id
+        type: oracle.order.OrderId
+
+    outcomes:
+      - name: shipped
+        moves: oracle.order.Order.ship
+        emits:
+          - oracle.order.OrderShipped
+        summary: The order leaves the building, and is terminal.
+
+  - name: oracle.order.CancelOrder
+
+    naming:
+      wire: cancel-order
+      display: Cancel order
+
+    input:
+      - name: order_id
+        type: oracle.order.OrderId
+
+    outcomes:
+      - name: cancelled
+        moves: oracle.order.Order.cancel
+        emits:
+          - oracle.order.OrderCancelled
+        summary: The order is cancelled, from Placed or from Held — never from Shipped.
+
+events:
+  - name: oracle.order.OrderPlaced
+    fields:
+      - name: order_id
+        type: oracle.order.OrderId
+      - name: contact
+        type: oracle.order.Email
+      - name: alternate_contact
+        type: oracle.order.Email
+
+  - name: oracle.order.OrderAmended
+    fields:
+      - name: order_id
+        type: oracle.order.OrderId
+      - name: weight_grams
+        type: Integer
+
+  - name: oracle.order.OrderHeld
+    fields:
+      - name: order_id
+        type: oracle.order.OrderId
+      - name: contact
+        type: oracle.order.Email
+
+  - name: oracle.order.OrderShipped
+    fields:
+      - name: order_id
+        type: oracle.order.OrderId
+      - name: contact
+        type: oracle.order.Email
+
+  - name: oracle.order.OrderCancelled
+    fields:
+      - name: order_id
+        type: oracle.order.OrderId
+
+views:
+  # Read-your-writes, filtered on the *initial* state. One command — `PlaceOrder` — puts a row in
+  # it, so a target that ignores the consistency token is caught by a single-step scenario: the
+  # read either sees the write it was told about or it does not. Billing's read-your-writes view
+  # filters on a state two commands away, which is a weaker race to lose.
+  - name: oracle.order.OpenOrders
+    source: oracle.order.Order
+    consistency: read_your_writes
+    filter: state == Placed
+    fields:
+      - name: order_id
+        type: oracle.order.OrderId
+      - name: contact
+        type: oracle.order.Email
+    naming:
+      wire: open
+      display: Open orders
+
+  # Eventual, and filtered on a state that is *not* the initial one — so the convergence a bounded
+  # eventual assertion waits for is real rather than satisfied the moment the entity exists. The
+  # normative example's eventual view has no filter at all.
+  - name: oracle.order.HeldOrders
+    source: oracle.order.Order
+    consistency: eventual
+    filter: state == Held
+    fields:
+      - name: order_id
+        type: oracle.order.OrderId
+      - name: contact
+        type: oracle.order.Email
+    naming:
+      wire: held
+      display: Held orders
