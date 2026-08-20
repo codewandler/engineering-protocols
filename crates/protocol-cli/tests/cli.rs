@@ -234,7 +234,7 @@ fn schema_lists_and_prints_generated_schemas() {
     assert_eq!(code(&listing), 0);
     assert_eq!(
         stdout(&listing).lines().count(),
-        10,
+        11,
         "one line per published schema"
     );
 
@@ -283,6 +283,70 @@ fn conformance_fails_when_a_property_is_deliberately_broken() {
         text.contains("expected to be caught by the `idempotency` suite"),
         "{text}"
     );
+}
+
+#[test]
+fn a_project_is_discovered_so_no_arguments_are_needed() {
+    // The first command an adopting team types should not need four paths.
+    let project = std::env::temp_dir().join("aep-cli-project");
+    std::fs::remove_dir_all(&project).ok();
+    std::fs::create_dir_all(project.join(".engineering")).expect("writable");
+    std::fs::write(
+        project.join(".engineering/project.yaml"),
+        format!(
+            "protocol: adp/1\nprofile: development.standard\nprotocols: {}\n",
+            root().display()
+        ),
+    )
+    .expect("writable");
+    std::fs::write(
+        project.join(".engineering/task.yaml"),
+        "id: LOCAL-1\nkind: feature\nobjective: prove discovery works\nprotocol: adp/1\n\
+         profile: development.standard\n",
+    )
+    .expect("writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_protocol"))
+        .arg("resolve")
+        .current_dir(&project)
+        .output()
+        .expect("the protocol binary runs");
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("LOCAL-1"), "{text}");
+    assert!(text.contains("development.standard"), "{text}");
+
+    // From a subdirectory too: discovery walks up.
+    let nested = project.join("src/deep");
+    std::fs::create_dir_all(&nested).expect("writable");
+    let nested_output = Command::new(env!("CARGO_BIN_EXE_protocol"))
+        .arg("resolve")
+        .current_dir(&nested)
+        .output()
+        .expect("the protocol binary runs");
+    assert_eq!(code(&nested_output), 0, "{}", stderr(&nested_output));
+
+    std::fs::remove_dir_all(&project).ok();
+}
+
+#[test]
+fn outside_a_project_the_missing_task_is_explained() {
+    let elsewhere = std::env::temp_dir().join("aep-cli-not-a-project");
+    std::fs::create_dir_all(&elsewhere).expect("writable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_protocol"))
+        .arg("resolve")
+        .current_dir(&elsewhere)
+        .output()
+        .expect("the protocol binary runs");
+
+    assert_eq!(code(&output), 1);
+    let errors = stderr(&output);
+    assert!(errors.contains(".engineering/project.yaml"), "{errors}");
+    assert!(errors.contains("no --task was given"), "{errors}");
+
+    std::fs::remove_dir_all(&elsewhere).ok();
 }
 
 #[test]

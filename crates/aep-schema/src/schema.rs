@@ -62,6 +62,11 @@ pub fn generated_schemas() -> Vec<GeneratedSchema> {
         entry::<RawWorkflow>("RawWorkflow", "workflow", "a workflow state machine"),
         entry::<RawProfile>("RawProfile", "profile", "a profile"),
         entry::<RawTask>("RawTask", "task", "a task"),
+        entry::<aep_domain::project::RawProjectConfig>(
+            "RawProjectConfig",
+            "project",
+            "what an adopting project says about itself",
+        ),
         entry::<RawArtifactManifest>(
             "RawArtifactManifest",
             "artifact-manifest",
@@ -89,7 +94,7 @@ mod tests {
     #[test]
     fn generates_a_schema_for_every_document_and_interchange_type() {
         let schemas = generated_schemas();
-        assert_eq!(schemas.len(), 10);
+        assert_eq!(schemas.len(), 11);
 
         let filenames: Vec<&str> = schemas
             .iter()

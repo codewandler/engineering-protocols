@@ -9,6 +9,23 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.1] — 2026-08-20
+
+### Added
+
+- **A project can be discovered.** `.engineering/project.yaml` names the protocol, the profile and
+  where the protocol tree lives; `protocol resolve` and `protocol evaluate` run with no arguments
+  anywhere inside a project, walking up to find it. An adopting team's first command no longer needs
+  four paths.
+- **Project-local principles and profiles.** `.engineering/principles/` and `.engineering/profiles/`
+  are merged over the protocol tree's, because no organisation's rules are entirely somebody else's.
+  They are documents in the same format, validated the same way — and a project-local profile still
+  cannot grant a capability the protocol's approval floor keeps behind approval.
+- `protocol resolve` and `protocol evaluate` report where their inputs came from, so it is never
+  ambiguous whether a flag or the project supplied them.
+
 ### Fixed
 
 - **The approval floor was inert for every `adp/1` and `aop/1` profile.** `Protocol::extend` merged
@@ -177,7 +194,8 @@ belongs in the commit message or in `docs/design/`.
 - **`xtask schema [--check]`** — schemas are generated from the Rust types, and CI proves they match.
 - Repository scaffolding: workspace, `Taskfile.yml` gate, Apache-2.0 licence, `AGENTS.md`.
 
-[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-3...HEAD
+[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.2.1...HEAD
+[0.2.1]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-3...0.2.1
 [0.2.0-wave-3]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-2...0.2.0-wave-3
 [0.2.0-wave-2]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-1...0.2.0-wave-2
 [0.2.0-wave-1]: https://github.com/codewandler/engineering-protocols/compare/0.1.0...0.2.0-wave-1

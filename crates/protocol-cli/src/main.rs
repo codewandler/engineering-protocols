@@ -68,13 +68,13 @@ struct RootArgs {
 /// The inputs an execution needs.
 #[derive(Debug, Args)]
 struct ExecutionArgs {
-    /// The document tree to load.
-    #[arg(long, default_value = ".")]
-    root: PathBuf,
-    /// The task document.
+    /// The document tree to load. Inside a project, this comes from `.engineering/project.yaml`.
     #[arg(long)]
-    task: PathBuf,
-    /// An artifact manifest.
+    root: Option<PathBuf>,
+    /// The task document. Inside a project, this comes from `.engineering/task.yaml`.
+    #[arg(long)]
+    task: Option<PathBuf>,
+    /// An artifact manifest. Inside a project, this comes from `.engineering/artifacts.yaml`.
     #[arg(long)]
     artifacts: Option<PathBuf>,
     /// Evidence to submit before evaluating, as a list of submissions.
@@ -534,16 +534,80 @@ struct Summary {
     problems: Vec<String>,
 }
 
+/// What an execution needs, from flags or from the project the command was run in.
+struct Inputs {
+    registry: Registry,
+    task: Task,
+    artifacts: ArtifactGraph,
+    /// Where these came from, for a report.
+    origin: String,
+}
+
+/// Resolves execution inputs: explicit flags first, then the project this was run in.
+///
+/// The order matters. A flag is an instruction; discovery is a convenience. Silently preferring the
+/// project would make `--task other.yaml` do something other than what it says.
+fn inputs(args: &ExecutionArgs) -> Result<Inputs> {
+    if let (Some(task), root) = (&args.task, &args.root) {
+        let root = root.clone().unwrap_or_else(|| PathBuf::from("."));
+        let registry = load(&root)?;
+        let artifacts = match &args.artifacts {
+            Some(path) => read_artifacts(path)?,
+            None => ArtifactGraph::new(),
+        };
+        return Ok(Inputs {
+            registry,
+            task: read_task(task)?,
+            artifacts,
+            origin: format!("{} and {}", root.display(), task.display()),
+        });
+    }
+
+    let here = std::env::current_dir().context("reading the working directory")?;
+    let root = aep_engine::project::discover(&here).with_context(|| {
+        format!(
+            "no `.engineering/project.yaml` in {} or any parent, and no --task was given",
+            here.display()
+        )
+    })?;
+    let project = aep_engine::project::load(&root).map_err(|errors| anyhow::anyhow!("{errors}"))?;
+
+    // A flag still overrides what the project says, so a one-off run needs no edit to the project.
+    let task = match &args.task {
+        Some(path) => read_task(path)?,
+        None => project
+            .require_task()
+            .map_err(|reason| anyhow::anyhow!("{reason}"))?
+            .clone(),
+    };
+    let artifacts = match &args.artifacts {
+        Some(path) => read_artifacts(path)?,
+        None => project.artifacts,
+    };
+
+    Ok(Inputs {
+        registry: project.registry,
+        task,
+        artifacts,
+        origin: format!("project {}", root.display()),
+    })
+}
+
 /// `protocol resolve`
 fn resolve(args: &ExecutionArgs) -> Result<ExitCode> {
-    let registry = load(&args.root)?;
-    let task = read_task(&args.task)?;
+    let Inputs {
+        registry,
+        task,
+        origin,
+        ..
+    } = inputs(args)?;
     let plan = aep_engine::resolve(&task, &registry)
         .map_err(|errors| anyhow::anyhow!("{errors}"))
         .context("the task cannot be resolved")?;
 
     match args.format {
         Format::Text => {
+            outln!("inputs      {origin}");
             outln!("task        {} ({})", plan.task.id, plan.task.kind);
             outln!("objective   {}", plan.task.objective);
             outln!("protocol    {}", plan.protocol.reference());
@@ -630,12 +694,12 @@ fn inspect(root: &Path, reference: Option<&str>, format: Format) -> Result<ExitC
 
 /// `protocol evaluate` and `protocol explain`
 fn evaluate(args: &ExecutionArgs, action: Option<&str>) -> Result<ExitCode> {
-    let registry = load(&args.root)?;
-    let task = read_task(&args.task)?;
-    let artifacts = match &args.artifacts {
-        Some(path) => read_artifacts(path)?,
-        None => ArtifactGraph::new(),
-    };
+    let Inputs {
+        registry,
+        task,
+        artifacts,
+        origin,
+    } = inputs(args)?;
 
     let engine = Engine::new(registry);
     let mut execution = match &args.state {
@@ -691,6 +755,7 @@ fn evaluate(args: &ExecutionArgs, action: Option<&str>) -> Result<ExitCode> {
     let evaluation = engine.evaluate(&execution);
     match args.format {
         Format::Text => {
+            outln!("inputs      {origin}");
             outln!(
                 "state       {} ({})",
                 evaluation.state,

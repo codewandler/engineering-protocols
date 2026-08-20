@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawProjectConfig",
+  "description": "A project configuration document, as parsed.",
+  "type": "object",
+  "required": [
+    "profile",
+    "protocol"
+  ],
+  "properties": {
+    "artifacts": {
+      "description": "Where the artifact manifest is.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "principles": {
+      "description": "Where project-local principles are.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "profile": {
+      "description": "The profile it uses.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProfileVersionedRef"
+        }
+      ]
+    },
+    "profiles": {
+      "description": "Where project-local profiles are.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "protocol": {
+      "description": "The protocol version this project runs under.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ProtocolRef"
+        }
+      ]
+    },
+    "protocols": {
+      "description": "Where the protocol document tree is, relative to `.engineering`.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "state": {
+      "description": "Where execution state is kept.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "description": "A one-line description.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task": {
+      "description": "Where the task document is.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "description": "The format version.",
+      "default": "aep.project/1",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "ProfileVersionedRef": {
+      "description": "Reference to a profile, optionally pinned to a major version.",
+      "type": "string",
+      "pattern": "^(profile:)?[a-z][a-z0-9-]*([./][a-z0-9-]+)*(/[1-9][0-9]*)?$"
+    },
+    "ProtocolRef": {
+      "description": "Reference to a protocol at a major version, such as `aep/1`.",
+      "type": "string",
+      "pattern": "^(protocol:)?[a-z][a-z0-9-]*/[1-9][0-9]*$"
+    }
+  }
+}

@@ -38,6 +38,7 @@
 //! | [`task`] | tasks, objectives, constraints and principle overrides |
 //! | [`protocol`] | protocol declarations: the vocabulary a profile may use |
 //! | [`profile`] | profiles: protocol, workflow, principles and completion |
+//! | [`project`] | what an adopting project says about itself |
 //! | [`plan`] | resolved execution plans |
 //! | [`event`] | the audit event vocabulary |
 //! | [`audit`] | the audit trail: who authorised it, what ran, why it was allowed |
@@ -60,6 +61,7 @@ pub mod plan;
 pub mod predicate;
 pub mod principle;
 pub mod profile;
+pub mod project;
 pub mod protocol;
 pub mod raw;
 pub mod requirement;
@@ -104,6 +106,7 @@ pub use principle::{
     VerificationRequirement,
 };
 pub use profile::Profile;
+pub use project::{ProjectConfig, ProjectPaths};
 pub use protocol::Protocol;
 pub use requirement::{
     ApprovalRequirement, ArtifactRequirement, ConditionalRequirement, EvidenceRequirement,

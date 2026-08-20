@@ -80,6 +80,11 @@ impl LoadOutcome {
 pub struct LoadErrors(Vec<LoadFailure>);
 
 impl LoadErrors {
+    /// Builds an error set from failures collected elsewhere.
+    pub fn from_failures(failures: Vec<LoadFailure>) -> Self {
+        Self(failures)
+    }
+
     /// The failures.
     pub fn as_slice(&self) -> &[LoadFailure] {
         &self.0
@@ -198,7 +203,10 @@ fn load_file(registry: &mut Registry, path: &Path, kind: DocumentKind) -> Result
                     .insert_lifecycle(document)
                     .map_err(|error| error.to_string())
             }),
-        DocumentKind::Task | DocumentKind::ArtifactManifest | DocumentKind::Evidence => {
+        DocumentKind::Task
+        | DocumentKind::ArtifactManifest
+        | DocumentKind::Evidence
+        | DocumentKind::Project => {
             Err(format!("{kind} documents do not belong in a protocol tree"))
         }
     };

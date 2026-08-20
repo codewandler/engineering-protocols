@@ -48,7 +48,7 @@ audit trail, and a backend can prove it implements the contract by running a sui
 | `aep-conformance` — black-box backend suites | 12% | 100% | 16 suites, 3 levels, a faulty backend that proves they bite |
 | `adp-domain`, `aop-domain` | 5% | 100% | 93 tests |
 
-428 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
+442 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
 the "done" column with `task check`.
 
 ### What works today

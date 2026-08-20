@@ -43,6 +43,8 @@ pub enum DocumentKind {
     Lifecycle,
     /// A list of evidence submissions.
     Evidence,
+    /// A project's own configuration.
+    Project,
 }
 
 impl DocumentKind {
@@ -57,6 +59,7 @@ impl DocumentKind {
             Self::ArtifactManifest => "artifact-manifest",
             Self::Lifecycle => "lifecycle",
             Self::Evidence => "evidence",
+            Self::Project => "project",
         }
     }
 
@@ -70,6 +73,7 @@ impl DocumentKind {
         Self::ArtifactManifest,
         Self::Lifecycle,
         Self::Evidence,
+        Self::Project,
     ];
 
     /// The repository subdirectory this kind is conventionally stored in.
@@ -83,6 +87,7 @@ impl DocumentKind {
             Self::ArtifactManifest => ".engineering",
             Self::Lifecycle => "artifacts/lifecycles",
             Self::Evidence => "evidence",
+            Self::Project => "project",
         }
     }
 }
@@ -196,6 +201,18 @@ pub fn task(text: &str, origin: Option<&str>) -> Result<Task, DocumentError> {
 /// Reads an artifact manifest.
 pub fn artifact_manifest(text: &str, origin: Option<&str>) -> Result<ArtifactGraph, DocumentError> {
     document::<RawArtifactManifest, ArtifactGraph>(DocumentKind::ArtifactManifest, text, origin)
+}
+
+/// Reads a project's own configuration.
+pub fn project(
+    text: &str,
+    origin: Option<&str>,
+) -> Result<aep_domain::project::ProjectConfig, DocumentError> {
+    document::<aep_domain::project::RawProjectConfig, aep_domain::project::ProjectConfig>(
+        DocumentKind::Project,
+        text,
+        origin,
+    )
 }
 
 /// Reads an artifact lifecycle.
@@ -329,6 +346,6 @@ states:
     fn document_kinds_map_to_repository_directories() {
         assert_eq!(DocumentKind::Principle.directory(), "principles");
         assert_eq!(DocumentKind::Lifecycle.directory(), "artifacts/lifecycles");
-        assert_eq!(DocumentKind::ALL.len(), 8);
+        assert_eq!(DocumentKind::ALL.len(), 9);
     }
 }
