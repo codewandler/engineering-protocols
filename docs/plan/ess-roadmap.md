@@ -300,6 +300,19 @@ runs the suite.
 
 ---
 
+## ESS wave 6.5 — hardening, the register emptied
+
+> **Scheduled, 2026-08-20.** Starts when wave 6 tags. Contents and evidence, one row per gap:
+> [`gap-register.md`](gap-register.md) § "Open, owned by the post-wave-6 hardening batch". This is
+> the reconciliation shape wave 3.5 had: no new capability, the existing claims made mechanical.
+
+In order: the three invariants enforced by nothing become enforced (7 by a source scan over the
+engine, 8 by extending the banned-token scan to every crate that states the property, 14 by a
+write-surface enumeration test); the model digest widens to full SHA-256 with one regeneration
+commit (register D-4); the input→event-payload model gap closes, so the one fault caught by nothing
+gets a scenario that catches it; value-object invariant scenarios synthesise, as the refusal text
+already promises; and `proptest` phase 1 lands with the model changes it was queued behind.
+
 ## What is not in these six waves
 
 Behavioural synthesis (§32 phase 7), formal verification, topology generation, the compatibility
