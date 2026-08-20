@@ -114,6 +114,34 @@ impl GraphFormat {
     }
 }
 
+/// How to render a semantic delta.
+///
+/// Its own enum rather than the shared [`Format`], on the same reasoning [`GraphFormat`] is: a value
+/// a verb cannot honour is worse than one it does not offer. What is missing here is `yaml`, and it
+/// is missing deliberately. A delta is a **document that is read back** — `ess-diff/1`, with a
+/// `RawEssDelta` to parse it — and its canonical form is JSON for the reason a conformance suite's
+/// is: `serde_yaml` decides quoting, folding and block style by heuristics on the value, so two
+/// renderings of one delta can differ in bytes without differing in meaning, which is exactly what a
+/// byte comparison cannot tolerate. Offering `yaml` would publish a second machine form with no
+/// format contract behind it and nothing that reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum DiffFormat {
+    /// Human-readable lines: what moved, and which of it widens or narrows the system.
+    Text,
+    /// The `ess-diff/1` document, canonical and byte-stable.
+    Json,
+}
+
+impl DiffFormat {
+    /// How a specification that does not compile, or a pair that is refused, is reported.
+    fn diagnostics(self) -> Format {
+        match self {
+            Self::Text => Format::Text,
+            Self::Json => Format::Json,
+        }
+    }
+}
+
 /// Where the documents are.
 #[derive(Debug, Args)]
 struct RootArgs {
@@ -414,6 +442,7 @@ fn run() -> Result<ExitCode> {
                 format,
             } => ess_generate(&path, kind, out.as_deref(), format),
             EssCommand::Graph { path, format } => ess_graph(&path, format),
+            EssCommand::Diff { from, to, format } => ess_diff(&from, &to, format),
             EssCommand::Conform { command } => match command {
                 EssConformCommand::Synthesize { path, out, format } => {
                     ess_conform_synthesize(&path, out.as_deref(), format)
@@ -675,6 +704,32 @@ enum EssCommand {
         /// How to render the graph.
         #[arg(long, value_enum, default_value_t = GraphFormat::Dot)]
         format: GraphFormat,
+    },
+    /// Say what moved between two revisions of one specification.
+    ///
+    /// Both sides are compiled first, and the answer is a semantic delta over the two IRs — not a
+    /// text diff. Moving a declaration between files, renaming a file, reordering blocks or
+    /// rewriting every comment costs two hundred lines of `git diff` and reports **no change** here,
+    /// because none of it changes what the system means. `examples/revision-pair/` is that claim
+    /// with a fixture behind it.
+    ///
+    /// Six construct families are compared — system, types, events, errors, actors, components —
+    /// and four kinds of change carry a direction: a grant added widens what the system permits, a
+    /// grant removed narrows it, and an enum or union variant does the same for what a type accepts.
+    /// Everything else is reported as *changed*, which is an answer rather than a shrug.
+    ///
+    /// Exits 1 when either side does not compile, or when the two name different systems — which is
+    /// the one pair this verb refuses rather than answers.
+    Diff {
+        /// The specification to compare *from*: a directory, or one file.
+        #[arg(long)]
+        from: PathBuf,
+        /// The specification to compare *to*: a directory, or one file.
+        #[arg(long)]
+        to: PathBuf,
+        /// How to render the delta. `json` is the `ess-diff/1` document itself.
+        #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
+        format: DiffFormat,
     },
     /// Check an implementation against the suite a specification obliges.
     ///
@@ -2385,6 +2440,43 @@ fn ess_graph(path: &Path, format: GraphFormat) -> Result<ExitCode> {
         GraphFormat::Dot => out!("{}", graph.dot()),
         GraphFormat::Yaml => print_serialised(&graph, Format::Yaml)?,
         GraphFormat::Json => print_serialised(&graph, Format::Json)?,
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol ess diff`
+///
+/// Two compilations and one comparison. The refusal is rendered rather than returned as an `Err`,
+/// because "these are two systems" is an answer about the input and not a failure of this program —
+/// the same shape `ess compile` uses for a specification that does not resolve.
+fn ess_diff(from: &Path, to: &Path, format: DiffFormat) -> Result<ExitCode> {
+    let before = match ess_compiled(from, format.diagnostics())? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+    let after = match ess_compiled(to, format.diagnostics())? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+
+    let delta = match ess_diff::diff(&before, &after) {
+        Ok(delta) => delta,
+        Err(refusal) => {
+            match format {
+                DiffFormat::Text => outln!("refused: {refusal}"),
+                DiffFormat::Json => print_serialised(&refusal, Format::Json)?,
+            }
+            return Ok(exit_code(false));
+        }
+    };
+
+    match format {
+        // The library renders the text, not this function: the sentence a person reads and the
+        // sentence a harness reads have to be the same sentence, and a second renderer here is a
+        // second place for a change to be put into words.
+        DiffFormat::Text => out!("{}", ess_diff::render::text(&delta)),
+        DiffFormat::Json => out!("{}", delta.to_canonical_json()),
     }
 
     Ok(ExitCode::SUCCESS)

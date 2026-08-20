@@ -1,0 +1,123 @@
+domain: catalog.pricing
+
+summary: Publishing price lists and retiring them.
+
+naming:
+  wire: pricing
+  display: Pricing
+
+types:
+  - name: catalog.pricing.PriceListId
+    kind: newtype
+    of: Uuid
+
+  # The enum the fixture's two type changes are about. `GBP` leaves in the `after` revision and
+  # `CHF` arrives, which is one narrowing and one widening on one declaration.
+  - name: catalog.pricing.Currency
+    kind: enum
+    variants: [EUR, USD, GBP]
+
+  - name: catalog.pricing.Money
+    kind: struct
+    fields:
+      - name: amount
+        type: Decimal
+      - name: currency
+        type: catalog.pricing.Currency
+    invariants:
+      - amount >= 0
+
+entities:
+  - name: catalog.pricing.PriceList
+
+    identity:
+      name: price_list_id
+      type: catalog.pricing.PriceListId
+
+    fields:
+      - name: headline
+        type: catalog.pricing.Money
+
+    lifecycle:
+      initial: Draft
+      states: [Draft, Published, Retired]
+      terminal: [Retired]
+      transitions:
+        - name: publish
+          from: [Draft]
+          to: Published
+        - name: retire
+          from: [Published]
+          to: Retired
+
+errors:
+  - name: catalog.pricing.PriceListStateConflict
+    summary: The price list is not in a state this command acts from, so nothing moved.
+    fields:
+      - name: state
+        type: catalog.pricing.PriceList.State
+
+commands:
+  - name: catalog.pricing.PublishPriceList
+
+    input:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+    outcomes:
+      - name: published
+        moves: catalog.pricing.PriceList.publish
+        instance: price_list_id
+        emits:
+          - catalog.pricing.PriceListPublished
+        summary: The price list leaves Draft and is now Published.
+
+      - name: wrong-state
+        wrong_state: true
+        error: catalog.pricing.PriceListStateConflict
+        summary: The price list is not in Draft, so it was not published.
+
+  - name: catalog.pricing.RetirePriceList
+
+    input:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+    outcomes:
+      - name: retired
+        moves: catalog.pricing.PriceList.retire
+        instance: price_list_id
+        emits:
+          - catalog.pricing.PriceListRetired
+        summary: The price list is withdrawn from sale.
+
+      - name: wrong-state
+        wrong_state: true
+        error: catalog.pricing.PriceListStateConflict
+        summary: The price list is not Published, so it was not retired.
+
+events:
+  - name: catalog.pricing.PriceListPublished
+    fields:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+  - name: catalog.pricing.PriceListRetired
+    fields:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+actors:
+  # Who may do what. The fixture's two actor changes move one grant from the second actor to the
+  # first, which is one widening and one narrowing.
+  - name: catalog.pricing.PricingManager
+    may:
+      - catalog.pricing.PublishPriceList
+    naming:
+      display: Pricing manager
+
+  - name: catalog.pricing.Auditor
+    may:
+      - catalog.pricing.RetirePriceList
+    naming:
+      display: Auditor

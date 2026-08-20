@@ -1,0 +1,17 @@
+# One component, so the fixture exercises the component family. It is identical in both revisions:
+# the pair differs by four changes and this is not one of them.
+
+components:
+  - component: pricing-service
+    summary: Owns price lists and the commands that move them.
+    owns:
+      domains:
+        - catalog.pricing
+    accepts:
+      commands:
+        - catalog.pricing.PublishPriceList
+        - catalog.pricing.RetirePriceList
+    publishes:
+      events:
+        - catalog.pricing.PriceListPublished
+        - catalog.pricing.PriceListRetired

@@ -377,6 +377,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ess-diff"
+version = "0.1.0"
+dependencies = [
+ "aep-domain",
+ "ess-compiler",
+ "ess-conformance",
+ "ess-domain",
+ "ess-gen",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "ess-domain"
 version = "0.1.0"
 dependencies = [
@@ -865,6 +878,7 @@ dependencies = [
  "clap",
  "ess-compiler",
  "ess-conformance",
+ "ess-diff",
  "ess-domain",
  "ess-gen",
  "serde",

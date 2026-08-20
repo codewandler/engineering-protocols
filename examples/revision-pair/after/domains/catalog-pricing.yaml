@@ -1,0 +1,130 @@
+# Renamed from `pricing.yaml`, because a document's identity comes from its content and not from its
+# filename (invariant 10). The `domain:` key below is what decides which bounded context this is, so
+# the rename costs nothing and the delta says so by not mentioning it.
+domain: catalog.pricing
+
+naming:
+  wire: pricing
+  display: Pricing
+
+summary: Publishing price lists and retiring them.
+
+# `commands:` first this time, where the earlier revision put `types:` first. Every declaration in a
+# specification is indexed by the name it declares, so the order they are written in is an author's
+# convenience and not a fact about the system.
+commands:
+  - name: catalog.pricing.PublishPriceList
+
+    input:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+    outcomes:
+      - name: published
+        moves: catalog.pricing.PriceList.publish
+        instance: price_list_id
+        emits:
+          - catalog.pricing.PriceListPublished
+        summary: The price list leaves Draft and is now Published.
+
+      - name: wrong-state
+        wrong_state: true
+        error: catalog.pricing.PriceListStateConflict
+        summary: The price list is not in Draft, so it was not published.
+
+  - name: catalog.pricing.RetirePriceList
+
+    input:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+    outcomes:
+      - name: retired
+        moves: catalog.pricing.PriceList.retire
+        instance: price_list_id
+        emits:
+          - catalog.pricing.PriceListRetired
+        summary: The price list is withdrawn from sale.
+
+      - name: wrong-state
+        wrong_state: true
+        error: catalog.pricing.PriceListStateConflict
+        summary: The price list is not Published, so it was not retired.
+
+# CHANGE 3 and CHANGE 4. The authority to retire a price list moves from the auditor to the pricing
+# manager: one grant added and one grant removed, which are the only two ways this slice can say a
+# revision widened or narrowed what the system permits without proving anything.
+actors:
+  - name: catalog.pricing.PricingManager
+    may:
+      - catalog.pricing.PublishPriceList
+      - catalog.pricing.RetirePriceList
+    naming:
+      display: Pricing manager
+
+  # `display: Auditor` was written out in the earlier revision and is left out here. It is the same
+  # display name either way — the model falls back to the declaration's own last segment — so this is
+  # a line in a text diff and nothing in a delta.
+  - name: catalog.pricing.Auditor
+
+events:
+  - name: catalog.pricing.PriceListPublished
+    fields:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+  - name: catalog.pricing.PriceListRetired
+    fields:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+errors:
+  - name: catalog.pricing.PriceListStateConflict
+    summary: The price list is not in a state this command acts from, so nothing moved.
+    fields:
+      - name: state
+        type: catalog.pricing.PriceList.State
+
+types:
+  # CHANGE 1 and CHANGE 2. `CHF` is accepted where it was not, and `GBP` is not accepted where it
+  # was. `EUR` and `USD` keep their relative order, so nothing is reported about the ordering.
+  - name: catalog.pricing.Currency
+    kind: enum
+    variants: [CHF, EUR, USD]
+
+  - name: catalog.pricing.Money
+    kind: struct
+    fields:
+      - name: amount
+        type: Decimal
+      - name: currency
+        type: catalog.pricing.Currency
+    invariants:
+      - amount >= 0
+
+  - name: catalog.pricing.PriceListId
+    kind: newtype
+    of: Uuid
+
+entities:
+  - name: catalog.pricing.PriceList
+
+    identity:
+      name: price_list_id
+      type: catalog.pricing.PriceListId
+
+    fields:
+      - name: headline
+        type: catalog.pricing.Money
+
+    lifecycle:
+      initial: Draft
+      states: [Draft, Published, Retired]
+      terminal: [Retired]
+      transitions:
+        - name: publish
+          from: [Draft]
+          to: Published
+        - name: retire
+          from: [Published]
+          to: Retired

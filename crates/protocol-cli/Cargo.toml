@@ -26,6 +26,11 @@ ess-compiler.workspace = true
 # that itself, which is the point: the command line is a shell over the library, so a harness calling
 # `Runner::for_suite(&suite).run(&suite, &target)` gets the same verdict.
 ess-conformance.workspace = true
+
+# `protocol ess diff`. The comparison, the delta document and the text rendering all live in the
+# library, so the command line is a shell over it: a harness calling `ess_diff::diff(&before,
+# &after)` gets the same delta, and `ess_diff::render::text` writes the same sentences.
+ess-diff.workspace = true
 ess-domain.workspace = true
 ess-gen.workspace = true
 anyhow.workspace = true

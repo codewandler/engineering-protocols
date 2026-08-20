@@ -9,6 +9,24 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+### Added
+
+- **`protocol ess diff --from <dir> --to <dir>`** — what actually moved between two revisions of a
+  specification, as typed changes rather than as text. On the worked fixture pair, 159 changed lines
+  across three files, one of them renamed, reduce to **four** semantic changes: renaming a file,
+  reordering blocks, rewriting a comment and writing out a default that was already implied all reach
+  nothing, and each of those is asserted by name rather than left to chance.
+
+  Six construct families are compared field by field — the system header, types, events, errors,
+  actors and components — with 65 typed changes and no untyped catch-all. Entities, commands, views,
+  bindings and topology are deliberately left out of this first slice: comparing their invariants and
+  conditions means comparing predicates, which is where an undecidable answer lives.
+
+  A change carries a direction where one can be derived mechanically and only there: a grant added or
+  an enum variant added *widens*, either removed *narrows*, and everything else is simply changed.
+  Three relations rather than the seven the design proposed, because four of them could not fire in
+  this slice, and a variant nothing can produce is the same defect as a test that cannot fail.
+
 ## [0.4.0-ess-wave-4] — 2026-08-20
 
 ### Changed

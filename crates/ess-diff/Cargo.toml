@@ -1,0 +1,50 @@
+[package]
+name = "ess-diff"
+description = "What moved between two revisions of one executable system specification: a typed, canonical semantic delta over two compiled IRs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+# `ValidationErrors`, `ValidationCode` and `SpecDigest`. A delta document is read back, so it is
+# refused the way every other document in this workspace is refused: accumulated errors carrying a
+# stable code, never a sentence a test would have to match on.
+aep-domain.workspace = true
+
+# The thing being compared. `EssIr` is `PartialEq` throughout and keyed by name, which is what makes
+# a comparator a walk rather than a parser.
+ess-compiler.workspace = true
+
+# `EssSemanticRef` and the nine `*Ref` names beside it. Reused rather than declared again, and this
+# is the dependency worth arguing for: a delta says *which construct moved* and a conformance
+# scenario records *which constructs it depends on*, and those two sentences have to be about the
+# same values or the next slice's intersection is a string comparison with a convention. A second
+# vocabulary here would be the "two answers to one question" `ess-conformance` warns about at its
+# `SuiteProvenance`.
+ess-conformance.workspace = true
+
+# `QualifiedName`, `Version`, `Naming` — the identity model a delta compares against.
+ess-domain.workspace = true
+
+# For the model digest in `EssRevisionRef`, derived from `ess_gen::Provenance` rather than computed a
+# second way. `SuiteProvenance::of` takes the same dependency for the same reason: one model has one
+# digest, or a report attests to a specification nobody can find again.
+ess-gen.workspace = true
+
+# The two the delta format needs, both already in `[workspace.dependencies]`. A committed delta is
+# JSON for the reason a committed suite is: it is this repository's canonical form, and `serde_yaml`
+# decides quoting and folding by heuristics, so two spellings of one delta could differ in bytes
+# without differing in meaning.
+#
+# Still no third-party crate beyond the workspace list. `sha2` was considered for the change id and
+# refused: a hashed id is unreadable in a review comment and tells a reader nothing about what it
+# names, and the four parts design §60 already orders changes by *are* the content the id has to be
+# derived from. `ScenarioId` reached the same answer in wave 4.
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -67,6 +67,12 @@ const SPECIFICATION: &str = "examples/billing";
 /// The second specification, the one built for the checks billing cannot make fail.
 const ORACLE: &str = "examples/oracle-fixture";
 
+/// The `--from` half of the semantic-diff fixture pair.
+const REVISION_BEFORE: &str = "examples/revision-pair/before";
+
+/// The `--to` half: the same system, four changes later.
+const REVISION_AFTER: &str = "examples/revision-pair/after";
+
 /// The committed suite the drift check keeps in step with `examples/billing/`.
 const COMMITTED_SUITE: &str = "suites/generated/billing/suite.json";
 
@@ -2161,5 +2167,253 @@ fn the_same_run_claimed_by_the_agent_that_wrote_the_code_does_not_close_the_task
     assert!(
         text.contains("ess_conformance.passed"),
         "the facts are still read off the record; what fails is who produced it: {text}"
+    );
+}
+
+#[test]
+fn ess_diff_names_the_four_changes_and_which_way_each_one_goes() {
+    // What a person sees. The pair is built so a reviewer's first question — did anything widen —
+    // is answered by the count line before the list starts, and so that each line says the
+    // direction before it says the subject.
+    let output = protocol(&[
+        "ess",
+        "diff",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+
+    assert!(
+        text.contains("4 change(s): 2 widening, 2 narrowing, 0 other"),
+        "the count comes before the list: {text}"
+    );
+    for line in [
+        "widens   type catalog.pricing.Currency: variant `CHF` added",
+        "narrows  type catalog.pricing.Currency: variant `GBP` removed",
+        "narrows  actor catalog.pricing.Auditor: may no longer invoke \
+         `catalog.pricing.RetirePriceList`",
+        "widens   actor catalog.pricing.PricingManager: may invoke \
+         `catalog.pricing.RetirePriceList`",
+    ] {
+        assert!(text.contains(line), "missing `{line}` in:\n{text}");
+    }
+    assert!(
+        text.contains(
+            "actor/catalog.pricing.Auditor/grant-removed/catalog.pricing.RetirePriceList"
+        ),
+        "every change carries the id a review comment quotes: {text}"
+    );
+    assert!(
+        text.contains("3c500d7cf1e4d59d"),
+        "and the digest that says which resolution was compared, because `catalog/v2` is a label \
+         two resolutions can share: {text}"
+    );
+}
+
+#[test]
+fn ess_diff_produces_the_same_bytes_twice_in_both_formats() {
+    for format in ["text", "json"] {
+        let first = protocol(&[
+            "ess",
+            "diff",
+            "--from",
+            REVISION_BEFORE,
+            "--to",
+            REVISION_AFTER,
+            "--format",
+            format,
+        ]);
+        let second = protocol(&[
+            "ess",
+            "diff",
+            "--from",
+            REVISION_BEFORE,
+            "--to",
+            REVISION_AFTER,
+            "--format",
+            format,
+        ]);
+        assert_eq!(code(&first), 0, "{}", stderr(&first));
+        assert_eq!(
+            first.stdout, second.stdout,
+            "`--format {format}` over one pair must produce identical bytes"
+        );
+    }
+}
+
+#[test]
+fn ess_diff_writes_a_document_that_carries_its_own_format_and_both_digests() {
+    let output = protocol(&[
+        "ess",
+        "diff",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(
+        text.ends_with("}\n"),
+        "a document without a trailing newline shows up modified in the next diff"
+    );
+
+    let parsed: serde_json::Value = serde_json::from_str(&text).expect("the delta is valid JSON");
+    assert_eq!(parsed["format"], "ess-diff/1");
+    assert_eq!(parsed["before"]["system"], "catalog");
+    assert_eq!(parsed["after"]["system"], "catalog");
+    assert_ne!(
+        parsed["before"]["spec_digest"], parsed["after"]["spec_digest"],
+        "the two sides are different resolutions, and the digest is what says so: {parsed}"
+    );
+
+    let changes = parsed["changes"].as_array().expect("a list of changes");
+    assert_eq!(changes.len(), 4);
+    let grant = changes
+        .iter()
+        .find(|change| {
+            change["id"]
+                == "actor/catalog.pricing.PricingManager/grant-added/catalog.pricing.RetirePriceList"
+        })
+        .unwrap_or_else(|| panic!("the delta names the grant that was added: {parsed}"));
+    assert_eq!(grant["relation"], "expanded");
+    assert_eq!(grant["change"]["category"], "actor");
+    assert_eq!(grant["change"]["subject"], "catalog.pricing.PricingManager");
+    assert_eq!(grant["change"]["changed"]["kind"], "grant-added");
+    assert_eq!(
+        grant["change"]["changed"]["command"],
+        "catalog.pricing.RetirePriceList"
+    );
+}
+
+#[test]
+fn ess_diff_reports_nothing_when_the_two_revisions_mean_the_same_system() {
+    let output = protocol(&[
+        "ess",
+        "diff",
+        "--from",
+        REVISION_AFTER,
+        "--to",
+        REVISION_AFTER,
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("no semantic change"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn ess_diff_refuses_two_different_systems_in_both_formats() {
+    // Both sides compile, so there was an answer available to produce — every construct of one
+    // added and every construct of the other removed. That answer is plausible, enormous, and about
+    // a question nobody asked, so the verb refuses instead.
+    let text = protocol(&[
+        "ess",
+        "diff",
+        "--from",
+        SPECIFICATION,
+        "--to",
+        REVISION_AFTER,
+    ]);
+    assert_eq!(
+        code(&text),
+        1,
+        "a refusal is an answer about the input, and the exit code has to say so"
+    );
+    let rendered = stdout(&text);
+    assert!(
+        rendered.contains("`billing`") && rendered.contains("`catalog`"),
+        "the refusal names both systems: {rendered}"
+    );
+    assert!(
+        !rendered.contains("change(s)"),
+        "and produces no delta at all: {rendered}"
+    );
+
+    let json = protocol(&[
+        "ess",
+        "diff",
+        "--from",
+        SPECIFICATION,
+        "--to",
+        REVISION_AFTER,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&json), 1);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&json)).expect("the refusal is valid JSON");
+    assert_eq!(parsed["refused"], "different-system");
+    assert_eq!(parsed["before"], "billing");
+    assert_eq!(parsed["after"], "catalog");
+}
+
+#[test]
+fn ess_diff_reports_a_specification_that_does_not_compile_rather_than_comparing_it() {
+    let directory = scratch("protocol-cli-diff-broken");
+    write(
+        &directory.join("system.yaml"),
+        "format: ess/1\nsystem: catalog\nversion: v2\ndomains:\n  - catalog.pricing\n",
+    );
+    write(
+        &directory.join("domains/pricing.yaml"),
+        concat!(
+            "domain: catalog.pricing\n",
+            "events:\n",
+            "  - name: catalog.pricing.Whatever\n",
+            "    fields:\n",
+            "      - name: id\n",
+            "        type: catalog.pricing.Nothing\n",
+        ),
+    );
+
+    let output = protocol(&[
+        "ess",
+        "diff",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        printable(&directory),
+    ]);
+
+    assert_eq!(code(&output), 1);
+    let text = stdout(&output);
+    assert!(
+        text.contains("catalog.pricing.Nothing"),
+        "the reason names the reference that does not resolve, not just that a side failed: {text}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_diff_offers_no_format_it_cannot_honour() {
+    // `yaml` is what every other `ess` verb accepts, and this one does not: a delta is a document
+    // that is read back, its canonical form is JSON, and a second machine rendering with no format
+    // contract behind it is a rendering nothing reads. The refusal has to be an argument error
+    // rather than a silent fallback to text.
+    let output = protocol(&[
+        "ess",
+        "diff",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--format",
+        "yaml",
+    ]);
+
+    assert_eq!(code(&output), 2, "bad usage is exit 2");
+    assert!(
+        stderr(&output).contains("yaml"),
+        "and it says which value was not accepted: {}",
+        stderr(&output)
     );
 }

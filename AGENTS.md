@@ -129,7 +129,7 @@ is honest. Do not write an enforcement here that you cannot point at.
     clippy-pedantic clean.
     *Enforced by* `missing_docs` and `clippy::pedantic` in `[workspace.lints]`, raised to errors by
     the `clippy` step's `-D warnings`, plus the `doc-check` step (`RUSTDOCFLAGS=-D warnings`) for
-    broken intra-doc links. All thirteen workspace members opt in with `[lints] workspace = true`; a
+    broken intra-doc links. All fourteen workspace members opt in with `[lints] workspace = true`; a
     new crate that omits that line is outside every lint here.
 12. **No `unsafe`** (`unsafe_code = "forbid"`).
     *Enforced by* that lint in `[workspace.lints.rust]`. `forbid` cannot be lifted by an inner

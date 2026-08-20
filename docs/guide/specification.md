@@ -22,6 +22,7 @@ its HTTP layer.
 | Derive the conformance suite it obliges | `protocol ess conform synthesize --path <path>` |
 | Run that suite against an implementation | `protocol ess conform run --path <path> --target <name>` |
 | Turn that run into AEP evidence | `protocol ess conform evidence --path <path> --target <name>` |
+| Say what moved between two revisions of one specification | `protocol ess diff --from <path> --to <path> --format text\|json` |
 | Complete a task only once that evidence exists | [`examples/billing-conformance/`](../../examples/billing-conformance/) |
 | Read the suites this repository commits | [`suites/generated/`](../../suites/generated/) |
 | Validate in an editor as you type | [`schemas/generated/ess.schema.json`](../../schemas/generated/ess.schema.json) |
@@ -143,6 +144,60 @@ Two verbs, one word apart, two questions:
 
 Design §42 calls the first contract conformance and the second semantic conformance. Neither implies
 the other, and each command's `--help` names the other one.
+
+### What changed, and which way
+
+`protocol ess diff` compares two revisions of one specification and reports what moved semantically.
+Not a text diff — the comparison is over the two compiled IRs, so moving a declaration between files,
+renaming a file, reordering blocks or rewriting every comment reports **nothing**, and a single line
+that removes a currency reports one narrowing.
+
+```console
+$ protocol ess diff --from examples/revision-pair/before --to examples/revision-pair/after
+catalog v2 → v2
+  before  3c500d7cf1e4d59d
+  after   ffd3570ade7b7447
+
+4 change(s): 2 widening, 2 narrowing, 0 other
+
+  widens   type catalog.pricing.Currency: variant `CHF` added
+           type/catalog.pricing.Currency/variant-added/CHF
+  narrows  type catalog.pricing.Currency: variant `GBP` removed
+           type/catalog.pricing.Currency/variant-removed/GBP
+  narrows  actor catalog.pricing.Auditor: may no longer invoke `catalog.pricing.RetirePriceList`
+           actor/catalog.pricing.Auditor/grant-removed/catalog.pricing.RetirePriceList
+  widens   actor catalog.pricing.PricingManager: may invoke `catalog.pricing.RetirePriceList`
+           actor/catalog.pricing.PricingManager/grant-added/catalog.pricing.RetirePriceList
+```
+
+[`examples/revision-pair/`](../../examples/revision-pair/) is that pair. Its two halves differ by
+exactly those four changes and by a great deal of text that means nothing: the domain file has a
+different name, every top-level block is in a different order, every comment is rewritten, and one
+naming default is written out on one side and left implicit on the other.
+
+**Four kinds of change carry a direction, and no others.** A grant added widens what the system
+permits and a grant removed narrows it; an enum or union variant added widens what a type accepts and
+one removed narrows it. Each is decided by set membership, so none of it is a guess. Everything else
+is reported as *changed*, which says the revisions differ here and that no direction follows from the
+difference — a rewritten invariant is `changed`, even when the new one is strictly stronger, because
+saying so would be a proof rather than a comparison.
+
+**Six construct families are compared:** the system header, types, events, errors, actors and
+components. Entities, commands, views, bindings, topology and conversions are not, yet — their
+invariants and conditions are predicates, and that is where an undecidable answer starts.
+
+**Nothing is inferred to be a rename.** `InvoiceCreated` removed and `InvoiceIssued` added is reported
+as a removal and an addition, however similar the names look: a rename and a delete-plus-create have
+different consequences for everything already deployed, and a report that guesses between them is
+wrong in the direction nobody checks.
+
+There is one refusal: two specifications that name different systems. Comparing `billing` with
+`ordering` would produce a delta — every construct of one added, every construct of the other removed
+— and it would be an enormous, plausible answer to a question nobody asked.
+
+`--format json` writes the `ess-diff/1` document: canonical, byte-identical for the same pair, with
+each change carrying an id derived from its own content, so a review comment or a later tool can quote
+one and still mean the same change after a sibling is inserted.
 
 ### Why compile at all, when validate already refuses a bad specification
 

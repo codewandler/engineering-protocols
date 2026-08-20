@@ -1,0 +1,16 @@
+# The `after` half of the semantic-diff fixture pair.
+#
+# Every comment in this revision is rewritten and every block below is in a different order from the
+# `before` half, and the domain file is called something else. None of that is a semantic change:
+# `protocol ess diff` reports four changes over this pair, and a text diff reports most of the file.
+format: ess/1
+system: catalog
+version: v2
+
+domains:
+  - catalog.pricing
+
+summary: >-
+  Price lists and who may change them. The smallest specification that carries one of each construct
+  ESS wave 5's first slice compares — a system, types, events, errors, actors and a component — and
+  nothing it does not.

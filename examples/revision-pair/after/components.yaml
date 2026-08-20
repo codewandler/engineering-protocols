@@ -1,0 +1,17 @@
+# Decomposition. Byte-identical to the `before` revision apart from this comment: the component
+# family is compared, and this pair deliberately has nothing for it to report.
+
+components:
+  - component: pricing-service
+    summary: Owns price lists and the commands that move them.
+    owns:
+      domains:
+        - catalog.pricing
+    accepts:
+      commands:
+        - catalog.pricing.PublishPriceList
+        - catalog.pricing.RetirePriceList
+    publishes:
+      events:
+        - catalog.pricing.PriceListPublished
+        - catalog.pricing.PriceListRetired

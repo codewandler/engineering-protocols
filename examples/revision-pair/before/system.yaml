@@ -1,0 +1,12 @@
+# The `before` half of the semantic-diff fixture pair. See `../README.md` for what differs.
+format: ess/1
+system: catalog
+version: v2
+
+summary: >-
+  Price lists and who may change them. The smallest specification that carries one of each construct
+  ESS wave 5's first slice compares — a system, types, events, errors, actors and a component — and
+  nothing it does not.
+
+domains:
+  - catalog.pricing
