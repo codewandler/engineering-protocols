@@ -1,6 +1,6 @@
 [package]
 name = "ess-conformance"
-description = "What a conformance suite is — the canonical scenario IR — and deciding whether a candidate command input satisfies a specification's guard."
+description = "What a conformance suite is — the canonical scenario IR — deciding whether a candidate command input satisfies a specification's guard, and synthesising the suite one specification obliges."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

@@ -1,6 +1,7 @@
-//! What a conformance suite is, and whether a candidate command input reaches a guard in it.
+//! What a conformance suite is, whether a candidate command input reaches a guard in it, and how a
+//! specification becomes one.
 //!
-//! Two things, in the order wave 4 needs them.
+//! Three things, in the order wave 4 needs them.
 //!
 //! [`scenario`] is the **canonical scenario IR** (design §21): the serialisable definition of every
 //! check a specification obliges an implementation to pass. It executes nothing. That separation is
@@ -57,13 +58,24 @@
 //! decided and [why](Reason). Five of the six reasons are properties of the specification that no
 //! candidate value can change; [`Reason::fixable_by_another_candidate`] is the one that says which.
 //!
+//! # Synthesis: from a specification to the suite it obliges
+//!
+//! [`synthesize()`] is the third part, and it is where the first two meet. It walks an
+//! [`EssIr`](ess_compiler::EssIr), asks [`witness`] for candidate inputs, asks [`decision`] whether
+//! one reaches a branch, and writes a [`scenario`] for every declared outcome it can reach.
+//!
+//! It returns a suite **and** typed refusals, never a silent omission — design §36. A construct
+//! that cannot be witnessed appears in the output saying which construct, why, and what would have
+//! to change, because a suite quietly holding fewer checks than the specification requires is the
+//! one failure a passing run cannot show.
+//!
 //! # What is deliberately not here
 //!
-//! * **Candidate generation.** This crate decides a candidate it is given. Producing one is wave 4's
-//!   job, and generate-and-filter versus a constraint solver is a decision nobody has taken.
-//! * **Branch selection.** [`when`] returns the predicate an outcome declares, and nothing here says
-//!   *which* outcome a candidate reaches: `otherwise` is defined relative to every other branch of
-//!   the same command, and `external` is by construction not decidable from an input at all.
+//! * **A constraint solver.** §11 names one as a later extension and not a requirement of the first
+//!   closed loop. [`witness`] tries the literals the guard itself writes, and refuses.
+//! * **Branch selection by inspection.** [`when`] returns the predicate an outcome declares, and
+//!   which branch a candidate reaches is read off `ResolvedOutcome::test_strategy`, never derived a
+//!   second time here.
 //! * **A runner.** [`scenario`] defines what a suite *is*; executing one against a target is a
 //!   later slice, and mixing the two is how a runner becomes the definition.
 //! * **A clock.** The crate that will hold one is this one; the part of it that needs one does not
@@ -72,6 +84,8 @@
 pub mod decision;
 pub mod input;
 pub mod scenario;
+pub mod synthesize;
+pub mod witness;
 
 pub use decision::{when, Decision, Reason, Unevaluable, UnknownCause};
 pub use input::{flatten, InputFacts, ShapeError, ShapeErrors};
@@ -79,3 +93,5 @@ pub use scenario::{
     ConformanceScenario, ConformanceSuite, EssSemanticRef, ScenarioId, ScenarioPurpose,
     ScenarioStep, SuiteProvenance,
 };
+pub use synthesize::{synthesize, InstanceNeed, Refusal, RefusalCause, Synthesis};
+pub use witness::WitnessGap;
