@@ -9,6 +9,10 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.6.1-ess-wave-6.5] — 2026-08-21
+
 ### Changed
 
 - **The model digest is the full SHA-256 — 64 hex characters, not 16 (gap register D-4).** Since
@@ -856,7 +860,8 @@ No compiler, no OpenAPI, no test synthesis: those are ESS waves 2 and 3 in
 - **`xtask schema [--check]`** — schemas are generated from the Rust types, and CI proves they match.
 - Repository scaffolding: workspace, `Taskfile.yml` gate, Apache-2.0 licence, `AGENTS.md`.
 
-[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.6.0-ess-wave-6...HEAD
+[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.6.1-ess-wave-6.5...HEAD
+[0.6.1-ess-wave-6.5]: https://github.com/codewandler/engineering-protocols/compare/0.6.0-ess-wave-6...0.6.1-ess-wave-6.5
 [0.6.0-ess-wave-6]: https://github.com/codewandler/engineering-protocols/compare/0.5.0-ess-wave-5...0.6.0-ess-wave-6
 [0.5.0-ess-wave-5]: https://github.com/codewandler/engineering-protocols/compare/0.4.0-ess-wave-4...0.5.0-ess-wave-5
 [0.4.0-ess-wave-4]: https://github.com/codewandler/engineering-protocols/compare/0.3.3-ess-wave-3.5...0.4.0-ess-wave-4
