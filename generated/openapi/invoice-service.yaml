@@ -1,0 +1,130 @@
+# generated from billing v3
+# model digest 120640924b8bdbf5
+# compiler 0.1.0 · generator 0.1.0
+# do not edit: regenerate with `protocol ess generate`
+openapi: 3.1.0
+info:
+  title: invoice-service
+  summary: Issues invoices and tracks payment.
+  description: |-
+    The HTTP surface of `invoice-service`, one of the components of `billing` v3.
+
+    Every path here is one semantic command, so the method is always POST and the path is the command's wire name under its domain's: a command is not a resource, and this document does not invent one. A status code is the outcome the specification declares — 202 for a branch that was taken, 422 for a refusal the input decides, 502 for a refusal decided outside the request — and the `outcome` property of every response body names the branch. Events emitted by a branch are published to consumers through the event transport; they are not returned here.
+  version: v3
+  x-ess-provenance:
+    system: billing
+    specification_version: v3
+    source_digest: 120640924b8bdbf5
+    compiler_version: 0.1.0
+    generator_version: 0.1.0
+tags:
+- name: invoices
+  description: Issuing invoices and tracking whether they are paid.
+paths:
+  /invoices/commands/create-invoice:
+    post:
+      operationId: billing.invoice.CreateInvoice
+      summary: Create invoice
+      tags:
+      - invoices
+      x-ess-may-invoke:
+      - billing.invoice.Customer
+      requestBody:
+        description: The input `billing.invoice.CreateInvoice` declares.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/billing.invoice.CreateInvoice.Input'
+      responses:
+        '202':
+          description: 'Outcome `accepted`: the branch the specification declares for this input. Events this branch emits are published to consumers, not returned here.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.CreateInvoice.accepted.Response'
+        '422':
+          description: 'Outcome `rejected`: the request was understood and refused on domain grounds. The body names the declared error and carries whatever that error declares.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.CreateInvoice.rejected.Response'
+components:
+  schemas:
+    billing.invoice.CreateInvoice.Input:
+      title: Create invoice input
+      x-ess-name: billing.invoice.CreateInvoice
+      x-ess-kind: command-input
+      type: object
+      properties:
+        customer_email:
+          $ref: '#/components/schemas/billing.invoice.Email'
+        amount:
+          $ref: '#/components/schemas/billing.invoice.Money'
+      required:
+      - customer_email
+      - amount
+      additionalProperties: false
+    billing.invoice.CreateInvoice.accepted.Response:
+      additionalProperties: false
+      description: The invoice is created in Draft. Taken when `amount.amount > 0` holds of the input. Emits `InvoiceCreated`, published to consumers rather than returned here.
+      properties:
+        outcome:
+          const: accepted
+          description: Which declared outcome the command took.
+      required:
+      - outcome
+      type: object
+    billing.invoice.CreateInvoice.rejected.Response:
+      additionalProperties: false
+      description: The amount was not positive, and nothing was created. Taken when no other outcome's condition matched.
+      properties:
+        error:
+          const: billing.invoice.InvalidAmount
+          description: The requested amount is not positive.
+          type: string
+        outcome:
+          const: rejected
+          description: Which declared outcome the command took.
+        payload:
+          $ref: '#/components/schemas/billing.invoice.InvalidAmount.Error'
+      required:
+      - outcome
+      - error
+      - payload
+      type: object
+    billing.invoice.Email:
+      title: Email
+      x-ess-name: billing.invoice.Email
+      x-ess-kind: newtype
+      type: string
+    billing.invoice.InvalidAmount.Error:
+      title: InvalidAmount payload
+      description: The requested amount is not positive.
+      x-ess-name: billing.invoice.InvalidAmount
+      x-ess-kind: error-payload
+      type: object
+      properties:
+        submitted:
+          $ref: '#/components/schemas/billing.invoice.Money'
+      required:
+      - submitted
+      additionalProperties: false
+    billing.invoice.Money:
+      title: Money
+      x-ess-name: billing.invoice.Money
+      x-ess-kind: struct
+      type: object
+      properties:
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?(0|[1-9][0-9]*)(\.[0-9]+)?$
+        currency:
+          type: string
+      required:
+      - amount
+      - currency
+      additionalProperties: false
+      x-ess-invariants:
+      - amount >= 0

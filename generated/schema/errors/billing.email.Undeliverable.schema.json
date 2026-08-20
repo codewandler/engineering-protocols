@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Undeliverable payload",
+  "description": "The address was rejected by the provider.",
+  "x-ess-name": "billing.email.Undeliverable",
+  "x-ess-kind": "error-payload",
+  "type": "object",
+  "additionalProperties": false,
+  "x-ess-provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "120640924b8bdbf5",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "regenerate": "protocol ess generate"
+  }
+}

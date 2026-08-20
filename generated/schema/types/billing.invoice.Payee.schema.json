@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/billing.invoice.Payee",
+  "x-ess-provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "120640924b8bdbf5",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "regenerate": "protocol ess generate"
+  },
+  "$defs": {
+    "billing.invoice.CompanyRef": {
+      "title": "CompanyRef",
+      "x-ess-name": "billing.invoice.CompanyRef",
+      "x-ess-kind": "newtype",
+      "type": "string"
+    },
+    "billing.invoice.Email": {
+      "title": "Email",
+      "x-ess-name": "billing.invoice.Email",
+      "x-ess-kind": "newtype",
+      "type": "string"
+    },
+    "billing.invoice.Payee": {
+      "title": "Payee",
+      "x-ess-name": "billing.invoice.Payee",
+      "x-ess-kind": "union",
+      "oneOf": [
+        {
+          "title": "company",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "company"
+            },
+            "value": {
+              "$ref": "#/$defs/billing.invoice.CompanyRef"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "title": "person",
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "person"
+            },
+            "value": {
+              "$ref": "#/$defs/billing.invoice.Email"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "x-ess-union-tag": "kind"
+    }
+  }
+}

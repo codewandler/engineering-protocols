@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "InvoiceCreated payload",
+  "x-ess-name": "billing.invoice.InvoiceCreated",
+  "x-ess-kind": "event-payload",
+  "type": "object",
+  "properties": {
+    "invoice_id": {
+      "$ref": "#/$defs/billing.invoice.InvoiceId"
+    },
+    "customer_email": {
+      "$ref": "#/$defs/billing.invoice.Email"
+    },
+    "amount": {
+      "$ref": "#/$defs/billing.invoice.Money"
+    }
+  },
+  "required": [
+    "invoice_id",
+    "customer_email",
+    "amount"
+  ],
+  "additionalProperties": false,
+  "x-ess-provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "120640924b8bdbf5",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "regenerate": "protocol ess generate"
+  },
+  "$defs": {
+    "billing.invoice.Email": {
+      "title": "Email",
+      "x-ess-name": "billing.invoice.Email",
+      "x-ess-kind": "newtype",
+      "type": "string"
+    },
+    "billing.invoice.InvoiceId": {
+      "title": "InvoiceId",
+      "x-ess-name": "billing.invoice.InvoiceId",
+      "x-ess-kind": "newtype",
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    },
+    "billing.invoice.Money": {
+      "title": "Money",
+      "x-ess-name": "billing.invoice.Money",
+      "x-ess-kind": "struct",
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "string",
+          "format": "decimal",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "additionalProperties": false,
+      "x-ess-invariants": [
+        "amount >= 0"
+      ]
+    }
+  }
+}

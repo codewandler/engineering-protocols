@@ -21,6 +21,7 @@ aep-engine.workspace = true
 aep-schema.workspace = true
 ess-compiler.workspace = true
 ess-domain.workspace = true
+ess-gen.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde.workspace = true

@@ -1,0 +1,105 @@
+# generated from billing v3
+# model digest 120640924b8bdbf5
+# compiler 0.1.0 · generator 0.1.0
+# do not edit: regenerate with `protocol ess generate`
+asyncapi: 3.0.0
+info:
+  title: invoice-service
+  version: v3
+  description: |-
+    `invoice-service` in the `billing` specification.
+
+    Issues invoices and tracks payment.
+
+    Invoicing and the notification that follows it: the smallest system that still exercises every construct the model has — two bounded contexts, a command that can be refused, a command with an outcome its input cannot decide, both consistency levels, a state machine, actors, and a type of every kind.
+
+    The specification declares no transport, so each address below is a name and not a topic on a named broker. Servers, protocol bindings, security schemes, message keys, partitioning, retention and ordering are absent because the model does not state them.
+  x-ess-component: invoice-service
+  x-ess-provenance:
+    system: billing
+    specification_version: v3
+    source_digest: 120640924b8bdbf5
+    compiler_version: 0.1.0
+    generator_version: 0.1.0
+defaultContentType: application/json
+channels:
+  billing.invoice.InvoiceCreated:
+    address: billing.invoice.InvoiceCreated
+    title: InvoiceCreated
+    messages:
+      billing.invoice.InvoiceCreated:
+        $ref: '#/components/messages/billing.invoice.InvoiceCreated'
+    x-ess-event: billing.invoice.InvoiceCreated
+    x-ess-address-source: qualified-name
+operations:
+  send.billing.invoice.InvoiceCreated:
+    action: send
+    channel:
+      $ref: '#/channels/billing.invoice.InvoiceCreated'
+    title: Publish InvoiceCreated
+    summary: Publishes `billing.invoice.InvoiceCreated`.
+    description: '`notify-on-invoice-created` reacts by invoking `billing.email.SendEmail`. On failure: `escalate`.'
+    messages:
+    - $ref: '#/channels/billing.invoice.InvoiceCreated/messages/billing.invoice.InvoiceCreated'
+    x-ess-consumed-by:
+    - binding: notify-on-invoice-created
+      handled_by: email-service
+      invokes: billing.email.SendEmail
+      delivery: at_least_once
+      on_failure: escalate
+components:
+  messages:
+    billing.invoice.InvoiceCreated:
+      name: billing.invoice.InvoiceCreated
+      title: InvoiceCreated
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/event.billing.invoice.InvoiceCreated'
+  schemas:
+    event.billing.invoice.InvoiceCreated:
+      title: InvoiceCreated payload
+      x-ess-name: billing.invoice.InvoiceCreated
+      x-ess-kind: event-payload
+      type: object
+      properties:
+        invoice_id:
+          $ref: '#/components/schemas/type.billing.invoice.InvoiceId'
+        customer_email:
+          $ref: '#/components/schemas/type.billing.invoice.Email'
+        amount:
+          $ref: '#/components/schemas/type.billing.invoice.Money'
+      required:
+      - invoice_id
+      - customer_email
+      - amount
+      additionalProperties: false
+    type.billing.invoice.Email:
+      title: Email
+      x-ess-name: billing.invoice.Email
+      x-ess-kind: newtype
+      type: string
+    type.billing.invoice.InvoiceId:
+      title: InvoiceId
+      x-ess-name: billing.invoice.InvoiceId
+      x-ess-kind: newtype
+      type: string
+      format: uuid
+      pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+    type.billing.invoice.Money:
+      title: Money
+      x-ess-name: billing.invoice.Money
+      x-ess-kind: struct
+      type: object
+      properties:
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?(0|[1-9][0-9]*)(\.[0-9]+)?$
+        currency:
+          type: string
+      required:
+      - amount
+      - currency
+      additionalProperties: false
+      x-ess-invariants:
+      - amount >= 0

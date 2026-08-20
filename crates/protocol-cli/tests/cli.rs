@@ -707,13 +707,24 @@ fn ess_compile_renders_a_refusal_as_json() {
 }
 
 #[test]
-fn ess_compile_inspect_and_graph_survive_a_reader_that_stops_reading() {
+fn every_ess_verb_survives_a_reader_that_stops_reading() {
     // `protocol ess graph | head -5` must produce five lines, not a stack trace: DOT is piped into
-    // `dot` by definition, and `println!` panics the moment that reader exits first.
+    // `dot` by definition, and `println!` panics the moment that reader exits first. `generate` is
+    // in the list because it is the verb with the most to say — its listing is what someone pipes
+    // into `head` to find out where one projection landed.
     use std::process::Stdio;
 
     for arguments in [
         vec!["ess", "compile", "--path", SPECIFICATION],
+        vec!["ess", "generate", "--path", SPECIFICATION],
+        vec![
+            "ess",
+            "generate",
+            "--path",
+            SPECIFICATION,
+            "--format",
+            "json",
+        ],
         vec![
             "ess",
             "inspect",
@@ -1140,4 +1151,333 @@ fn ess_compile_reports_a_refusal_structurally_in_json() {
     assert!(first["code"].is_string(), "{first}");
     assert_eq!(first["severity"], "error", "{first}");
     assert!(first["message"].is_string(), "{first}");
+}
+
+#[test]
+fn ess_generate_projects_the_normative_example() {
+    let output = protocol(&["ess", "generate", "--path", SPECIFICATION]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    // The provenance line, because an artifact set nobody can attribute is one nobody can audit —
+    // and over a pipe the header comments inside the files are not what the reader is looking at.
+    assert!(text.contains("billing v3"), "{text}");
+    assert!(text.contains("projection(s)"), "{text}");
+}
+
+#[test]
+fn ess_generate_carries_provenance_and_every_artifacts_contents_in_json() {
+    let output = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the generation report is valid JSON");
+
+    assert_eq!(parsed["provenance"]["system"], "billing");
+    assert_eq!(parsed["provenance"]["specification_version"], "v3");
+    assert!(
+        parsed["provenance"]["source_digest"]
+            .as_str()
+            .is_some_and(|digest| !digest.is_empty()),
+        "design §10's four facts, or a consumer cannot say which model this came from: {parsed}"
+    );
+
+    for artifact in parsed["artifacts"].as_array().expect("artifacts is a list") {
+        assert!(artifact["path"].is_string(), "{artifact}");
+        // The contents travel with the path, which is what lets a drift check compare a committed
+        // tree against this without anything having to write the files first.
+        assert!(artifact["contents"].is_string(), "{artifact}");
+    }
+}
+
+#[test]
+fn every_projection_ess_gen_publishes_can_be_asked_for_by_name() {
+    // `--kind` is a second list of the projections, because clap needs the values at compile time.
+    // A projection this build publishes that nothing can ask for is a projection nobody runs, and
+    // the only thing that keeps the two lists in step is this test.
+    let help = stdout(&protocol(&["ess", "generate", "--help"]));
+    for generator in ess_gen::generators() {
+        assert!(
+            help.contains(&format!("- {}:", generator.name())),
+            "`--kind {}` is missing from the help: {help}",
+            generator.name()
+        );
+    }
+}
+
+#[test]
+fn ess_generate_reports_only_the_projection_it_was_asked_for() {
+    let output = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--kind",
+        "docs",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the generation report is valid JSON");
+    let projections = parsed["projections"]
+        .as_array()
+        .expect("projections is a list");
+    assert_eq!(projections.len(), 1, "{parsed}");
+    assert_eq!(projections[0]["name"], "docs");
+}
+
+#[test]
+fn ess_generate_keeps_to_the_projection_it_was_asked_for() {
+    let filtered = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--kind",
+        "docs",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&filtered), 0, "{}", stderr(&filtered));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&filtered)).expect("the generation report is valid JSON");
+    let paths: Vec<String> = parsed["artifacts"]
+        .as_array()
+        .expect("artifacts is a list")
+        .iter()
+        .map(|artifact| artifact["path"].as_str().unwrap_or_default().to_owned())
+        .collect();
+
+    assert!(!paths.is_empty(), "the docs projection produced nothing");
+    for path in &paths {
+        assert!(
+            path.starts_with("docs/"),
+            "`--kind docs` produced {path}, which is another projection's file"
+        );
+    }
+
+    // And filtering subtracts rather than changing: the same artifact, byte for byte, as the run
+    // that asked for everything. A `--kind` that produced different bytes would make the committed
+    // tree depend on how it was generated.
+    let everything = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    let all: serde_json::Value =
+        serde_json::from_str(&stdout(&everything)).expect("the generation report is valid JSON");
+    let docs: Vec<&serde_json::Value> = all["artifacts"]
+        .as_array()
+        .expect("artifacts is a list")
+        .iter()
+        .filter(|artifact| {
+            artifact["path"]
+                .as_str()
+                .is_some_and(|path| path.starts_with("docs/"))
+        })
+        .collect();
+    let filtered_artifacts: Vec<&serde_json::Value> = parsed["artifacts"]
+        .as_array()
+        .expect("artifacts is a list")
+        .iter()
+        .collect();
+    assert_eq!(docs, filtered_artifacts, "`--kind` may only subtract");
+}
+
+#[test]
+fn ess_generate_produces_an_artifact_for_every_projection() {
+    // The bug this catches is a projection that silently produces nothing: the run still exits 0,
+    // the tree still looks complete, and one of the three contracts the wave promised is absent.
+    let output = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the generation report is valid JSON");
+
+    let artifacts = parsed["artifacts"].as_array().expect("artifacts is a list");
+    for projection in parsed["projections"]
+        .as_array()
+        .expect("projections is a list")
+    {
+        let directory = format!(
+            "{}/",
+            projection["directory"].as_str().expect("a directory")
+        );
+        assert!(
+            artifacts.iter().any(|artifact| artifact["path"]
+                .as_str()
+                .is_some_and(|path| path.starts_with(&directory))),
+            "the `{}` projection produced nothing",
+            projection["name"]
+        );
+    }
+}
+
+#[test]
+fn ess_generate_refuses_a_specification_that_does_not_compile() {
+    // Nothing is generated from a model that does not resolve, and the refusal has to name the file
+    // and the code — a generator's caller is usually an agent, and that is what it repairs from.
+    let directory = scratch("aep-cli-ungeneratable-spec");
+    write(&directory.join("system.yaml"), SYSTEM);
+    write(&directory.join("domains/one.yaml"), DOMAIN);
+    write(&directory.join("domains/two.yaml"), DOMAIN);
+
+    let output = protocol(&["ess", "generate", "--path", printable(&directory)]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("duplicate_declaration"), "{text}");
+    assert!(
+        text.contains("domains/two.yaml"),
+        "a refusal has to say which file to open: {text}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_generate_writes_nothing_until_it_is_asked_for_a_directory() {
+    // Typed without `--out` this reads like a question, so it has to behave like one. Run from a
+    // directory of its own, because the mistake worth catching is a verb that writes into whatever
+    // working tree it was invoked from.
+    let directory = scratch("aep-cli-generate-read-only");
+    let specification = root().join(SPECIFICATION);
+    let output = Command::new(env!("CARGO_BIN_EXE_protocol"))
+        .args(["ess", "generate", "--path", printable(&specification)])
+        .current_dir(&directory)
+        .output()
+        .expect("the protocol binary runs");
+
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("nothing written"),
+        "and it says so, rather than leaving the reader to notice: {}",
+        stdout(&output)
+    );
+    let left_behind: Vec<PathBuf> = std::fs::read_dir(&directory)
+        .expect("the scratch directory is readable")
+        .map(|entry| entry.expect("a readable entry").path())
+        .collect();
+    assert!(
+        left_behind.is_empty(),
+        "a read-only-looking command wrote {left_behind:?}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_generate_says_where_it_wrote_when_it_was_given_somewhere() {
+    let directory = scratch("aep-cli-generate-out");
+    let output = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--out",
+        printable(&directory),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the generation report is valid JSON");
+    assert_eq!(parsed["written_to"], printable(&directory));
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_generate_writes_every_artifact_it_reports_and_prints_no_contents() {
+    let directory = scratch("aep-cli-generate-written");
+    let output = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--out",
+        printable(&directory),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the generation report is valid JSON");
+    let artifacts = parsed["artifacts"].as_array().expect("artifacts is a list");
+    assert!(!artifacts.is_empty(), "nothing was generated: {parsed}");
+
+    for artifact in artifacts {
+        let path = artifact["path"].as_str().expect("a path");
+        let contents = artifact["contents"].as_str().expect("contents");
+        let written = std::fs::read_to_string(directory.join(path))
+            .unwrap_or_else(|error| panic!("{path} was reported but not written: {error}"));
+        assert_eq!(
+            written, contents,
+            "{path} was written with different bytes from the ones reported"
+        );
+    }
+
+    // And the text rendering stays a listing: `--out` is how contents leave this program, so a
+    // human asking where things went is not handed four directories of Markdown on stdout.
+    let listed = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--out",
+        printable(&directory),
+    ]);
+    let text = stdout(&listed);
+    let first = artifacts[0]["contents"].as_str().expect("contents");
+    assert!(
+        !text.contains(first),
+        "the listing carried an artifact's contents: {text}"
+    );
+    assert!(
+        text.contains(artifacts[0]["path"].as_str().expect("a path")),
+        "the listing has to name what it wrote: {text}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_generate_produces_the_same_bytes_twice() {
+    // Review F8, one level up: determinism asserted is determinism untested, and a projection that
+    // varies between two runs turns every regeneration into a diff nobody can review.
+    let first = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&first), 0, "{}", stderr(&first));
+    let second = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(
+        first.stdout, second.stdout,
+        "two runs over one specification must produce identical bytes"
+    );
 }

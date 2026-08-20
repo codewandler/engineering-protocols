@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SendEmail input",
+  "x-ess-name": "billing.email.SendEmail",
+  "x-ess-kind": "command-input",
+  "type": "object",
+  "properties": {
+    "recipient": {
+      "$ref": "#/$defs/billing.email.EmailAddress"
+    },
+    "template": {
+      "$ref": "#/$defs/billing.email.TemplateId"
+    }
+  },
+  "required": [
+    "recipient",
+    "template"
+  ],
+  "additionalProperties": false,
+  "x-ess-provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "120640924b8bdbf5",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "regenerate": "protocol ess generate"
+  },
+  "$defs": {
+    "billing.email.EmailAddress": {
+      "title": "EmailAddress",
+      "x-ess-name": "billing.email.EmailAddress",
+      "x-ess-kind": "newtype",
+      "type": "string"
+    },
+    "billing.email.TemplateId": {
+      "title": "TemplateId",
+      "x-ess-name": "billing.email.TemplateId",
+      "x-ess-kind": "newtype",
+      "type": "string"
+    }
+  }
+}

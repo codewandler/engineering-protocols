@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EmailSent payload",
+  "x-ess-name": "billing.email.EmailSent",
+  "x-ess-kind": "event-payload",
+  "type": "object",
+  "properties": {
+    "message_id": {
+      "$ref": "#/$defs/billing.email.MessageId"
+    },
+    "recipient": {
+      "$ref": "#/$defs/billing.email.EmailAddress"
+    }
+  },
+  "required": [
+    "message_id",
+    "recipient"
+  ],
+  "additionalProperties": false,
+  "x-ess-provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "120640924b8bdbf5",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "regenerate": "protocol ess generate"
+  },
+  "$defs": {
+    "billing.email.EmailAddress": {
+      "title": "EmailAddress",
+      "x-ess-name": "billing.email.EmailAddress",
+      "x-ess-kind": "newtype",
+      "type": "string"
+    },
+    "billing.email.MessageId": {
+      "title": "MessageId",
+      "x-ess-name": "billing.email.MessageId",
+      "x-ess-kind": "newtype",
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    }
+  }
+}

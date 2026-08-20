@@ -28,6 +28,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ess_compiler::diagnostic::Diagnostics;
 use ess_compiler::ir::EssIr;
 use ess_compiler::source::SourceMap;
+use ess_gen::{Artifact, Generator, Provenance};
 
 /// Who the entity surface seeds as.
 ///
@@ -351,6 +352,12 @@ fn run() -> Result<ExitCode> {
                 kind,
                 format,
             } => ess_inspect(&path, &name, kind, format),
+            EssCommand::Generate {
+                path,
+                kind,
+                out,
+                format,
+            } => ess_generate(&path, kind, out.as_deref(), format),
             EssCommand::Graph { path, format } => ess_graph(&path, format),
         },
         Command::Resolve(args) => resolve(&args),
@@ -542,6 +549,26 @@ enum EssCommand {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+    /// Generate every projection of a specification: documentation, schemas, contracts.
+    ///
+    /// Read-only unless `--out` is given. Without it the artifacts are listed rather than written,
+    /// because a verb that scatters files over a working tree the first time someone tries it is a
+    /// verb nobody tries twice; `--format json` carries their contents for a consumer that wants
+    /// them without a directory.
+    Generate {
+        /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// Which projection to generate. Every one of them when this is not given.
+        #[arg(long, value_enum)]
+        kind: Option<EssProjection>,
+        /// Where to write the artifacts. Without it nothing is written and they are listed instead.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// How to render the result. `json` and `yaml` carry every artifact's contents.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
     /// Print the event and command graph.
     ///
     /// `text` is DOT, for `dot -Tsvg`; `json` and `yaml` are the same graph as nodes and edges, for
@@ -577,6 +604,37 @@ enum EssKind {
     Binding,
     /// A component, by its identifier.
     Component,
+}
+
+/// Which projection `ess generate` is asked for.
+///
+/// Spelled out here rather than taken from [`ess_gen::generators`] because clap needs the values at
+/// compile time to put them in `--help`. That makes this a second list, so a test asserts the two
+/// agree: a projection `ess-gen` publishes that nothing can ask for is a projection nobody runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum EssProjection {
+    /// Markdown and Mermaid.
+    Docs,
+    /// JSON Schema per command input and event payload.
+    Schema,
+    /// The HTTP contract for the commands a component accepts.
+    #[value(name = "openapi")]
+    OpenApi,
+    /// The messaging contract for the events a component publishes.
+    #[value(name = "asyncapi")]
+    AsyncApi,
+}
+
+impl EssProjection {
+    /// The name `ess-gen` publishes this projection under.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Docs => "docs",
+            Self::Schema => "schema",
+            Self::OpenApi => "openapi",
+            Self::AsyncApi => "asyncapi",
+        }
+    }
 }
 
 /// Every `.yaml` file that makes up a specification, in a stable order.
@@ -982,6 +1040,138 @@ fn ess_compile(path: &Path, format: Format) -> Result<ExitCode> {
             },
             format,
         )?,
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// One projection, as `ess generate` names it on the command line.
+#[derive(serde::Serialize)]
+struct EssProjectionReport {
+    /// What `--kind` calls it.
+    name: &'static str,
+    /// The subdirectory its artifacts go in.
+    directory: &'static str,
+    /// One line saying what it proves.
+    describes: &'static str,
+}
+
+impl EssProjectionReport {
+    /// Reads a projection's own description of itself.
+    fn of(generator: &dyn Generator) -> Self {
+        Self {
+            name: generator.name(),
+            directory: generator.directory(),
+            describes: generator.describes(),
+        }
+    }
+}
+
+/// What `ess generate` reports.
+///
+/// Provenance sits in the report and not only in the artifacts: a consumer reading this over a pipe
+/// has no file header to look at, and "which specification produced this" is the only question
+/// anyone asks of generated output. Contents are carried whether or not `--out` was given, so
+/// nothing has to pick a directory to get at the bytes — which is exactly what `cargo xtask
+/// generate --check` needs in order to compare the committed tree against them.
+#[derive(serde::Serialize)]
+struct EssGeneration<'a> {
+    /// Which specification, resolved by which build.
+    provenance: &'a Provenance,
+    /// Where the artifacts were written, when they were.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    written_to: Option<String>,
+    /// The projections that ran, which is one of them when `--kind` was given.
+    projections: Vec<EssProjectionReport>,
+    /// Every artifact, in path order, with its contents.
+    artifacts: Vec<&'a Artifact>,
+}
+
+/// `protocol ess generate`
+///
+/// Printed and written artifacts are the same bytes, because both come from one call into `ess-gen`.
+/// The drift guard in `cargo xtask generate --check` compares a committed tree against what this
+/// prints, and that comparison means nothing unless there is one answer to compare with.
+fn ess_generate(
+    path: &Path,
+    kind: Option<EssProjection>,
+    out: Option<&Path>,
+    format: Format,
+) -> Result<ExitCode> {
+    let ir = match ess_compiled(path, format)? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+
+    let (projections, artifacts) = match kind {
+        Some(projection) => {
+            let generator = ess_gen::generator(projection.name()).with_context(|| {
+                format!(
+                    "`{}` is not a projection this build publishes",
+                    projection.name()
+                )
+            })?;
+            // The same entry point the whole set is run through, so a filtered run cannot produce a
+            // byte the unfiltered one does not — which is the only reason `--kind` is safe to use
+            // against a tree the drift guard checks.
+            let artifacts = ess_gen::artifact::run(generator.as_ref(), &ir)?;
+            (vec![EssProjectionReport::of(&*generator)], artifacts)
+        }
+        None => (
+            ess_gen::generators()
+                .iter()
+                .map(|generator| EssProjectionReport::of(&**generator))
+                .collect(),
+            ess_gen::generate_all(&ir)?,
+        ),
+    };
+
+    // Written, and nothing else: an artifact in `--out` that no projection produces any more is
+    // drift, but it is not this verb's business — `--out` may be any directory a caller names, and a
+    // command that deletes what it did not write is a command nobody points at a working tree.
+    // `cargo xtask generate` owns the committed tree, and owns removing from it.
+    if let Some(directory) = out {
+        for artifact in artifacts.values() {
+            let target = directory.join(&artifact.path);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            fs::write(&target, &artifact.contents)
+                .with_context(|| format!("writing {}", target.display()))?;
+        }
+    }
+
+    let provenance = Provenance::of(&ir);
+    let report = EssGeneration {
+        provenance: &provenance,
+        written_to: out.map(|directory| directory.display().to_string()),
+        projections,
+        artifacts: artifacts.values().collect(),
+    };
+
+    match format {
+        Format::Text => {
+            outln!(
+                "{} — {} projection(s), {} artifact(s)",
+                report.provenance,
+                report.projections.len(),
+                report.artifacts.len()
+            );
+            for artifact in &report.artifacts {
+                outln!("  {} — {} byte(s)", artifact.path, artifact.contents.len());
+            }
+            // Said rather than implied. A reader who expected files needs to know why there are
+            // none, and one who wanted the contents needs to be told where they are.
+            match &report.written_to {
+                Some(directory) => outln!("written to {directory}"),
+                None => outln!(
+                    "nothing written: pass --out to write these, or --format json for their \
+                     contents"
+                ),
+            }
+        }
+        Format::Yaml | Format::Json => print_serialised(&report, format)?,
     }
 
     Ok(ExitCode::SUCCESS)

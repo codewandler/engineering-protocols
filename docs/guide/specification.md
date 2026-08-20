@@ -18,13 +18,49 @@ its HTTP layer.
 | Resolve every reference into a normalized IR | `protocol ess compile --path <path>` |
 | Look one declaration up, resolved | `protocol ess inspect --path <path> <name>` |
 | See the event/command graph | `protocol ess graph --path <path>` (DOT) |
+| Derive documentation, schemas and contracts | `protocol ess generate --kind docs\|schema\|openapi\|asyncapi` |
 | Validate in an editor as you type | [`schemas/generated/ess.schema.json`](../../schemas/generated/ess.schema.json) |
 | Require conformance to one, as a protocol rule | [`principles/verification/ess-conformance.yaml`](../../principles/verification/ess-conformance.yaml) |
 
-**Nothing is generated from a specification yet** — no OpenAPI, no test synthesis. Those are ESS
-wave 3 in [`docs/plan/ess-roadmap.md`](../plan/ess-roadmap.md). What exists is the model, the
-compiler that resolves it, and the join: a task can already be blocked until something proves an
-implementation conforms, with a human producing that evidence by hand.
+**No tests are generated yet** — that is ESS wave 4 in
+[`docs/plan/ess-roadmap.md`](../plan/ess-roadmap.md), along with the deliberately-wrong
+implementation that proves a generated suite bites. What exists is the model, the compiler that
+resolves it, four projections derived from it, and the join: a task can already be blocked until
+something proves an implementation conforms, with a human producing that evidence by hand.
+
+### What gets derived, and what each projection is for
+
+| `--kind` | output | why it exists |
+|---|---|---|
+| `docs` | Markdown with Mermaid diagrams | the cheapest check that the model is complete: a construct with no rendering is a hole in a page a person reads |
+| `schema` | JSON Schema per command input, event and error payload | the type system, projected without losing the distinctions it exists to make |
+| `openapi` | one OpenAPI 3.1 document per component | the specification *is* the HTTP contract, not a document beside it |
+| `asyncapi` | one AsyncAPI 3.0 document per component | the same for messaging, including what happens when a binding fails |
+
+`--out` writes them; without it you get a listing, because a command that looks read-only should not
+write into whatever directory you happened to be in. `cargo xtask generate --check` fails when the
+committed output no longer matches the specification — a generated OpenAPI document that has drifted
+is a contract someone is already building against.
+
+Every artifact carries its provenance: the specification version, a digest of the resolved model, and
+the compiler and generator versions. The digest is over the model rather than the source files, so it
+does not change when a comment does — a digest that moves for no reason is one every reader learns to
+ignore.
+
+### Two things a projection can quietly destroy
+
+Worth knowing because they are the questions to ask of any generated artifact here.
+
+**A newtype collapsing into its representation.** `Email` and `EmailAddress` are both a `String`
+underneath. The generated schemas keep them as separate definitions with separate references, so a
+code generator emits two types — but on the wire both are a bare JSON string, and **a payload with
+the two values swapped validates clean.** JSON Schema constrains structure; it cannot carry nominal
+identity. That is a real limit, stated rather than papered over.
+
+**A command becoming an endpoint.** `CreateInvoice` is a command; `POST /invoice/commands/create-invoice`
+is one way to expose it. The model has no `exposures:` construct yet (design §6 sketches one), so that
+path is a *convention the generator chose*, written down in the generated document's own description.
+When `exposures:` lands it should override the convention, not replace it.
 
 ### Why compile at all, when validate already refuses a bad specification
 

@@ -1,0 +1,108 @@
+# generated from billing v3
+# model digest 120640924b8bdbf5
+# compiler 0.1.0 · generator 0.1.0
+# do not edit: regenerate with `protocol ess generate`
+openapi: 3.1.0
+info:
+  title: email-service
+  summary: Sends what other contexts ask it to send.
+  description: |-
+    The HTTP surface of `email-service`, one of the components of `billing` v3.
+
+    Every path here is one semantic command, so the method is always POST and the path is the command's wire name under its domain's: a command is not a resource, and this document does not invent one. A status code is the outcome the specification declares — 202 for a branch that was taken, 422 for a refusal the input decides, 502 for a refusal decided outside the request — and the `outcome` property of every response body names the branch. Events emitted by a branch are published to consumers through the event transport; they are not returned here.
+  version: v3
+  x-ess-provenance:
+    system: billing
+    specification_version: v3
+    source_digest: 120640924b8bdbf5
+    compiler_version: 0.1.0
+    generator_version: 0.1.0
+tags:
+- name: email
+  description: Sending the notifications other contexts ask for.
+paths:
+  /email/commands/SendEmail:
+    post:
+      operationId: billing.email.SendEmail
+      summary: SendEmail
+      tags:
+      - email
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        description: '`notify-on-invoice-created` invokes this command with `delivery: at_least_once`, so it may arrive more than once for one cause. The key names the invocation, so a repeat can be recognised as the same one rather than performed again. It is required rather than optional because a retrying caller could otherwise omit it, and the declared guarantee would have no mechanism behind it.'
+        required: true
+        schema:
+          minLength: 1
+          type: string
+      requestBody:
+        description: The input `billing.email.SendEmail` declares.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/billing.email.SendEmail.Input'
+      responses:
+        '202':
+          description: 'Outcome `sent`: the branch the specification declares for this input. Events this branch emits are published to consumers, not returned here.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.email.SendEmail.sent.Response'
+        '502':
+          description: 'Outcome `failed`: something outside the request refused. The input was acceptable, so the caller has nothing to correct and a retry is meaningful.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.email.SendEmail.failed.Response'
+components:
+  schemas:
+    billing.email.EmailAddress:
+      title: EmailAddress
+      x-ess-name: billing.email.EmailAddress
+      x-ess-kind: newtype
+      type: string
+    billing.email.SendEmail.Input:
+      title: SendEmail input
+      x-ess-name: billing.email.SendEmail
+      x-ess-kind: command-input
+      type: object
+      properties:
+        recipient:
+          $ref: '#/components/schemas/billing.email.EmailAddress'
+        template:
+          $ref: '#/components/schemas/billing.email.TemplateId'
+      required:
+      - recipient
+      - template
+      additionalProperties: false
+    billing.email.SendEmail.failed.Response:
+      additionalProperties: false
+      description: 'Decided outside the request: the provider rejects the recipient address.'
+      properties:
+        error:
+          const: billing.email.Undeliverable
+          description: The address was rejected by the provider.
+          type: string
+        outcome:
+          const: failed
+          description: Which declared outcome the command took.
+      required:
+      - outcome
+      - error
+      type: object
+    billing.email.SendEmail.sent.Response:
+      additionalProperties: false
+      description: Taken when no other outcome's condition matched. Emits `EmailSent`, published to consumers rather than returned here.
+      properties:
+        outcome:
+          const: sent
+          description: Which declared outcome the command took.
+      required:
+      - outcome
+      type: object
+    billing.email.TemplateId:
+      title: TemplateId
+      x-ess-name: billing.email.TemplateId
+      x-ess-kind: newtype
+      type: string

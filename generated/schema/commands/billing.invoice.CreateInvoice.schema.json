@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Create invoice input",
+  "x-ess-name": "billing.invoice.CreateInvoice",
+  "x-ess-kind": "command-input",
+  "type": "object",
+  "properties": {
+    "customer_email": {
+      "$ref": "#/$defs/billing.invoice.Email"
+    },
+    "amount": {
+      "$ref": "#/$defs/billing.invoice.Money"
+    }
+  },
+  "required": [
+    "customer_email",
+    "amount"
+  ],
+  "additionalProperties": false,
+  "x-ess-provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "120640924b8bdbf5",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "regenerate": "protocol ess generate"
+  },
+  "$defs": {
+    "billing.invoice.Email": {
+      "title": "Email",
+      "x-ess-name": "billing.invoice.Email",
+      "x-ess-kind": "newtype",
+      "type": "string"
+    },
+    "billing.invoice.Money": {
+      "title": "Money",
+      "x-ess-name": "billing.invoice.Money",
+      "x-ess-kind": "struct",
+      "type": "object",
+      "properties": {
+        "amount": {
+          "type": "string",
+          "format": "decimal",
+          "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+        },
+        "currency": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "additionalProperties": false,
+      "x-ess-invariants": [
+        "amount >= 0"
+      ]
+    }
+  }
+}

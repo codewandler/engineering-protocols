@@ -13,6 +13,7 @@ tasks:
       - task: clippy
       - task: test
       - task: schema-check
+      - task: generate-check
 
   fmt:
     desc: Format the workspace.
@@ -33,6 +34,16 @@ tasks:
     desc: Run every test in the workspace.
     cmds:
       - cargo test --workspace
+
+  generate:
+    desc: Regenerate generated/ — the projections of examples/billing/.
+    cmds:
+      - cargo xtask generate
+
+  generate-check:
+    desc: Fail if the committed projections differ from what the specification produces.
+    cmds:
+      - cargo xtask generate --check
 
   schema:
     desc: Regenerate schemas/generated/ from the Rust types.

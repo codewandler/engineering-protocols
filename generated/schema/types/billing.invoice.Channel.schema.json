@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "#/$defs/billing.invoice.Channel",
+  "x-ess-provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "120640924b8bdbf5",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "regenerate": "protocol ess generate"
+  },
+  "$defs": {
+    "billing.invoice.Channel": {
+      "title": "Delivery channel",
+      "x-ess-name": "billing.invoice.Channel",
+      "x-ess-kind": "enum",
+      "type": "string",
+      "enum": [
+        "Email",
+        "Post",
+        "Portal"
+      ]
+    }
+  }
+}

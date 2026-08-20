@@ -56,3 +56,20 @@ jobs:
 
       - name: Check generated schemas
         run: cargo xtask schema --check
+
+  # Its own job for the same reason as `schemas`: a stale projection reads as a stale projection.
+  # A generated OpenAPI document that no longer matches the specification is a contract someone is
+  # building against, and "the gate failed" would bury that behind a test log. The fix is
+  # `cargo xtask generate`.
+  projections:
+    name: Projections up to date
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check generated projections
+        run: cargo xtask generate --check
