@@ -9,7 +9,14 @@ use std::fmt;
 use ess_compiler::EssIr;
 
 /// What produced an artifact.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+///
+/// `Deserialize` as well as `Serialize`, and the two version fields are owned rather than
+/// `&'static str`, because provenance is read back and not only written. A conformance suite is
+/// committed and re-read by a later run, and a document that has been on disk cannot hold a
+/// `&'static str` that came from someone else's `env!`. Costing two allocations per artifact to let
+/// the same type serve both directions is a better trade than a second provenance type that drifts
+/// from this one — which is what happened to the schema mapping this crate publishes.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Provenance {
     /// The system the artifact describes.
     pub system: String,
@@ -22,9 +29,9 @@ pub struct Provenance {
     /// makes every reader ignore it.
     pub source_digest: String,
     /// The build that resolved it.
-    pub compiler_version: &'static str,
+    pub compiler_version: String,
     /// The build that wrote the artifact.
-    pub generator_version: &'static str,
+    pub generator_version: String,
 }
 
 impl Provenance {
@@ -40,8 +47,8 @@ impl Provenance {
             system: ir.system.to_string(),
             specification_version: ir.version.to_string(),
             source_digest: digest(ir),
-            compiler_version: Self::VERSION,
-            generator_version: Self::VERSION,
+            compiler_version: Self::VERSION.to_owned(),
+            generator_version: Self::VERSION.to_owned(),
         }
     }
 
