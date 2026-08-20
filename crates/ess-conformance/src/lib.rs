@@ -84,8 +84,24 @@
 //! nothing anywhere sleeps. Two identically-constructed runners produce byte-identical reports
 //! against a deterministic target, which is what makes a stored report reviewable by diff.
 //!
-//! [`mod@reference`] is the target that proves the suite means anything: `examples/billing/`
-//! implemented by hand, in memory, passing all 27 scenarios its own specification obliges.
+//! [`mod@reference`] holds the targets that prove the suite means anything: `examples/billing/` and
+//! `examples/oracle-fixture/`, each implemented by hand and in memory, passing all 27 and all 31
+//! scenarios their own specifications oblige.
+//!
+//! # Falsification: does the suite catch a wrong implementation?
+//!
+//! A green run against a correct target shows only that the suite asks for nothing a correct target
+//! cannot answer. [`faulty`] is the other half — §25 and §26 — and it is what makes the rest of this
+//! crate evidence rather than a claim: ten implementations that are wrong in exactly one way, and
+//! `tests/faults.rs`, which asserts per fault **which named scenario fails** and **how many
+//! unrelated ones still pass**, against an allowance that has to be changed with a reason.
+//!
+//! Three of the ten are caught by **nothing at all**, and those are the rows worth reading. They
+//! share one root: a synthesised suite asserts that an event was published and never what it
+//! carried, and asks for the absence of exactly one event per refused transition and of nothing
+//! else. [`Caught::Nothing`] records each with its reason, and the matrix
+//! asserts they are *still* uncaught, so closing one of the holes forces the row to be rewritten
+//! rather than forgotten.
 //!
 //! # What is deliberately not here
 //!
@@ -97,11 +113,11 @@
 //! * **An async runtime.** Design's open decision D2, taken as its default: the runner is
 //!   synchronous, because nothing in this workspace can drive a future that really yields and
 //!   waiting belongs inside the target anyway (§15).
-//! * **Deliberately faulty implementations, and the fault matrix.** §25 and §26, and a slice of
-//!   their own on purpose: a suite is not trustworthy until its failures are demonstrated, and
-//!   defects co-designed with the suite that is meant to catch them demonstrate nothing.
+//! * **A constraint solver, still.** §11 names one as a later extension, and nothing in the fault
+//!   matrix needed it.
 
 pub mod decision;
+pub mod faulty;
 pub mod input;
 pub mod reference;
 pub mod report;
@@ -112,6 +128,7 @@ pub mod target;
 pub mod witness;
 
 pub use decision::{when, Decision, Reason, Unevaluable, UnknownCause};
+pub use faulty::{Caught, Fault, Faulty, Injection, System};
 pub use input::{flatten, resolve_path, InputFacts, ShapeError, ShapeErrors, Target};
 pub use report::{
     CheckCode, CheckResult, ConformanceReport, ConformanceStatus, Diagnostic, ScenarioResult,

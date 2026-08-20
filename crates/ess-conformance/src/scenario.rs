@@ -287,8 +287,8 @@ impl SuiteProvenance {
             system: projection.system,
             specification_version: projection.specification_version,
             spec_digest,
-            compiler_version: projection.compiler_version.to_owned(),
-            generator_version: projection.generator_version.to_owned(),
+            compiler_version: projection.compiler_version.clone(),
+            generator_version: projection.generator_version.clone(),
             synthesizer_version: Self::SYNTHESIZER_VERSION.to_owned(),
         }
     }

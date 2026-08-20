@@ -41,6 +41,18 @@ belongs in the commit message or in `docs/design/`.
   proved and an illegal one refused, an entity's invariants checked after each state-changing command,
   and a binding checked for its mapping, its delivery guarantee and its failure policy. The normative
   example yields twenty-seven scenarios and the oracle fixture thirty-one. Nothing executes them yet.
+- **The generated suite is checked against implementations that are deliberately wrong.** Ten faults,
+  each injected one at a time: a wrong event, an accepted invalid amount, an illegal transition
+  allowed, a dropped binding, a swapped mapping, a stale read-your-writes view, an ignored external
+  outcome. Seven are caught by the scenario that exists to catch them — named, not merely "the run
+  went red" — and the matrix asserts each fault's blast radius against an allowance, so a suite that
+  starts over-reaching fails rather than looking thorough.
+- **Three faults are caught by nothing, and the matrix records that too.** An event may be published
+  with any payload, and a command may announce an event belonging to a branch it did not take, because
+  synthesis asserts an event by name and writes no payload; and a target that returns no consistency
+  token gets a weaker read instead of a reported failure. Each is recorded as an uncaught fault with
+  the reason, and the test asserts it is *still* uncaught — so closing one of these holes breaks the
+  row rather than being quietly forgotten.
 - **A generated suite runs against an implementation.** A `ConformanceTarget` offers nine methods,
   each traceable to something the specification declares — execute a command, query a view, observe
   events, configure an externally decided outcome, redeliver an event, isolate a scenario. There is no
