@@ -26,7 +26,7 @@ use crate::MemoryBackend;
 // one talks to a `BTreeMap`, so none of its bodies awaits anything, and a newer clippy reads that as a
 // mistake. It is the opposite: the signature belongs to the contract, not to this implementation, and
 // dropping `async` here would stop it implementing the trait at all.
-#[allow(clippy::unused_async)]
+#[allow(clippy::unused_async_trait_impl)]
 impl QueryService for MemoryBackend {
     type AuditRecord = AuditRecord;
 
