@@ -44,7 +44,7 @@ See the status table in [`README.md`](README.md); keep it accurate when you land
 is the per-wave record of what actually shipped — read it before believing any prose about progress.
 
 **Every crate in the workspace is implemented and gated. There are no skeletons left.** The most
-recent tag is `0.5.0-ess-wave-5`; `task check` (eight steps) currently passes 60 suites and 1346
+recent tag is `0.5.0-ess-wave-5`; `task check` (eight steps) currently passes 63 suites and 1362
 tests, with 0 clippy warnings and 0 rustdoc warnings.
 
 * **AEP — the protocol; the v0.2 scope is implemented.** `aep-domain`, `aep-schema`, `aep-engine`,
@@ -60,13 +60,15 @@ tests, with 0 clippy warnings and 0 rustdoc warnings.
   `0.3.1-ess-wave-2`), `ess-gen` (four projections behind one `Generator` trait,
   `0.3.2-ess-wave-3`), `ess-conformance` (the specification as oracle: synthesis, runner, evidence,
   `0.4.0-ess-wave-4`), `ess-diff` (semantic delta and impact closure, `0.5.0-ess-wave-5`) and
-  `ess-synth` (language-neutral synthesis plan, Rust emission — wave 6, in progress). `generated/`
-  holds the committed projections and the synthesised workspace, `suites/generated/` the committed
-  conformance suites; all drift-checked in the gate.
-* **Not built yet:** wave 6's W6.3 (the generated code passing the generated suite) until it lands;
-  the wave 6.5 hardening batch and wave 7, both scheduled on the roadmap; attested evidence
-  (gap register D-3, proposed and unaccepted); any durable backend — the only implementation of the
-  contract is in memory.
+  `ess-synth` (language-neutral synthesis plan, Rust emission, wave 6 complete: the committed
+  billing suite, unchanged, passes the synthesised workspace linked with the hand-written
+  realization in `examples/billing-realization`, and fails the deliberately corrupted linkage at
+  the one scenario that exists to catch it). `generated/` holds the committed projections and the
+  synthesised workspace, `suites/generated/` the committed conformance suites; all drift-checked
+  in the gate.
+* **Not built yet:** the wave 6.5 hardening batch and wave 7, both scheduled on the roadmap;
+  attested evidence (gap register D-3, proposed and unaccepted); any durable backend — the only
+  implementation of the contract is in memory.
 * Work order: [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) §4 for AEP,
   [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) for ESS, and
   [`docs/plan/gap-register.md`](docs/plan/gap-register.md) for what is owed outside any wave.
@@ -165,7 +167,10 @@ task check
 
 Eight steps, all eight of which CI also runs, in this order:
 
-1. `fmt-check` — `cargo fmt --all -- --check`.
+1. `fmt-check` — `cargo xtask fmt --check`, which formats exactly the workspace members. Not
+   `cargo fmt --all`: that flag also reaches every member's local path dependencies, which since
+   `examples/billing-realization` would hand the synthesised workspaces under `generated/rust/`
+   to rustfmt — and their bytes are the emitter's, held byte-identical by `synth-check`.
 2. `clippy` — `--workspace --all-targets -D warnings`, which is also what turns `missing_docs` and
    `clippy::pedantic` from warnings into failures.
 3. `test` — `cargo test --workspace`.
@@ -178,8 +183,12 @@ Eight steps, all eight of which CI also runs, in this order:
    `suites/generated/` differ from what the specifications produce. A suite is a contract an
    implementation is checked against, so a stale one certifies the wrong thing.
 8. `synth-check` — `cargo xtask synth --check`, which fails if the committed synthesised workspaces
-   under `generated/rust/` differ from what the specifications determine, or if a matching tree no
-   longer passes `cargo check` — the latter being a defect in `ess-synth`, not in any specification.
+   under `generated/rust/` differ from what the specifications determine, if a matching tree no
+   longer passes `cargo check`, or if the committed billing suite no longer holds against the
+   workspace linked with `examples/billing-realization`: the honest linkage must pass all 27
+   scenarios and the deliberately corrupted one must fail exactly the scenario that exists to
+   catch it. A tree that matches its specification and still fails here is a defect in
+   `ess-synth` or in the realization, not in any specification.
 
 Land nothing that does not pass all eight.
 

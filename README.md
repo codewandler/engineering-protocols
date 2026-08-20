@@ -61,7 +61,7 @@ it implements the contract by running a suite against itself.
 | `aep-conformance` — black-box backend suites | 12% | 100% | 16 suites, 3 levels, a faulty backend that proves they bite |
 | `adp-domain`, `aop-domain` | 5% | 100% | 44 + 49 tests |
 
-### ESS — executable system specifications (five waves delivered, the sixth in flight)
+### ESS — executable system specifications (six waves delivered)
 
 | Component | Done | State |
 |---|---:|---|
@@ -76,9 +76,9 @@ it implements the contract by running a suite against itself.
 | [ESS wave 3.5 — reconciliation](docs/plan/ess-wave-3.5-reconciliation.md) | 100% | all 20 gates closed, `0.3.3-ess-wave-3.5` |
 | Generated conformance suites, committed and drift-checked | 100% | 27 scenarios from `examples/billing/` and 31 from `examples/oracle-fixture/`, under `suites/generated/`, with every construct that got no scenario listed with its reason |
 | Semantic diff — what a revision invalidates | 100% | `ess diff` and `ess impact`, `0.5.0-ess-wave-5` — first slice as scoped: six construct families; predicate-bearing constructs fall back to whole-suite invalidation |
-| Rust structural synthesis (`ess-synth`) | 60% | wave 6 slices 1–2 of 3: a language-neutral `SynthesisPlan` (every capability generated, owed or refused, with reasons), then a committed zero-dependency workspace — semantic types, typestate lifecycles, component ports, and the one transport the billing binding requires; every obligation doubled as a typed stub, held to a bijection with the plan; `synth-check` in the gate. Billing: 45 capabilities = 33 generated / 8 obligations / 4 refused |
+| Rust structural synthesis (`ess-synth`) | 100% | wave 6 complete: a language-neutral `SynthesisPlan` (every capability generated, owed or refused, with reasons), a committed zero-dependency workspace — semantic types, typestate lifecycles, component ports, one transport — and the executed criterion: the committed billing suite, unchanged, passes the workspace linked with `examples/billing-realization` (27 of 27) and fails the deliberately corrupted linkage at exactly the scenario that exists to catch it. Billing: 45 capabilities = 33 generated / 8 obligations / 4 refused; the linker never chooses (D-2) |
 
-`task check` passes 60 suites and 1346 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
+`task check` passes 63 suites and 1362 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
 are an effort estimate, not a measurement; verify the "done" column with `task check`. The ESS roadmap
 is [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md).
 

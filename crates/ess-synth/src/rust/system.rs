@@ -12,12 +12,27 @@
 //!
 //! # Failure, per the binding's own words
 //!
-//! The one failure that exists in this workspace is an unmet obligation — a port refusing because
-//! its behaviour is owed. When that stops a binding's command from running, the binding's
-//! declared policy answers: `escalate` builds the declared event through the escalation
-//! obligation and publishes it, `retry` holds the event for the next pump (which is the
-//! at-least-once redelivery, on the schedule the caller provides), `drop` gives up silently
-//! because that is what the author wrote.
+//! What a binding's `on_failure:` speaks about is the invoked command **refusing** — taking a
+//! declared outcome that carries an error, which for billing is `SendEmail` answering `failed`
+//! with `Undeliverable`. That is the failure the declared policy answers: `escalate` builds the
+//! declared event through the escalation obligation and publishes it, `retry` holds the event for
+//! the next pump (which is the at-least-once redelivery, on the schedule the caller provides),
+//! `drop` gives up silently because that is what the author wrote. The pump therefore matches on
+//! the outcome enum and takes the policy on exactly the error-carrying variants.
+//!
+//! An unmet obligation is deliberately **not** routed into the policy. A port refusing because
+//! its behaviour is owed is a fact about the workspace being unfinished, not a fact about a
+//! delivery, and escalating it would publish a domain event for a defect no provider caused —
+//! manufactured evidence, in the vocabulary this repository uses for it. It propagates out of
+//! `pump` instead, naming what is owed.
+//!
+//! # The transport records what its bindings invoke
+//!
+//! Beside the log, the pump keeps a second observable record: every command a binding invoked,
+//! with the input it passed, as a typed `BindingInvocation`. A mapping's target is a command
+//! input, and the model relates a command's input to no observable fact afterwards — so without
+//! this record, "the binding filled `recipient` from the field the document names" is a claim
+//! nothing can check. A conformance run reads it; nothing inside the system does.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -148,14 +163,15 @@ fn lib_module(
         "//!\n//! The transport is derived from the specification, not chosen: `at_least_once` \
          is the only\n//! delivery guarantee the model declares, so published events land on an \
          append-only log and a\n//! pump delivers each to every binding that reacts to it. The \
-         log is the system's observable\n//! record. What no specification determines — how an \
-         escalation event is filled, behaviour behind\n//! the ports — stays an obligation; see \
-         the `PLAN.md` beside this \
+         log is the system's observable\n//! record, and so is the record of what each binding \
+         invoked. What no specification determines\n//! — how an escalation event is filled, \
+         behaviour behind the ports — stays an obligation; see\n//! the `PLAN.md` beside this \
          workspace.\n\n#![forbid(unsafe_code)]\n#![deny(missing_docs)]\n",
     );
 
     system_event_enum(&mut out, layout, &types, &variants);
     from_impls(&mut out, ir, layout, &variants);
+    binding_invocation_enum(&mut out, layout, &types, &deliveries);
     transformations(&mut out, ir, plan, layout, &types, covered);
     obligations_module(&mut out, ir, plan, layout, &types, stubbed);
     system_struct(&mut out, ir, layout, &types, &deliveries, &variants);
@@ -183,6 +199,39 @@ fn system_event_enum(
             out,
             "    /// `{event}`.\n    {variant}({}),",
             types_path(layout, types, event.name())
+        );
+    }
+    out.push_str("}\n");
+}
+
+/// The transport's second record: one variant per generated delivery, holding what was passed.
+///
+/// Emitted only where a delivery is generated at all, because a system with no bindings invokes
+/// nothing and an empty enum would be a type with no values pretending to be a record.
+fn binding_invocation_enum(
+    out: &mut String,
+    layout: &Layout,
+    types: &str,
+    deliveries: &[Delivery<'_>],
+) {
+    if deliveries.is_empty() {
+        return;
+    }
+    out.push_str(
+        "\n/// One command a binding invoked, and the input it passed — the transport's own \
+         record.\n///\n/// Recorded by the pump at the moment of invocation, so what a binding \
+         actually passed is\n/// observable from outside — a conformance run holds a mapping to \
+         its words with exactly this —\n/// without instrumenting the component underneath.\n\
+         #[derive(Debug, Clone, PartialEq, Eq)]\npub enum BindingInvocation {\n",
+    );
+    for delivery in deliveries {
+        let _ = writeln!(
+            out,
+            "    /// `{}` invoked `{}`.\n    {}({}),",
+            delivery.binding.name,
+            delivery.binding.command,
+            name::pascal(&delivery.binding.name.to_string()),
+            types_path(layout, types, delivery.binding.command.name()),
         );
     }
     out.push_str("}\n");
@@ -514,13 +563,25 @@ fn system_struct(
     if with_obligations {
         out.push_str("    obligations: Obligations,\n");
     }
+    let with_invocations = !deliveries.is_empty();
+    if with_invocations {
+        out.push_str("    invocations: Vec<BindingInvocation>,\n");
+    }
     out.push_str("    published: Vec<SystemEvent>,\n    cursor: usize,\n");
     if retries {
         out.push_str("    retries: Vec<SystemEvent>,\n");
     }
     out.push_str("}\n");
 
-    constructor(out, ir, layout, &angled, with_obligations, retries);
+    constructor(
+        out,
+        ir,
+        layout,
+        &angled,
+        with_obligations,
+        with_invocations,
+        retries,
+    );
 
     pump_impl(
         out,
@@ -545,6 +606,7 @@ fn constructor(
     layout: &Layout,
     angled: &str,
     with_obligations: bool,
+    with_invocations: bool,
     retries: bool,
 ) {
     let _ = writeln!(out, "\nimpl{angled} System{angled} {{");
@@ -584,6 +646,9 @@ fn constructor(
     if with_obligations {
         out.push_str("            obligations,\n");
     }
+    if with_invocations {
+        out.push_str("            invocations: Vec::new(),\n");
+    }
     out.push_str("            published: Vec::new(),\n            cursor: 0,\n");
     if retries {
         out.push_str("            retries: Vec::new(),\n");
@@ -592,8 +657,16 @@ fn constructor(
     out.push_str(
         "\n    /// Everything published so far, in publication order — the system's observable \
          record.\n    pub fn published(&self) -> &[SystemEvent] {\n        &self.published\n    \
-         }\n}\n",
+         }\n",
     );
+    if with_invocations {
+        out.push_str(
+            "\n    /// Every command a binding invoked so far, in invocation order, with what it \
+             passed.\n    pub fn invocations(&self) -> &[BindingInvocation] {\n        \
+             &self.invocations\n    }\n",
+        );
+    }
+    out.push_str("}\n");
 }
 
 /// The generic parameter names of the component fields, in component order.
@@ -668,6 +741,16 @@ fn pump_impl(
         out.push_str("        }\n    }\n");
     } else {
         out.push_str("            self.deliver(&event)?;\n        }\n    }\n");
+        let _ = writeln!(
+            out,
+            "\n    /// Delivers one already-published occurrence to every binding that reacts to \
+             it, again,\n    /// then pumps until quiescent.\n    ///\n    /// The duplicate a \
+             delivery guarantee of at least once explicitly permits: the occurrence is\n    /// \
+             not published a second time — a second occurrence would be a different claim — but\n    \
+             /// every reacting binding runs again, and what that causes lands on the log as \
+             usual.\n    pub fn redeliver(&mut self, event: &SystemEvent) -> Result<(), {unmet}> \
+             {{\n        self.deliver(event)?;\n        self.pump()\n    }}"
+        );
     }
 
     out.push_str(
@@ -685,7 +768,7 @@ fn pump_impl(
     out.push_str("    }\n");
 
     if !deliveries.is_empty() {
-        deliver_fn(out, layout, deliveries, variants, &unmet);
+        deliver_fn(out, ir, layout, types, deliveries, variants, &unmet);
     }
     out.push_str("}\n");
 }
@@ -693,7 +776,9 @@ fn pump_impl(
 /// The delivery match: one arm per event the log can carry, holding the bindings that react.
 fn deliver_fn(
     out: &mut String,
+    ir: &EssIr,
     layout: &Layout,
+    types: &str,
     deliveries: &[Delivery<'_>],
     variants: &std::collections::BTreeMap<&EventHandle, String>,
     unmet: &str,
@@ -715,18 +800,25 @@ fn deliver_fn(
         }
         let _ = writeln!(out, "            SystemEvent::{variant}(event) => {{");
         for delivery in reacting {
-            delivery_arm(out, layout, delivery, variants, variant);
+            delivery_arm(out, ir, layout, types, delivery, variants, variant);
         }
         out.push_str("            }\n");
     }
     out.push_str("        }\n        Ok(())\n    }\n");
 }
 
-/// One binding's delivery: transform, invoke the acceptor's port, answer failure with the
-/// declared policy.
+/// One binding's delivery: transform, record the invocation, invoke the acceptor's port, and
+/// answer a declared refusal with the declared policy.
+///
+/// The failure a policy speaks about is the invoked command taking an error-carrying outcome —
+/// see the [module documentation](self) — so the arm matches on the outcome enum. An unmet
+/// obligation propagates with `?` instead: it is the workspace being unfinished, not a delivery
+/// failing, and routing it into the policy would publish a domain event no domain fact caused.
 fn delivery_arm(
     out: &mut String,
+    ir: &EssIr,
     layout: &Layout,
+    types: &str,
     delivery: &Delivery<'_>,
     variants: &std::collections::BTreeMap<&EventHandle, String>,
     trigger_variant: &str,
@@ -734,8 +826,26 @@ fn delivery_arm(
     let binding = delivery.binding;
     let source = binding.name.to_string();
     let ident = name::value_ident(&source);
+    let pascal = name::pascal(&source);
     let acceptor = name::value_ident(&delivery.acceptor.name.to_string());
     let method = name::value_ident(&layout.type_name(binding.command.name()));
+    let outcome_type = format!(
+        "{}Outcome",
+        types_path(layout, types, binding.command.name())
+    );
+    let command = ir.command(&binding.command);
+    let successes: Vec<String> = command
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.error.is_none())
+        .map(|outcome| name::pascal(outcome.name.as_str()))
+        .collect();
+    let refusals: Vec<String> = command
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.error.is_some())
+        .map(|outcome| name::pascal(outcome.name.as_str()))
+        .collect();
 
     let _ = writeln!(
         out,
@@ -751,29 +861,90 @@ fn delivery_arm(
             "                let input = self.obligations.{ident}_input(event)?;"
         );
     }
+    let _ = writeln!(
+        out,
+        "                self.invocations.push(BindingInvocation::{pascal}(input.clone()));"
+    );
+
+    // A command with no error-carrying outcome cannot refuse, so no policy can ever run; the
+    // invocation still happens, and an unmet obligation still propagates.
+    if refusals.is_empty() {
+        let _ = writeln!(
+            out,
+            "                // No declared refusal exists, so this invocation cannot fail.\n                \
+             let _ = self.{acceptor}.{method}(input)?;"
+        );
+        return;
+    }
     match binding.on_failure() {
         ResolvedFailure::Escalate { emits } => {
-            let _ = writeln!(
-                out,
-                "                if self.{acceptor}.{method}(input.clone()).is_err() {{\n                    \
-                 let escalation = self.obligations.{ident}_escalation(&input)?;\n                    \
-                 self.published.push(SystemEvent::{}(escalation));\n                }}",
+            let body = format!(
+                "                        // The declared refusal is the failure the policy names: \
+                 escalate.\n                        let escalation = \
+                 self.obligations.{ident}_escalation(&input)?;\n                        \
+                 self.published.push(SystemEvent::{}(escalation));\n",
                 variants[emits]
+            );
+            refusal_match(
+                out,
+                &format!("self.{acceptor}.{method}(input.clone())"),
+                &outcome_type,
+                &successes,
+                &refusals,
+                &body,
             );
         }
         ResolvedFailure::Retry => {
-            let _ = writeln!(
+            let body = format!(
+                "                        // The declared refusal is the failure the policy names: \
+                 hold the event for the\n                        // next pump, which is one more \
+                 at-least-once attempt.\n                        \
+                 self.retries.push(SystemEvent::{trigger_variant}(event.clone()));\n"
+            );
+            refusal_match(
                 out,
-                "                if self.{acceptor}.{method}(input).is_err() {{\n                    \
-                 self.retries.push(SystemEvent::{trigger_variant}(event.clone()));\n                }}"
+                &format!("self.{acceptor}.{method}(input)"),
+                &outcome_type,
+                &successes,
+                &refusals,
+                &body,
             );
         }
         ResolvedFailure::Drop => {
             let _ = writeln!(
                 out,
-                "                // `drop`: give up silently, because that is what the author \
-                 wrote.\n                let _ = self.{acceptor}.{method}(input);"
+                "                // `drop`: a declared refusal is given up silently, because that \
+                 is what the author\n                // wrote; an unmet obligation still \
+                 propagates.\n                let _ = self.{acceptor}.{method}(input)?;"
             );
         }
     }
+}
+
+/// The outcome match a failure policy needs: `?` on the call so an unmet obligation propagates,
+/// every success variant inert, and every error-carrying variant running the policy's body.
+fn refusal_match(
+    out: &mut String,
+    call: &str,
+    outcome_type: &str,
+    successes: &[String],
+    refusals: &[String],
+    body: &str,
+) {
+    let _ = writeln!(out, "                match {call}? {{");
+    for variant in successes {
+        let _ = writeln!(
+            out,
+            "                    {outcome_type}::{variant} {{ .. }} => {{}}"
+        );
+    }
+    let refused: String = refusals
+        .iter()
+        .map(|variant| format!("{outcome_type}::{variant} {{ .. }}"))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    let _ = writeln!(
+        out,
+        "                    {refused} => {{\n{body}                    }}\n                }}"
+    );
 }

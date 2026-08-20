@@ -14,6 +14,15 @@ obligation is also a typed stub in the workspace, refusing with a value that nam
 `Cargo.lock` and `target/` inside a workspace are written by `cargo check` and are not part
 of the committed tree.
 
+The other half of the bargain is hand-written, and lives outside this tree because the
+ownership boundary is absolute: [`examples/billing-realization`](../../examples/billing-realization)
+implements each obligation against its contract, and its linker assembles components and
+implementations into a runnable system without ever choosing — zero implementations for an
+obligation is an unsatisfied obligation, two is an ambiguity error naming both (gap register
+D-2). `cargo xtask synth` then executes the committed conformance suite, unchanged, against
+that linked system: 27 of 27 scenarios must pass, and the deliberately corrupted variant
+beside the honest one must fail exactly the scenario that exists to catch it.
+
 | workspace | generated from | generated | obligations | refused | plan |
 | --- | --- | --- | --- | --- | --- |
 | [`billing/`](billing) | billing v3 (model digest e19d384dac86219a) | 33 | 8 | 4 | [`billing/PLAN.md`](billing/PLAN.md) |

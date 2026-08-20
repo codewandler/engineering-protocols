@@ -807,9 +807,24 @@ fn the_transport_is_the_one_the_billing_binding_requires() {
         system.contains("// `notify-on-invoice-created`: at_least_once, on failure escalate."),
         "the arm carries the binding's own delivery facts: {system}"
     );
+    // The failure the policy answers is the command *refusing* — taking its error-carrying
+    // outcome — never an unmet obligation, which is the workspace being unfinished rather than a
+    // delivery failing and which therefore propagates with `?`. The old shape, `is_err()`, was
+    // exactly that conflation: a provider rejecting an address and a behaviour nobody wrote yet
+    // took the same branch.
     assert!(
-        system.contains("if self.email_service.send_email(input.clone()).is_err()"),
-        "the command lands on the component that accepts it: {system}"
+        system.contains("match self.email_service.send_email(input.clone())? {"),
+        "the command lands on the component that accepts it, and an unmet obligation propagates: \
+         {system}"
+    );
+    assert!(
+        system.contains("billing_types::email::SendEmailOutcome::Sent { .. } => {}")
+            && system.contains("billing_types::email::SendEmailOutcome::Failed { .. } =>"),
+        "the policy runs on exactly the declared refusal, not on every non-success: {system}"
+    );
+    assert!(
+        !system.contains(".is_err()"),
+        "an unmet obligation must not be read as a delivery failure: {system}"
     );
     assert!(
         system.contains("self.obligations.notify_on_invoice_created_escalation(&input)?")
@@ -832,6 +847,39 @@ fn the_transport_is_the_one_the_billing_binding_requires() {
              {system}"
         );
     }
+}
+
+#[test]
+fn the_transport_records_its_invocations_and_can_deliver_an_occurrence_twice() {
+    // The two observations a conformance run needs of a transport and nothing inside the system
+    // needs: what a binding actually passed (a mapping's target is a command input, which the
+    // model relates to no observable fact afterwards), and that an occurrence can reach its
+    // bindings a second time (the only claim `at_least_once` makes). Both are the transport's to
+    // expose — reading either out of a component would be instrumentation the specification never
+    // asked of it.
+    let synthesis = synthesize(&billing());
+    let system = artifact(&synthesis, "crates/billing-system/src/lib.rs");
+
+    assert!(
+        system.contains("pub enum BindingInvocation")
+            && system.contains("NotifyOnInvoiceCreated(billing_types::email::SendEmail)"),
+        "the record is typed against the invoked command's input: {system}"
+    );
+    assert!(
+        system.contains(
+            "self.invocations.push(BindingInvocation::NotifyOnInvoiceCreated(input.clone()));"
+        ),
+        "the pump records the invocation at the moment it happens: {system}"
+    );
+    assert!(
+        system.contains("pub fn invocations(&self) -> &[BindingInvocation]"),
+        "the record is observable from outside: {system}"
+    );
+    assert!(
+        system.contains("pub fn redeliver(&mut self, event: &SystemEvent)")
+            && system.contains("self.deliver(event)?;\n        self.pump()"),
+        "redelivery runs the bindings again without publishing a second occurrence: {system}"
+    );
 }
 
 #[test]

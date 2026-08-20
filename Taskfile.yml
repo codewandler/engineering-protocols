@@ -20,15 +20,19 @@ tasks:
       - task: suite-check
       - task: synth-check
 
+  # `cargo xtask fmt`, not `cargo fmt --all`: `--all` also formats every member's local path
+  # dependencies, and `examples/billing-realization` depends by path on the synthesised crates
+  # under `generated/rust/` — a tree whose bytes are the emitter's, held byte-identical by
+  # `synth-check`. One owner per tree; rustfmt is not the generated workspaces' owner.
   fmt:
-    desc: Format the workspace.
+    desc: Format the source workspace's members.
     cmds:
-      - cargo fmt --all
+      - cargo xtask fmt
 
   fmt-check:
-    desc: Fail if anything is unformatted.
+    desc: Fail if any workspace member is unformatted. Generated workspaces are exempt by design.
     cmds:
-      - cargo fmt --all -- --check
+      - cargo xtask fmt --check
 
   clippy:
     desc: Lint every target, warnings are errors.
@@ -76,7 +80,8 @@ tasks:
   synth-check:
     desc: >-
       Fail if the committed synthesised workspaces differ from what the specifications determine,
-      or no longer compile.
+      no longer compile, or no longer hold the committed suite — the honest realization linkage
+      must pass it and the corrupted one must fail it.
     cmds:
       - cargo xtask synth --check
 

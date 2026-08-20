@@ -8,8 +8,9 @@
 //! The transport is derived from the specification, not chosen: `at_least_once` is the only
 //! delivery guarantee the model declares, so published events land on an append-only log and a
 //! pump delivers each to every binding that reacts to it. The log is the system's observable
-//! record. What no specification determines — how an escalation event is filled, behaviour behind
-//! the ports — stays an obligation; see the `PLAN.md` beside this workspace.
+//! record, and so is the record of what each binding invoked. What no specification determines
+//! — how an escalation event is filled, behaviour behind the ports — stays an obligation; see
+//! the `PLAN.md` beside this workspace.
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
@@ -50,6 +51,17 @@ impl From<invoice_service::PublishedEvent> for SystemEvent {
             invoice_service::PublishedEvent::InvoicePaid(event) => Self::InvoicePaid(event),
         }
     }
+}
+
+/// One command a binding invoked, and the input it passed — the transport's own record.
+///
+/// Recorded by the pump at the moment of invocation, so what a binding actually passed is
+/// observable from outside — a conformance run holds a mapping to its words with exactly this —
+/// without instrumenting the component underneath.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindingInvocation {
+    /// `notify-on-invoice-created` invoked `billing.email.SendEmail`.
+    NotifyOnInvoiceCreated(billing_types::email::SendEmail),
 }
 
 /// The binding `notify-on-invoice-created`: `billing.invoice.InvoiceCreated`, read as `billing.email.SendEmail` input.
@@ -106,6 +118,7 @@ pub struct System<EmailServiceBehaviors, InvoiceServiceBehaviors, Obligations> {
     /// The `invoice-service` component.
     pub invoice_service: invoice_service::InvoiceService<InvoiceServiceBehaviors>,
     obligations: Obligations,
+    invocations: Vec<BindingInvocation>,
     published: Vec<SystemEvent>,
     cursor: usize,
 }
@@ -117,6 +130,7 @@ impl<EmailServiceBehaviors, InvoiceServiceBehaviors, Obligations> System<EmailSe
             email_service,
             invoice_service,
             obligations,
+            invocations: Vec::new(),
             published: Vec::new(),
             cursor: 0,
         }
@@ -125,6 +139,11 @@ impl<EmailServiceBehaviors, InvoiceServiceBehaviors, Obligations> System<EmailSe
     /// Everything published so far, in publication order — the system's observable record.
     pub fn published(&self) -> &[SystemEvent] {
         &self.published
+    }
+
+    /// Every command a binding invoked so far, in invocation order, with what it passed.
+    pub fn invocations(&self) -> &[BindingInvocation] {
+        &self.invocations
     }
 }
 
@@ -153,6 +172,17 @@ where
         }
     }
 
+    /// Delivers one already-published occurrence to every binding that reacts to it, again,
+    /// then pumps until quiescent.
+    ///
+    /// The duplicate a delivery guarantee of at least once explicitly permits: the occurrence is
+    /// not published a second time — a second occurrence would be a different claim — but
+    /// every reacting binding runs again, and what that causes lands on the log as usual.
+    pub fn redeliver(&mut self, event: &SystemEvent) -> Result<(), billing_types::obligation::UnmetObligation> {
+        self.deliver(event)?;
+        self.pump()
+    }
+
     /// Moves every component's outbox onto the log, in component order.
     fn collect(&mut self) {
         for event in self.email_service.drain_outbox() {
@@ -172,9 +202,14 @@ where
             SystemEvent::InvoiceCreated(event) => {
                 // `notify-on-invoice-created`: at_least_once, on failure escalate.
                 let input = notify_on_invoice_created(event);
-                if self.email_service.send_email(input.clone()).is_err() {
-                    let escalation = self.obligations.notify_on_invoice_created_escalation(&input)?;
-                    self.published.push(SystemEvent::DeliveryEscalated(escalation));
+                self.invocations.push(BindingInvocation::NotifyOnInvoiceCreated(input.clone()));
+                match self.email_service.send_email(input.clone())? {
+                    billing_types::email::SendEmailOutcome::Sent { .. } => {}
+                    billing_types::email::SendEmailOutcome::Failed { .. } => {
+                        // The declared refusal is the failure the policy names: escalate.
+                        let escalation = self.obligations.notify_on_invoice_created_escalation(&input)?;
+                        self.published.push(SystemEvent::DeliveryEscalated(escalation));
+                    }
                 }
             }
             SystemEvent::InvoiceIssued(_) => {}

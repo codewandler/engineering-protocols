@@ -186,6 +186,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "billing-realization"
+version = "0.1.0"
+dependencies = [
+ "aep-contract",
+ "aep-domain",
+ "billing-system",
+ "billing-types",
+ "email-service",
+ "ess-conformance",
+ "invoice-service",
+ "serde_json",
+]
+
+[[package]]
+name = "billing-system"
+version = "3.0.0"
+dependencies = [
+ "billing-types",
+ "email-service",
+ "invoice-service",
+]
+
+[[package]]
+name = "billing-types"
+version = "3.0.0"
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -336,6 +363,13 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "email-service"
+version = "3.0.0"
+dependencies = [
+ "billing-types",
+]
 
 [[package]]
 name = "email_address"
@@ -617,6 +651,13 @@ checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
  "hashbrown",
+]
+
+[[package]]
+name = "invoice-service"
+version = "3.0.0"
+dependencies = [
+ "billing-types",
 ]
 
 [[package]]

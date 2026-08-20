@@ -11,6 +11,41 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **The generated code passes the generated tests — wave 6's criterion, executed.** The committed
+  billing suite (`suites/generated/billing/suite.json`, exactly as wave 4 wrote it, 27 scenarios,
+  digest-checked against the workspace's plan) now runs against the synthesised workspace linked
+  with hand-written obligation implementations, and passes 27 of 27. The falsifiability half runs
+  beside it: one obligation implementation deliberately corrupted — `accepts-any-amount`, the
+  `CreateInvoice` guard dropped — and the same unchanged suite fails exactly
+  `billing.invoice.CreateInvoice/outcome/rejected`, with a blast radius of one. Both halves are
+  part of `synth-check`, so CI executes the criterion rather than trusting it.
+- **`examples/billing-realization` — the hand-written half of the synthesised workspace.** One
+  implementation per obligation in the generated `PLAN.md`, written by reading
+  `examples/billing/`: the amount guard on the wire rendering (never a float), lifecycle moves
+  through the generated typestate, both view projections, the provider stand-in for `SendEmail`,
+  and the escalation that records the delivery that was given up on. Hand-written code satisfies
+  generated interfaces by import and never enters `generated/`.
+- **The linker never chooses (gap register D-2).** Assembling the system takes exactly one offered
+  implementation per obligation: zero offers is an unsatisfied obligation, two is an ambiguity
+  error naming both claimants, and refusals accumulate — a linker with three empty slots reports
+  three. The linker's obligation list is held equal to the committed plan by a test.
+- **The generated transport is now observable where a conformance run needs it.** The system crate
+  records every command a binding invoked with the input it passed (`BindingInvocation`, read by
+  the runner's mapping check), and grows `redeliver` — one already-published occurrence delivered
+  to its bindings again, the duplicate `at_least_once` permits, without publishing a second
+  occurrence.
+
+### Fixed
+
+- **A binding's failure policy now answers the declared refusal, not an unfinished workspace.**
+  The generated delivery arm matched `is_err()`, which conflated the provider refusing an address
+  (the declared `failed` outcome) with the behaviour behind the port not being implemented yet
+  (an `UnmetObligation`). It now matches the outcome enum: an error-carrying outcome takes the
+  declared policy — escalate, retry, or drop — and an unmet obligation propagates out of `pump`,
+  because escalating it would publish a domain event no domain fact caused. Found by W6.3's suite
+  run: under the old shape a forced `SendEmail` failure produced no `DeliveryEscalated`, and
+  `notify-on-invoice-created/binding/on-failure` failed.
+
 - **`protocol ess synthesize` now emits component skeletons and one transport.** The plan's scope
   grows from `semantic-types` to `component-skeletons`: each component becomes its own generated
   crate whose port is the specification's declared surface — accepted commands as typed handlers,

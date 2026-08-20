@@ -83,6 +83,18 @@ const SYNTH_SPECIFICATIONS: &[&str] = &["examples/billing"];
 /// down.
 const SYNTH: &str = "generated/rust";
 
+/// The committed realization each synthesised workspace is linked with and judged through.
+///
+/// `(workspace directory under SYNTH, source-workspace package)`. Wave 6's acceptance criterion
+/// is executed here rather than asserted: the realization package's tests run the committed
+/// conformance suite — unchanged, digest-checked against the workspace's plan — against the
+/// system its linker assembles, and also hold that the deliberately corrupted linkage fails
+/// exactly the scenario that exists to catch it. The tests already run in the gate's `test`
+/// step; they run here too because "the generated code passes the generated tests" is this
+/// tree's acceptance criterion, and a check named `synth` that did not check it would certify
+/// bytes rather than behaviour.
+const REALIZATIONS: &[(&str, &str)] = &[("billing", "billing-realization")];
+
 /// The subtrees of `generated/` the projection task does not own.
 ///
 /// Exactly the nested owners' roots, relative to [`PROJECTIONS`] — the ownership test refuses an
@@ -126,6 +138,12 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Format the source workspace's members — and only them.
+    Fmt {
+        /// Verify formatting instead of rewriting it.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -148,6 +166,7 @@ fn main() -> Result<()> {
                 .collect();
             suite(&specifications, &root.join(SUITES), check)
         }
+        Command::Fmt { check } => fmt(check),
         Command::Synth { check } => {
             let root = workspace_root();
             let specifications: Vec<PathBuf> = SYNTH_SPECIFICATIONS
@@ -640,6 +659,78 @@ fn synth(specifications: &[PathBuf], out: &Path, check: bool) -> Result<()> {
     for workspace in &workspaces {
         check_generated_workspace(&out.join(&workspace.directory))?;
     }
+    for (workspace, package) in REALIZATIONS {
+        check_realization(workspace, package)?;
+    }
+    Ok(())
+}
+
+/// Runs one realization package's tests: the committed suite against the linked system.
+///
+/// Both halves of the criterion live in those tests — the honest linkage passes 27 of 27, the
+/// corrupted one fails exactly the scenario that exists to catch it — so a failure here means
+/// the committed workspace, the committed suite and the hand-written realization no longer
+/// agree, which no byte-diff can see.
+fn check_realization(workspace: &str, package: &str) -> Result<()> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = std::process::Command::new(&cargo)
+        .args(["test", "--package", package])
+        .current_dir(workspace_root())
+        .output()
+        .with_context(|| format!("running {cargo:?} test --package {package}"))?;
+    if !output.status.success() {
+        bail!(
+            "the committed suite no longer holds against `generated/rust/{workspace}` linked \
+             with `{package}` — either the honest linkage fails a scenario it must pass, or the \
+             corrupted one no longer fails the scenario that exists to catch it:\n{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
+/// Formats (or checks) exactly the source workspace's members.
+///
+/// Not `cargo fmt --all`: that flag also formats every member's *local path dependencies*, and
+/// `examples/billing-realization` depends by path on the synthesised crates under
+/// `generated/rust/` — a tree with one owner, the synth task, whose bytes are the emitter's and
+/// are held byte-identical by `synth-check`. Two tasks owning one tree is exactly what this
+/// file's module documentation forbids, so the member list comes from `cargo metadata` and the
+/// generated workspaces are never rustfmt's to touch.
+fn fmt(check: bool) -> Result<()> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = std::process::Command::new(&cargo)
+        .args(["metadata", "--no-deps", "--format-version", "1"])
+        .current_dir(workspace_root())
+        .output()
+        .with_context(|| format!("running {cargo:?} metadata"))?;
+    if !output.status.success() {
+        bail!(
+            "reading the workspace members failed:
+{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&output.stdout).context("parsing `cargo metadata` output")?;
+    let mut arguments: Vec<String> = vec!["fmt".to_owned()];
+    for package in array(&metadata, "packages")? {
+        arguments.push("--package".to_owned());
+        arguments.push(text(package, "name")?);
+    }
+    if check {
+        arguments.push("--".to_owned());
+        arguments.push("--check".to_owned());
+    }
+    let status = std::process::Command::new(&cargo)
+        .args(&arguments)
+        .current_dir(workspace_root())
+        .status()
+        .with_context(|| format!("running {cargo:?} fmt over the workspace members"))?;
+    if !status.success() {
+        bail!("formatting {}", if check { "differs" } else { "failed" });
+    }
     Ok(())
 }
 
@@ -725,6 +816,15 @@ const SYNTH_INDEX_PREAMBLE: &[&str] = &[
     "obligation is also a typed stub in the workspace, refusing with a value that names it.",
     "`Cargo.lock` and `target/` inside a workspace are written by `cargo check` and are not part",
     "of the committed tree.",
+    "",
+    "The other half of the bargain is hand-written, and lives outside this tree because the",
+    "ownership boundary is absolute: [`examples/billing-realization`](../../examples/billing-realization)",
+    "implements each obligation against its contract, and its linker assembles components and",
+    "implementations into a runnable system without ever choosing — zero implementations for an",
+    "obligation is an unsatisfied obligation, two is an ambiguity error naming both (gap register",
+    "D-2). `cargo xtask synth` then executes the committed conformance suite, unchanged, against",
+    "that linked system: 27 of 27 scenarios must pass, and the deliberately corrupted variant",
+    "beside the honest one must fail exactly the scenario that exists to catch it.",
     "",
     "| workspace | generated from | generated | obligations | refused | plan |",
     "| --- | --- | --- | --- | --- | --- |",

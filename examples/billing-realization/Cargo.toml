@@ -1,0 +1,33 @@
+# The hand-written half of the synthesised billing workspace: one implementation per obligation
+# in `generated/rust/billing/PLAN.md`, the linker that assembles them (gap register D-2), and —
+# in `tests/` — the bridge that runs wave 4's committed suite against the linked system.
+#
+# It lives beside the specification it realizes, *outside* `generated/`, because that boundary is
+# absolute: hand-written code satisfies generated interfaces by import, and the generated tree
+# stays fully disposable. The dependencies below are path dependencies into the excluded generated
+# workspace — outputs this crate consumes, never members of the source workspace.
+[package]
+name = "billing-realization"
+description = "Hand-written obligation implementations for the synthesised billing workspace, and the linker that assembles them into a runnable system."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+billing-types = { path = "../../generated/rust/billing/crates/billing-types" }
+billing-system = { path = "../../generated/rust/billing/crates/billing-system" }
+email-service = { path = "../../generated/rust/billing/crates/email-service" }
+invoice-service = { path = "../../generated/rust/billing/crates/invoice-service" }
+
+[dev-dependencies]
+ess-conformance.workspace = true
+aep-domain.workspace = true
+aep-contract.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

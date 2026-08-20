@@ -16,6 +16,7 @@ members = [
     "crates/ess-gen",
     "crates/ess-synth",
     "crates/protocol-cli",
+    "examples/billing-realization",
     "xtask",
 ]
 # The synthesised workspaces under `generated/rust/` are outputs, not members: each carries its own
