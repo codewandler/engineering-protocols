@@ -12,7 +12,9 @@
 //! **`file:line`**, through [`diagnose`].
 //!
 //! This pass refuses exactly one category on its own account: **a reference it has to resolve in
-//! order to mint a handle.** [`compile`] cannot put a `CommandHandle` in the IR for a name nothing
+//! order to mint a handle.** An entity's identity type, a view's source entity, an actor's grant:
+//! there is no `EntityHandle` to put in a view for a name nothing declares, so the reference is
+//! resolved here and refused here, under the code `ess-domain` uses for the same defect. [`compile`] cannot put a `CommandHandle` in the IR for a name nothing
 //! declares, so it says so, using the same code the bridge would have produced for the same defect
 //! at the same location. One defect keeps one code whichever half noticed it, and in the file
 //! pipeline `assemble` fails first, so an author never sees two messages.
@@ -37,22 +39,25 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use aep_domain::error::{ValidationCode, ValidationErrors};
+use ess_domain::actor::ActorSpec;
 use ess_domain::binding::{BindingName, BindingSpec, MappingSource};
 use ess_domain::command::{CommandSpec, ErrorSpec, EventSpec, Outcome, OutcomeCondition};
 use ess_domain::component::{ComponentName, ComponentSpec};
+use ess_domain::entity::{EntitySpec, StateMachine};
 use ess_domain::name::QualifiedName;
 use ess_domain::spec::Specification;
 use ess_domain::system::Source;
 use ess_domain::topology::Workload;
 use ess_domain::types::{is_assignable, Field, NamedType, TypeBody, TypeRef, TypeRegistry};
+use ess_domain::view::ViewSpec;
 
 use crate::diagnostic::{Code, Detail, Diagnostic, Diagnostics, Severity};
 use crate::ir::{
-    CommandHandle, ComponentHandle, DomainHandle, ErrorHandle, EssIr, EventHandle, ResolvedBinding,
-    ResolvedBody, ResolvedCommand, ResolvedComponent, ResolvedCondition, ResolvedConversion,
-    ResolvedDomain, ResolvedError, ResolvedEvent, ResolvedField, ResolvedMapping,
-    ResolvedMappingValue, ResolvedOutcome, ResolvedType, ResolvedTypeRef, ResolvedWorkload,
-    TypeHandle,
+    ActorHandle, CommandHandle, ComponentHandle, DomainHandle, EntityHandle, ErrorHandle, EssIr,
+    EventHandle, ResolvedActor, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedComponent,
+    ResolvedCondition, ResolvedConversion, ResolvedDomain, ResolvedEntity, ResolvedError,
+    ResolvedEvent, ResolvedField, ResolvedMapping, ResolvedMappingValue, ResolvedOutcome,
+    ResolvedType, ResolvedTypeRef, ResolvedView, ResolvedWorkload, TypeHandle, ViewHandle,
 };
 use crate::source::{Location, SourceMap, Span};
 
@@ -88,14 +93,37 @@ use crate::source::{Location, SourceMap, Span};
 /// | components accepting undefined commands | `ESS-COMPONENT-001` | `ess-domain`, `validate_components` |
 /// | topology references to missing components | `ESS-TOPOLOGY-001` | `ess-domain`, `validate_topology` |
 /// | forbidden dependency cycles | [`UNINHABITABLE_TYPE`](codes::UNINHABITABLE_TYPE) | `ess-domain`, as `self_reference` |
-/// | unreachable states, invalid transitions | `ESS-ENTITY-011` | `ess-domain`, wave 1 |
-/// | views exposing missing fields | `ESS-VIEW-001` | `ess-domain`, wave 1 |
+/// | unreachable states, invalid transitions | `ESS-ENTITY-011` | `ess-domain`, wave 1; delegated here |
+/// | views exposing missing fields | `ESS-VIEW-001` | `ess-domain`; also here, for the source and the projected field types |
 /// | contradictory invariants | — | nowhere; see below |
 ///
 /// Every §20 bullet except the last is enforced. Most are enforced in `ess-domain`, where the rule
 /// was already tested, and reach a reader with a code and a `file:line` through
 /// [`diagnose`]. The ones this pass also checks are the ones it cannot do its own
 /// job without: it has to *mint a handle*, and it has none to mint for a name nothing declares.
+///
+/// # Entities, views and actors
+///
+/// The three constructs added in wave 2 divide the same way, and neither half gained a rule:
+///
+/// | reference | who resolves it | code |
+/// |---|---|---|
+/// | an entity's identity type and field types | here, to mint [`TypeHandle`]s | [`ENTITY_UNDECLARED_REFERENCE`](codes::ENTITY_UNDECLARED_REFERENCE) |
+/// | a view's source entity, and its projected field types | here, to mint an [`EntityHandle`] and [`TypeHandle`]s | [`VIEW_UNDECLARED_REFERENCE`](codes::VIEW_UNDECLARED_REFERENCE) |
+/// | an actor's `may` grant | here, to mint a [`CommandHandle`] | [`ACTOR_UNDECLARED_REFERENCE`](codes::ACTOR_UNDECLARED_REFERENCE) |
+/// | a projected field the source entity does not have, or whose type disagrees with it | `ess-domain`, `ViewSpec::validate` | `ESS-VIEW-001`, `ESS-VIEW-002` |
+/// | a lifecycle's states: unknown, unreachable, dead-ended, duplicated | `ess-domain`, `StateMachine::validate_at` | `ESS-ENTITY-011`, `ESS-ENTITY-006` |
+/// | an invariant reading a field the entity does not have | `ess-domain`, `EntitySpec::validate` | `ESS-ENTITY-003` |
+///
+/// An actor grant is not a §20 bullet of its own. It is refused as a reference with nothing behind
+/// it — the same reading `ess-domain`'s `ActorSpec::validate` takes, which is why both produce
+/// `ESS-ACTOR-001` and a consumer cannot tell which half ran.
+///
+/// A lifecycle naming a state it does not declare is refused by *nothing here*. It is settled when
+/// `RawStateMachine` is converted, so an assembled specification cannot carry one; a `Specification`
+/// built field by field can, and that makes the compilation off-contract — the entity stays out of
+/// the IR and [`Resolver::report_off_contract`] says so — rather than being restated as a rule with a
+/// second code.
 ///
 /// Contradictory invariants are not refused by anything. Deciding that `amount >= 0` and
 /// `amount < 0` cannot both hold needs a solver; a cheap syntactic subset would refuse some
@@ -230,6 +258,23 @@ pub mod codes {
         /// rather than as cycles, because a cycle is not the defect: a union whose other variant is
         /// an `Integer` may refer to itself all it likes.
         UNINHABITABLE_TYPE = family::TYPE, class::SELF_REFERENCE;
+
+        /// An entity names a type, or a domain, that nothing declares.
+        ///
+        /// Its identity's type and every field's type, because each becomes a `TypeHandle`. Its
+        /// lifecycle is not in here: a state is not a reference out of the entity, so there is no
+        /// handle to mint for one.
+        ENTITY_UNDECLARED_REFERENCE = family::ENTITY, class::UNDECLARED;
+
+        /// A view names a source entity, a type, or a domain, that nothing declares.
+        VIEW_UNDECLARED_REFERENCE = family::VIEW, class::UNDECLARED;
+
+        /// An actor grants a command, or names a domain, that nothing declares.
+        ///
+        /// The failure worth catching about a grant: it reads as an authorization decision and
+        /// authorizes nothing, because nothing refuses a request on account of it and no generated
+        /// permission matrix has a row for it.
+        ACTOR_UNDECLARED_REFERENCE = family::ACTOR, class::UNDECLARED;
 
         /// A command names an event, an error, a type or a domain that nothing declares.
         ///
@@ -662,13 +707,24 @@ impl<'a> Resolver<'a> {
     fn run(mut self) -> Result<EssIr, Diagnostics> {
         let types = self.types();
         let conversions = self.conversions();
+        let entities = self.entities(&types);
         let events = self.events();
         let errors = self.errors();
         let commands = self.commands(&events, &errors);
+        let views = self.views(&entities);
+        let actors = self.actors(&commands);
         let components = self.components(&commands, &events);
         let bindings = self.bindings(&events, &commands);
         let workloads = self.workloads(&components);
-        let domains = self.domains(&types, &commands, &events, &errors);
+        let domains = self.domains(&Members {
+            types: &types,
+            entities: &entities,
+            commands: &commands,
+            events: &events,
+            errors: &errors,
+            views: &views,
+            actors: &actors,
+        });
         self.report_off_contract();
 
         if self.diagnostics.has_errors() {
@@ -682,9 +738,12 @@ impl<'a> Resolver<'a> {
             domains,
             types,
             conversions,
+            entities,
             commands,
             events,
             errors,
+            views,
+            actors,
             bindings,
             components,
             workloads,
@@ -974,6 +1033,21 @@ impl<'a> Resolver<'a> {
         }
     }
 
+    /// An entity, as a handle.
+    fn entity_of(
+        &self,
+        name: &QualifiedName,
+        entities: &BTreeMap<QualifiedName, ResolvedEntity>,
+    ) -> Found<EntityHandle> {
+        if entities.contains_key(name) {
+            Found::Handle(EntityHandle::new(name.clone()))
+        } else if self.spec.entities.contains_key(name) {
+            Found::Unresolved
+        } else {
+            Found::Missing
+        }
+    }
+
     /// A command, as a handle.
     fn command_of(
         &self,
@@ -1213,6 +1287,213 @@ impl<'a> Resolver<'a> {
             });
         }
         complete.then_some(resolved)
+    }
+
+    // ---- entities, views and actors --------------------------------------------------------
+
+    /// Every entity, with its identity, its fields and its lifecycle resolved.
+    ///
+    /// The lifecycle travels as `ess-domain`'s own [`StateMachine`], so the transitions, the initial
+    /// state and the terminal set survive together with the state list — which is what a diagram
+    /// with arrows in it is made of. What this pass adds is the two handles an entity needs: the
+    /// types its fields are, and the enum its states form.
+    fn entities(
+        &mut self,
+        types: &BTreeMap<QualifiedName, ResolvedType>,
+    ) -> BTreeMap<QualifiedName, ResolvedEntity> {
+        let declared: Vec<EntitySpec> = self.spec.entities.values().cloned().collect();
+        let mut resolved = BTreeMap::new();
+        for entity in declared {
+            let path = format!("entities.{}", entity.name);
+            let needles = vec![format!("name: {}", entity.name)];
+            let code = codes::ENTITY_UNDECLARED_REFERENCE;
+            let identity = self
+                .fields(
+                    code,
+                    std::slice::from_ref(&entity.identity),
+                    &entity.name,
+                    &format!("{path}.identity"),
+                    &needles,
+                )
+                .and_then(|resolved| resolved.into_iter().next());
+            let fields = self.fields(code, &entity.fields, &entity.name, &path, &needles);
+            let domain = self.owner(code, &entity.name, "entity");
+            let state_type = self.state_type(&entity, types);
+            let lifecycle = self.lifecycle(&entity);
+            let (Some(identity), Some(fields), Some(domain), Some(state_type), Some(lifecycle)) =
+                (identity, fields, domain, state_type, lifecycle)
+            else {
+                continue;
+            };
+            resolved.insert(
+                entity.name.clone(),
+                ResolvedEntity {
+                    name: entity.name,
+                    domain,
+                    identity,
+                    fields,
+                    state_type,
+                    lifecycle,
+                    invariants: entity.invariants,
+                    naming: entity.naming,
+                },
+            );
+        }
+        resolved
+    }
+
+    /// The enum an entity's lifecycle forms, as a handle.
+    ///
+    /// Synthesised by [`EntitySpec::state_type`] and inserted into this pass's registry, so it is
+    /// resolved like any other declared type and a projection emits the states from one place. It is
+    /// absent only when a declared type has claimed the same name, which is wave 1's rejection and
+    /// already reported by the time a `Specification` exists.
+    fn state_type(
+        &mut self,
+        entity: &EntitySpec,
+        types: &BTreeMap<QualifiedName, ResolvedType>,
+    ) -> Option<TypeHandle> {
+        let name = entity.state_type().name;
+        if types.contains_key(&name) {
+            return Some(TypeHandle::new(name));
+        }
+        self.off_contract = true;
+        None
+    }
+
+    /// One entity's lifecycle, checked to name only states it declares.
+    ///
+    /// Not a rule of this pass's own: `RawStateMachine`'s conversion owns it, with the codes design
+    /// §20 asks for, and restating it here would be a second refusal for one defect. What this does
+    /// is refuse to *hold* a lifecycle whose transition points at a phantom state — the compilation
+    /// goes off-contract, `ess-domain`'s verdict is bridged in, and the IR does not come back with a
+    /// state diagram containing an arrow to nowhere.
+    fn lifecycle(&mut self, entity: &EntitySpec) -> Option<StateMachine> {
+        let machine = &entity.states;
+        let declared = |state| machine.states.contains(state);
+        let sound = declared(&machine.initial)
+            && machine.terminal.iter().all(declared)
+            && machine
+                .transitions
+                .iter()
+                .all(|transition| transition.from.iter().all(declared) && declared(&transition.to));
+        if !sound {
+            self.off_contract = true;
+            return None;
+        }
+        Some(machine.clone())
+    }
+
+    /// Every view, with its source entity and its projected fields resolved.
+    ///
+    /// The consistency and the assertion style come across unchanged, and the style is the domain
+    /// crate's own answer rather than one computed here: `expect` against a projection is a race,
+    /// and the repair everybody reaches for is a sleep.
+    fn views(
+        &mut self,
+        entities: &BTreeMap<QualifiedName, ResolvedEntity>,
+    ) -> BTreeMap<QualifiedName, ResolvedView> {
+        let declared: Vec<ViewSpec> = self.spec.views.values().cloned().collect();
+        let mut resolved = BTreeMap::new();
+        for view in declared {
+            let path = format!("views.{}", view.name);
+            let needles = vec![format!("name: {}", view.name)];
+            let code = codes::VIEW_UNDECLARED_REFERENCE;
+            let fields = self.fields(code, &view.fields, &view.name, &path, &needles);
+            let domain = self.owner(code, &view.name, "view");
+            let source = match self.entity_of(&view.source, entities) {
+                Found::Handle(handle) => Some(handle),
+                Found::Unresolved => None,
+                Found::Missing => {
+                    let available = self.spec.entities.keys().map(ToString::to_string).collect();
+                    let span = self.locator.span(format!("{path}.source"), &needles);
+                    self.refuse_undeclared(
+                        code,
+                        format!(
+                            "`{}` projects `{}`, which is not a declared entity",
+                            view.name, view.source
+                        ),
+                        &view.source,
+                        "entity",
+                        available,
+                        span,
+                    );
+                    None
+                }
+            };
+            let (Some(fields), Some(domain), Some(source)) = (fields, domain, source) else {
+                continue;
+            };
+            resolved.insert(
+                view.name.clone(),
+                ResolvedView {
+                    name: view.name,
+                    domain,
+                    source,
+                    fields,
+                    filter: view.filter,
+                    consistency: view.consistency,
+                    assertion_style: view.consistency.assertion_style(),
+                    naming: view.naming,
+                },
+            );
+        }
+        resolved
+    }
+
+    /// Every actor, with every grant resolved to the command it names.
+    fn actors(
+        &mut self,
+        commands: &BTreeMap<QualifiedName, ResolvedCommand>,
+    ) -> BTreeMap<QualifiedName, ResolvedActor> {
+        let declared: Vec<ActorSpec> = self.spec.actors.values().cloned().collect();
+        let mut resolved = BTreeMap::new();
+        for actor in declared {
+            let path = format!("actors.{}", actor.name);
+            let needles = vec![format!("name: {}", actor.name)];
+            let code = codes::ACTOR_UNDECLARED_REFERENCE;
+            let domain = self.owner(code, &actor.name, "actor");
+            let mut may = BTreeSet::new();
+            let mut complete = true;
+            for granted in &actor.may {
+                match self.command_of(granted, commands) {
+                    Found::Handle(handle) => {
+                        may.insert(handle);
+                    }
+                    Found::Unresolved => complete = false,
+                    Found::Missing => {
+                        complete = false;
+                        let available =
+                            self.spec.commands.keys().map(ToString::to_string).collect();
+                        let span = self.locator.span(format!("{path}.may"), &needles);
+                        self.refuse_undeclared(
+                            code,
+                            format!(
+                                "`{}` may invoke `{granted}`, which no domain declares as a command",
+                                actor.name
+                            ),
+                            granted,
+                            "command",
+                            available,
+                            span,
+                        );
+                    }
+                }
+            }
+            let (Some(domain), true) = (domain, complete) else {
+                continue;
+            };
+            resolved.insert(
+                actor.name.clone(),
+                ResolvedActor {
+                    name: actor.name,
+                    domain,
+                    may,
+                    naming: actor.naming,
+                },
+            );
+        }
+        resolved
     }
 
     // ---- components and topology ----------------------------------------------------------
@@ -1576,13 +1857,11 @@ impl<'a> Resolver<'a> {
     // ---- domains --------------------------------------------------------------------------
 
     /// Every domain, listing what the IR holds of it.
-    fn domains(
-        &mut self,
-        types: &BTreeMap<QualifiedName, ResolvedType>,
-        commands: &BTreeMap<QualifiedName, ResolvedCommand>,
-        events: &BTreeMap<QualifiedName, ResolvedEvent>,
-        errors: &BTreeMap<QualifiedName, ResolvedError>,
-    ) -> BTreeMap<QualifiedName, ResolvedDomain> {
+    ///
+    /// A roster entry for a member that did not resolve is left out rather than carried as a name:
+    /// the member's own refusal was already reported, and the alternative is a domain that claims to
+    /// own something the IR cannot hand back.
+    fn domains(&mut self, members: &Members<'_>) -> BTreeMap<QualifiedName, ResolvedDomain> {
         let mut resolved = BTreeMap::new();
         for domain in &self.spec.system.domains {
             resolved.insert(
@@ -1590,34 +1869,67 @@ impl<'a> Resolver<'a> {
                 ResolvedDomain {
                     name: domain.name.clone(),
                     naming: domain.naming.clone(),
-                    types: types
+                    types: members
+                        .types
                         .keys()
                         .filter(|name| name.is_within(&domain.name))
                         .map(|name| TypeHandle::new(name.clone()))
                         .collect(),
+                    entities: domain
+                        .entities
+                        .iter()
+                        .filter(|name| members.entities.contains_key(*name))
+                        .map(|name| EntityHandle::new(name.clone()))
+                        .collect(),
                     commands: domain
                         .commands
                         .iter()
-                        .filter(|name| commands.contains_key(*name))
+                        .filter(|name| members.commands.contains_key(*name))
                         .map(|name| CommandHandle::new(name.clone()))
                         .collect(),
                     events: domain
                         .events
                         .iter()
-                        .filter(|name| events.contains_key(*name))
+                        .filter(|name| members.events.contains_key(*name))
                         .map(|name| EventHandle::new(name.clone()))
                         .collect(),
                     errors: domain
                         .errors
                         .iter()
-                        .filter(|name| errors.contains_key(*name))
+                        .filter(|name| members.errors.contains_key(*name))
                         .map(|name| ErrorHandle::new(name.clone()))
+                        .collect(),
+                    views: domain
+                        .views
+                        .iter()
+                        .filter(|name| members.views.contains_key(*name))
+                        .map(|name| ViewHandle::new(name.clone()))
+                        .collect(),
+                    actors: domain
+                        .actors
+                        .iter()
+                        .filter(|name| members.actors.contains_key(*name))
+                        .map(|name| ActorHandle::new(name.clone()))
                         .collect(),
                 },
             );
         }
         resolved
     }
+}
+
+/// What resolved, for the pass that writes each domain's roster.
+///
+/// One argument rather than seven: a roster lists every kind of member, and a parameter list that
+/// grows with the model is a parameter list someone eventually passes in the wrong order.
+struct Members<'a> {
+    types: &'a BTreeMap<QualifiedName, ResolvedType>,
+    entities: &'a BTreeMap<QualifiedName, ResolvedEntity>,
+    commands: &'a BTreeMap<QualifiedName, ResolvedCommand>,
+    events: &'a BTreeMap<QualifiedName, ResolvedEvent>,
+    errors: &'a BTreeMap<QualifiedName, ResolvedError>,
+    views: &'a BTreeMap<QualifiedName, ResolvedView>,
+    actors: &'a BTreeMap<QualifiedName, ResolvedActor>,
 }
 
 /// The domain's spelling of a resolved reference.
@@ -1672,6 +1984,17 @@ mod tests {
         assert_eq!(codes::MAPPING_TYPE_MISMATCH.to_string(), "ESS-BINDING-002");
         assert_eq!(codes::UNDECLARED_TYPE.to_string(), "ESS-TYPE-001");
         assert_eq!(codes::UNINHABITABLE_TYPE.to_string(), "ESS-TYPE-008");
+        // One number per kind across every family: `-001` is a reference to something undeclared
+        // wherever it is written, so a reader learns it once.
+        assert_eq!(
+            codes::ENTITY_UNDECLARED_REFERENCE.to_string(),
+            "ESS-ENTITY-001"
+        );
+        assert_eq!(codes::VIEW_UNDECLARED_REFERENCE.to_string(), "ESS-VIEW-001");
+        assert_eq!(
+            codes::ACTOR_UNDECLARED_REFERENCE.to_string(),
+            "ESS-ACTOR-001"
+        );
         for code in codes::ALL {
             let rendered = code.to_string();
             assert!(rendered.starts_with("ESS-"), "{rendered}");
@@ -1689,6 +2012,9 @@ mod tests {
             codes::UNVALIDATED_SPECIFICATION,
             codes::UNDECLARED_TYPE,
             codes::UNINHABITABLE_TYPE,
+            codes::ENTITY_UNDECLARED_REFERENCE,
+            codes::VIEW_UNDECLARED_REFERENCE,
+            codes::ACTOR_UNDECLARED_REFERENCE,
             codes::COMMAND_UNDECLARED_REFERENCE,
             codes::EVENT_UNDECLARED_REFERENCE,
             codes::ERROR_UNDECLARED_REFERENCE,

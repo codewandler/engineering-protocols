@@ -25,6 +25,41 @@
 //! | what does this command's error carry? | [`EssIr::errors`], which the skeleton lacked |
 //! | what is this field called on the wire? | [`ResolvedField::naming`] |
 //! | which component runs how many times? | [`EssIr::workloads`] |
+//! | which states can this entity move between, and by which named move? | [`ResolvedEntity::lifecycle`] |
+//! | does a generated scenario assert this view with `expect` or `eventually`? | [`ResolvedView::assertion_style`] |
+//! | which commands may this actor invoke? | [`ResolvedActor::may`] |
+//!
+//! # A state is a variant, not a handle
+//!
+//! [`StateName`](ess_domain::entity::StateName) stays a name inside [`ResolvedEntity::lifecycle`],
+//! and that is not an exception to the rule above. A handle exists because a reference can point
+//! outside the declaration that writes it; a lifecycle's states are declared *by that same
+//! lifecycle*, so [`StateMachine::states`] is the whole answer and it travels in the same struct.
+//! Minting a `StateHandle` would have meant inventing a qualified name for
+//! `billing.invoice.Invoice.State.Draft`, which the model never spells, and an `EssIr` map keyed by
+//! it. What a projection actually asks — "what type do I emit for this entity's state" — is
+//! [`ResolvedEntity::state_type`], which *is* a handle, because the enum it names is a declaration
+//! of its own.
+//!
+//! # A predicate travels parsed, not resolved
+//!
+//! [`ResolvedView::filter`] and [`ResolvedEntity::invariants`] carry
+//! [`Predicate`](aep_domain::predicate::Predicate) trees — the same shape
+//! [`ResolvedCondition::When`] and [`ResolvedBody::Struct`] already carry, and the same one
+//! `ess-domain` parsed. So nothing downstream re-parses a filter, and
+//! [`Invariant`](ess_domain::entity::Invariant) keeps the author's own spelling beside the tree for a
+//! diagnostic to quote.
+//!
+//! What a predicate does *not* carry is a handle per leaf. `state == Issued` reads the fact path
+//! `state`, and that stays a path rather than becoming a reference to
+//! [`ResolvedEntity::state_type`]'s variant. The cost is real and worth naming: a generator that
+//! wants the type behind a filter's root matches the path's first segment against
+//! [`ResolvedEntity::observable_fields`] by name. `ess-domain` guarantees that match succeeds — it
+//! refuses a filter reading something the source does not have — but the IR does not make the
+//! failure unrepresentable, so that one lookup returns an `Option`. Buying it back means a mirror of
+//! ten `Predicate` variants, `Operand` and `FactValue`, plus a rule for the deep paths (`total.amount`
+//! walking into a struct) that `ess-domain` deliberately leaves open — a new rejection class in a
+//! pass whose job is to resolve, not to grow rules.
 //!
 //! # Determinism
 //!
@@ -35,14 +70,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use aep_domain::facts::FactPath;
 use aep_domain::predicate::Predicate;
 use ess_domain::binding::{BindingName, Delivery, Failure};
 use ess_domain::command::{OutcomeName, TestStrategy};
 use ess_domain::component::ComponentName;
-use ess_domain::entity::Invariant;
+use ess_domain::entity::{EntitySpec, Invariant, StateMachine};
 use ess_domain::name::{Naming, QualifiedName, Version};
 use ess_domain::topology::{Replicas, Resource};
 use ess_domain::types::Primitive;
+use ess_domain::view::{AssertionStyle, Consistency};
 
 /// Declares every handle kind, its accessor on [`EssIr`], and the map it indexes — from one line
 /// each, so a handle cannot exist without a total lookup for it.
@@ -115,12 +152,18 @@ macro_rules! handles {
 handles! {
     /// A named type that is declared.
     TypeHandle(QualifiedName) => named_type : ResolvedType in types, "type";
+    /// An entity that is declared.
+    EntityHandle(QualifiedName) => entity : ResolvedEntity in entities, "entity";
     /// A command that is declared.
     CommandHandle(QualifiedName) => command : ResolvedCommand in commands, "command";
     /// An event that is declared.
     EventHandle(QualifiedName) => event : ResolvedEvent in events, "event";
     /// An error that is declared.
     ErrorHandle(QualifiedName) => error : ResolvedError in errors, "error";
+    /// A view that is declared.
+    ViewHandle(QualifiedName) => view : ResolvedView in views, "view";
+    /// An actor that is declared.
+    ActorHandle(QualifiedName) => actor : ResolvedActor in actors, "actor";
     /// A bounded context that is declared.
     DomainHandle(QualifiedName) => domain : ResolvedDomain in domains, "domain";
     /// A component that is declared.
@@ -280,6 +323,116 @@ pub struct ResolvedType {
     pub naming: Naming,
 }
 
+/// An entity: something with stable identity, with its fields and its lifecycle resolved.
+///
+/// The skeleton kept only the *state set*, as the synthesised enum. That is what a state diagram
+/// with no arrows is made of: the transitions, the initial state, the terminal states, the
+/// invariants and the identity's name were all gone, and a documentation projection had to warn its
+/// readers not to read the empty diagram as a claim about what the model permits.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedEntity {
+    /// Its identity — `billing.invoice.Invoice`.
+    pub name: QualifiedName,
+    /// The bounded context that owns it.
+    pub domain: DomainHandle,
+    /// How an instance is identified: the field's **name** as well as its type.
+    ///
+    /// The name is load-bearing, and carrying it was a wave-1 decision rather than a convenience. A
+    /// view projects `invoice_id`; without the name in the model, every projection invents one, and
+    /// the same field is `id` in the contract, `invoice_id` in the specification and something else
+    /// again in the generated code.
+    pub identity: ResolvedField,
+    /// What it holds, in declaration order.
+    pub fields: Vec<ResolvedField>,
+    /// The enum its lifecycle forms — `billing.invoice.Invoice.State`.
+    ///
+    /// A handle, so the states a projection emits and the states a filter compares are the same
+    /// declaration. Synthesised by [`EntitySpec::state_type`] rather than written by an author, which
+    /// is why it is derived from the lifecycle and cannot disagree with it; the variants of
+    /// [`EssIr::named_type`] on this handle are [`StateMachine::states`], rendered.
+    pub state_type: TypeHandle,
+    /// Its lifecycle: every state, where an instance starts, where it may rest, and every named
+    /// move.
+    ///
+    /// `ess-domain`'s own [`StateMachine`], not a copy of it. It holds no reference that points
+    /// outside itself — a transition's `from` and `to` name states this same value declares — so the
+    /// questions a projection asks ([`StateMachine::outgoing`], [`StateMachine::can_move`]) are
+    /// already answered here, by the code that owns the rule that a move nobody declared is a move
+    /// nobody may make.
+    pub lifecycle: StateMachine,
+    /// What must hold of every instance, at rest, as predicates over its fields.
+    pub invariants: Vec<Invariant>,
+    /// What it is called on the wire, and shown as.
+    pub naming: Naming,
+}
+
+impl ResolvedEntity {
+    /// The declared field with this name. The identity is not one; it is [`ResolvedEntity::identity`].
+    pub fn field(&self, name: &str) -> Option<&ResolvedField> {
+        self.fields.iter().find(|field| field.name == name)
+    }
+
+    /// The `state` pseudo-field, typed as [`ResolvedEntity::state_type`].
+    ///
+    /// Derived, and it stays derived: a stored copy would be a second declaration of the one thing
+    /// the lifecycle already says. The name is [`EntitySpec::STATE`], so the specification, the
+    /// domain crate and every projection spell it the same way.
+    pub fn state_field(&self) -> ResolvedField {
+        ResolvedField {
+            name: EntitySpec::STATE.to_owned(),
+            type_ref: ResolvedTypeRef::Declared {
+                name: self.state_type.clone(),
+            },
+            naming: Naming::default(),
+        }
+    }
+
+    /// What a view may project or filter on: the identity, the declared fields, and the state.
+    ///
+    /// The same surface [`EntitySpec::observable_fields`] defines, in the same order — because it is
+    /// the surface `ess-domain` validated a view against, and a projection computing a different one
+    /// would accept a view the compiler refused or refuse one it accepted.
+    pub fn observable_fields(&self) -> Vec<ResolvedField> {
+        let mut observable = Vec::with_capacity(self.fields.len() + 2);
+        observable.push(self.identity.clone());
+        observable.extend(self.fields.iter().cloned());
+        observable.push(self.state_field());
+        observable
+    }
+
+    /// The observable field a name refers to, including the identity and `state`.
+    ///
+    /// This is the lookup a filter's or an invariant's fact path needs, and it returns an `Option`
+    /// because a predicate carries paths rather than handles — the one place in this IR where a
+    /// reference is a name. `ess-domain` refuses a predicate reading something absent, so `None`
+    /// means a `Specification` nothing validated.
+    pub fn observable_field(&self, name: &str) -> Option<ResolvedField> {
+        self.observable_fields()
+            .into_iter()
+            .find(|field| field.name == name)
+    }
+
+    /// Every named type this entity reaches, through its identity and its fields.
+    ///
+    /// [`ResolvedEntity::state_type`] is deliberately not in it: this answers "which declared types
+    /// does an author's entity use", and the state enum is one this compiler synthesised.
+    pub fn named_leaves(&self) -> Vec<&TypeHandle> {
+        let mut leaves = self.identity.type_ref.named_leaves();
+        for field in &self.fields {
+            leaves.extend(field.type_ref.named_leaves());
+        }
+        leaves
+    }
+
+    /// Every fact an invariant reads, in declaration order.
+    pub fn invariant_reads(&self) -> Vec<&FactPath> {
+        self.invariants
+            .iter()
+            .flat_map(|invariant| invariant.predicate.fact_paths())
+            .collect()
+    }
+}
+
 /// A crossing the specification permits, with both ends resolved.
 ///
 /// In the IR as a whole set, not only where a mapping uses one: "what is this system willing to
@@ -420,6 +573,92 @@ pub struct ResolvedError {
     pub fields: Vec<ResolvedField>,
 }
 
+/// A view: what the outside world is promised it can observe, and how soon.
+///
+/// Absent from the skeleton, which is why nothing downstream could see a view's source, the fields
+/// it projects, its filter — or its [`Consistency`], the field the whole construct exists to carry.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedView {
+    /// Its identity.
+    pub name: QualifiedName,
+    /// The bounded context that owns it.
+    pub domain: DomainHandle,
+    /// The entity it projects, as a handle.
+    ///
+    /// So "what is this a view *of*" is answered by [`EssIr::entity`] rather than by a name a
+    /// projection has to look up and hope about.
+    pub source: EntityHandle,
+    /// What it exposes, in declaration order.
+    ///
+    /// The view's own declaration of each field, not the entity's. They are checked to agree by
+    /// `ess-domain` — a projection that widens a type is a promise the entity cannot keep — and this
+    /// is the side a contract is generated from.
+    pub fields: Vec<ResolvedField>,
+    /// Which instances it contains, as a parsed predicate. `None` means all of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<Predicate>,
+    /// How soon it reflects a command that has already returned.
+    pub consistency: Consistency,
+    /// The block a generated scenario must assert this view in.
+    ///
+    /// Stored, computed once from [`ViewSpec::assertion_style`](ess_domain::view::ViewSpec::assertion_style),
+    /// for the reason [`ResolvedOutcome::test_strategy`] is: it is a decision, and a decision made
+    /// per projection is a decision made wrong eventually. Asserting an `eventual` view with
+    /// `expect` races the projection, and the repair everyone reaches for is a sleep — which makes
+    /// the suite a test of the machine it runs on.
+    pub assertion_style: AssertionStyle,
+    /// What it is called on the wire, and shown as.
+    pub naming: Naming,
+}
+
+impl ResolvedView {
+    /// The projected field with this name.
+    pub fn field(&self, name: &str) -> Option<&ResolvedField> {
+        self.fields.iter().find(|field| field.name == name)
+    }
+
+    /// Every fact the filter reads, or nothing when there is no filter.
+    ///
+    /// The roots of these paths are observable fields of [`ResolvedView::source`]; resolve one with
+    /// [`ResolvedEntity::observable_field`].
+    pub fn filter_reads(&self) -> Vec<&FactPath> {
+        self.filter
+            .as_ref()
+            .map(Predicate::fact_paths)
+            .unwrap_or_default()
+    }
+}
+
+/// An actor: who may ask the system for what, with every grant resolved.
+///
+/// Absent from the skeleton, which is why an interface generator had no source for a security
+/// scheme: `may` *is* that source, and it was not in the IR to read.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedActor {
+    /// Its identity.
+    pub name: QualifiedName,
+    /// The bounded context that owns it.
+    pub domain: DomainHandle,
+    /// The commands it may invoke.
+    ///
+    /// Handles, so a grant naming a command nobody declares cannot be in here — which is the one
+    /// failure worth catching about a grant, because it reads as an authorization decision and
+    /// authorizes nothing.
+    ///
+    /// A set, ordered by name: the same grant written twice means the same thing, and anything
+    /// generated from it has to be diffable.
+    pub may: BTreeSet<CommandHandle>,
+    /// What it is called on the wire, and shown as.
+    pub naming: Naming,
+}
+
+impl ResolvedActor {
+    /// `true` when this actor may invoke `command`.
+    pub fn may_invoke(&self, command: &CommandHandle) -> bool {
+        self.may.contains(command)
+    }
+}
+
 /// Where a mapped value comes from, resolved.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -516,11 +755,10 @@ pub struct ResolvedWorkload {
     pub requires: Vec<Resource>,
 }
 
-/// A bounded context, and what the IR holds of it.
+/// A bounded context, and what it owns.
 ///
-/// Member lists name only kinds the IR itself holds. Entities, views and actors are absent from
-/// this wave's IR, so they are absent here too rather than being listed as [`QualifiedName`]s
-/// pointing at nothing — a name in the IR is exactly what this crate exists to remove.
+/// Every member list is handles, never names: "who owns this" has to be answerable, and a roster of
+/// [`QualifiedName`]s pointing at nothing is exactly what this crate exists to remove.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedDomain {
     /// Its namespace — `billing.invoice`.
@@ -532,13 +770,21 @@ pub struct ResolvedDomain {
     /// held no domains at all, so that title had to come from the source.
     pub naming: Naming,
     /// The types declared inside it.
+    ///
+    /// Including the enum each of its entities' lifecycles forms, which this compiler synthesises.
     pub types: BTreeSet<TypeHandle>,
+    /// The entities it owns.
+    pub entities: BTreeSet<EntityHandle>,
     /// The commands it owns.
     pub commands: BTreeSet<CommandHandle>,
     /// The events it owns.
     pub events: BTreeSet<EventHandle>,
     /// The errors its commands may report.
     pub errors: BTreeSet<ErrorHandle>,
+    /// The views it publishes.
+    pub views: BTreeSet<ViewHandle>,
+    /// The actors it declares.
+    pub actors: BTreeSet<ActorHandle>,
 }
 
 /// The whole specification, resolved.
@@ -559,12 +805,18 @@ pub struct EssIr {
     pub types: BTreeMap<QualifiedName, ResolvedType>,
     /// Every crossing the specification permits.
     pub conversions: Vec<ResolvedConversion>,
+    /// Every entity, by name.
+    pub entities: BTreeMap<QualifiedName, ResolvedEntity>,
     /// Every command, by name.
     pub commands: BTreeMap<QualifiedName, ResolvedCommand>,
     /// Every event, by name.
     pub events: BTreeMap<QualifiedName, ResolvedEvent>,
     /// Every error, by name.
     pub errors: BTreeMap<QualifiedName, ResolvedError>,
+    /// Every view, by name.
+    pub views: BTreeMap<QualifiedName, ResolvedView>,
+    /// Every actor, by name.
+    pub actors: BTreeMap<QualifiedName, ResolvedActor>,
     /// Every binding, by name.
     pub bindings: BTreeMap<BindingName, ResolvedBinding>,
     /// Every component, by name.
@@ -583,6 +835,33 @@ impl EssIr {
         let mut out: BTreeMap<&EventHandle, Vec<&ResolvedBinding>> = BTreeMap::new();
         for binding in self.bindings.values() {
             out.entry(&binding.event).or_default().push(binding);
+        }
+        out
+    }
+
+    /// Every view of each entity, by the entity it projects.
+    ///
+    /// On the IR rather than computed per consumer for the same reason [`EssIr::reactions`] is: two
+    /// consumers computing it separately disagree the first time a second view projects one entity.
+    pub fn projections(&self) -> BTreeMap<&EntityHandle, Vec<&ResolvedView>> {
+        let mut out: BTreeMap<&EntityHandle, Vec<&ResolvedView>> = BTreeMap::new();
+        for view in self.views.values() {
+            out.entry(&view.source).or_default().push(view);
+        }
+        out
+    }
+
+    /// Every actor that may invoke each command, by command.
+    ///
+    /// The map an interface generator needs to emit a security requirement per operation, which is
+    /// the direction `may` is not written in: an actor lists its commands, and the question asked of
+    /// the IR is the other way round.
+    pub fn grants(&self) -> BTreeMap<&CommandHandle, Vec<&ResolvedActor>> {
+        let mut out: BTreeMap<&CommandHandle, Vec<&ResolvedActor>> = BTreeMap::new();
+        for actor in self.actors.values() {
+            for command in &actor.may {
+                out.entry(command).or_default().push(actor);
+            }
         }
         out
     }
