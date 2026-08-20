@@ -3675,7 +3675,84 @@ enum InfraCommand {
         /// How to render the result.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
+        /// Also report each workload's observed properties: replicas, images, resource
+        /// envelope.
+        #[arg(long)]
+        properties: bool,
     },
+    /// Render the typed dependency graph of an observed cluster.
+    ///
+    /// Edges exist where a reference resolved — service to workload by selector, ingress to
+    /// service, workload to its configuration, pod to its derived controller and node — each
+    /// carrying the sites that state it. The JSON document is canonical; Mermaid draws the
+    /// configuration topology grouped by namespace and leaves the runtime layer (pods, cluster
+    /// nodes) to the JSON.
+    Graph {
+        /// A bundle or a persisted IR document.
+        #[arg(long)]
+        path: PathBuf,
+        /// Restrict the graph to one namespace.
+        #[arg(long)]
+        namespace: Option<String>,
+        /// How to render the graph.
+        #[arg(long, value_enum, default_value_t = InfraGraphFormat::Mermaid)]
+        format: InfraGraphFormat,
+    },
+    /// Diagnose an observed cluster: typed findings, each with a stable `INFRA-DIAG-*` code.
+    ///
+    /// A diagnosis is a report, not a gate: observed infrastructure is allowed to be wrong, so
+    /// a cluster full of findings still exits 0. Exit 1 means the *input* was invalid — a
+    /// refused bundle or a tampered IR document — not that the cluster is unhealthy.
+    Diagnose {
+        /// A bundle or a persisted IR document.
+        #[arg(long)]
+        path: PathBuf,
+        /// How to render the findings.
+        #[arg(long, value_enum, default_value_t = DiagnoseFormat::Text)]
+        format: DiagnoseFormat,
+        /// The lowest severity to show; the summary always counts everything.
+        #[arg(long, value_enum, default_value_t = SeverityFloor::Info)]
+        min_severity: SeverityFloor,
+    },
+}
+
+/// How `infra graph` renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum InfraGraphFormat {
+    /// A Mermaid flowchart of the configuration topology, namespace-grouped, unfenced.
+    Mermaid,
+    /// The canonical graph document, carrying every node, edge, site and ownership fact.
+    Json,
+}
+
+/// How `infra diagnose` renders.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum DiagnoseFormat {
+    /// One line per finding, then the severity counts.
+    Text,
+    /// The findings and counts as one JSON document.
+    Json,
+}
+
+/// The `--min-severity` floor, mirroring [`infra_analyze::Severity`] for clap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+enum SeverityFloor {
+    /// Everything.
+    Info,
+    /// Warnings and errors.
+    Warning,
+    /// Errors only.
+    Error,
+}
+
+impl SeverityFloor {
+    fn severity(self) -> infra_analyze::Severity {
+        match self {
+            Self::Info => infra_analyze::Severity::Info,
+            Self::Warning => infra_analyze::Severity::Warning,
+            Self::Error => infra_analyze::Severity::Error,
+        }
+    }
 }
 
 /// The `infra` verb family, one arm per subcommand.
@@ -3683,8 +3760,166 @@ fn run_infra(command: &InfraCommand) -> Result<ExitCode> {
     match command {
         InfraCommand::Validate { path, format } => infra_validate(path, *format),
         InfraCommand::Compile { path, out, format } => infra_compile(path, out.as_deref(), *format),
-        InfraCommand::Inspect { path, format } => infra_inspect(path, *format),
+        InfraCommand::Inspect {
+            path,
+            format,
+            properties,
+        } => infra_inspect(path, *format, *properties),
+        InfraCommand::Graph {
+            path,
+            namespace,
+            format,
+        } => infra_graph(path, namespace.as_deref(), *format),
+        InfraCommand::Diagnose {
+            path,
+            format,
+            min_severity,
+        } => infra_diagnose(path, *format, min_severity.severity()),
     }
+}
+
+/// A typed IR obtained from either input format: a bundle is validated and compiled, a
+/// persisted `infra-ir/1` document is read back through its own validation (digest and handle
+/// checks). Either way, holding an [`infra_compiler::InfraIr`] means every check ran.
+enum InfraIrLoaded {
+    /// The IR, ready for analysis.
+    Ir(Box<infra_compiler::InfraIr>),
+    /// The input was refused; every reason is here.
+    Refused(infra_domain::ValidationErrors),
+}
+
+/// Reads a bundle or a persisted IR document into a typed IR.
+fn infra_ir_at(path: &Path) -> Result<InfraIrLoaded> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).with_context(|| format!("{} is not JSON", path.display()))?;
+    match value.get("format").and_then(serde_json::Value::as_str) {
+        Some(infra_domain::OBSERVATION_FORMAT) => Ok(match infra_load(path)? {
+            InfraLoaded::Observed(observation) => {
+                InfraIrLoaded::Ir(Box::new(infra_compiler::compile(&observation)))
+            }
+            InfraLoaded::Refused(errors) => InfraIrLoaded::Refused(errors),
+        }),
+        Some(infra_compiler::IR_FORMAT) => Ok(match infra_compiler::read_document(&value) {
+            Ok(ir) => InfraIrLoaded::Ir(Box::new(ir)),
+            Err(errors) => InfraIrLoaded::Refused(errors),
+        }),
+        other => bail!(
+            "{} declares format {:?}; expected `{}` or `{}`",
+            path.display(),
+            other.unwrap_or("<none>"),
+            infra_domain::OBSERVATION_FORMAT,
+            infra_compiler::IR_FORMAT
+        ),
+    }
+}
+
+/// `protocol infra graph`
+fn infra_graph(path: &Path, namespace: Option<&str>, format: InfraGraphFormat) -> Result<ExitCode> {
+    let ir = match infra_ir_at(path)? {
+        InfraIrLoaded::Ir(ir) => ir,
+        InfraIrLoaded::Refused(errors) => {
+            infra_refusals(&errors);
+            return Ok(exit_code(false));
+        }
+    };
+    let mut graph = infra_analyze::InfraGraph::of(&ir);
+    if let Some(namespace) = namespace {
+        graph = graph.restricted_to(namespace);
+    }
+    match format {
+        InfraGraphFormat::Mermaid => out!("{}", graph.mermaid()),
+        InfraGraphFormat::Json => out!(
+            "{}",
+            infra_analyze::GraphDocument::of(&graph, &ir, namespace).to_json()
+        ),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// What `infra diagnose --format json` prints.
+#[derive(Debug, serde::Serialize)]
+struct DiagnoseReport<'a> {
+    /// The kubeconfig context the observation targeted.
+    context: String,
+    /// The digest of the IR the diagnosis is about.
+    source_digest: String,
+    /// The floor the findings were filtered at.
+    min_severity: infra_analyze::Severity,
+    /// Findings at or above the floor, in canonical order.
+    findings: Vec<&'a infra_analyze::Finding>,
+    /// Counts over the *whole* diagnosis, so a filtered report still states the totals.
+    errors: usize,
+    /// See `errors`.
+    warnings: usize,
+    /// See `errors`.
+    infos: usize,
+}
+
+/// `protocol infra diagnose`
+///
+/// Exit 0 whatever the findings say: a diagnosis is a report, not a gate. Exit 1 is reserved
+/// for input that could not be diagnosed at all.
+fn infra_diagnose(
+    path: &Path,
+    format: DiagnoseFormat,
+    floor: infra_analyze::Severity,
+) -> Result<ExitCode> {
+    let ir = match infra_ir_at(path)? {
+        InfraIrLoaded::Ir(ir) => ir,
+        InfraIrLoaded::Refused(errors) => {
+            match format {
+                DiagnoseFormat::Text => infra_refusals(&errors),
+                DiagnoseFormat::Json => print_serialised(&errors, Format::Json)?,
+            }
+            return Ok(exit_code(false));
+        }
+    };
+    let diagnosis = infra_analyze::diagnose(&ir);
+    let (errors, warnings, infos) = diagnosis.counts();
+    let shown = diagnosis.at_least(floor);
+    match format {
+        DiagnoseFormat::Text => {
+            for finding in &shown {
+                let site = finding
+                    .site
+                    .as_deref()
+                    .map(|site| format!(" {site}"))
+                    .unwrap_or_default();
+                outln!(
+                    "{} {} {}{}: {}",
+                    finding.code,
+                    finding.severity,
+                    finding.subject,
+                    site,
+                    finding.message
+                );
+            }
+            if shown.len() < diagnosis.findings.len() {
+                outln!(
+                    "{} of {} finding(s) at or above {}",
+                    shown.len(),
+                    diagnosis.findings.len(),
+                    floor
+                );
+            }
+            outln!("{errors} error(s), {warnings} warning(s), {infos} info(s)");
+        }
+        DiagnoseFormat::Json => print_serialised(
+            &DiagnoseReport {
+                context: ir.provenance.context.clone(),
+                source_digest: ir.digest(),
+                min_severity: floor,
+                findings: shown,
+                errors,
+                warnings,
+                infos,
+            },
+            Format::Json,
+        )?,
+    }
+    Ok(ExitCode::SUCCESS)
 }
 
 /// A parsed bundle: validated, or refused with everything that is wrong with it.
@@ -3863,10 +4098,43 @@ struct InfraInspection {
     digest: String,
     counts: InfraCounts,
     unresolved: usize,
+    /// Per-workload observed properties, only under `--properties`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    properties: Option<Vec<infra_analyze::WorkloadProperties>>,
+}
+
+/// Renders one workload's properties as indented text lines.
+fn render_properties(workload: &infra_analyze::WorkloadProperties) {
+    let replicas = workload
+        .replicas
+        .map_or_else(|| "-".to_owned(), |count| count.to_string());
+    outln!("  {} replicas={replicas}", workload.workload);
+    for container in &workload.containers {
+        let quantities = |bounds: &std::collections::BTreeMap<String, String>| {
+            if bounds.is_empty() {
+                "-".to_owned()
+            } else {
+                bounds
+                    .iter()
+                    .map(|(resource, quantity)| format!("{resource}={quantity}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }
+        };
+        outln!(
+            "    {} image={} tag={} digest={} requests={} limits={}",
+            container.container,
+            container.image.repository,
+            container.image.tag.as_deref().unwrap_or("-"),
+            container.image.digest.as_deref().unwrap_or("-"),
+            quantities(&container.requests),
+            quantities(&container.limits)
+        );
+    }
 }
 
 /// `protocol infra inspect`
-fn infra_inspect(path: &Path, format: Format) -> Result<ExitCode> {
+fn infra_inspect(path: &Path, format: Format, properties: bool) -> Result<ExitCode> {
     let text =
         std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let value: serde_json::Value =
@@ -3892,9 +4160,27 @@ fn infra_inspect(path: &Path, format: Format) -> Result<ExitCode> {
                 digest: ir.digest(),
                 counts: InfraCounts::of_observation(&observation),
                 unresolved: ir.model.unresolved.len(),
+                properties: properties.then(|| infra_analyze::properties(&ir)),
             }
         }
-        Some(infra_compiler::IR_FORMAT) => inspect_ir_document(path, &value)?,
+        Some(infra_compiler::IR_FORMAT) => {
+            let mut inspection = inspect_ir_document(path, &value)?;
+            if properties {
+                // The summary above verified the digest at the value level; the typed
+                // read-back re-verifies and additionally checks every `resolved` handle.
+                match infra_compiler::read_document(&value) {
+                    Ok(ir) => inspection.properties = Some(infra_analyze::properties(&ir)),
+                    Err(errors) => {
+                        match format {
+                            Format::Text => infra_refusals(&errors),
+                            Format::Yaml | Format::Json => print_serialised(&errors, format)?,
+                        }
+                        return Ok(exit_code(false));
+                    }
+                }
+            }
+            inspection
+        }
         other => bail!(
             "{} declares format {:?}; expected `{}` or `{}`",
             path.display(),
@@ -3914,6 +4200,12 @@ fn infra_inspect(path: &Path, format: Format) -> Result<ExitCode> {
             );
             outln!("digest {}", inspection.digest);
             outln!("{} unresolved reference(s)", inspection.unresolved);
+            if let Some(all) = &inspection.properties {
+                outln!("properties:");
+                for workload in all {
+                    render_properties(workload);
+                }
+            }
         }
         Format::Yaml | Format::Json => print_serialised(&inspection, format)?,
     }
@@ -3953,6 +4245,7 @@ fn inspect_ir_document(path: &Path, value: &serde_json::Value) -> Result<InfraIn
             .map_or(0, serde_json::Map::len)
     };
     Ok(InfraInspection {
+        properties: None,
         format: infra_compiler::IR_FORMAT.to_owned(),
         context: value
             .pointer("/provenance/context")

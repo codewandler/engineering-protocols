@@ -38,6 +38,7 @@ ess-gen.workspace = true
 # command line is a shell over them: a harness calling `infra_compiler::compile(&observation)`
 # gets the same IR and the same digest. Nothing in any of the three reaches a cluster — the
 # scanner that does is a separate repository, and the boundary is deliberate.
+infra-analyze.workspace = true
 infra-compiler.workspace = true
 infra-domain.workspace = true
 

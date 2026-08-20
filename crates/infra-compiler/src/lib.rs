@@ -10,6 +10,7 @@
 //! |---|---|
 //! | [`ir`] | the IR: handles, resolved shapes, the model, provenance, the digest |
 //! | [`compile`](mod@compile) | the total compilation from a validated observation |
+//! | [`read`] | a persisted document back into a typed IR — through validation, never `Deserialize` |
 //!
 //! # Determinism
 //!
@@ -21,6 +22,7 @@
 
 pub mod compile;
 pub mod ir;
+pub mod read;
 
 pub use compile::compile;
 pub use ir::{
@@ -31,3 +33,4 @@ pub use ir::{
     ResolvedWorkload, SecretHandle, ServiceAccountHandle, ServiceHandle, UnresolvedReference,
     UnresolvedTarget, IR_FORMAT,
 };
+pub use read::read_document;

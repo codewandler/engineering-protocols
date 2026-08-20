@@ -109,7 +109,8 @@ Validation accumulates: one run reports every refusal (invariant 3), each with a
 
 * **IW2 — graph and diagnosis:** a typed dependency graph over the IR (ownership chains,
   selector edges, config edges) and diagnoses over it — starting from the unresolved facts and
-  pod runtime state the IR already carries.
+  pod runtime state the IR already carries. **Delivered** as `protocol infra graph|diagnose`;
+  see [`infra-wave-2-analyze.md`](infra-wave-2-analyze.md).
 * **IW3 — desired state:** a declared target model, semantic diff observed↔desired, and
   simulation of a change before anything applies it.
 * **IW4 — projection:** manifests generated *from* the model, closing the loop the ESS side

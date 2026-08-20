@@ -2919,7 +2919,7 @@ fn infra_validate_accepts_the_committed_observation() {
     let text = stdout(&output);
     assert!(text.contains("valid"), "the verdict is stated: {text}");
     assert!(
-        text.contains("6 pod(s)"),
+        text.contains("9 pod(s)"),
         "the summary counts what was observed: {text}"
     );
 }
@@ -3021,11 +3021,12 @@ fn infra_inspect_reads_a_bundle_and_the_committed_ir_and_both_agree_on_the_diges
         64,
         "the full SHA-256, not a truncation"
     );
-    assert_eq!(bundle_view["counts"]["workloads"], 5);
+    assert_eq!(bundle_view["counts"]["workloads"], 6);
     assert_eq!(
-        bundle_view["unresolved"], 3,
-        "the three deliberate danglings of the fixture: the optional coredns configmap, the \
-         selector matching nothing, and the retired ingress backend"
+        bundle_view["unresolved"], 4,
+        "the four deliberate danglings of the fixture: the optional coredns configmap, the \
+         selector matching nothing, the retired ingress backend, and flaky-agent's required \
+         secret"
     );
 }
 
@@ -3060,4 +3061,185 @@ fn infra_compile_reports_every_refusal_and_writes_nothing_for_a_refused_bundle()
         );
     }
     std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn infra_graph_from_the_bundle_and_from_the_committed_ir_render_identical_bytes() {
+    // The read-back is only honest if analysis cannot tell the two inputs apart.
+    let from_bundle = protocol(&["infra", "graph", "--path", OBSERVATION, "--format", "json"]);
+    assert_eq!(code(&from_bundle), 0, "{}", stderr(&from_bundle));
+    let from_ir = protocol(&["infra", "graph", "--path", COMMITTED_IR, "--format", "json"]);
+    assert_eq!(code(&from_ir), 0, "{}", stderr(&from_ir));
+    assert_eq!(
+        stdout(&from_bundle),
+        stdout(&from_ir),
+        "compiling the bundle and reading the committed IR must graph identically, byte for byte"
+    );
+    let document: serde_json::Value =
+        serde_json::from_str(&stdout(&from_bundle)).expect("the graph document is JSON");
+    assert_eq!(document["format"], "infra-graph/1");
+    assert_eq!(
+        document["source_digest"].as_str().map(str::len),
+        Some(64),
+        "the graph names the model it explains"
+    );
+}
+
+#[test]
+fn infra_graph_mermaid_groups_by_namespace_and_a_namespace_filter_narrows_it() {
+    let full = protocol(&["infra", "graph", "--path", OBSERVATION]);
+    assert_eq!(code(&full), 0, "{}", stderr(&full));
+    let text = stdout(&full);
+    assert!(text.starts_with("flowchart TB"), "unfenced Mermaid: {text}");
+    assert!(
+        text.contains("subgraph ns0[\"namespace kube-system\"]")
+            && text.contains("subgraph ns1[\"namespace sbf\"]"),
+        "one subgraph per namespace: {text}"
+    );
+
+    let narrowed = protocol(&[
+        "infra",
+        "graph",
+        "--path",
+        OBSERVATION,
+        "--namespace",
+        "sbf",
+    ]);
+    assert_eq!(code(&narrowed), 0, "{}", stderr(&narrowed));
+    let text = stdout(&narrowed);
+    assert!(
+        !text.contains("kube-system") && text.contains("namespace sbf"),
+        "the filter keeps one namespace: {text}"
+    );
+}
+
+#[test]
+fn infra_diagnose_reports_the_findings_and_exits_zero_because_a_diagnosis_is_not_a_gate() {
+    let output = protocol(&["infra", "diagnose", "--path", OBSERVATION]);
+    assert_eq!(
+        code(&output),
+        0,
+        "a cluster full of findings diagnoses successfully: {}",
+        stderr(&output)
+    );
+    let text = stdout(&output);
+    assert!(
+        text.contains("INFRA-DIAG-008 error pods/sbf/flaky-agent-6d8f9c7b44-x1q2z"),
+        "the crash loop is reported with its code and severity: {text}"
+    );
+    assert!(
+        text.contains("3 error(s), 22 warning(s), 10 info(s)"),
+        "the summary counts every severity: {text}"
+    );
+}
+
+#[test]
+fn infra_diagnose_min_severity_filters_the_lines_and_keeps_the_totals() {
+    let output = protocol(&[
+        "infra",
+        "diagnose",
+        "--path",
+        OBSERVATION,
+        "--min-severity",
+        "error",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(
+        !text.contains("INFRA-DIAG-007") && !text.contains(" warning "),
+        "nothing below the floor is listed: {text}"
+    );
+    assert!(
+        text.contains("3 of 35 finding(s) at or above error"),
+        "the filter says what it hid: {text}"
+    );
+    assert!(
+        text.contains("3 error(s), 22 warning(s), 10 info(s)"),
+        "the totals stay totals under any floor: {text}"
+    );
+}
+
+#[test]
+fn infra_diagnose_json_carries_codes_severities_and_evidence() {
+    let output = protocol(&[
+        "infra",
+        "diagnose",
+        "--path",
+        OBSERVATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let report: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the report is JSON");
+    assert_eq!(report["errors"], 3);
+    assert_eq!(report["warnings"], 22);
+    assert_eq!(report["infos"], 10);
+    let findings = report["findings"].as_array().expect("findings");
+    assert_eq!(findings.len(), 35);
+    let crash = findings
+        .iter()
+        .find(|finding| finding["code"] == "INFRA-DIAG-008")
+        .expect("the crash loop is in the report");
+    assert_eq!(crash["severity"], "error");
+    assert_eq!(crash["evidence"]["reason"], "CrashLoopBackOff");
+}
+
+#[test]
+fn infra_diagnose_refuses_a_tampered_ir_document_with_exit_1() {
+    // The one way to exit non-zero: input that cannot be diagnosed at all.
+    let directory = scratch("protocol-infra-diagnose-tampered");
+    let ir = directory.join("tampered.ir.json");
+    let committed = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(COMMITTED_IR);
+    let text = std::fs::read_to_string(committed).expect("the committed IR is readable");
+    let tampered = text.replacen("\"replicas\": 1", "\"replicas\": 9", 1);
+    assert_ne!(text, tampered, "the tampering has to land");
+    write(&ir, &tampered);
+
+    let output = protocol(&["infra", "diagnose", "--path", printable(&ir)]);
+    assert_eq!(code(&output), 1, "a tampered document is invalid input");
+    assert!(
+        stdout(&output).contains("INFRA-IR-002"),
+        "the refusal carries the digest code: {}",
+        stdout(&output)
+    );
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn infra_inspect_properties_reports_the_workload_envelope_from_either_input() {
+    let from_bundle = protocol(&["infra", "inspect", "--path", OBSERVATION, "--properties"]);
+    assert_eq!(code(&from_bundle), 0, "{}", stderr(&from_bundle));
+    let text = stdout(&from_bundle);
+    assert!(
+        text.contains("sbf/deployment/flaky-agent replicas=1"),
+        "the replica count is a property: {text}"
+    );
+    assert!(
+        text.contains("agent image=registry.local/flaky-agent tag=- digest=- requests=- limits=-"),
+        "an untagged, unbounded container reads as exactly that: {text}"
+    );
+    assert!(
+        text.contains("tag=latest"),
+        "asterisk's latest tag is stated: {text}"
+    );
+
+    let from_ir = protocol(&[
+        "infra",
+        "inspect",
+        "--path",
+        COMMITTED_IR,
+        "--properties",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&from_ir), 0, "{}", stderr(&from_ir));
+    let inspection: serde_json::Value =
+        serde_json::from_str(&stdout(&from_ir)).expect("the inspection is JSON");
+    let properties = inspection["properties"]
+        .as_array()
+        .expect("properties ride along in JSON");
+    assert_eq!(properties.len(), 6, "one entry per workload");
 }

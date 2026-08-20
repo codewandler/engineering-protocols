@@ -15,6 +15,7 @@ members = [
     "crates/ess-domain",
     "crates/ess-gen",
     "crates/ess-synth",
+    "crates/infra-analyze",
     "crates/infra-compiler",
     "crates/infra-domain",
     "crates/protocol-cli",
@@ -47,6 +48,7 @@ ess-diff = { path = "crates/ess-diff", version = "0.1.0" }
 ess-domain = { path = "crates/ess-domain", version = "0.1.0" }
 ess-gen = { path = "crates/ess-gen", version = "0.1.0" }
 ess-synth = { path = "crates/ess-synth", version = "0.1.0" }
+infra-analyze = { path = "crates/infra-analyze", version = "0.1.0" }
 infra-compiler = { path = "crates/infra-compiler", version = "0.1.0" }
 infra-domain = { path = "crates/infra-domain", version = "0.1.0" }
 aep-schema = { path = "crates/aep-schema", version = "0.1.0" }

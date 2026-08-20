@@ -619,6 +619,17 @@ pub struct RawClaim {
     /// The declared spec.
     #[serde(default)]
     pub spec: RawClaimSpec,
+    /// The observed status; only the phase is read.
+    #[serde(default)]
+    pub status: RawClaimStatus,
+}
+
+/// The slice of a claim's status the model reads.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawClaimStatus {
+    /// The lifecycle phase, `Bound` on a healthy claim.
+    #[serde(default)]
+    pub phase: Option<String>,
 }
 
 /// The slice of a claim's spec the model reads.
@@ -680,6 +691,25 @@ pub struct RawContainerStatus {
     /// How often it restarted.
     #[serde(default, rename = "restartCount")]
     pub restart_count: u32,
+    /// The current state block; only a waiting state's reason is read.
+    #[serde(default)]
+    pub state: RawContainerState,
+}
+
+/// A container status's `state` block.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawContainerState {
+    /// Present while the container waits instead of running.
+    #[serde(default)]
+    pub waiting: Option<RawContainerWaiting>,
+}
+
+/// The waiting state's essentials; the free-text `message` is deliberately not read.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawContainerWaiting {
+    /// The machine-readable reason, such as `CrashLoopBackOff`.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 /// Pulls one kind's items out of the bundle, refusing an absent kind and any item that does not

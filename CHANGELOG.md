@@ -11,6 +11,40 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`protocol infra graph` — the observed cluster as a typed dependency graph.** Edges exist
+  where a reference resolved — service→workload by selector match, ingress→service,
+  workload→configmap/secret/claim/service-account per env, `envFrom` and volume site,
+  statefulset→governing service, pod→node, pod→workload — each under one of ten closed
+  relations and carrying the sites in the dependent that state it. Deployment pods are tied to
+  their deployment through the `pod-template-hash` label without observing ReplicaSets; a pod
+  whose controller cannot be derived on that evidence is a typed underived-owner fact with the
+  reason, never a guess. `--format json` is the canonical document (nodes, edges, sites,
+  ownership facts, and the source IR's digest); `--format mermaid` draws the configuration
+  topology grouped by namespace and leaves the runtime layer to the JSON; `--namespace`
+  restricts either.
+- **`protocol infra diagnose` — what is wrong, typed and coded, and never a refusal.**
+  Fourteen rules, each finding under a stable `INFRA-DIAG-001`…`014` code with a severity
+  registered on the code (error / warning / info) and named evidence: dangling selectors,
+  missing required vs. optional references (an absent optional ref is info, a required one is
+  an error), containers without resource bounds or probes, `:latest`/untagged images, single
+  replicas, containers stuck in `CrashLoopBackOff` and kin, high restart counts,
+  controller-managed pods that are not ready, orphaned configmaps/secrets/claims, unbound
+  claims, and duplicate service selectors. The command exits 0 whatever the findings say — a
+  diagnosis is a report about a cluster that is allowed to be wrong, not a gate; exit 1 means
+  the input itself was invalid. `--min-severity` filters the listing and keeps the totals.
+- **A persisted `infra-ir/1` document can be read back — through validation, never
+  `Deserialize`.** `graph`, `diagnose` and `inspect --properties` accept either a bundle or a
+  compiled IR document; the read-back re-verifies the digest (`INFRA-IR-002`) and re-minted
+  handle by handle refuses any hand-written `resolved` reference whose key its map does not
+  hold (`INFRA-IR-004`), so a forged document is refused instead of panicking a total lookup.
+  Graphing the bundle and graphing its committed IR are byte-identical.
+- **`protocol infra inspect --properties`** — per workload, the observed invariant-like facts
+  IW3 will diff a desired state against: replica count, images parsed into
+  repository/tag/digest, and the request/limit envelope per container.
+- **The observation model reads two more runtime facts**: a waiting container's reason
+  (`CrashLoopBackOff`, kept verbatim) and a claim's phase (`Bound`/`Pending`/`Lost`). Both are
+  digested semantic state, so IRs compiled before this change carry a different digest.
+
 - **`protocol infra validate | compile | inspect` — a scanned cluster becomes a validated,
   content-addressed IR.** An external scanner (`infra-scout`, its own repository) writes an
   `infra-observation/1` bundle; `validate` refuses a broken one with every problem in one run,

@@ -92,6 +92,24 @@ infra_codes! {
 
     /// An ingress path's backend names no service.
     IncompleteBackend => "INFRA-INGRESS-001",
+
+    /// A persisted IR document's `format` is not `infra-ir/1`.
+    IrUnsupportedFormat => "INFRA-IR-001",
+
+    /// A persisted IR document's digest does not match its model — the document was edited
+    /// after it was compiled.
+    IrDigestMismatch => "INFRA-IR-002",
+
+    /// A persisted IR document does not read as the `infra-ir/1` shape.
+    IrMalformed => "INFRA-IR-003",
+
+    /// A persisted IR document claims a reference is resolved, but the key it names is absent
+    /// from the map that should hold it.
+    ///
+    /// No compilation produces this: a handle is minted only against the model it points into.
+    /// A document carrying one was assembled by hand, and reading it as-is would turn a total
+    /// lookup into a panic.
+    IrDanglingHandle => "INFRA-IR-004",
 }
 
 impl fmt::Display for InfraCode {
@@ -202,7 +220,11 @@ mod tests {
 
     #[test]
     fn every_code_renders_in_the_infra_namespace_and_the_generated_list_holds_them_all() {
-        assert_eq!(InfraCode::ALL.len(), 11, "the catalogue is eleven codes");
+        assert_eq!(
+            InfraCode::ALL.len(),
+            15,
+            "the catalogue is fifteen codes: eleven observation refusals and four IR-document ones"
+        );
         for code in InfraCode::ALL {
             assert!(
                 code.as_str().starts_with("INFRA-"),

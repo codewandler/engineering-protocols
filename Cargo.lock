@@ -656,6 +656,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "infra-analyze"
+version = "0.1.0"
+dependencies = [
+ "infra-compiler",
+ "infra-domain",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "infra-compiler"
 version = "0.1.0"
 dependencies = [
@@ -979,6 +989,7 @@ dependencies = [
  "ess-domain",
  "ess-gen",
  "ess-synth",
+ "infra-analyze",
  "infra-compiler",
  "infra-domain",
  "serde",

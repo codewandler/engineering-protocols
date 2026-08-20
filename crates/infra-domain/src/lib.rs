@@ -39,8 +39,8 @@
 //!   set differ in every one of them.
 //! * **Status beyond the modelled essentials** — conditions, per-replica counters, revision
 //!   hashes, image lists on nodes. The essentials that *are* kept (pod phase, readiness, restart
-//!   counts, node assignment, owner, node capacity and info) are the runtime facts IW2's
-//!   diagnosis reads; the rest is reconstruction detail.
+//!   counts, a waiting container's reason, node assignment, owner, claim phase, node capacity
+//!   and info) are the runtime facts IW2's diagnosis reads; the rest is reconstruction detail.
 //! * **Rollout mechanics** — update strategies, `revisionHistoryLimit`,
 //!   `progressDeadlineSeconds`, pod management policies. How a change rolls out is not part of
 //!   what the cluster *is*.
@@ -62,7 +62,7 @@ pub use code::{InfraCode, ValidationError, ValidationErrors};
 pub use config::{ConfigMap, Secret, ValueDigest};
 pub use network::{Ingress, IngressBackend, IngressPath, IngressRule, Service, ServicePort};
 pub use observation::{
-    ContainerStatus, Identity, Namespace, Node, NodeInfo, Observation, OwnerRef,
+    ClaimPhase, ContainerStatus, Identity, Namespace, Node, NodeInfo, Observation, OwnerRef,
     PersistentVolumeClaim, Pod, PodPhase, ServiceAccount, KINDS, OBSERVATION_FORMAT,
 };
 pub use raw::RawBundle;

@@ -110,6 +110,37 @@ pub struct PersistentVolumeClaim {
     pub access_modes: Vec<String>,
     /// The requested size, as the API states it.
     pub requested_storage: Option<String>,
+    /// The observed lifecycle phase.
+    pub phase: ClaimPhase,
+}
+
+/// A persistent volume claim's lifecycle phase.
+///
+/// The API defines exactly these three. Anything else — including an absent status — maps to
+/// [`Self::Unknown`], for [`PodPhase`]'s reason: a phase is runtime observation, not document
+/// structure, and an unobserved phase is not the same claim as an unbound one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaimPhase {
+    /// Not yet bound to a volume.
+    Pending,
+    /// Bound to a volume.
+    Bound,
+    /// The bound volume is gone.
+    Lost,
+    /// The state could not be obtained.
+    Unknown,
+}
+
+impl ClaimPhase {
+    fn parse(phase: Option<&str>) -> Self {
+        match phase {
+            Some("Pending") => Self::Pending,
+            Some("Bound") => Self::Bound,
+            Some("Lost") => Self::Lost,
+            _ => Self::Unknown,
+        }
+    }
 }
 
 /// A pod's lifecycle phase.
@@ -162,6 +193,13 @@ pub struct ContainerStatus {
     pub ready: bool,
     /// How often it restarted.
     pub restart_count: u32,
+    /// Why the container is waiting instead of running, when it is — `CrashLoopBackOff`,
+    /// `ImagePullBackOff` and their kind. `None` for a running or terminated container.
+    ///
+    /// Kept verbatim rather than as a closed enum: the reason strings are kubelet vocabulary
+    /// that grows between releases, and a diagnosis that mapped an unknown reason to `Unknown`
+    /// would erase exactly the word an operator needs to read.
+    pub waiting_reason: Option<String>,
 }
 
 /// A pod, reduced to runtime essentials: what IW2's diagnosis reads.
@@ -588,6 +626,7 @@ impl PersistentVolumeClaim {
             storage_class: raw.spec.storage_class_name.clone(),
             access_modes,
             requested_storage: raw.spec.resources.requests.get("storage").cloned(),
+            phase: ClaimPhase::parse(raw.status.phase.as_deref()),
         })
     }
 }
@@ -602,6 +641,11 @@ impl Pod {
                     name: name.to_owned(),
                     ready: status.ready,
                     restart_count: status.restart_count,
+                    waiting_reason: status
+                        .state
+                        .waiting
+                        .as_ref()
+                        .and_then(|waiting| waiting.reason.clone()),
                 }),
                 _ => errors.refuse(
                     InfraCode::MissingIdentity,
