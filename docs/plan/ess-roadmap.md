@@ -1,12 +1,16 @@
-# ESS roadmap — waves 1 to 5
+# ESS roadmap — waves 1 to 6
 
-> **Waves 1, 2 and 3 delivered; 4 and 5 proposed, and 4 is gated.** Numbering restarts: these are
-> ESS waves, not a continuation of the protocol's. Tags are `0.3.0-ess-wave-1`, `0.3.1-ess-wave-2`
-> and `0.3.2-ess-wave-3`, keeping the convention that a tag is named after its changelog heading.
+> **Waves 1 to 4 delivered; 5 and 6 proposed.** Numbering restarts: these are ESS waves, not a
+> continuation of the protocol's. Tags are `0.3.0-ess-wave-1`, `0.3.1-ess-wave-2`,
+> `0.3.2-ess-wave-3`, `0.3.3-ess-wave-3.5` and `0.4.0-ess-wave-4`, keeping the convention that a tag
+> is named after its changelog heading.
 >
-> The five waves are design §32's seven phases, with 3 and 4 merged (both are projections of the same
+> Waves 1 to 4 are design §32's seven phases, with 3 and 4 merged (both are projections of the same
 > IR, and separating them would mean shipping documentation nothing checks) and 7 left out (behavioural
-> synthesis is not worth attempting before structural synthesis has produced something that builds):
+> synthesis is not worth attempting before structural synthesis has produced something that builds).
+> Wave 5 is not from §32 at all — it comes from a design filed later, and it moved ahead of structural
+> synthesis by decision because wave 4 left everything derived from a single revision with no way to
+> say what a change invalidates:
 >
 > | wave | design phase |
 > |---|---|
@@ -238,7 +242,26 @@ asserting which fault breaks which check.
 
 ---
 
-## ESS wave 5 — structural synthesis
+## ESS wave 5 — what changed, and what that invalidates
+
+> **Proposed, and next.** Plan: [`ess-wave-5-semantic-diff.md`](ess-wave-5-semantic-diff.md). Design:
+> [`ess-semantic-diff-impact-evolution-design-v0.1.md`](../design/ess-semantic-diff-impact-evolution-design-v0.1.md),
+> reviewed in [`2026-08-20-semantic-diff-feasibility-review.md`](../reviews/2026-08-20-semantic-diff-feasibility-review.md).
+
+**Goal: two compiled specifications, and a typed answer to what moved between them.**
+
+Sequenced ahead of structural synthesis by decision, and the argument is what wave 4 left behind.
+Everything this repository generates is derived from **one revision**, and gate G19 made conformance
+evidence fail closed when the model moves — so today any change to a specification, including one to a
+comment in an unrelated domain, sends every conformance requirement back to owed. Correct, and blunt.
+A semantic delta is what makes it proportionate. Structural synthesis would instead generate *more*
+artifacts from one revision, multiplying the thing that has no change story.
+
+Note this is a **vision amendment** as well as a wave: `docs/VISION.md` describes specifying a system
+once and compiling from that description, and says nothing about a system changing over time. The
+first slice, its exclusions, and the decision itself are on the plan page.
+
+## ESS wave 6 — structural synthesis
 
 > **Proposed.** Design:
 > [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](../design/ess-structural-synthesis-obligations-realizations-design-v0.1.md),
@@ -277,10 +300,10 @@ runs the suite.
 
 ---
 
-## What is not in these five waves
+## What is not in these six waves
 
-Behavioural synthesis (§32 phase 7), formal verification, topology generation, `ess diff` compatibility
-classification, and every transport beyond the one the billing example needs. Each is a wave of its
+Behavioural synthesis (§32 phase 7), formal verification, topology generation, the compatibility
+classification `ess diff` will eventually carry, and every transport beyond the one the billing example needs. Each is a wave of its
 own. None is worth starting before generated code has compiled and passed a suite it did not write.
 
 ### The two proposals that arrived after these waves were written

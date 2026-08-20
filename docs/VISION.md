@@ -91,7 +91,20 @@ services without the domain changing.
 
 > Describe how work is performed and what must exist **once**, in typed form, and let everything else
 > — the checks, the contracts, the tests, the audit trail, the skeleton — be derived from that
-> description rather than maintained beside it.
+> description rather than maintained beside it. When the description changes, let what that
+> invalidates be derived too.
+
+The second sentence was added deliberately, in August 2026, and it is an amendment rather than a
+clarification. "Specified once and compiled" describes a system in the present tense, and every real
+adoption is brownfield: a model you can only use on day one is a model nobody adopts on day two. The
+concrete pressure came from the oracle. Binding conformance evidence to the specification revision it
+attests is correct and blunt — without a semantic delta, changing a comment in an unrelated domain
+sends every conformance requirement back to owed, which is indistinguishable from having checked
+nothing.
+
+So *what changed* is now part of what this project derives, alongside the contracts and the tests.
+What is still deliberately outside it is what any of that implies anyone should **do**: a delta says
+what a revision invalidates, and a person decides what happens next.
 
 The model reasons. The protocol constrains. The specification defines. The verifiers establish facts.
 What the loop asks you to trust is narrow and named: that a producer declaring itself independent is.
@@ -131,22 +144,24 @@ verdict is only worth what the guards under it are worth.
 
 ## Proposed, not accepted
 
-Four design documents in [`docs/design/`](design/) propose extending this. None of them is part of the
-vision above, and they are listed here so that reading the newest file in that directory cannot be
-mistaken for reading what this project has agreed to build.
+Four design documents in [`docs/design/`](design/) propose extending this. They are listed here with
+their status so that reading the newest file in that directory cannot be mistaken for reading what
+this project has agreed to build — two have been taken up, two have not.
 
 | proposed design | what it would add | status |
 |---|---|---|
-| [closed-loop execution and conformance](design/ess-closed-loop-execution-conformance-design-v0.1.md) | the specification becomes an *oracle* — a verdict on an implementation, not only a projection of a model | reviewed, reconciled and frozen for implementation, except four named open decisions; **sequenced first**, as ESS wave 4 |
-| [semantic diff, impact and evolution](design/ess-semantic-diff-impact-evolution-design-v0.1.md) | a **third axis**: the system changing over time, impact closure, what a revision invalidates | proposed, unreviewed; **sequenced after wave 4** |
+| [closed-loop execution and conformance](design/ess-closed-loop-execution-conformance-design-v0.1.md) | the specification becomes an *oracle* — a verdict on an implementation, not only a projection of a model | **delivered** as ESS wave 4 |
+| [semantic diff, impact and evolution](design/ess-semantic-diff-impact-evolution-design-v0.1.md) | the system changing over time, impact closure, what a revision invalidates | **core accepted** into the thesis above and sequenced as ESS wave 5; reviewed, and its proposal-evaluation and architecture-search sections rejected rather than deferred |
 | [structural synthesis, obligations and realizations](design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | generated applications, and human or agent work carried as typed obligations | proposed; reviewed once and not reconciled — that review reads it as four waves, not one; unsequenced |
-| [infrastructure discovery and multi-cloud realization](design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | a **fourth domain**: infrastructure, with `InfraSpec` and `InfraIr` beside the ESS pair | proposed, unreviewed; unsequenced |
+| [infrastructure discovery and multi-cloud realization](design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | a **fourth domain**: infrastructure, with `InfraSpec` and `InfraIr` beside the ESS pair | reviewed, and deferred whole with two ideas harvested; unsequenced |
 
-Closed-loop conformance and structural synthesis are horizons the two halves already imply — the
-thesis above already promises the tests and the skeleton. The other two are not: "specified once and
-compiled" says nothing about a system *changing*, and infrastructure is a second subject matter rather
-than a further projection of the first. Absorbing either of those into the thesis is a decision
-someone has to take deliberately, with a reason. Until then this section is where they live.
+Closed-loop conformance and structural synthesis are horizons the two halves already implied — the
+thesis promises the tests and the skeleton, and wave 4 delivered the first of them. Semantic diff was
+not implied, and absorbing it was taken as a deliberate amendment with the reason recorded above.
+
+Infrastructure remains outside. It is a second subject matter rather than a further projection of the
+first, and a review of it recommended deferring the whole and harvesting two ideas. Absorbing it would
+be another amendment, and nobody has made the argument for one.
 
 ## What this is deliberately not
 

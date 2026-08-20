@@ -96,11 +96,11 @@
 //!
 //! A green run against a correct target shows only that the suite asks for nothing a correct target
 //! cannot answer. [`faulty`] is the other half — §25 and §26 — and it is what makes the rest of this
-//! crate evidence rather than a claim: eleven implementations that are wrong in exactly one way, and
+//! crate evidence rather than a claim: twelve implementations that are wrong in exactly one way, and
 //! `tests/faults.rs`, which asserts per fault **which named scenario fails** and **how many
 //! unrelated ones still pass**, against an allowance that has to be changed with a reason.
 //!
-//! Exactly one of the eleven is caught by **nothing at all**, and that is the row worth reading:
+//! Exactly one of the twelve is caught by **nothing at all**, and that is the row worth reading:
 //! `wrong-event-payload` publishes an invoice's creation with an amount nobody submitted. Every
 //! field the event declares is present and every one is of its declared type, and **nothing in the
 //! model says where a payload field's value comes from** — so the check that would catch it is a

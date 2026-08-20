@@ -129,7 +129,7 @@ Task complete in `complete`:
 ## 4. And it refuses — the half that makes the rest mean anything
 
 Same task, same everything else. One implementation that accepts an invoice the specification
-refuses: `--inject accept-invalid-amount`, one of eleven deliberate faults.
+refuses: `--inject accept-invalid-amount`, one of twelve deliberate faults.
 
 ```console
 $ $B ess conform run --path examples/billing --target billing --inject accept-invalid-amount
