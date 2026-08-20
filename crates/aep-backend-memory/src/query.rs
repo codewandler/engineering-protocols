@@ -22,6 +22,11 @@ use aep_domain::node::Node;
 use crate::store::{Store, StoredEntity};
 use crate::MemoryBackend;
 
+// The trait's methods are `async fn` because a backend that talks to a network needs them to be. This
+// one talks to a `BTreeMap`, so none of its bodies awaits anything, and a newer clippy reads that as a
+// mistake. It is the opposite: the signature belongs to the contract, not to this implementation, and
+// dropping `async` here would stop it implementing the trait at all.
+#[allow(clippy::unused_async)]
 impl QueryService for MemoryBackend {
     type AuditRecord = AuditRecord;
 

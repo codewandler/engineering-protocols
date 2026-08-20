@@ -173,7 +173,14 @@ Seven steps, all seven of which CI also runs, in this order:
    `suites/generated/` differ from what the specifications produce. A suite is a contract an
    implementation is checked against, so a stale one certifies the wrong thing.
 
-Land nothing that does not pass all seven. There is no release process yet; when there is, releases
+Land nothing that does not pass all seven.
+
+**A green local gate does not guarantee a green CI.** The steps mirror each other exactly, but the
+*toolchain* does not: CI installs whatever `stable` is on the day, and a newer clippy can introduce a
+lint that fails a commit which passed locally on an older one. That is how `clippy::unused_async`
+turned `main` red on a commit whose gate was green. Before pushing something you cannot easily revisit,
+`rustup update` first — and when CI fails on a lint that did not exist locally, that is the cause, not
+a flaky gate. There is no release process yet; when there is, releases
 require a green full suite, not component gates.
 
 ## Conventions

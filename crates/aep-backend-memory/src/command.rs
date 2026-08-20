@@ -36,6 +36,9 @@ use crate::MemoryBackend;
 /// query that filters on it.
 pub const STATUS_KEY: &str = "status";
 
+// See the note on `impl QueryService`: the `async` belongs to the contract, and this backend's bodies
+// complete without awaiting because they read and write a map.
+#[allow(clippy::unused_async)]
 impl CommandService for MemoryBackend {
     type Command = Command;
 
