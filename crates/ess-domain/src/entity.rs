@@ -806,6 +806,7 @@ fn check_nested(
 pub fn validate_lifecycle_causes(
     entities: &BTreeMap<QualifiedName, EntitySpec>,
     commands: &BTreeMap<QualifiedName, crate::command::CommandSpec>,
+    events: &BTreeMap<QualifiedName, crate::command::EventSpec>,
 ) -> ValidationErrors {
     let mut errors = ValidationErrors::new();
     let mut performed: BTreeSet<(&QualifiedName, &str)> = BTreeSet::new();
@@ -841,6 +842,7 @@ pub fn validate_lifecycle_causes(
                 );
                 continue;
             };
+            errors.extend(validate_instance(command, outcome, subject, entity, events));
             let Some(transition) = subject.effect.transition() else {
                 continue;
             };
@@ -899,6 +901,107 @@ pub fn validate_lifecycle_causes(
         }
     }
 
+    errors
+}
+
+/// Checks that the field an outcome's `instance:` names exists, on the surface its verb decides,
+/// and carries the entity's identity type.
+///
+/// Two references again, and one of them points at a surface the outcome chose rather than at a
+/// declaration: `creates:` publishes an identity through an event it emits, so the field is looked
+/// for in **the events this branch emits** — the first of them that declares it, in the order the
+/// outcome writes them. `moves:` and `updates:` consume an identity the caller supplies, so the
+/// field is looked for in the command's input.
+///
+/// The type check is what stops the link being a name that happens to exist. `instance:
+/// customer_email` resolves to a declared field and identifies no invoice, and a scenario built on
+/// it would send an address where an implementation expects an id — a suite that fails a correct
+/// implementation, which is the outcome design §11 rules out in one line.
+///
+/// A `creates:` branch always has somewhere to look: an outcome with a subject cannot also name an
+/// error ([`RefusalMutatedState`](ValidationCode::RefusalMutatedState)) and an outcome that neither
+/// emits nor errors is [`EmptyChange`](ValidationCode::EmptyChange), so it emits at least one event.
+fn validate_instance(
+    command: &crate::command::CommandSpec,
+    outcome: &crate::command::Outcome,
+    subject: &crate::command::Subject,
+    entity: &EntitySpec,
+    events: &BTreeMap<QualifiedName, crate::command::EventSpec>,
+) -> ValidationErrors {
+    use crate::command::InstanceSurface;
+
+    let mut errors = ValidationErrors::new();
+    let surface = subject.surface();
+    let at = format!(
+        "command.{}.outcomes.{}.instance",
+        command.name, outcome.name
+    );
+
+    // Every field the name could have referred to, with where it was found, so a mistyped name and a
+    // mistyped *type* are told apart rather than both reported as "not declared".
+    let (found, available): (Vec<&Field>, Vec<String>) = match surface {
+        InstanceSurface::CommandInput => (
+            command.input_field(&subject.instance).into_iter().collect(),
+            command
+                .input
+                .iter()
+                .map(|field| field.name.clone())
+                .collect(),
+        ),
+        InstanceSurface::EmittedEvent => {
+            let mut hits = Vec::new();
+            let mut offered = Vec::new();
+            for emitted in &outcome.emits {
+                let Some(declared) = events.get(emitted) else {
+                    continue; // Already reported where the outcome's `emits` failed to resolve.
+                };
+                for field in &declared.fields {
+                    offered.push(format!("{}.{}", declared.name, field.name));
+                    if field.name == subject.instance {
+                        hits.push(field);
+                    }
+                }
+            }
+            (hits, offered)
+        }
+    };
+
+    if found
+        .iter()
+        .any(|field| field.type_ref == entity.identity.type_ref)
+    {
+        return errors;
+    }
+    {
+        let (code, message) = if found.is_empty() {
+            (
+                ValidationCode::UndeclaredReference,
+                format!(
+                    "outcome `{}` of `{}` acts on the instance named by `{}`, which is no {} of it",
+                    outcome.name, command.name, subject.instance, surface
+                ),
+            )
+        } else {
+            (
+                ValidationCode::TypeMismatch,
+                format!(
+                    "outcome `{}` of `{}` names the instance by `{}`, which is typed `{}`; `{}` is \
+                     identified by `{}`",
+                    outcome.name,
+                    command.name,
+                    subject.instance,
+                    found[0].type_ref,
+                    entity.name,
+                    entity.identity.type_ref
+                ),
+            )
+        };
+        errors.push(ValidationError::new(code, at, message).with_hint(format!(
+            "the {surface} must be typed `{}` — declared: {}",
+            entity.identity.type_ref,
+            names(available.into_iter())
+        )));
+    }
     errors
 }
 
@@ -1675,7 +1778,14 @@ lifecycle:
     ) -> crate::command::CommandSpec {
         crate::command::CommandSpec {
             name: name(command),
-            input: Vec::new(),
+            // Every subject below names its instance by `invoice_id`, so the input has to carry one
+            // typed as the entity's identity: without it these fixtures would fail the *instance*
+            // rule as well as the one each is about, and an exact error count would stop meaning
+            // what its test says it means.
+            input: vec![Field::new(
+                "invoice_id",
+                TypeRef::Named(name("billing.invoice.InvoiceId")),
+            )],
             outcomes: vec![crate::command::Outcome {
                 name: crate::command::OutcomeName::new(outcome).expect("a valid outcome name"),
                 condition: crate::command::OutcomeCondition::Otherwise,
@@ -1712,6 +1822,28 @@ lifecycle:
             .collect()
     }
 
+    /// The one event every `driver` above emits, carrying the identity a `creates:` publishes.
+    fn events() -> BTreeMap<QualifiedName, crate::command::EventSpec> {
+        let moved = crate::command::EventSpec {
+            name: name("billing.invoice.Moved"),
+            fields: vec![Field::new(
+                "invoice_id",
+                TypeRef::Named(name("billing.invoice.InvoiceId")),
+            )],
+            naming: Naming::default(),
+        };
+        // A fact that publishes nothing, so a `creates:` whose events carry no identity has an event
+        // to emit and still nowhere to read one from.
+        let silent = crate::command::EventSpec {
+            name: name("billing.invoice.Silent"),
+            fields: Vec::new(),
+            naming: Naming::default(),
+        };
+        [(moved.name.clone(), moved), (silent.name.clone(), silent)]
+            .into_iter()
+            .collect()
+    }
+
     #[test]
     fn a_transition_no_command_outcome_takes_is_refused_as_uncaused() {
         // The rule gate G14 exists for: `Issued -> Paid` is a state change the specification
@@ -1728,6 +1860,7 @@ lifecycle:
                     Some(crate::command::Subject::moves(
                         name("billing.invoice.Invoice"),
                         "IssueInvoice",
+                        "invoice_id",
                     )),
                 ),
                 driver(
@@ -1736,9 +1869,11 @@ lifecycle:
                     Some(crate::command::Subject::moves(
                         name("billing.invoice.Invoice"),
                         "CancelInvoice",
+                        "invoice_id",
                     )),
                 ),
             ]),
+            &events(),
         );
 
         let uncaused: Vec<&ValidationError> = errors
@@ -1769,6 +1904,7 @@ lifecycle:
                     Some(crate::command::Subject::moves(
                         name("billing.invoice.Invoice"),
                         "IssueInvoice",
+                        "invoice_id",
                     )),
                 ),
                 driver(
@@ -1777,6 +1913,7 @@ lifecycle:
                     Some(crate::command::Subject::moves(
                         name("billing.invoice.Invoice"),
                         "PayInvoice",
+                        "invoice_id",
                     )),
                 ),
                 driver(
@@ -1785,9 +1922,11 @@ lifecycle:
                     Some(crate::command::Subject::moves(
                         name("billing.invoice.Invoice"),
                         "CancelInvoice",
+                        "invoice_id",
                     )),
                 ),
             ]),
+            &events(),
         );
         assert!(errors.is_empty(), "{errors}");
     }
@@ -1803,8 +1942,10 @@ lifecycle:
                 Some(crate::command::Subject::moves(
                     name("billing.invoice.Receipt"),
                     "IssueInvoice",
+                    "invoice_id",
                 )),
             )]),
+            &events(),
         );
         let dangling = errors
             .as_slice()
@@ -1835,8 +1976,10 @@ lifecycle:
                 Some(crate::command::Subject::moves(
                     name("billing.invoice.Invoice"),
                     "settle",
+                    "invoice_id",
                 )),
             )]),
+            &events(),
         );
         let misspelt = errors
             .as_slice()
@@ -1862,8 +2005,13 @@ lifecycle:
             &lifecycle(invoice),
             &commands(vec![refusing_driver(
                 "billing.invoice.Pay",
-                crate::command::Subject::moves(name("billing.invoice.Invoice"), "PayInvoice"),
+                crate::command::Subject::moves(
+                    name("billing.invoice.Invoice"),
+                    "PayInvoice",
+                    "invoice_id",
+                ),
             )]),
+            &events(),
         );
         assert!(
             errors
@@ -1885,10 +2033,12 @@ lifecycle:
             &commands(vec![driver(
                 "billing.invoice.Create",
                 "accepted",
-                Some(crate::command::Subject::creates(name(
-                    "billing.invoice.Invoice",
-                ))),
+                Some(crate::command::Subject::creates(
+                    name("billing.invoice.Invoice"),
+                    "invoice_id",
+                )),
             )]),
+            &events(),
         );
         assert_eq!(
             errors
@@ -1898,6 +2048,127 @@ lifecycle:
                 .count(),
             3,
             "{errors}"
+        );
+    }
+
+    // ---- which instance an outcome acts on ------------------------------------------------------
+
+    #[test]
+    fn an_instance_named_by_a_field_the_command_does_not_take_is_refused() {
+        // Half the link is a name pointing at nothing, and this is the half `ess-domain` can see: a
+        // `moves:` acts on an instance the caller has to supply, so the field has to be one the
+        // command actually declares. The fixture reaches the state where the rule bites — the
+        // entity, the transition and the emitted event all resolve — so the only defect is the one
+        // asserted.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let mover = driver(
+            "billing.invoice.Pay",
+            "settled",
+            Some(crate::command::Subject::moves(
+                name("billing.invoice.Invoice"),
+                "PayInvoice",
+                "reference",
+            )),
+        );
+
+        let errors =
+            validate_lifecycle_causes(&lifecycle(invoice), &commands(vec![mover]), &events());
+
+        let refusal = errors
+            .as_slice()
+            .iter()
+            .find(|error| error.code == ValidationCode::UndeclaredReference)
+            .unwrap_or_else(|| panic!("the instance is refused: {errors}"));
+        assert!(
+            refusal.message.contains("`reference`") && refusal.message.contains("input field"),
+            "the message names the field and the surface it was looked for on: {refusal:?}"
+        );
+    }
+
+    #[test]
+    fn an_instance_named_by_a_field_of_the_wrong_type_is_refused() {
+        // The other half, and the one a name check alone would let through. `total` is a declared
+        // input field; it is a `Money`, and an invoice is identified by an `InvoiceId`. A scenario
+        // built on this link would send an amount where an implementation expects an id — a suite
+        // that fails a correct implementation, which is worse than one that refuses.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let mut mover = driver(
+            "billing.invoice.Pay",
+            "settled",
+            Some(crate::command::Subject::moves(
+                name("billing.invoice.Invoice"),
+                "PayInvoice",
+                "total",
+            )),
+        );
+        mover.input.push(Field::new(
+            "total",
+            TypeRef::Named(name("billing.invoice.Money")),
+        ));
+
+        let errors =
+            validate_lifecycle_causes(&lifecycle(invoice), &commands(vec![mover]), &events());
+
+        let refusal = errors
+            .as_slice()
+            .iter()
+            .find(|error| error.code == ValidationCode::TypeMismatch)
+            .unwrap_or_else(|| panic!("the type is refused: {errors}"));
+        assert!(
+            refusal.message.contains("billing.invoice.Money")
+                && refusal.message.contains("billing.invoice.InvoiceId"),
+            "both types are in the message, because the repair needs both: {refusal:?}"
+        );
+    }
+
+    #[test]
+    fn a_creation_reads_its_new_identity_from_an_event_it_emits_and_never_from_the_input() {
+        // The asymmetry `creates:` forces. An invoice does not exist when `CreateInvoice` is called,
+        // so no input field can name it and the only thing the specification can say is where the
+        // new identity becomes observable. The two halves are asserted together: `invoice_id` on the
+        // emitted event is accepted, and the *same* name declared as an input is not — which is what
+        // makes this a test of the surface rule rather than of a name lookup.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let creator = |instance: &str| {
+            driver(
+                "billing.invoice.Create",
+                "accepted",
+                Some(crate::command::Subject::creates(
+                    name("billing.invoice.Invoice"),
+                    instance,
+                )),
+            )
+        };
+
+        let accepted = validate_lifecycle_causes(
+            &lifecycle(invoice.clone()),
+            &commands(vec![creator("invoice_id")]),
+            &events(),
+        );
+        assert!(
+            accepted
+                .as_slice()
+                .iter()
+                .all(|error| error.code == ValidationCode::MissingCausation),
+            "`Moved` carries `invoice_id`, so the link resolves; only the uncaused moves remain: \
+             {accepted}"
+        );
+
+        // `driver` declares `invoice_id` as an *input*, which is exactly what a `creates:` may not
+        // read — so this is the same name, on the wrong surface.
+        let mut input_only = creator("invoice_id");
+        input_only.outcomes[0].emits.clear();
+        input_only.outcomes[0]
+            .emits
+            .push(name("billing.invoice.Silent"));
+        let refused =
+            validate_lifecycle_causes(&lifecycle(invoice), &commands(vec![input_only]), &events());
+        assert!(
+            refused
+                .as_slice()
+                .iter()
+                .any(|error| error.code == ValidationCode::UndeclaredReference),
+            "an identity nothing publishes is an instance no later step can name: {refused}"
         );
     }
 
@@ -1919,7 +2190,7 @@ lifecycle:
 ",
         )
         .expect("a one-state entity");
-        let errors = validate_lifecycle_causes(&lifecycle(settled), &BTreeMap::new());
+        let errors = validate_lifecycle_causes(&lifecycle(settled), &BTreeMap::new(), &events());
         assert!(errors.is_empty(), "{errors}");
     }
 }

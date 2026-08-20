@@ -134,6 +134,7 @@ commands:
       - name: accepted
         when: amount.amount > 0
         creates: witness.orders.Order
+        instance: order_id
         emits:
           - witness.orders.OrderPlaced
       - name: refused
@@ -161,6 +162,7 @@ commands:
     outcomes:
       - name: placed
         moves: witness.orders.Order.place
+        instance: order_id
         emits:
           - witness.orders.OrderPlaced
 ";

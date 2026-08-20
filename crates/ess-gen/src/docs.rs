@@ -894,7 +894,7 @@ fn effect_sentence(ir: &EssIr, subject: Option<&ResolvedSubject>) -> String {
         return "No entity in this specification changes.".to_owned();
     };
     let entity = ir.entity(&subject.entity);
-    match &subject.effect {
+    let effect = match &subject.effect {
         ResolvedEffect::Creates => format!(
             "It creates a `{}`, which starts in `{}`.",
             entity.name, entity.lifecycle.initial
@@ -915,6 +915,28 @@ fn effect_sentence(ir: &EssIr, subject: Option<&ResolvedSubject>) -> String {
         ResolvedEffect::Updates => format!(
             "It changes a `{}` without moving it along its lifecycle.",
             entity.name
+        ),
+    };
+    format!("{effect} {}", instance_sentence(ir, subject))
+}
+
+/// Which instance the branch acts on, and where a reader finds its identity.
+///
+/// A page that says an invoice moved and not *which* invoice describes a system nobody can call.
+/// The two sentences differ because the two surfaces do: an existing instance is named by the caller
+/// in the request, and a new one is announced by the event the branch emits, because it did not
+/// exist when the request was made.
+fn instance_sentence(ir: &EssIr, subject: &ResolvedSubject) -> String {
+    let field = subject.instance.field();
+    match subject.instance.event() {
+        None => format!(
+            "The instance is the one named by the input field {}.",
+            code(&field.name)
+        ),
+        Some(event) => format!(
+            "The new instance's identity is published as {} on `{}`.",
+            code(&field.name),
+            ir.event(event).name
         ),
     }
 }

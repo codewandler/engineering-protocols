@@ -44,17 +44,33 @@
 //! reading. §10's own worked suite asserts `→ InvalidAmount` and no field, and this produces exactly
 //! that. When the model gains a mapping, the fields follow from it rather than from a name match.
 //!
+//! # A lifecycle scenario is a sequence over one instance
+//!
+//! §19's two classes — the move that must be possible, and the move that must not — are sequences:
+//! bring an instance into existence, drive it to the state in question, then act. Every step after
+//! the first has to say *which* instance, and until an outcome declared
+//! [`instance:`](ess_domain::command::Subject::instance) nothing in the model could. Both classes
+//! were refused wholesale; both are synthesised now.
+//!
+//! What makes it honest rather than convenient is where the identity comes from. Nothing here
+//! fabricates one: the arrangement runs the outcome the specification says *creates* the entity, and
+//! binds the identity out of the event that outcome declares publishes it — through
+//! [`ScenarioStep::CaptureInstance`] — so the value is the target's, and the suite carries a
+//! reference to it rather than a guess at it.
+//!
 //! # What is not here yet
 //!
 //! Binding scenarios (§16–§18) and the runner. Both are later slices, and the first appears as a
 //! refusal per binding rather than as silence, for the reason above.
 //!
-//! Invariant scenarios (§20) produce nothing at all, and that is a property of the scenario IR
-//! rather than an omission here: [`ScenarioId`] has four shapes — an outcome, a transition, a
-//! refusal and a binding — and an entity invariant is none of them. It is observable only through a
-//! view, which is what the view steps below assert.
+//! Invariant scenarios (§20) produce nothing at all, and the two things that stop them are not this
+//! gate. [`ScenarioId`] has four shapes — an outcome, a transition, a refusal and a binding — and an
+//! entity invariant is none of them; and [`ViewExpectation`] matches rows by field *values*, so
+//! there is no step that evaluates `total.amount >= 0` against what a view shows. Both are decisions
+//! about what a suite can say, in the sense §21 means: a new shape there is a change to what an ESS
+//! *means*, not a convenience for one generator.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use aep_domain::facts::{FactPath, FactSource, FactStore, FactValue};
@@ -62,8 +78,8 @@ use aep_domain::node::Node;
 use aep_domain::predicate::{Predicate, Truth};
 use ess_compiler::diagnostic::Code;
 use ess_compiler::ir::{
-    EssIr, ResolvedBody, ResolvedCommand, ResolvedEffect, ResolvedOutcome, ResolvedTypeRef,
-    ResolvedView,
+    Driver, EntityHandle, EssIr, ResolvedBody, ResolvedCommand, ResolvedEffect, ResolvedInstance,
+    ResolvedOutcome, ResolvedSubject, ResolvedTypeRef, ResolvedView,
 };
 use ess_domain::command::TestStrategy;
 use ess_domain::entity::{EntitySpec, StateName};
@@ -74,8 +90,9 @@ use crate::decision::{when, Decision, Unevaluable};
 use crate::input::{flatten, ShapeErrors};
 use crate::scenario::{
     ActorRef, BindingRef, CommandRef, ConformanceScenario, ConformanceSuite, DeclaredTypeRef,
-    EntityRef, ErrorRef, EssSemanticRef, EventRef, OutcomeRef, ScenarioId, ScenarioPurpose,
-    ScenarioStep, SuiteProvenance, TransitionRef, ViewExpectation, ViewRef,
+    EntityRef, ErrorRef, EssSemanticRef, EventRef, InstanceName, OutcomeRef, ScenarioId,
+    ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance, TransitionRef, ViewExpectation,
+    ViewRef,
 };
 use crate::witness::{candidates, WitnessGap, MAX_CANDIDATES};
 
@@ -201,20 +218,21 @@ pub enum RefusalCause {
         /// How many candidates were decided against it.
         tried: usize,
     },
-    /// The scenario would have needed an instance of an entity that already exists.
+    /// The scenario needed an instance of an entity, and the specification cannot arrange one.
     ///
-    /// The gap that stops §19 dead, and it is not the one G14 closed. An outcome now names the
-    /// entity it moves and the transition it takes, so *which* command drives a transition is
-    /// answered. What is still unanswered is **which input field names the instance**: an entity
-    /// declares an identity, a command declares an input, and nothing in the model relates the two.
-    /// A scenario therefore cannot say "the invoice the previous step created", and a fabricated id
-    /// would be a test that fails against a correct implementation — which §11 rules out in one
-    /// line: *a refusal is better than a false test*.
+    /// The model now says which field names an instance, so "the invoice the previous step created"
+    /// is expressible and §19's scenarios are synthesised. What is left here is the case where the
+    /// specification cannot *produce* the instance the scenario needs: nothing creates the entity at
+    /// all, no sequence of declared moves reaches the state, or a command on the only route has no
+    /// witness. Each is a property of the specification, and each is reported rather than papered
+    /// over with a fabricated identity — which would be a test that fails a correct implementation.
     InstanceRequired {
         /// Whose instance.
         entity: EntityRef,
         /// What the scenario would have needed of it.
         need: InstanceNeed,
+        /// Why the specification cannot produce one.
+        reason: Unreachable,
     },
     /// A view's filter could not be decided against the state the scenario reaches.
     ///
@@ -299,10 +317,7 @@ impl RefusalCause {
                 "write the branch's condition over values a candidate can carry, or supply a \
                  fixture for it"
             }
-            Self::InstanceRequired { .. } => {
-                "the model must say which command input names the subject's identity before a \
-                 scenario can act on an instance an earlier step created"
-            }
+            Self::InstanceRequired { reason, .. } => reason.hint(),
             Self::ViewUndecidable { .. } => {
                 "filter the view on the entity's state, which is what a generated scenario knows \
                  after the command it ran"
@@ -330,10 +345,11 @@ impl fmt::Display for RefusalCause {
                 f,
                 "no candidate of the {tried} tried satisfies `{predicate}`"
             ),
-            Self::InstanceRequired { entity, need } => write!(
-                f,
-                "it needs an instance of `{entity}` {need}, and no step can name one"
-            ),
+            Self::InstanceRequired {
+                entity,
+                need,
+                reason,
+            } => write!(f, "it needs an instance of `{entity}` {need}, and {reason}"),
             Self::ViewUndecidable {
                 view,
                 filter,
@@ -364,6 +380,75 @@ impl fmt::Display for RefusalCause {
                 write!(
                     f,
                     "the witness is not a value of the input's type:\n{errors}"
+                )
+            }
+        }
+    }
+}
+
+/// Why a scenario could not get the instance it needed.
+///
+/// Three shapes, and the difference is which line of the specification an author goes and edits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unreachable {
+    /// No outcome brings an instance of the entity into existence.
+    ///
+    /// Legal: an entity may arrive from a migration or from a system outside this document, which is
+    /// why `ess-domain` does not refuse it. It still means no scenario can act on one.
+    NothingCreates,
+    /// No sequence of declared, driven transitions reaches the state from where the lifecycle starts.
+    ///
+    /// A drift alarm. `ess-domain` refuses a state nothing reaches (`unreachable_state`) and a
+    /// transition nothing drives (`missing_causation`), so the graph this walk searches and the
+    /// graph that check searches are the same one — and a valid specification cannot produce this.
+    /// It exists so that if the two ever come apart, the result is a named refusal rather than a
+    /// scenario nobody wrote. The reachable shape of "cannot get there" is
+    /// [`Unwitnessable`](Self::Unwitnessable).
+    NoPath {
+        /// Where a new instance begins.
+        from: StateName,
+    },
+    /// A command on the route to the state has no input that reaches the branch that moves it.
+    ///
+    /// The full reason is on that outcome's own refusal; naming it here keeps one cause in one
+    /// place rather than restating it under a second id.
+    Unwitnessable {
+        /// The branch that could not be reached.
+        outcome: OutcomeRef,
+    },
+}
+
+impl Unreachable {
+    /// What would have to change.
+    fn hint(&self) -> &'static str {
+        match self {
+            Self::NothingCreates => {
+                "give some command outcome `creates:` for this entity; nothing can act on an \
+                 instance nothing brings into existence"
+            }
+            Self::NoPath { .. } => {
+                "declare a transition that reaches this state, and an outcome that takes it"
+            }
+            Self::Unwitnessable { .. } => {
+                "the route to this state runs through a branch no input reaches; see that \
+                 outcome's own refusal"
+            }
+        }
+    }
+}
+
+impl fmt::Display for Unreachable {
+    /// Reads as the tail of "it needs an instance of `X` …, and …".
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NothingCreates => f.write_str("no outcome creates one"),
+            Self::NoPath { from } => {
+                write!(f, "no declared move reaches it from `{from}`")
+            }
+            Self::Unwitnessable { outcome } => {
+                write!(
+                    f,
+                    "the route runs through `{outcome}`, which no input reaches"
                 )
             }
         }
@@ -415,12 +500,10 @@ pub fn synthesize(ir: &EssIr) -> Synthesis {
             else {
                 continue;
             };
-            if let Err(claimed) = suite.insert(id, scenario) {
-                refusals.push(Refusal::about(&claimed, RefusalCause::DuplicateScenario));
-            }
+            insert(&mut suite, id, scenario, &mut refusals);
         }
     }
-    lifecycle(ir, &mut refusals);
+    lifecycle(ir, &actors, &mut suite, &mut refusals);
     bindings(ir, &mut refusals);
 
     Synthesis { suite, refusals }
@@ -434,34 +517,53 @@ fn outcome_scenario(
     actors: &BTreeMap<QualifiedName, ActorRef>,
     refusals: &mut Vec<Refusal>,
 ) -> Option<(ScenarioId, ConformanceScenario)> {
-    let command_ref = CommandRef::new(command.name.clone());
-    let outcome_ref = OutcomeRef::new(command_ref.clone(), outcome.name.clone());
     let id = ScenarioId::Outcome {
-        outcome: outcome_ref.clone(),
+        outcome: OutcomeRef::new(CommandRef::new(command.name.clone()), outcome.name.clone()),
     };
+    let (steps, source) = exercise(ir, command, outcome, actors, &id, refusals)?;
+    Some((
+        id,
+        ConformanceScenario::new(purpose(command, outcome), steps, source),
+    ))
+}
 
-    if let Some((entity, need)) = instance_needed(outcome) {
-        refusals.push(Refusal::about(
-            &id,
-            RefusalCause::InstanceRequired { entity, need },
-        ));
-        return None;
-    }
-
+/// Arrange the instance the branch acts on, run the branch, and assert everything it promises.
+///
+/// The body §10 and §19 share. An outcome scenario and a transition scenario differ in the id they
+/// are filed under and in the sentence they print, and not in what they do — §10's unit is the
+/// branch and §19's is the move, and a suite that dropped one because it resembled the other would
+/// lose the id a fault matrix refers to.
+fn exercise(
+    ir: &EssIr,
+    command: &ResolvedCommand,
+    outcome: &ResolvedOutcome,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+    id: &ScenarioId,
+    refusals: &mut Vec<Refusal>,
+) -> Option<(Vec<ScenarioStep>, BTreeSet<EssSemanticRef>)> {
+    let setup = match prepare(ir, outcome, actors) {
+        Ok(setup) => setup,
+        Err(cause) => {
+            refusals.push(Refusal::about(id, cause));
+            return None;
+        }
+    };
     let input = match reach(ir, command, outcome) {
         Ok(input) => input,
         Err(cause) => {
-            refusals.push(Refusal::about(&id, cause));
+            refusals.push(Refusal::about(id, cause));
             return None;
         }
     };
 
+    let command_ref = CommandRef::new(command.name.clone());
+    let outcome_ref = OutcomeRef::new(command_ref.clone(), outcome.name.clone());
     let emitted: Vec<EventRef> = outcome.emits.iter().map(EventRef::from).collect();
     let absent = siblings_emit(command, outcome, &emitted);
     let actor = actors.get(&command.name).cloned();
-    let (view_steps, views) = view_expectations(ir, outcome, &id, refusals);
+    let (view_steps, views) = view_expectations(ir, outcome, setup.after.as_ref(), id, refusals);
 
-    let mut steps = Vec::new();
+    let mut steps = setup.steps.clone();
     if outcome.test_strategy == TestStrategy::InjectFault {
         // §12: no predicate over a recipient and a template says whether a provider will accept the
         // mail, so the suite injects the answer rather than inventing an input that produces it.
@@ -470,12 +572,12 @@ fn outcome_scenario(
         });
     }
     steps.push(ScenarioStep::ExecuteCommand {
-        command: command_ref.clone(),
+        command: command_ref,
         actor: actor.clone(),
-        input: input.clone(),
+        input: supply(&input, outcome.subject.as_ref(), setup.instance.as_ref()),
     });
     steps.push(ScenarioStep::ExpectOutcome {
-        outcome: outcome_ref.clone(),
+        outcome: outcome_ref,
     });
     if let Some(error) = &outcome.error {
         steps.push(ScenarioStep::ExpectError {
@@ -498,40 +600,368 @@ fn outcome_scenario(
     }
     steps.extend(view_steps);
 
-    let source = dependencies(ir, command, outcome, &absent, actor, &views);
-    Some((
-        id,
-        ConformanceScenario::new(purpose(command, outcome), steps, source),
-    ))
+    let mut source = dependencies(ir, command, outcome, &absent, actor, &views);
+    source.extend(setup.source);
+    Some((steps, source))
 }
 
-/// What an outcome needs of an instance that must already exist, when it needs one.
+/// What has to be true before a branch can be run, and what is true of its subject afterwards.
 ///
-/// `Creates` needs none — the model's own words are "a new instance comes into existence" — and a
-/// branch with no subject changes nothing at all.
+/// Empty for a branch that changes no entity, and for one that *creates* its own subject: a created
+/// instance is the scenario's own doing, so there is nothing to arrange first.
+struct Setup {
+    /// The steps that bring the instance into the state the branch needs.
+    steps: Vec<ScenarioStep>,
+    /// What those steps bound the instance as, where they bound one.
+    instance: Option<InstanceName>,
+    /// The constructs the arrangement depends on, so a change to one makes a stored result stale.
+    source: BTreeSet<EssSemanticRef>,
+    /// The state the subject is in once the branch has been taken, where there is a subject.
+    after: Option<StateName>,
+}
+
+impl Setup {
+    /// Nothing to arrange, and no entity to assert about afterwards.
+    fn none() -> Self {
+        Self {
+            steps: Vec::new(),
+            instance: None,
+            source: BTreeSet::new(),
+            after: None,
+        }
+    }
+}
+
+/// The instance one branch needs, brought to the state that branch may be taken from.
 ///
-/// # A refusal branch of a lifecycle command is still synthesised
-///
-/// `PayInvoice/rejected` declares no subject, because a refused command changes nothing, and its
-/// branch is decided by `amount.amount > 0` and by nothing else. So a scenario for it is what the
-/// specification actually says: this input, this outcome, this error. The `invoice_id` it carries
-/// names no invoice, and the specification does not make it matter — there is no `not_found`
-/// outcome declared.
-///
-/// If an implementation checks existence first and answers something else, the specification is
-/// incomplete and this scenario is how that becomes visible. That is the oracle working, not a
-/// false test: the value proves nothing and is claimed to prove nothing (§11), and the branch it
-/// asserts was decided by evaluation.
-fn instance_needed(outcome: &ResolvedOutcome) -> Option<(EntityRef, InstanceNeed)> {
-    let subject = outcome.subject.as_ref()?;
-    let need = match &subject.effect {
-        ResolvedEffect::Creates => return None,
-        ResolvedEffect::Moves { transition } => InstanceNeed::Moves {
-            transition: transition.name.clone(),
-        },
-        ResolvedEffect::Updates => InstanceNeed::Updates,
+/// `creates:` needs nothing arranged and lands in the lifecycle's `initial`. `moves:` needs an
+/// instance resting in one of the transition's `from` states, and takes the first that the
+/// specification can actually reach — trying them in name order rather than picking one, so a
+/// transition whose only reachable source is the second one still gets a scenario. `updates:` names
+/// no state at all, so the cheapest reachable one is where the lifecycle starts.
+fn prepare(
+    ir: &EssIr,
+    outcome: &ResolvedOutcome,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+) -> Result<Setup, RefusalCause> {
+    let Some(subject) = &outcome.subject else {
+        return Ok(Setup::none());
     };
-    Some((EntityRef::from(&subject.entity), need))
+    let lifecycle = &ir.entity(&subject.entity).lifecycle;
+    let (targets, need): (Vec<StateName>, InstanceNeed) = match &subject.effect {
+        ResolvedEffect::Creates => {
+            return Ok(Setup {
+                after: Some(lifecycle.initial.clone()),
+                ..Setup::none()
+            })
+        }
+        ResolvedEffect::Moves { transition } => (
+            transition.from.iter().cloned().collect(),
+            InstanceNeed::Moves {
+                transition: transition.name.clone(),
+            },
+        ),
+        ResolvedEffect::Updates => (vec![lifecycle.initial.clone()], InstanceNeed::Updates),
+    };
+    let after = match &subject.effect {
+        ResolvedEffect::Moves { transition } => transition.to.clone(),
+        ResolvedEffect::Creates | ResolvedEffect::Updates => lifecycle.initial.clone(),
+    };
+
+    let arrangement = arrange_first(ir, &subject.entity, &targets, actors).map_err(|reason| {
+        RefusalCause::InstanceRequired {
+            entity: EntityRef::from(&subject.entity),
+            need,
+            reason,
+        }
+    })?;
+    Ok(Setup {
+        steps: arrangement.steps,
+        instance: Some(arrangement.instance),
+        source: arrangement.source,
+        after: Some(after),
+    })
+}
+
+/// One instance of an entity, resting in a state, and the name the scenario calls it by.
+struct Arrangement {
+    /// What it is called for the rest of the scenario.
+    instance: InstanceName,
+    /// The steps that produce it.
+    steps: Vec<ScenarioStep>,
+    /// What those steps depend on.
+    source: BTreeSet<EssSemanticRef>,
+}
+
+/// The cheapest of several candidate states the specification can actually reach.
+///
+/// `cancel` may start in `Placed` or in `Held`, and both are legal sources for the same scenario —
+/// so the one taken is the one that needs the fewest commands to set up. Every extra command in an
+/// arrangement is another way for a scenario to fail for a reason that has nothing to do with what
+/// it is testing. Ties go to the lower-named state, and the states arrive in name order, so the
+/// choice is a function of the model (§37).
+///
+/// The error kept is the first one, in name order, so a refusal does not move when an unrelated
+/// state is added to the transition's `from` set.
+fn arrange_first(
+    ir: &EssIr,
+    entity: &EntityHandle,
+    targets: &[StateName],
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+) -> Result<Arrangement, Unreachable> {
+    let mut cheapest: Option<Arrangement> = None;
+    let mut first: Option<Unreachable> = None;
+    for target in targets {
+        match arrange(ir, entity, target, actors) {
+            Ok(arrangement) => {
+                if cheapest
+                    .as_ref()
+                    .is_none_or(|held| arrangement.steps.len() < held.steps.len())
+                {
+                    cheapest = Some(arrangement);
+                }
+            }
+            Err(reason) => {
+                first.get_or_insert(reason);
+            }
+        }
+    }
+    cheapest.ok_or(first.unwrap_or(Unreachable::NothingCreates))
+}
+
+/// Bring one instance of `entity` into existence and drive it to `target`.
+///
+/// Two questions the model can now answer and could not before G21: which outcome brings an instance
+/// into existence, and — the one this gate closed — **which field carries its identity**, so the
+/// steps that follow can name the instance the first step created rather than inventing one.
+///
+/// The route is the shortest sequence of declared, driven transitions from the lifecycle's `initial`
+/// to `target`. Shortest because a scenario is a fixture, not a tour: every extra command is another
+/// way for the arrangement to fail for a reason that has nothing to do with what is being tested.
+fn arrange(
+    ir: &EssIr,
+    entity: &EntityHandle,
+    target: &StateName,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+) -> Result<Arrangement, Unreachable> {
+    let all = ir.drivers();
+    let drivers: &[Driver<'_>] = all.get(entity).map_or(&[], Vec::as_slice);
+    let creator = drivers
+        .iter()
+        .find(|driver| matches!(driver.effect, ResolvedEffect::Creates))
+        .ok_or(Unreachable::NothingCreates)?;
+    let route = route(ir, entity, drivers, target).ok_or_else(|| Unreachable::NoPath {
+        from: ir.entity(entity).lifecycle.initial.clone(),
+    })?;
+
+    let instance = instance_name(&ir.entity(entity).name);
+    let mut steps = Vec::new();
+    let mut source = BTreeSet::new();
+
+    let (created, used) = invoke(ir, creator, None, actors)?;
+    steps.extend(created);
+    source.extend(used);
+    // Where the identity becomes knowable. `creates:` names a field of an event the branch emits,
+    // because the caller could not have named an instance that did not exist when it called — and
+    // because §9's command result already carries the events a command emitted, so binding it here
+    // asks a target for nothing it was not already going to report.
+    let ResolvedInstance::Observed { event, field } = &subject(creator).instance else {
+        // `Subject::surface` makes this a function of the verb, and the verb here is `creates`.
+        unreachable!("a `creates:` link is observed in an event")
+    };
+    steps.push(ScenarioStep::CaptureInstance {
+        instance: instance.clone(),
+        entity: EntityRef::from(entity),
+        event: EventRef::from(event),
+        field: field.name.clone(),
+    });
+    source.insert(EventRef::from(event).into());
+
+    for driver in route {
+        let (moved, used) = invoke(ir, &driver, Some(&instance), actors)?;
+        steps.extend(moved);
+        source.extend(used);
+    }
+    Ok(Arrangement {
+        instance,
+        steps,
+        source,
+    })
+}
+
+/// One command run as part of an arrangement: reach its branch, and require that it was taken.
+///
+/// The outcome is asserted rather than assumed, because an arrangement that quietly failed produces
+/// a scenario that proves nothing and says it passed — which is the shape of green this whole
+/// milestone exists to rule out.
+fn invoke(
+    ir: &EssIr,
+    driver: &Driver<'_>,
+    instance: Option<&InstanceName>,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+) -> Result<(Vec<ScenarioStep>, BTreeSet<EssSemanticRef>), Unreachable> {
+    let command_ref = CommandRef::new(driver.command.name.clone());
+    let outcome_ref = OutcomeRef::new(command_ref.clone(), driver.outcome.name.clone());
+    // The cause is not carried up. That branch has a refusal of its own, under its own id, saying
+    // exactly why no input reaches it; repeating it here would be one defect reported twice with two
+    // repairs to weigh.
+    let input =
+        reach(ir, driver.command, driver.outcome).map_err(|_| Unreachable::Unwitnessable {
+            outcome: outcome_ref.clone(),
+        })?;
+
+    let mut steps = Vec::new();
+    if driver.outcome.test_strategy == TestStrategy::InjectFault {
+        steps.push(ScenarioStep::ConfigureExternalOutcome {
+            force: outcome_ref.clone(),
+        });
+    }
+    steps.push(ScenarioStep::ExecuteCommand {
+        command: command_ref.clone(),
+        actor: actors.get(&driver.command.name).cloned(),
+        input: supply(&input, driver.outcome.subject.as_ref(), instance),
+    });
+    steps.push(ScenarioStep::ExpectOutcome {
+        outcome: outcome_ref.clone(),
+    });
+
+    let source: BTreeSet<EssSemanticRef> = [command_ref.into(), outcome_ref.into()]
+        .into_iter()
+        .collect();
+    Ok((steps, source))
+}
+
+/// The shortest sequence of driven transitions from where the lifecycle starts to `target`.
+///
+/// Breadth-first over the states, with the edges out of each state visited in a fixed order —
+/// transition name, then command, then branch — so the route is a function of the model and not of
+/// how a map happened to iterate (§37).
+fn route<'a>(
+    ir: &EssIr,
+    entity: &EntityHandle,
+    drivers: &[Driver<'a>],
+    target: &StateName,
+) -> Option<Vec<Driver<'a>>> {
+    let lifecycle = &ir.entity(entity).lifecycle;
+    if &lifecycle.initial == target {
+        return Some(Vec::new());
+    }
+
+    let mut edges: BTreeMap<StateName, Vec<(StateName, Driver<'a>)>> = BTreeMap::new();
+    for driver in drivers {
+        let Some(transition) = driver.effect.transition() else {
+            continue;
+        };
+        for from in &transition.from {
+            edges
+                .entry(from.clone())
+                .or_default()
+                .push((transition.to.clone(), *driver));
+        }
+    }
+    for outgoing in edges.values_mut() {
+        outgoing.sort_by_key(|(to, driver)| {
+            (
+                driver
+                    .effect
+                    .transition()
+                    .map(|transition| transition.name.clone())
+                    .unwrap_or_default(),
+                driver.command.name.to_string(),
+                driver.outcome.name.to_string(),
+                to.to_string(),
+            )
+        });
+    }
+
+    let mut came: BTreeMap<StateName, (StateName, Driver<'a>)> = BTreeMap::new();
+    let mut seen: BTreeSet<StateName> = [lifecycle.initial.clone()].into();
+    let mut queue: VecDeque<StateName> = [lifecycle.initial.clone()].into();
+    while let Some(state) = queue.pop_front() {
+        for (to, driver) in edges.get(&state).map(Vec::as_slice).unwrap_or_default() {
+            if !seen.insert(to.clone()) {
+                continue;
+            }
+            came.insert(to.clone(), (state.clone(), *driver));
+            if to == target {
+                let mut route = Vec::new();
+                let mut at = target.clone();
+                while let Some((previous, driver)) = came.get(&at) {
+                    route.push(*driver);
+                    at = previous.clone();
+                }
+                route.reverse();
+                return Some(route);
+            }
+            queue.push_back(to.clone());
+        }
+    }
+    None
+}
+
+/// The subject of a driver's outcome, which a driver always has.
+fn subject<'a>(driver: &Driver<'a>) -> &'a ResolvedSubject {
+    driver.outcome.subject.as_ref().unwrap_or_else(|| {
+        panic!(
+            "a driver is an outcome with a subject: {}",
+            driver.outcome.name
+        )
+    })
+}
+
+/// What a scenario calls one instance of this entity: its local name, in lower-kebab.
+///
+/// Derived from the model rather than counted, so two scenarios about one entity use one word and a
+/// reader of a suite recognises it.
+fn instance_name(entity: &QualifiedName) -> InstanceName {
+    let local = entity.local();
+    let mut out = String::with_capacity(local.len() + 4);
+    for (index, character) in local.char_indices() {
+        if character == '_' || character == '-' {
+            out.push('-');
+        } else if character.is_ascii_uppercase() {
+            if index > 0 && !out.ends_with('-') {
+                out.push('-');
+            }
+            out.push(character.to_ascii_lowercase());
+        } else {
+            out.push(character);
+        }
+    }
+    InstanceName::new(out)
+        .unwrap_or_else(|_| InstanceName::new("subject").expect("`subject` is lower-kebab"))
+}
+
+/// A witness input, with the field that names the instance replaced by the instance itself.
+///
+/// The one place a scenario carries a reference rather than a value. Every other field holds what
+/// synthesis decided against the branch's guard; this one holds "the instance step one created",
+/// because no generator can know an identity a target has not assigned yet.
+///
+/// A guard may not read this field — `ess-domain` refuses that under `unobservable_fact`, since
+/// invariant 13 makes an identity opaque — so replacing it cannot invalidate the decision that chose
+/// the rest of the input.
+fn supply(
+    input: &BTreeMap<String, Node>,
+    subject: Option<&ResolvedSubject>,
+    instance: Option<&InstanceName>,
+) -> BTreeMap<String, ScenarioValue> {
+    let named = subject.and_then(|subject| match &subject.instance {
+        ResolvedInstance::Supplied { field } => Some(field.name.as_str()),
+        ResolvedInstance::Observed { .. } => None,
+    });
+    input
+        .iter()
+        .map(|(field, value)| {
+            let supplied = match (named, instance) {
+                (Some(named), Some(bound)) if named == field => {
+                    ScenarioValue::instance(bound.clone())
+                }
+                _ => ScenarioValue::literal(value.clone()),
+            };
+            (field.clone(), supplied)
+        })
+        .collect()
 }
 
 /// The input that reaches this branch, decided rather than assumed.
@@ -628,25 +1058,26 @@ fn siblings_emit(
         .collect()
 }
 
-/// The view assertions an outcome that brings an instance into existence supports (§14, §20).
+/// The view assertions a branch that changed an entity supports (§14, §20).
 ///
-/// Only for `creates:`. A branch that moves or updates an instance is refused before this is
-/// reached, and a branch with no subject changes nothing a view could show.
+/// `after` is the state the subject is in once the branch has been taken — the lifecycle's `initial`
+/// for a `creates:`, the transition's `to` for a `moves:`, and the state it was arranged in for an
+/// `updates:`. It is passed in rather than re-derived, because deciding a filter against the wrong
+/// state is a wrong assertion rather than a missing one.
+///
+/// A branch with no subject changes nothing a view could show, and produces no steps.
 fn view_expectations(
     ir: &EssIr,
     outcome: &ResolvedOutcome,
+    after: Option<&StateName>,
     id: &ScenarioId,
     refusals: &mut Vec<Refusal>,
 ) -> (Vec<ScenarioStep>, BTreeSet<ViewRef>) {
     let mut steps = Vec::new();
     let mut named = BTreeSet::new();
-    let Some(subject) = &outcome.subject else {
+    let (Some(subject), Some(state)) = (&outcome.subject, after) else {
         return (steps, named);
     };
-    if !matches!(subject.effect, ResolvedEffect::Creates) {
-        return (steps, named);
-    }
-    let state = ir.entity(&subject.entity).lifecycle.initial.clone();
     let projections = ir.projections();
     let Some(views) = projections.get(&subject.entity) else {
         return (steps, named);
@@ -654,7 +1085,7 @@ fn view_expectations(
 
     for view in views {
         let name = ViewRef::new(view.name.clone());
-        let expectation = match shows(view, &state) {
+        let expectation = match shows(view, state) {
             Ok(true) => ViewExpectation::Contains {
                 fields: BTreeMap::new(),
             },
@@ -816,23 +1247,26 @@ fn purpose(command: &ResolvedCommand, outcome: &ResolvedOutcome) -> ScenarioPurp
         "`{}` answers `{}` for {reached}",
         command.name, outcome.name
     );
-    let clipped: String = text.chars().take(ScenarioPurpose::MAX_LENGTH).collect();
-    ScenarioPurpose::new(clipped)
-        .unwrap_or_else(|error| panic!("a synthesised purpose is one line: {error}"))
+    clipped(&text)
 }
 
-/// One refusal per lifecycle scenario §19 asks for, legal and illegal alike.
+/// The two classes of lifecycle scenario §19 asks for, legal and illegal alike.
 ///
-/// Both classes need an instance that already exists, so both are blocked by the same missing link;
-/// see [`RefusalCause::InstanceRequired`]. They are enumerated rather than summarised because each
-/// is a scenario a later slice will produce under the same id, and a fault matrix that refers to
-/// one has to find it in yesterday's refusals as well as in tomorrow's suite.
-fn lifecycle(ir: &EssIr, refusals: &mut Vec<Refusal>) {
+/// Both are sequences over one instance: bring one into existence, drive it to the state in
+/// question, then either take the move and require it happened, or issue the command that must not
+/// be honoured there and require that it did not. Neither could be written before an outcome said
+/// which field names the instance it acts on.
+fn lifecycle(
+    ir: &EssIr,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+    suite: &mut ConformanceSuite,
+    refusals: &mut Vec<Refusal>,
+) {
     for (handle, drivers) in ir.drivers() {
         let entity = EntityRef::from(handle);
-        let lifecycle = &ir.entity(handle).lifecycle;
+        let states = &ir.entity(handle).lifecycle;
 
-        for transition in &lifecycle.transitions {
+        for transition in &states.transitions {
             for driver in drivers
                 .iter()
                 .filter(|driver| driver.takes(&transition.name))
@@ -847,15 +1281,18 @@ fn lifecycle(ir: &EssIr, refusals: &mut Vec<Refusal>) {
                         driver.outcome.name.clone(),
                     ),
                 };
-                refusals.push(Refusal::about(
-                    &id,
-                    RefusalCause::InstanceRequired {
-                        entity: entity.clone(),
-                        need: InstanceNeed::Moves {
-                            transition: transition.name.clone(),
-                        },
-                    },
-                ));
+                let Some((steps, source)) =
+                    exercise(ir, driver.command, driver.outcome, actors, &id, refusals)
+                else {
+                    continue;
+                };
+                let purpose = moving(&entity, transition, driver);
+                insert(
+                    suite,
+                    id,
+                    ConformanceScenario::new(purpose, steps, source),
+                    refusals,
+                );
             }
         }
 
@@ -866,7 +1303,7 @@ fn lifecycle(ir: &EssIr, refusals: &mut Vec<Refusal>) {
             .filter(|driver| driver.effect.transition().is_some())
             .map(|driver| &driver.command.name)
             .collect();
-        for state in &lifecycle.states {
+        for state in &states.states {
             for command in &movers {
                 let legal = drivers.iter().any(|driver| {
                     &driver.command.name == *command
@@ -883,18 +1320,138 @@ fn lifecycle(ir: &EssIr, refusals: &mut Vec<Refusal>) {
                     state: state.clone(),
                     command: CommandRef::new((*command).clone()),
                 };
-                refusals.push(Refusal::about(
-                    &id,
-                    RefusalCause::InstanceRequired {
-                        entity: entity.clone(),
-                        need: InstanceNeed::InState {
-                            state: state.clone(),
-                        },
-                    },
-                ));
+                let Some(scenario) =
+                    refused_here(ir, handle, &drivers, command, state, actors, &id, refusals)
+                else {
+                    continue;
+                };
+                insert(suite, id, scenario, refusals);
             }
         }
     }
+}
+
+/// Adds a scenario, or records the collision as a refusal rather than losing one of the two.
+fn insert(
+    suite: &mut ConformanceSuite,
+    id: ScenarioId,
+    scenario: ConformanceScenario,
+    refusals: &mut Vec<Refusal>,
+) {
+    if let Err(claimed) = suite.insert(id, scenario) {
+        refusals.push(Refusal::about(&claimed, RefusalCause::DuplicateScenario));
+    }
+}
+
+/// The scenario that proves a command is not honoured in a state its moves cannot start from.
+///
+/// Three decisions are worth stating, because each is the difference between a check and a
+/// formality:
+///
+/// * The input is the one that **would have reached the moving branch**. Sending a value the branch
+///   would refuse anyway produces a scenario that passes whether or not the state rule holds.
+/// * There is no `ExpectOutcome`. The specification declares no branch for this case — that is
+///   precisely what makes the combination illegal — so asserting one would be inventing the
+///   rejection mechanism §19 says must come from the declared semantics.
+/// * What is asserted is that the events the move would have published did **not** happen. An
+///   outcome with a subject can neither report an error (invariant 15) nor be silent
+///   (`empty_change`), so a mover always emits something, and there is always something to require
+///   the absence of.
+#[allow(clippy::too_many_arguments)]
+fn refused_here(
+    ir: &EssIr,
+    handle: &EntityHandle,
+    drivers: &[Driver<'_>],
+    command: &QualifiedName,
+    state: &StateName,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+    id: &ScenarioId,
+    refusals: &mut Vec<Refusal>,
+) -> Option<ConformanceScenario> {
+    let entity = EntityRef::from(handle);
+    let movers: Vec<&Driver<'_>> = drivers
+        .iter()
+        .filter(|driver| &driver.command.name == command && driver.effect.transition().is_some())
+        .collect();
+    let attempt = movers.first().copied()?;
+
+    let arrangement = match arrange(ir, handle, state, actors) {
+        Ok(arrangement) => arrangement,
+        Err(reason) => {
+            refusals.push(Refusal::about(
+                id,
+                RefusalCause::InstanceRequired {
+                    entity,
+                    need: InstanceNeed::InState {
+                        state: state.clone(),
+                    },
+                    reason,
+                },
+            ));
+            return None;
+        }
+    };
+    let input = match reach(ir, attempt.command, attempt.outcome) {
+        Ok(input) => input,
+        Err(cause) => {
+            refusals.push(Refusal::about(id, cause));
+            return None;
+        }
+    };
+
+    let command_ref = CommandRef::new(command.clone());
+    let mut steps = arrangement.steps;
+    steps.push(ScenarioStep::ExecuteCommand {
+        command: command_ref.clone(),
+        actor: actors.get(command).cloned(),
+        input: supply(
+            &input,
+            attempt.outcome.subject.as_ref(),
+            Some(&arrangement.instance),
+        ),
+    });
+    let forbidden: BTreeSet<EventRef> = movers
+        .iter()
+        .flat_map(|driver| driver.outcome.emits.iter().map(EventRef::from))
+        .collect();
+    for event in &forbidden {
+        steps.push(ScenarioStep::ExpectNoEvent {
+            event: event.clone(),
+        });
+    }
+
+    let mut source = arrangement.source;
+    source.insert(command_ref.clone().into());
+    source.insert(EntityRef::from(handle).into());
+    for driver in &movers {
+        source.insert(OutcomeRef::new(command_ref.clone(), driver.outcome.name.clone()).into());
+    }
+    source.extend(forbidden.into_iter().map(EssSemanticRef::from));
+    if let Some(actor) = actors.get(command) {
+        source.insert(actor.clone().into());
+    }
+
+    let text = format!("`{command}` does not move a `{entity}` that is in `{state}`");
+    Some(ConformanceScenario::new(clipped(&text), steps, source))
+}
+
+/// One line saying which move a transition scenario proves, and by which verb.
+fn moving(
+    entity: &EntityRef,
+    transition: &ess_domain::entity::Transition,
+    driver: &Driver<'_>,
+) -> ScenarioPurpose {
+    clipped(&format!(
+        "`{}` on `{}` moves a `{entity}` to `{}` along `{}`",
+        driver.command.name, driver.outcome.name, transition.to, transition.name
+    ))
+}
+
+/// A purpose cut to one line, which is what [`ScenarioPurpose`] accepts.
+fn clipped(text: &str) -> ScenarioPurpose {
+    let clipped: String = text.chars().take(ScenarioPurpose::MAX_LENGTH).collect();
+    ScenarioPurpose::new(clipped)
+        .unwrap_or_else(|error| panic!("a synthesised purpose is one line: {error}"))
 }
 
 /// One refusal per binding, until the slice that synthesises §16–§18 lands.
@@ -966,6 +1523,7 @@ mod tests {
                     QualifiedName::new("billing.invoice.Invoice").expect("valid"),
                 ),
                 need: InstanceNeed::Updates,
+                reason: Unreachable::NothingCreates,
             },
             RefusalCause::ViewUndecidable {
                 view: ViewRef::new(QualifiedName::new("billing.invoice.ById").expect("valid")),
@@ -1019,6 +1577,9 @@ mod tests {
                 ),
                 need: InstanceNeed::InState {
                     state: StateName::new("Paid").expect("valid"),
+                },
+                reason: Unreachable::NoPath {
+                    from: StateName::new("Draft").expect("valid"),
                 },
             },
         };

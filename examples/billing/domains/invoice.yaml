@@ -156,6 +156,12 @@ commands:
       - name: accepted
         when: amount.amount > 0
         creates: billing.invoice.Invoice
+        # Which invoice. `creates:` is the one verb whose instance the caller cannot name — the
+        # invoice does not exist when the command is issued and its id is the implementation's to
+        # assign — so `instance:` names the field of an *emitted* event the new identity is
+        # published in. That is what lets the next scenario say "the invoice the previous step
+        # created" instead of inventing one.
+        instance: invoice_id
         emits:
           - billing.invoice.InvoiceCreated
         summary: The invoice is created in Draft.
@@ -181,6 +187,7 @@ commands:
     outcomes:
       - name: issued
         moves: billing.invoice.Invoice.issue
+        instance: invoice_id
         emits:
           - billing.invoice.InvoiceIssued
         summary: The invoice leaves Draft and is now Issued.
@@ -204,6 +211,10 @@ commands:
       - name: settled
         when: amount.amount > 0
         moves: billing.invoice.Invoice.settle
+        # For `moves:` and `updates:` the instance already exists, so `instance:` names the *input*
+        # field that carries its identity. `PayInvoice` takes two fields and only one of them
+        # identifies an invoice; nothing here matches on the type to work that out.
+        instance: invoice_id
         emits:
           - billing.invoice.InvoicePaid
         summary: The payment is accepted and the invoice becomes Paid.
@@ -228,6 +239,7 @@ commands:
     outcomes:
       - name: cancelled
         moves: billing.invoice.Invoice.cancel
+        instance: invoice_id
         emits:
           - billing.invoice.InvoiceCancelled
         summary: The invoice is cancelled, from Draft or from Issued.

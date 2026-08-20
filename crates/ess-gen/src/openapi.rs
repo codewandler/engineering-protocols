@@ -692,6 +692,17 @@ fn outcome_description(ir: &EssIr, outcome: &ResolvedOutcome) -> String {
                 entity.name
             ),
         });
+        // Which one. A caller reading "an invoice has moved" and not which invoice has been told
+        // half of what the specification says, and the half it is missing is the half it supplied.
+        let field = subject.instance.field();
+        parts.push(match subject.instance.event() {
+            None => format!("The instance is the one `{}` names.", field.name),
+            Some(event) => format!(
+                "Its identity is published as `{}` on `{}`.",
+                field.name,
+                ir.event(event).name
+            ),
+        });
     }
     if !outcome.emits.is_empty() {
         let events: Vec<String> = outcome

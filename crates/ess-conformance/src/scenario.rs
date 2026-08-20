@@ -761,6 +761,130 @@ impl<'de> serde::Deserialize<'de> for ScenarioPurpose {
     }
 }
 
+/// What one scenario calls one instance while it runs.
+///
+/// A slot, not an ESS name. The identity itself does not exist until the run that creates it, and
+/// design §37 puts every source of variation on the runner's side — so a suite that carried a
+/// literal id would be a suite whose meaning changed with the target it ran against, and re-running
+/// it would collide with the row the last run left behind. What the suite carries instead is *which*
+/// instance: the one bound by the [`CaptureInstance`](ScenarioStep::CaptureInstance) step earlier in
+/// the same scenario.
+///
+/// Lower-kebab, for the reason [`OutcomeName`] is: this name reaches a generated test, a report and
+/// a diagnostic, and one spelling in the model is one spelling in all three.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(into = "String")]
+pub struct InstanceName(String);
+
+impl InstanceName {
+    /// The pattern published in generated JSON Schema.
+    pub const PATTERN: &'static str = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
+
+    /// Parses one.
+    pub fn new(value: impl AsRef<str>) -> Result<Self, ParseError> {
+        let value = value.as_ref();
+        let reject = |reason: &str| {
+            Err(ParseError::identifier(
+                "instance name",
+                value,
+                reason.to_owned(),
+            ))
+        };
+        if value.is_empty() {
+            return reject("must not be empty");
+        }
+        if !value.starts_with(|character: char| character.is_ascii_lowercase()) {
+            return reject("must start with a lower-case letter; instance names are lower-kebab");
+        }
+        if !value.chars().all(|character| {
+            character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'
+        }) {
+            return reject("may hold only lower-case letters, digits and hyphens");
+        }
+        if value.ends_with('-') || value.contains("--") {
+            return reject("has an empty segment");
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    /// The name as written.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for InstanceName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<InstanceName> for String {
+    fn from(value: InstanceName) -> Self {
+        value.0
+    }
+}
+
+impl FromStr for InstanceName {
+    type Err = ParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::new(value)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for InstanceName {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+/// One value a scenario supplies to a command's input.
+///
+/// Two cases, because a suite can decide one of them and not the other. A [`Literal`](Self::Literal)
+/// is a value synthesis chose and *decided* against the branch's guard; an
+/// [`Instance`](Self::Instance) is the identity of something an earlier step brought into existence,
+/// which no generator can know and every lifecycle scenario needs.
+///
+/// Tagged rather than untagged, deliberately: a declared struct may perfectly well have a field
+/// called `instance`, and an untagged encoding would read such a value as a reference. A tag is two
+/// extra keys in the artifact and no ambiguity at all.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ScenarioValue {
+    /// A value the suite chose.
+    Literal {
+        /// The value.
+        value: Node,
+    },
+    /// The identity of the instance bound under this name earlier in the scenario.
+    Instance {
+        /// Which instance.
+        instance: InstanceName,
+    },
+}
+
+impl ScenarioValue {
+    /// A literal value.
+    pub fn literal(value: Node) -> Self {
+        Self::Literal { value }
+    }
+
+    /// The identity of a bound instance.
+    pub fn instance(name: InstanceName) -> Self {
+        Self::Instance { instance: name }
+    }
+
+    /// The value, where it is one the suite decided.
+    pub fn as_literal(&self) -> Option<&Node> {
+        match self {
+            Self::Literal { value } => Some(value),
+            Self::Instance { .. } => None,
+        }
+    }
+}
+
 // ---- steps ---------------------------------------------------------------------------------
 
 /// One thing a scenario does or requires.
@@ -780,6 +904,22 @@ impl<'de> serde::Deserialize<'de> for ScenarioPurpose {
 /// [`ViewExpectation::Excludes`] are steps, not the absence of steps. A happy-path-only suite is
 /// non-conformant with the design (§10), and "nothing else happened" is exactly the check a wrong
 /// implementation passes by accident when nobody writes it down.
+///
+/// # Steps run in order, and an assertion is about the command before it
+///
+/// A scenario is a sequence, and every step after an
+/// [`ExecuteCommand`](ScenarioStep::ExecuteCommand) is about *that* invocation:
+/// [`ExpectOutcome`](ScenarioStep::ExpectOutcome), [`ExpectError`](ScenarioStep::ExpectError),
+/// [`ExpectEvent`](ScenarioStep::ExpectEvent) and
+/// [`ExpectNoEvent`](ScenarioStep::ExpectNoEvent) all read the result of the last command executed,
+/// which is exactly what §9's `SemanticCommandResult` hands a runner. The same reading is already
+/// how [`ExpectView`](ScenarioStep::ExpectView) relates to the
+/// [`QueryView`](ScenarioStep::QueryView) before it.
+///
+/// The rule became load-bearing when scenarios grew arrangements. A lifecycle scenario cancels an
+/// invoice in order to *reach* `Cancelled` and then requires that cancelling it again publishes
+/// nothing — and `InvoiceCancelled` was legitimately observed earlier in that same scenario. Read
+/// per-command the two are different claims; read per-scenario they contradict each other.
 ///
 /// # Nothing here holds a clock, a token or an id
 ///
@@ -812,12 +952,14 @@ pub enum ScenarioStep {
         actor: Option<ActorRef>,
         /// The input, by declared field name.
         ///
-        /// A [`Node`] tree — the workspace's one format-neutral dynamic value, and the same shape
-        /// [`flatten`](crate::flatten) already projects into the facts a guard reads. A value type
-        /// of this module's own would be a second place for `Map<String, Money>` to mean something
-        /// slightly different.
+        /// A [`ScenarioValue`] per field: either a [`Node`] tree — the workspace's one
+        /// format-neutral dynamic value, and the same shape [`flatten`](crate::flatten) already
+        /// projects into the facts a guard reads — or a reference to an instance an earlier step
+        /// bound. A value type of this module's own would be a second place for `Map<String, Money>`
+        /// to mean something slightly different; a *reference* is not a value at all, which is why
+        /// it is a second case rather than a special [`Node`].
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        input: BTreeMap<String, Node>,
+        input: BTreeMap<String, ScenarioValue>,
     },
     /// Require that the command took this declared branch (§10).
     ///
@@ -854,6 +996,28 @@ pub enum ScenarioStep {
     ExpectNoEvent {
         /// The event that must not appear.
         event: EventRef,
+    },
+    /// Bind the identity of the instance the last command created, so later steps can name it.
+    ///
+    /// The eleventh step, and the one §19 could not be written without: a lifecycle scenario is a
+    /// *sequence* of commands over one instance, and every step after the first has to say which
+    /// instance it acts on. The identity is read out of an event the creating branch emitted,
+    /// because that is where the model says it is published —
+    /// [`ResolvedInstance::Observed`](ess_compiler::ir::ResolvedInstance) — and because §9's command
+    /// result already carries the events a command emitted, so this asks nothing new of a target.
+    ///
+    /// It is a step rather than a field on [`ExpectEvent`](Self::ExpectEvent) because binding is not
+    /// an assertion: a runner that could not bind has failed to *arrange* the scenario, which is a
+    /// different verdict from an expectation that did not hold.
+    CaptureInstance {
+        /// The name later steps refer to it by.
+        instance: InstanceName,
+        /// Whose instance it is.
+        entity: EntityRef,
+        /// The event carrying the identity.
+        event: EventRef,
+        /// The field of that event's payload.
+        field: String,
     },
     /// Read a view (§14).
     ///

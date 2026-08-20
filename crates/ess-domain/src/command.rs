@@ -37,6 +37,37 @@
 //! refused by [`validate_lifecycle_causes`](crate::entity::validate_lifecycle_causes), because a
 //! move nothing can trigger is the lifecycle's version of the type no value can inhabit.
 //!
+//! # An outcome says *which* instance, and the model does not guess
+//!
+//! A verb alone says an invoice moved. It does not say *which* invoice, and a conformance scenario
+//! that cannot say which instance it acts on cannot be written at all — a fabricated identity fails
+//! a correct implementation, which is worse than generating nothing. So a [`Subject`] carries
+//! [`instance`](Subject::instance) beside the verb, naming the field that carries the identity, and
+//! [`Subject::surface`] says which surface that field belongs to:
+//!
+//! | verb | `instance:` names | because |
+//! |---|---|---|
+//! | `creates:` | a field of an event the branch **emits** | the instance did not exist when the command was issued, so the caller could not have named it; what the specification can say is where the new identity becomes observable |
+//! | `moves:` | a field of the command's **input** | the caller has to say which instance to move |
+//! | `updates:` | a field of the command's **input** | likewise |
+//!
+//! One key, and the verb beside it decides the surface — so there is no lookup order to remember and
+//! no ambiguity to resolve. The field's type must be the entity's identity type, which is what stops
+//! `instance: customer_email` naming an invoice.
+//!
+//! **Declared, not inferred.** "The input field whose type is the identity's type" is cheap and
+//! wrong in both directions: a command that takes two of them — a transfer between two accounts, an
+//! order whose `contact` and `alternate_contact` are the same type on purpose in
+//! `examples/oracle-fixture/` — has no answer, and a command that takes none has no answer either.
+//! Worse, it makes the link move when nothing about it changed: adding an unrelated second field of
+//! the identity's type to a command's input would take a scenario id out of the suite, and stable
+//! scenario ids are what a stored conformance result is matched against. The precedent is already in
+//! this model — an entity's `identity:` carries a *name* as well as a type, decided in wave 1 for
+//! exactly this reason.
+//!
+//! The cost is one word per state-changing branch, and only there: a refusal declares no subject
+//! (invariant 15), and a command that changes no entity declares none either.
+//!
 //! # Events carry no transport
 //!
 //! [`EventSpec`] has a name and fields, and deliberately nothing else. A topic, a partition key, a
@@ -61,6 +92,10 @@
 //! | an external outcome states no cause | [`UnexplainedDecision`](ValidationCode::UnexplainedDecision) |
 //! | an outcome is both conditional and external, or declares two of `creates`/`moves`/`updates` | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
 //! | a `moves:` names no entity, only a bare transition | [`MissingDeclaration`](ValidationCode::MissingDeclaration) |
+//! | an outcome declares a subject and no `instance:`, or an `instance:` and no subject | [`MissingDeclaration`](ValidationCode::MissingDeclaration) |
+//! | an `instance:` names no field of the surface its verb decides | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
+//! | an `instance:` names a field that is not typed as the entity's identity | [`TypeMismatch`](ValidationCode::TypeMismatch) |
+//! | a `when` reads the field the outcome's `instance:` names | [`UnobservableFact`](ValidationCode::UnobservableFact) |
 //! | an outcome acts on an entity nothing declares, or takes a transition its subject does not declare | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
 //! | a declared transition no outcome performs | [`MissingCausation`](ValidationCode::MissingCausation) |
 //! | a `when` reads something that is not an input field | [`UnobservableFact`](ValidationCode::UnobservableFact) |
@@ -355,33 +390,88 @@ pub struct Subject {
     /// What it does to it.
     #[serde(flatten)]
     pub effect: Effect,
+    /// Which field carries the identity of the instance, on the surface [`Subject::effect`] decides.
+    ///
+    /// Not optional, so the model cannot hold a subject whose instance nobody can name. See
+    /// [`Subject::instance`] and the [module documentation](self) for which surface the field is
+    /// read from, and why it is declared rather than found by matching the identity's type.
+    pub instance: String,
 }
 
 impl Subject {
-    /// An outcome that brings a new instance of `entity` into existence.
-    pub fn creates(entity: QualifiedName) -> Self {
+    /// An outcome that brings a new instance of `entity` into existence, whose identity the event
+    /// field `instance` publishes.
+    pub fn creates(entity: QualifiedName, instance: impl Into<String>) -> Self {
         Self {
             entity,
             effect: Effect::Creates,
+            instance: instance.into(),
         }
     }
 
-    /// An outcome that moves an instance of `entity` along the transition `transition`.
-    pub fn moves(entity: QualifiedName, transition: impl Into<String>) -> Self {
+    /// An outcome that moves the instance named by the input field `instance` along `transition`.
+    pub fn moves(
+        entity: QualifiedName,
+        transition: impl Into<String>,
+        instance: impl Into<String>,
+    ) -> Self {
         Self {
             entity,
             effect: Effect::Moves {
                 transition: transition.into(),
             },
+            instance: instance.into(),
         }
     }
 
-    /// An outcome that changes an instance of `entity` without moving it.
-    pub fn updates(entity: QualifiedName) -> Self {
+    /// An outcome that changes the instance named by the input field `instance`, without moving it.
+    pub fn updates(entity: QualifiedName, instance: impl Into<String>) -> Self {
         Self {
             entity,
             effect: Effect::Updates,
+            instance: instance.into(),
         }
+    }
+
+    /// Where a scenario reads the instance's identity: the command's input, or an emitted event.
+    ///
+    /// A function of the verb and of nothing else, which is what keeps one key unambiguous. An
+    /// outcome that `moves` or `updates` acts on an instance the caller has to *name*, so the field
+    /// is an input; an outcome that `creates` one acts on an instance that did not exist when the
+    /// command was issued, so the field is the one an emitted event publishes the new identity in.
+    pub fn surface(&self) -> InstanceSurface {
+        match self.effect {
+            Effect::Creates => InstanceSurface::EmittedEvent,
+            Effect::Moves { .. } | Effect::Updates => InstanceSurface::CommandInput,
+        }
+    }
+}
+
+/// Where the field named by [`Subject::instance`] lives.
+///
+/// Two surfaces, and which one applies is read off the verb rather than written a second time:
+/// `creates:` publishes an identity, `moves:` and `updates:` consume one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstanceSurface {
+    /// A field of the command's declared input.
+    CommandInput,
+    /// A field of one of the events the outcome emits.
+    EmittedEvent,
+}
+
+impl InstanceSurface {
+    /// How it reads in a diagnostic.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CommandInput => "input field",
+            Self::EmittedEvent => "field of an emitted event",
+        }
+    }
+}
+
+impl fmt::Display for InstanceSurface {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
     }
 }
 
@@ -671,30 +761,71 @@ impl CommandSpec {
             }
         }
 
-        // A `when` is a predicate over *this command's input* and nothing else. Only the first
-        // segment is resolved here: a deeper path such as `amount.amount` walks into a named
-        // struct, and resolving that belongs with the IR, which knows every type in the system.
-        if let Some(predicate) = outcome.condition.predicate() {
-            for path in predicate.fact_paths() {
-                let root = path.namespace();
-                if !inputs.contains(root) {
-                    errors.push(
-                        ValidationError::new(
-                            ValidationCode::UnobservableFact,
-                            format!("{location}.when"),
-                            format!(
-                                "`{path}` reads `{root}`, which `{}` does not declare as input; a \
-                                 condition on something the caller never supplied cannot be \
-                                 decided when the command arrives",
-                                self.name
-                            ),
-                        )
-                        .with_hint(format!("declared input: {}", join(inputs.iter()))),
-                    );
-                }
+        errors.extend(self.validate_guard(outcome, inputs, &location));
+        errors
+    }
+
+    /// Checks that a branch's condition reads only what the caller supplied, and never an identity.
+    ///
+    /// A `when` is a predicate over *this command's input* and nothing else. Only the first segment
+    /// is resolved here: a deeper path such as `amount.amount` walks into a named struct, and
+    /// resolving that belongs with the IR, which knows every type in the system.
+    fn validate_guard(
+        &self,
+        outcome: &Outcome,
+        inputs: &BTreeSet<&str>,
+        location: &str,
+    ) -> ValidationErrors {
+        let mut errors = ValidationErrors::new();
+        let Some(predicate) = outcome.condition.predicate() else {
+            return errors;
+        };
+
+        for path in predicate.fact_paths() {
+            let root = path.namespace();
+            if !inputs.contains(root) {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::UnobservableFact,
+                        format!("{location}.when"),
+                        format!(
+                            "`{path}` reads `{root}`, which `{}` does not declare as input; a \
+                             condition on something the caller never supplied cannot be decided \
+                             when the command arrives",
+                            self.name
+                        ),
+                    )
+                    .with_hint(format!("declared input: {}", join(inputs.iter()))),
+                );
+                continue;
+            }
+            // Invariant 13, read on a command's branches: an identity is opaque, so nothing may
+            // decide anything by looking inside one. A branch chosen by reading the field that names
+            // the instance would also be a branch a generated scenario cannot honestly reach — it
+            // decides the guard against a witness id and then sends the id of the instance an
+            // earlier step created, which are two different values.
+            let Some(subject) = &outcome.subject else {
+                continue;
+            };
+            if subject.surface() == InstanceSurface::CommandInput && root == subject.instance {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::UnobservableFact,
+                        format!("{location}.when"),
+                        format!(
+                            "outcome `{}` is decided by `{path}`, and `{}` names the instance it \
+                             acts on; an identity is opaque, so no branch may be chosen by reading \
+                             one",
+                            outcome.name, subject.instance
+                        ),
+                    )
+                    .with_hint(
+                        "decide the branch on what the caller supplied about the change, not on \
+                         the identity of what is being changed",
+                    ),
+                );
             }
         }
-
         errors
     }
 
@@ -975,6 +1106,12 @@ pub struct RawOutcome {
     /// The entity this outcome changes without moving along its lifecycle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updates: Option<QualifiedName>,
+    /// Which field carries the identity of the instance this outcome acts on.
+    ///
+    /// Required beside `creates`, `moves` and `updates`, and meaningless without one. The verb
+    /// decides which surface the name is read from — see [`Subject::surface`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<String>,
     /// The events it emits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub emits: Vec<QualifiedName>,
@@ -1037,7 +1174,7 @@ impl TryFrom<RawOutcome> for Outcome {
             (None, Some(cause)) => OutcomeCondition::External { cause },
             (None, None) => OutcomeCondition::Otherwise,
         };
-        let subject = subject_of(&raw.name, raw.creates, raw.moves, raw.updates)?;
+        let subject = subject_of(&raw.name, raw.creates, raw.moves, raw.updates, raw.instance)?;
         Ok(Self {
             name: raw.name,
             condition,
@@ -1059,6 +1196,7 @@ fn subject_of(
     creates: Option<QualifiedName>,
     moves: Option<QualifiedName>,
     updates: Option<QualifiedName>,
+    instance: Option<String>,
 ) -> Result<Option<Subject>, ValidationErrors> {
     let declared: Vec<&'static str> = [
         creates.as_ref().map(|_| "creates"),
@@ -1087,14 +1225,50 @@ fn subject_of(
         .into());
     }
 
+    // One key without the other is half a statement. A subject with no instance is an entity the
+    // specification says a branch changes and gives no way to say *which one*, which is the gap that
+    // stopped every lifecycle scenario being synthesised; an instance with no subject names a field
+    // as the identity of nothing.
+    let instance = match (declared.first(), instance) {
+        (Some(_), Some(field)) => field,
+        (Some(verb), None) => {
+            return Err(ValidationError::new(
+                ValidationCode::MissingDeclaration,
+                format!("outcomes.{name}.{verb}"),
+                format!(
+                    "outcome `{name}` {verb} an entity and declares no `instance`, so nothing says \
+                     which instance it acts on"
+                ),
+            )
+            .with_hint(
+                "add `instance:` naming the input field that carries the identity — or, for \
+                 `creates:`, the field of an emitted event the new identity is published in",
+            )
+            .into());
+        }
+        (None, Some(field)) => {
+            return Err(ValidationError::new(
+                ValidationCode::MissingDeclaration,
+                format!("outcomes.{name}.instance"),
+                format!(
+                    "outcome `{name}` declares `instance: {field}` and none of `creates`, `moves` \
+                     or `updates`, so the field names the identity of nothing"
+                ),
+            )
+            .with_hint("say what this branch does to which entity, or drop the `instance`")
+            .into());
+        }
+        (None, None) => return Ok(None),
+    };
+
     if let Some(entity) = creates {
-        return Ok(Some(Subject::creates(entity)));
+        return Ok(Some(Subject::creates(entity, instance)));
     }
     if let Some(entity) = updates {
-        return Ok(Some(Subject::updates(entity)));
+        return Ok(Some(Subject::updates(entity, instance)));
     }
     let Some(qualified) = moves else {
-        return Ok(None);
+        unreachable!("one of the three keys is declared, and the other two were taken above")
     };
     // `billing.invoice.Invoice.settle` is the entity plus the transition's own name. A bare name
     // with no namespace names no entity at all, and reading it as one would produce a diagnostic
@@ -1111,7 +1285,7 @@ fn subject_of(
         .with_hint("write it as `billing.invoice.Invoice.settle`")
         .into());
     };
-    Ok(Some(Subject::moves(entity, qualified.local())))
+    Ok(Some(Subject::moves(entity, qualified.local(), instance)))
 }
 
 impl TryFrom<RawCommandSpec> for CommandSpec {
@@ -1176,20 +1350,23 @@ impl From<Outcome> for RawOutcome {
             OutcomeCondition::Otherwise => (None, None),
             OutcomeCondition::External { cause } => (None, Some(cause)),
         };
-        let (creates, moves, updates) = match outcome.subject {
-            None => (None, None, None),
+        let (creates, moves, updates, instance) = match outcome.subject {
+            None => (None, None, None, None),
             Some(Subject {
                 entity,
                 effect: Effect::Creates,
-            }) => (Some(entity), None, None),
+                instance,
+            }) => (Some(entity), None, None, Some(instance)),
             Some(Subject {
                 entity,
                 effect: Effect::Moves { transition },
-            }) => (None, Some(entity.child(&transition)), None),
+                instance,
+            }) => (None, Some(entity.child(&transition)), None, Some(instance)),
             Some(Subject {
                 entity,
                 effect: Effect::Updates,
-            }) => (None, None, Some(entity)),
+                instance,
+            }) => (None, None, Some(entity), Some(instance)),
         };
         Self {
             name: outcome.name,
@@ -1198,6 +1375,7 @@ impl From<Outcome> for RawOutcome {
             creates,
             moves,
             updates,
+            instance,
             emits: outcome.emits,
             error: outcome.error,
             summary: outcome.summary,
@@ -1898,12 +2076,15 @@ summary: The requested amount is not positive.
             r"
 name: billing.invoice.PayInvoice
 input:
+  - name: invoice_id
+    type: billing.invoice.InvoiceId
   - name: amount
     type: billing.invoice.Money
 outcomes:
   - name: settled
     when: amount.amount > 0
     moves: billing.invoice.Invoice.settle
+    instance: invoice_id
     emits: [billing.invoice.InvoiceCreated]
   - name: rejected
     error: billing.invoice.InvalidAmount
@@ -1956,7 +2137,11 @@ outcomes:
             Outcome {
                 name: outcome_name("rejected"),
                 condition: OutcomeCondition::Otherwise,
-                subject: Some(Subject::moves(name("billing.invoice.Invoice"), "settle")),
+                subject: Some(Subject::moves(
+                    name("billing.invoice.Invoice"),
+                    "settle",
+                    "invoice_id",
+                )),
                 emits: Vec::new(),
                 error: Some(name("billing.invoice.InvalidAmount")),
                 summary: None,
@@ -1967,6 +2152,132 @@ outcomes:
             "{errors}"
         );
         assert!(errors.to_string().contains("moves"), "{errors}");
+    }
+
+    #[test]
+    fn an_outcome_that_moves_an_entity_without_naming_an_instance_is_refused() {
+        // The gap this gate closes, at the door. A branch that says an invoice moved and not *which*
+        // invoice is a branch no scenario can be written for, and the two answers available to a
+        // generator are both wrong: invent an id and the test fails a correct implementation, or
+        // generate nothing and the suite is quietly short of a check nobody notices.
+        //
+        // The fixture is otherwise complete — a declared entity, a declared move, an emitted event —
+        // so the refusal is about the missing key and not about the rest of it.
+        let raw: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.PayInvoice
+input:
+  - name: invoice_id
+    type: billing.invoice.InvoiceId
+outcomes:
+  - name: settled
+    moves: billing.invoice.Invoice.settle
+    emits: [billing.invoice.InvoiceCreated]
+",
+        )
+        .expect("well formed");
+
+        let errors = CommandSpec::try_from(raw).expect_err("a subject with no instance");
+        assert!(
+            errors.contains(ValidationCode::MissingDeclaration),
+            "{errors}"
+        );
+        let refusal = errors
+            .as_slice()
+            .iter()
+            .find(|error| error.code == ValidationCode::MissingDeclaration)
+            .expect("the refusal");
+        assert!(
+            refusal.location.ends_with("outcomes.settled.moves"),
+            "it points at the key an author would go and edit: {}",
+            refusal.location
+        );
+        assert!(
+            refusal
+                .hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("instance:")),
+            "and says which key to write: {refusal:?}"
+        );
+    }
+
+    #[test]
+    fn an_instance_named_by_a_branch_that_changes_nothing_is_refused() {
+        // The other half of the same rule. `instance:` alone names the identity of nothing — there
+        // is no entity for it to identify — and reading it as harmless would let a `creates:` be
+        // deleted without the link that depends on it being noticed.
+        let raw: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.PayInvoice
+input:
+  - name: invoice_id
+    type: billing.invoice.InvoiceId
+outcomes:
+  - name: settled
+    instance: invoice_id
+    emits: [billing.invoice.InvoiceCreated]
+",
+        )
+        .expect("well formed");
+
+        let errors = CommandSpec::try_from(raw).expect_err("an instance with no subject");
+        assert!(
+            errors.contains(ValidationCode::MissingDeclaration),
+            "{errors}"
+        );
+        assert!(
+            errors.to_string().contains("identity of nothing"),
+            "the message says what is wrong with it, not merely that something is: {errors}"
+        );
+    }
+
+    #[test]
+    fn a_branch_decided_by_the_field_that_names_its_instance_is_refused() {
+        // Invariant 13 — identity is opaque — read on a command's branches. Two things go wrong at
+        // once if this is allowed: the specification decides behaviour by looking inside an id, and
+        // a generated scenario decides the guard against a witness id and then sends the id of the
+        // instance an earlier step created, which are two different values.
+        //
+        // The fixture reaches the state where the rule bites: the guard is well formed, `invoice_id`
+        // *is* a declared input field, and the only thing wrong with reading it is this rule.
+        let command = CommandSpec {
+            name: name("billing.invoice.PayInvoice"),
+            input: vec![
+                Field::new("invoice_id", TypeRef::Named(name("billing.invoice.Email"))),
+                Field::new("amount", TypeRef::Named(name("billing.invoice.Money"))),
+            ],
+            outcomes: vec![
+                Outcome::when(
+                    outcome_name("settled"),
+                    Predicate::parse_expression("invoice_id != \"\"").expect("a predicate"),
+                    vec![name("billing.invoice.InvoiceCreated")],
+                )
+                .acting_on(Subject::moves(
+                    name("billing.invoice.Invoice"),
+                    "settle",
+                    "invoice_id",
+                )),
+                Outcome {
+                    name: outcome_name("rejected"),
+                    condition: OutcomeCondition::Otherwise,
+                    subject: None,
+                    emits: Vec::new(),
+                    error: Some(name("billing.invoice.InvalidAmount")),
+                    summary: None,
+                },
+            ],
+            naming: Naming::default(),
+        };
+
+        let errors = refuse(&command);
+        assert!(
+            errors.contains(ValidationCode::UnobservableFact),
+            "a guard over the field that names the instance is refused: {errors}"
+        );
+        assert!(
+            errors.to_string().contains("opaque"),
+            "and the message says why, so the rule is learnable from one diagnostic: {errors}"
+        );
     }
 
     #[test]

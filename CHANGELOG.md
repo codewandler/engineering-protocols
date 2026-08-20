@@ -9,6 +9,30 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+### Changed
+
+- **A command outcome that changes an entity must say which instance.** `creates:`, `moves:` and
+  `updates:` named the entity; `instance:` now names the field carrying its identity, and an outcome
+  with a subject and no instance is refused. **This will refuse a specification that used to be
+  accepted** — every state-changing outcome needs one word added.
+
+  The reason is a measurement rather than a preference. A generated conformance suite could not test
+  a single lifecycle transition without it: `PayInvoice` settles *an* invoice, and nothing connected
+  its input to that invoice's identity, so twenty-eight scenarios across the two example
+  specifications refused to generate rather than fabricate an id — and a fabricated id fails a
+  *correct* implementation, which is worse than generating nothing. With the link declared, those
+  twenty-eight became scenarios.
+
+  It is declared rather than inferred, because inference has no answer when a command carries two
+  fields of the identity's type and no answer when it carries none — and because an inferred link
+  would silently change which scenarios exist when someone adds an unrelated field, while stored
+  conformance results are keyed on exactly those names. It hangs on the outcome, not the command,
+  for the reason the subject does: a command's branches disagree about what they touch, and a
+  command-level key would attach an instance to a refusal.
+
+  `creates:` is the exception and points at an event rather than the input: a created instance does
+  not exist when the caller calls, so its identity is published rather than supplied.
+
 ### Added
 
 - **`protocol ess graph --format mermaid`.** The system graph as a Mermaid flowchart, unfenced, so it

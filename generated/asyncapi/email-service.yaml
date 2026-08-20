@@ -1,5 +1,5 @@
 # generated from billing v3
-# model digest 2940fd167bf4c4cc
+# model digest 660af2b6d97ea480
 # compiler 0.1.0 · generator 0.1.0
 # do not edit: regenerate with `protocol ess generate`
 asyncapi: 3.0.0
@@ -18,7 +18,7 @@ info:
   x-ess-provenance:
     system: billing
     specification_version: v3
-    source_digest: 2940fd167bf4c4cc
+    source_digest: 660af2b6d97ea480
     compiler_version: 0.1.0
     generator_version: 0.1.0
 defaultContentType: application/json

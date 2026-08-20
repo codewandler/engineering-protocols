@@ -655,9 +655,23 @@ fn state_changes(ir: &EssIr, event: &ResolvedEvent) -> Vec<String> {
                 continue;
             };
             let entity = ir.entity(&subject.entity);
+            // Only where *this* message is the one the model says publishes the identity. A branch
+            // may emit several events and the link names one of them; claiming it of the others
+            // would be this projection speaking for the model.
+            let publishes = subject
+                .instance
+                .event()
+                .filter(|handle| handle.name() == &event.name)
+                .map(|_| {
+                    format!(
+                        " It carries the new instance's identity in `{}`.",
+                        subject.instance.field().name
+                    )
+                })
+                .unwrap_or_default();
             out.push(match &subject.effect {
                 ResolvedEffect::Creates => format!(
-                    "`{}` emits it on `{}`, which creates a `{}` in `{}`.",
+                    "`{}` emits it on `{}`, which creates a `{}` in `{}`.{publishes}",
                     command.name, outcome.name, entity.name, entity.lifecycle.initial
                 ),
                 ResolvedEffect::Moves { transition } => format!(

@@ -90,8 +90,8 @@ pub mod witness;
 pub use decision::{when, Decision, Reason, Unevaluable, UnknownCause};
 pub use input::{flatten, InputFacts, ShapeError, ShapeErrors};
 pub use scenario::{
-    ConformanceScenario, ConformanceSuite, EssSemanticRef, ScenarioId, ScenarioPurpose,
-    ScenarioStep, SuiteProvenance,
+    ConformanceScenario, ConformanceSuite, EssSemanticRef, InstanceName, ScenarioId,
+    ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance,
 };
-pub use synthesize::{synthesize, InstanceNeed, Refusal, RefusalCause, Synthesis};
+pub use synthesize::{synthesize, InstanceNeed, Refusal, RefusalCause, Synthesis, Unreachable};
 pub use witness::WitnessGap;

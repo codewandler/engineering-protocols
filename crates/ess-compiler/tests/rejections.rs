@@ -14,7 +14,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ess_compiler::diagnostic::{Code, Detail, Diagnostics};
-use ess_compiler::ir::{EssIr, ResolvedMappingValue};
+use ess_compiler::ir::{EssIr, ResolvedInstance, ResolvedMappingValue};
 use ess_compiler::resolve::{codes, compile};
 use ess_compiler::source::SourceMap;
 use ess_domain::binding::{BindingName, BindingSpec, Delivery, Failure, MappingSource};
@@ -421,10 +421,14 @@ fn an_outcome_that_acts_on_an_entity_nobody_declares_is_refused() {
         entities: vec![entity("shop.orders.Order", "close")],
         commands: vec![command(
             "shop.orders.Close",
-            Vec::new(),
+            vec![field("order_id", "String")],
             vec![acting(
                 "closed",
-                ess_domain::command::Subject::moves(name("shop.orders.Receipt"), "close"),
+                ess_domain::command::Subject::moves(
+                    name("shop.orders.Receipt"),
+                    "close",
+                    "order_id",
+                ),
             )],
         )],
         ..Fixture::default()
@@ -445,10 +449,14 @@ fn an_outcome_that_takes_a_move_the_entity_does_not_declare_is_refused() {
         entities: vec![entity("shop.orders.Order", "close")],
         commands: vec![command(
             "shop.orders.Close",
-            Vec::new(),
+            vec![field("order_id", "String")],
             vec![acting(
                 "closed",
-                ess_domain::command::Subject::moves(name("shop.orders.Order"), "settle"),
+                ess_domain::command::Subject::moves(
+                    name("shop.orders.Order"),
+                    "settle",
+                    "order_id",
+                ),
             )],
         )],
         ..Fixture::default()
@@ -474,6 +482,77 @@ fn an_outcome_that_takes_a_move_the_entity_does_not_declare_is_refused() {
 }
 
 #[test]
+fn an_outcome_whose_instance_is_not_typed_as_the_identity_is_refused_as_a_type_mismatch() {
+    // The link between a command and the instance it acts on, resolved here for the reason the
+    // entity and the transition are: there is no `ResolvedField` to carry for a field that is not
+    // there, and no honest one to carry for a field of the wrong type. `order_id` here is an
+    // `Integer` and an `Order` is identified by a `String`, so the name resolves and the link does
+    // not — which is exactly the case a name check alone would let through.
+    let diagnostics = Fixture {
+        entities: vec![entity("shop.orders.Order", "close")],
+        commands: vec![command(
+            "shop.orders.Close",
+            vec![field("order_id", "Integer")],
+            vec![acting(
+                "closed",
+                ess_domain::command::Subject::moves(name("shop.orders.Order"), "close", "order_id"),
+            )],
+        )],
+        ..Fixture::default()
+    }
+    .refused();
+
+    assert!(
+        diagnostics.contains(codes::COMMAND_TYPE_MISMATCH),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.as_slice().iter().any(|diagnostic| {
+            diagnostic.details.iter().any(|detail| {
+                matches!(
+                    detail,
+                    Detail::Typed { subject, type_ref, requires }
+                        if subject == "shop.orders.Close.order_id" && type_ref == "String" && *requires
+                )
+            })
+        }),
+        "the type the position requires is a field, not a sentence: {diagnostics}"
+    );
+}
+
+#[test]
+fn an_outcome_whose_instance_names_no_input_field_is_refused() {
+    // The other half. `reference` is well formed and names nothing the command takes, so it gets the
+    // code every other well-formed name pointing at nothing gets.
+    let diagnostics = Fixture {
+        entities: vec![entity("shop.orders.Order", "close")],
+        commands: vec![command(
+            "shop.orders.Close",
+            vec![field("order_id", "String")],
+            vec![acting(
+                "closed",
+                ess_domain::command::Subject::moves(
+                    name("shop.orders.Order"),
+                    "close",
+                    "reference",
+                ),
+            )],
+        )],
+        ..Fixture::default()
+    }
+    .refused();
+
+    assert!(
+        diagnostics.contains(codes::COMMAND_UNDECLARED_REFERENCE),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.to_string().contains("order_id"),
+        "the fields it does take are offered: {diagnostics}"
+    );
+}
+
+#[test]
 fn a_resolved_outcome_carries_the_move_itself_rather_than_its_name() {
     // The one place this IR resolves a reference to a *value* instead of to a handle: a transition
     // is declared inside a lifecycle and has no map on `EssIr` to be keyed in, so a projection gets
@@ -482,10 +561,10 @@ fn a_resolved_outcome_carries_the_move_itself_rather_than_its_name() {
         entities: vec![entity("shop.orders.Order", "close")],
         commands: vec![command(
             "shop.orders.Close",
-            Vec::new(),
+            vec![field("order_id", "String")],
             vec![acting(
                 "closed",
-                ess_domain::command::Subject::moves(name("shop.orders.Order"), "close"),
+                ess_domain::command::Subject::moves(name("shop.orders.Order"), "close", "order_id"),
             )],
         )],
         ..Fixture::default()
@@ -507,6 +586,20 @@ fn a_resolved_outcome_carries_the_move_itself_rather_than_its_name() {
         subject.entity.name(),
         &name("shop.orders.Order"),
         "the subject is a handle, so `EssIr::entity` answers whose invariants a scenario checks"
+    );
+    // The third part, resolved the same way and for the same reason: a projection asking "which
+    // instance" gets the field, with its type and its wire name, rather than a name to look up.
+    let ResolvedInstance::Supplied { field } = &subject.instance else {
+        panic!(
+            "a `moves:` is supplied by the caller: {:?}",
+            subject.instance
+        )
+    };
+    assert_eq!(field.name, "order_id");
+    assert_eq!(
+        field.type_ref.to_string(),
+        "String",
+        "and it is the entity's identity type, which is what makes the link mean anything"
     );
 
     // And the same relation, read the way a lifecycle diagram asks it.

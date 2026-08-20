@@ -242,6 +242,7 @@ impl Specification {
         errors.extend(crate::entity::validate_lifecycle_causes(
             &self.entities,
             &self.commands,
+            &self.events,
         ));
 
         let catalogue = EntityCatalogue::new(self.entities.values());
@@ -779,9 +780,13 @@ entities:
 
 commands:
   - name: shop.cart.CloseCart
+    input:
+      - name: cart_id
+        type: String
     outcomes:
       - name: closed
         moves: shop.cart.Cart.close
+        instance: cart_id
         emits: [shop.cart.CartClosed]
 
 events:

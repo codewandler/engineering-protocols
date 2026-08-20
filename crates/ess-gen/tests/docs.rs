@@ -455,6 +455,28 @@ fn a_commands_refusal_branch_is_documented_and_not_only_its_name() {
 }
 
 #[test]
+fn an_outcome_that_changes_an_entity_says_which_instance_and_where_the_identity_is_read() {
+    // A page that says an invoice moved and not *which* invoice describes a system nobody can call.
+    // The two sentences differ because the two surfaces do, and both are on the page: an existing
+    // instance is named by the caller, and a new one is announced by the event the branch emits,
+    // because it did not exist when the request was made.
+    let docs = docs();
+    let invoice = page(&docs, "docs/domains/billing.invoice.md");
+
+    assert_says(
+        &invoice,
+        "The instance is the one named by the input field `invoice_id`.",
+        "a `moves:` acts on the instance the caller names",
+    );
+    assert_says(
+        &invoice,
+        "The new instance's identity is published as `invoice_id` on \
+         `billing.invoice.InvoiceCreated`.",
+        "a `creates:` cannot be told which instance, so the page says where its identity appears",
+    );
+}
+
+#[test]
 fn an_outcome_the_input_cannot_decide_says_so_rather_than_claiming_it_is_unreachable() {
     let docs = docs();
     let email = page(&docs, "docs/domains/billing.email.md");

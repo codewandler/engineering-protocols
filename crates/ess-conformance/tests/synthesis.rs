@@ -19,8 +19,8 @@ use ess_compiler::diagnostic::Code;
 use ess_compiler::ir::EssIr;
 use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
-use ess_conformance::scenario::{ScenarioStep, ViewExpectation};
-use ess_conformance::synthesize::{synthesize, RefusalCause, Synthesis};
+use ess_conformance::scenario::{ScenarioStep, ScenarioValue, ViewExpectation};
+use ess_conformance::synthesize::{synthesize, RefusalCause, Synthesis, Unreachable};
 use ess_conformance::{flatten, when, Decision, ScenarioId};
 use ess_domain::name::QualifiedName;
 use ess_domain::spec::{RawSpecFile, Specification};
@@ -113,6 +113,7 @@ fn shape(synthesis: &Synthesis, id: &str) -> Vec<&'static str> {
             ScenarioStep::ExpectError { .. } => "error",
             ScenarioStep::ExpectEvent { .. } => "event",
             ScenarioStep::ExpectNoEvent { .. } => "no-event",
+            ScenarioStep::CaptureInstance { .. } => "capture",
             ScenarioStep::QueryView { .. } => "query",
             ScenarioStep::ExpectView { .. } => "view",
             ScenarioStep::EventuallyEvent { .. } => "eventually-event",
@@ -131,15 +132,24 @@ fn steps<'a>(synthesis: &'a Synthesis, id: &str) -> &'a [ScenarioStep] {
         .steps
 }
 
-/// The input one scenario sends.
-fn sent(synthesis: &Synthesis, id: &str) -> BTreeMap<String, Node> {
+/// The input one scenario sends, in the *last* command it runs — the one it is about.
+fn sent(synthesis: &Synthesis, id: &str) -> BTreeMap<String, ScenarioValue> {
     steps(synthesis, id)
         .iter()
+        .rev()
         .find_map(|step| match step {
             ScenarioStep::ExecuteCommand { input, .. } => Some(input.clone()),
             _ => None,
         })
         .unwrap_or_else(|| panic!("`{id}` invokes a command"))
+}
+
+/// The literal half of that input, which is every field a guard is allowed to read.
+fn literals(synthesis: &Synthesis, id: &str) -> BTreeMap<String, Node> {
+    sent(synthesis, id)
+        .into_iter()
+        .filter_map(|(field, value)| value.as_literal().cloned().map(|node| (field, node)))
+        .collect()
 }
 
 /// The view expectation one scenario makes of `view`, and the step it makes it in.
@@ -204,15 +214,19 @@ fn every_declared_outcome_is_either_a_scenario_or_a_named_refusal() {
         "an outcome that is neither in the suite nor in a refusal has disappeared"
     );
     assert_eq!(
-        ids(&synthesis),
-        vec![
-            "billing.email.SendEmail/outcome/failed",
-            "billing.email.SendEmail/outcome/sent",
-            "billing.invoice.CreateInvoice/outcome/accepted",
-            "billing.invoice.CreateInvoice/outcome/rejected",
-            "billing.invoice.PayInvoice/outcome/rejected",
-        ],
-        "the suite billing produces today"
+        covered.len(),
+        declared.len(),
+        "and every one of them is now a scenario rather than a refusal: {:?}",
+        refused(&synthesis)
+    );
+    assert!(
+        ids(&synthesis)
+            .iter()
+            .filter(|id| id.contains("/outcome/"))
+            .count()
+            == declared.len(),
+        "the eight outcomes billing declares are eight scenarios: {:?}",
+        ids(&synthesis)
     );
 }
 
@@ -314,14 +328,14 @@ fn the_input_a_scenario_sends_is_re_decided_against_the_guard_it_claims_to_reach
                     &flatten(
                         &ir,
                         command,
-                        &sent(&synthesis, "billing.invoice.CreateInvoice/outcome/rejected"),
+                        &literals(&synthesis, "billing.invoice.CreateInvoice/outcome/rejected"),
                     )
                     .expect("the input fits"),
                 ),
             ),
         ),
     ] {
-        let input = sent(&synthesis, id);
+        let input = literals(&synthesis, id);
         let facts = flatten(&ir, command, &input).expect("a synthesised input fits its own type");
         assert_eq!(
             facts.decide(guard),
@@ -533,103 +547,318 @@ fn a_filter_reading_something_no_scenario_knows_refuses_rather_than_guessing() {
     );
 }
 
-// ---- §19: lifecycle, and the link that is still missing -----------------------------------------
+// ---- §19: lifecycle, over an instance the specification can name ---------------------------------
 
 #[test]
-fn an_outcome_that_moves_an_existing_instance_refuses_rather_than_inventing_an_identity() {
-    // G14 closed *which command drives a transition*. What is still unanswered is which input names
-    // the instance: nothing relates a command's input to the subject's identity, so a scenario
-    // cannot say "the invoice the previous step created" and a fabricated id would be a test that
-    // fails against a correct implementation.
+fn a_scenario_that_moves_an_instance_names_the_one_an_earlier_step_created() {
+    // The gate, end to end. `PayInvoice` cannot be exercised against nothing: the invoice has to
+    // exist and be `Issued` first, and the scenario has to say *which* invoice it is paying. The
+    // identity is never fabricated — it is bound out of the event `CreateInvoice/accepted` declares
+    // publishes it, so the value is the target's.
     let synthesis = synthesize(&example("billing"));
+    let id = "billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled";
 
-    let refused_here: Vec<String> = synthesis
-        .refused(code(4))
-        .filter_map(|refusal| refusal.scenario.as_ref())
-        .map(ToString::to_string)
-        .collect();
+    assert_eq!(
+        shape(&synthesis, id),
+        vec![
+            "execute",
+            "outcome",
+            "capture",
+            "execute",
+            "outcome",
+            "execute",
+            "outcome",
+            "event",
+            "eventually-view",
+            "query",
+            "view"
+        ],
+        "create, bind the new invoice, issue it, then pay it and assert what that promises"
+    );
 
-    for expected in [
-        "billing.invoice.IssueInvoice/outcome/issued",
-        "billing.invoice.PayInvoice/outcome/settled",
-        "billing.invoice.CancelInvoice/outcome/cancelled",
-        "billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled",
-        "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.CancelInvoice",
-    ] {
-        assert!(
-            refused_here.iter().any(|id| id == expected),
-            "`{expected}` must appear as a refusal rather than as an absence: {refused_here:?}"
-        );
-        assert!(
-            synthesis
-                .suite
-                .scenario(&ScenarioId::parse(expected).expect("an id"))
-                .is_none(),
-            "`{expected}` must not be in the suite"
+    let bound = steps(&synthesis, id)
+        .iter()
+        .find_map(|step| match step {
+            ScenarioStep::CaptureInstance {
+                instance,
+                entity,
+                event,
+                field,
+            } => Some((
+                instance.to_string(),
+                entity.to_string(),
+                event.to_string(),
+                field.clone(),
+            )),
+            _ => None,
+        })
+        .expect("the scenario binds the invoice it created");
+    assert_eq!(
+        bound,
+        (
+            "invoice".to_owned(),
+            "billing.invoice.Invoice".to_owned(),
+            "billing.invoice.InvoiceCreated".to_owned(),
+            "invoice_id".to_owned()
+        ),
+        "the identity is read where the model says it is published, and nowhere else"
+    );
+
+    // Every later command names that binding rather than a value, and the fields the guard reads
+    // are still literals the synthesizer decided.
+    for step in steps(&synthesis, id) {
+        let ScenarioStep::ExecuteCommand { command, input, .. } = step else {
+            continue;
+        };
+        if command.to_string() == "billing.invoice.CreateInvoice" {
+            continue;
+        }
+        assert_eq!(
+            input.get("invoice_id"),
+            Some(&ScenarioValue::instance(
+                "invoice".parse().expect("a valid instance name")
+            )),
+            "`{command}` must act on the invoice step one created, not on an invented id"
         );
     }
-    assert_eq!(
-        synthesis.refused(code(4)).count(),
-        14,
-        "three outcomes, three transitions and eight state/command pairs the lifecycle forbids"
+    assert!(
+        sent(&synthesis, id)
+            .get("amount")
+            .and_then(ScenarioValue::as_literal)
+            .is_some(),
+        "and the field its guard reads is still a decided value"
     );
 }
 
 #[test]
-fn every_declared_transition_is_named_by_a_scenario_id_that_does_not_exist_yet() {
+fn every_declared_transition_has_a_scenario_that_proves_it_can_occur() {
     // §19's first class — *for every declared transition, generate a scenario that proves it can
-    // occur* — enumerated rather than summarised, so the id a fault matrix will refer to is already
-    // the id the refusal carries.
+    // occur under a valid witness* — now in the suite rather than in the refusals. Read from the
+    // model rather than from a list, so a transition added to the example has to gain a scenario.
     let ir = example("billing");
     let synthesis = synthesize(&ir);
 
-    let transitions: BTreeSet<String> = refused(&synthesis)
+    let mut expected: BTreeSet<String> = BTreeSet::new();
+    for (entity, drivers) in ir.drivers() {
+        for driver in &drivers {
+            if let Some(transition) = driver.effect.transition() {
+                expected.insert(format!(
+                    "{}/transition/{}/by/{}/{}",
+                    entity.name(),
+                    transition.name,
+                    driver.command.name,
+                    driver.outcome.name
+                ));
+            }
+        }
+    }
+    assert_eq!(expected.len(), 3, "billing declares three moves");
+
+    let synthesised: BTreeSet<String> = ids(&synthesis)
         .into_iter()
         .filter(|id| id.contains("/transition/"))
         .collect();
     assert_eq!(
-        transitions,
-        BTreeSet::from([
-            "billing.invoice.Invoice/transition/cancel/by/billing.invoice.CancelInvoice/cancelled"
-                .to_owned(),
-            "billing.invoice.Invoice/transition/issue/by/billing.invoice.IssueInvoice/issued"
-                .to_owned(),
-            "billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled"
-                .to_owned(),
-        ]),
-        "one per declared transition, naming the outcome that drives it"
+        synthesised, expected,
+        "one scenario per declared move, naming the outcome that drives it"
+    );
+    assert!(
+        refused(&synthesis)
+            .iter()
+            .all(|id| !id.contains("/transition/")),
+        "and none of them is refused: {:?}",
+        refused(&synthesis)
     );
 }
 
 #[test]
-fn an_outcome_that_updates_an_instance_refuses_for_the_same_reason_one_that_moves_it_does() {
-    // `updates:` is why `examples/oracle-fixture/` declares `AmendOrder`: billing has no outcome
-    // that changes an entity without moving it, so §20's case has no instance there.
-    let synthesis = synthesize(&example("oracle-fixture"));
+fn a_move_that_is_illegal_in_a_state_is_attempted_with_the_input_that_would_have_worked() {
+    // §19's second class, and the assertion that makes it a check rather than a formality. The
+    // input sent is the one that reaches the *moving* branch — send an amount the branch would
+    // refuse anyway and the scenario passes whether or not the state rule holds — and what is
+    // required is that the event the move publishes did not happen, because the specification
+    // declares no outcome for this combination and inventing one would be inventing the rejection
+    // mechanism §19 says must come from the declared semantics.
+    let synthesis = synthesize(&example("billing"));
+    let id = "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.PayInvoice";
+
+    assert_eq!(
+        shape(&synthesis, id),
+        vec![
+            "execute", "outcome", "capture", "execute", "outcome", "execute", "outcome", "execute",
+            "no-event"
+        ],
+        "drive the invoice to `Paid`, then pay it again — and assert no outcome, because none is \
+         declared for this"
+    );
+
+    let amount = sent(&synthesis, id)
+        .get("amount")
+        .and_then(ScenarioValue::as_literal)
+        .cloned()
+        .expect("the second payment carries an amount");
+    let ir = example("billing");
+    let command = ir
+        .commands
+        .get(&QualifiedName::new("billing.invoice.PayInvoice").expect("valid"))
+        .expect("declared");
+    let settled = command
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.name.as_str() == "settled")
+        .expect("the branch that moves it");
+    // Decided against the guard a second time, from outside the synthesizer. The identity is
+    // borrowed from the sibling scenario that sends a literal one: a guard may not read the field
+    // that names the instance — `ess-domain` refuses that, because invariant 13 makes an identity
+    // opaque — so which id stands in the map cannot change the answer.
+    let mut input = literals(&synthesis, "billing.invoice.PayInvoice/outcome/rejected");
+    input.insert("amount".to_owned(), amount);
+    let facts = flatten(&ir, command, &input).expect("the input fits its declared types");
+    assert_eq!(
+        facts.decide(when(settled).expect("`settled` is guarded")),
+        Decision::Satisfied,
+        "the attempt has to be one the branch would otherwise have taken; anything else proves \
+         nothing about the state"
+    );
+
+    let absent: Vec<String> = steps(&synthesis, id)
+        .iter()
+        .filter_map(|step| match step {
+            ScenarioStep::ExpectNoEvent { event } => Some(event.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        absent,
+        vec!["billing.invoice.InvoicePaid"],
+        "what must not happen is the fact the move would have published"
+    );
+}
+
+#[test]
+fn a_state_reached_only_through_a_branch_no_input_reaches_is_refused_rather_than_arranged() {
+    // The refusal that survives the gate. `Held` is declared, reachable and driven — and the branch
+    // that drives it is guarded by `quantity == 0.5`, which no `Integer` satisfies. So the state
+    // exists on paper and no scenario can set it up, and everything downstream of it says so with
+    // the code and the reason rather than being dropped: a suite quietly holding fewer checks than
+    // the specification requires is the failure §36 exists to prevent.
+    let synthesis = synthesize(&fixture(UNWITNESSABLE_ROUTE));
 
     let refusal = synthesis
-        .refusals
-        .iter()
-        .find(|refusal| {
-            refusal
-                .scenario
-                .as_ref()
-                .is_some_and(|id| id.to_string() == "oracle.order.AmendOrder/outcome/amended")
-        })
-        .unwrap_or_else(|| panic!("`amended` refuses: {:?}", refused(&synthesis)));
-
-    assert_eq!(refusal.code(), code(4));
-    assert!(
-        refusal.to_string().contains("to change without moving"),
-        "the refusal says which of the three verbs it could not reach: {refusal}"
+        .refused(code(4))
+        .next()
+        .unwrap_or_else(|| panic!("the route refuses: {:?}", refused(&synthesis)));
+    let RefusalCause::InstanceRequired { reason, .. } = &refusal.cause else {
+        panic!("{refusal}")
+    };
+    let Unreachable::Unwitnessable { outcome } = reason else {
+        panic!("{refusal}")
+    };
+    assert_eq!(
+        outcome.to_string(),
+        "stuck.orders.HoldOrder/held",
+        "the refusal names the branch that cannot be reached, so a reader goes to its own refusal \
+         for the reason"
     );
     assert!(
-        synthesis
-            .suite
-            .scenario(&ScenarioId::parse("oracle.order.AmendOrder/outcome/rejected").expect("id"))
-            .is_some(),
-        "while the branch that changes nothing is still synthesised: a refused command has no \
-         subject, so it needs no instance"
+        synthesis.refused(code(3)).any(|other| other
+            .scenario
+            .as_ref()
+            .is_some_and(|id| id.to_string() == "stuck.orders.HoldOrder/outcome/held")),
+        "and that refusal is there, carrying the guard nothing satisfies: {:?}",
+        refused(&synthesis)
+    );
+
+    // Refusing one branch is not refusing the family: what does not depend on `Held` is synthesised.
+    assert!(
+        ids(&synthesis)
+            .iter()
+            .any(|id| id == "stuck.orders.PlaceOrder/outcome/accepted"),
+        "{:?}",
+        ids(&synthesis)
+    );
+}
+
+#[test]
+fn an_entity_nothing_creates_cannot_be_acted_on_and_says_so() {
+    // The other surviving reason, and the one `ess-domain` deliberately does not refuse: an entity
+    // may arrive from a migration or from a system outside this document. It is still true that no
+    // scenario can act on an instance nothing brings into existence, and the refusal is where that
+    // becomes visible rather than a suite that is quietly three checks short.
+    let synthesis = synthesize(&fixture(NOTHING_CREATES));
+
+    let refusal = synthesis
+        .refused(code(4))
+        .next()
+        .unwrap_or_else(|| panic!("the entity refuses: {:?}", refused(&synthesis)));
+    let RefusalCause::InstanceRequired { reason, .. } = &refusal.cause else {
+        panic!("{refusal}")
+    };
+    assert_eq!(*reason, Unreachable::NothingCreates);
+    assert!(
+        refusal.hint().contains("creates:"),
+        "the hint names the key to write: {}",
+        refusal.hint()
+    );
+}
+
+#[test]
+fn an_outcome_that_updates_an_instance_acts_on_one_the_scenario_created() {
+    // `updates:` is why `examples/oracle-fixture/` declares `AmendOrder`: billing has no outcome
+    // that changes an entity without moving it, so §20's case has no instance there. It names no
+    // state, so the cheapest reachable one — where the lifecycle starts — is where it is arranged.
+    let synthesis = synthesize(&example("oracle-fixture"));
+    let id = "oracle.order.AmendOrder/outcome/amended";
+
+    assert_eq!(
+        shape(&synthesis, id),
+        vec![
+            "execute",
+            "outcome",
+            "capture",
+            "execute",
+            "outcome",
+            "event",
+            "eventually-view",
+            "query",
+            "view"
+        ],
+        "place an order, bind it, then amend that one"
+    );
+    assert_eq!(
+        sent(&synthesis, id).get("order_id"),
+        Some(&ScenarioValue::instance(
+            "order".parse().expect("a valid instance name")
+        )),
+        "the amendment acts on the order step one placed"
+    );
+    let (block, open) = expectation(&synthesis, id, "oracle.order.OpenOrders");
+    assert_eq!(block, "expect", "`OpenOrders` is `read_your_writes`");
+    assert!(
+        matches!(open, ViewExpectation::Contains { .. }),
+        "an amended order has not moved, so it is still open: {open:?}"
+    );
+}
+
+#[test]
+fn a_move_is_observed_through_the_view_the_state_it_left_is_filtered_on() {
+    // What a transition scenario asserts beyond "the command answered": the invoice was `Issued`
+    // and is now `Paid`, so the view filtered on `Issued` must no longer hold it. Without this the
+    // scenario proves a branch was taken and nothing about the state it left.
+    let synthesis = synthesize(&example("billing"));
+    let settled = "billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled";
+    let issued = "billing.invoice.Invoice/transition/issue/by/billing.invoice.IssueInvoice/issued";
+
+    let (_, after_payment) =
+        expectation(&synthesis, settled, "billing.invoice.OutstandingInvoices");
+    assert!(
+        matches!(after_payment, ViewExpectation::Excludes { .. }),
+        "a paid invoice is not outstanding: {after_payment:?}"
+    );
+    let (_, after_issue) = expectation(&synthesis, issued, "billing.invoice.OutstandingInvoices");
+    assert!(
+        matches!(after_issue, ViewExpectation::Contains { .. }),
+        "and an issued one is, which is the other half of the same rule: {after_issue:?}"
     );
 }
 
@@ -894,6 +1123,7 @@ commands:
     outcomes:
       - name: accepted
         creates: hidden.orders.Order
+        instance: order_id
         emits:
           - hidden.orders.OrderPlaced
 
@@ -904,6 +1134,7 @@ commands:
     outcomes:
       - name: shipped
         moves: hidden.orders.Order.ship
+        instance: order_id
         emits:
           - hidden.orders.OrderShipped
 
@@ -915,4 +1146,143 @@ views:
     fields:
       - name: order_id
         type: hidden.orders.OrderId
+";
+
+/// A state whose only way in is a branch no input reaches.
+///
+/// `hold` is guarded by `quantity == 0.5` and `quantity` is an `Integer`, so every candidate is
+/// decided and none satisfies it. `Held` is therefore declared, reachable on paper — `ess-domain`
+/// refuses a state nothing reaches, so it has to be — and impossible to arrange, which is the one
+/// shape of unreachability a valid specification can still carry.
+const UNWITNESSABLE_ROUTE: &str = r"
+format: ess/1
+system: stuck
+version: v1
+domain: stuck.orders
+
+types:
+  - name: stuck.orders.OrderId
+    kind: newtype
+    of: Uuid
+
+errors:
+  - name: stuck.orders.Refused
+    summary: The hold was refused.
+
+entities:
+  - name: stuck.orders.Order
+    identity:
+      name: order_id
+      type: stuck.orders.OrderId
+    lifecycle:
+      initial: Placed
+      states: [Placed, Held, Cancelled]
+      terminal: [Cancelled]
+      transitions:
+        - name: hold
+          from: [Placed]
+          to: Held
+        - name: cancel
+          from: [Held]
+          to: Cancelled
+
+events:
+  - name: stuck.orders.OrderPlaced
+    fields:
+      - name: order_id
+        type: stuck.orders.OrderId
+
+  - name: stuck.orders.OrderHeld
+    fields:
+      - name: order_id
+        type: stuck.orders.OrderId
+
+  - name: stuck.orders.OrderCancelled
+    fields:
+      - name: order_id
+        type: stuck.orders.OrderId
+
+commands:
+  - name: stuck.orders.PlaceOrder
+    outcomes:
+      - name: accepted
+        creates: stuck.orders.Order
+        instance: order_id
+        emits:
+          - stuck.orders.OrderPlaced
+
+  - name: stuck.orders.HoldOrder
+    input:
+      - name: order_id
+        type: stuck.orders.OrderId
+      - name: quantity
+        type: Integer
+    outcomes:
+      - name: held
+        when: quantity == 0.5
+        moves: stuck.orders.Order.hold
+        instance: order_id
+        emits:
+          - stuck.orders.OrderHeld
+      - name: refused
+        error: stuck.orders.Refused
+
+  - name: stuck.orders.CancelOrder
+    input:
+      - name: order_id
+        type: stuck.orders.OrderId
+    outcomes:
+      - name: cancelled
+        moves: stuck.orders.Order.cancel
+        instance: order_id
+        emits:
+          - stuck.orders.OrderCancelled
+";
+
+/// An entity that moves and that nothing creates.
+///
+/// Legal — an order may arrive from a migration, which is why `ess-domain` does not refuse it — and
+/// still impossible to write a scenario about, because no step can bring one into existence.
+const NOTHING_CREATES: &str = r"
+format: ess/1
+system: migrated
+version: v1
+domain: migrated.orders
+
+types:
+  - name: migrated.orders.OrderId
+    kind: newtype
+    of: Uuid
+
+entities:
+  - name: migrated.orders.Order
+    identity:
+      name: order_id
+      type: migrated.orders.OrderId
+    lifecycle:
+      initial: Placed
+      states: [Placed, Shipped]
+      terminal: [Shipped]
+      transitions:
+        - name: ship
+          from: [Placed]
+          to: Shipped
+
+events:
+  - name: migrated.orders.OrderShipped
+    fields:
+      - name: order_id
+        type: migrated.orders.OrderId
+
+commands:
+  - name: migrated.orders.ShipOrder
+    input:
+      - name: order_id
+        type: migrated.orders.OrderId
+    outcomes:
+      - name: shipped
+        moves: migrated.orders.Order.ship
+        instance: order_id
+        emits:
+          - migrated.orders.OrderShipped
 ";

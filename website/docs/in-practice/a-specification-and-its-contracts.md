@@ -38,6 +38,11 @@ commands:
       - name: accepted
         when: amount.amount > 0
         creates: billing.invoice.Invoice
+        # Which invoice. `creates:` is the one verb whose instance the caller cannot name — the
+        # invoice does not exist yet, and its id is the implementation's to assign — so this names
+        # the field of an emitted event the new identity is published in. That is what lets a later
+        # scenario say "the invoice the previous step created" instead of inventing one.
+        instance: invoice_id
         emits:
           - billing.invoice.InvoiceCreated
         summary: The invoice is created in Draft.

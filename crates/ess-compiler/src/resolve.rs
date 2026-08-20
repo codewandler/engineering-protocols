@@ -43,7 +43,7 @@ use aep_domain::error::{ValidationCode, ValidationErrors};
 use ess_domain::actor::ActorSpec;
 use ess_domain::binding::{BindingName, BindingSpec, MappingSource};
 use ess_domain::command::{
-    CommandSpec, Effect, ErrorSpec, EventSpec, Outcome, OutcomeCondition, Subject,
+    CommandSpec, Effect, ErrorSpec, EventSpec, InstanceSurface, Outcome, OutcomeCondition, Subject,
 };
 use ess_domain::component::{ComponentName, ComponentSpec};
 use ess_domain::entity::{EntitySpec, StateMachine};
@@ -59,9 +59,9 @@ use crate::ir::{
     ActorHandle, CommandHandle, ComponentHandle, DomainHandle, EntityHandle, ErrorHandle, EssIr,
     EventHandle, ResolvedActor, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedComponent,
     ResolvedCondition, ResolvedConversion, ResolvedDomain, ResolvedEffect, ResolvedEntity,
-    ResolvedError, ResolvedEvent, ResolvedField, ResolvedMapping, ResolvedMappingValue,
-    ResolvedOutcome, ResolvedSubject, ResolvedType, ResolvedTypeRef, ResolvedView,
-    ResolvedWorkload, TypeHandle, ViewHandle,
+    ResolvedError, ResolvedEvent, ResolvedField, ResolvedInstance, ResolvedMapping,
+    ResolvedMappingValue, ResolvedOutcome, ResolvedSubject, ResolvedType, ResolvedTypeRef,
+    ResolvedView, ResolvedWorkload, TypeHandle, ViewHandle,
 };
 use crate::source::{Location, SourceMap, Span};
 
@@ -116,6 +116,7 @@ use crate::source::{Location, SourceMap, Span};
 /// | a view's source entity, and its projected field types | here, to mint an [`EntityHandle`] and [`TypeHandle`]s | [`VIEW_UNDECLARED_REFERENCE`](codes::VIEW_UNDECLARED_REFERENCE) |
 /// | an actor's `may` grant | here, to mint a [`CommandHandle`] | [`ACTOR_UNDECLARED_REFERENCE`](codes::ACTOR_UNDECLARED_REFERENCE) |
 /// | an outcome's subject: the entity it changes, and the transition it takes | here, to mint an [`EntityHandle`] and to carry the move itself | [`COMMAND_UNDECLARED_REFERENCE`](codes::COMMAND_UNDECLARED_REFERENCE) |
+/// | an outcome's `instance:`: which field names the instance it acts on | here, to carry the [`ResolvedField`] and, for `creates:`, the [`EventHandle`] publishing it | [`COMMAND_UNDECLARED_REFERENCE`](codes::COMMAND_UNDECLARED_REFERENCE), or [`COMMAND_TYPE_MISMATCH`](codes::COMMAND_TYPE_MISMATCH) when the field is not typed as the identity |
 /// | a transition no outcome takes | `ess-domain`, `validate_lifecycle_causes` | `ESS-ENTITY-005`, as `missing_causation` |
 /// | the event a binding escalates with | here, to mint an [`EventHandle`] | [`BINDING_UNDECLARED_REFERENCE`](codes::BINDING_UNDECLARED_REFERENCE) |
 /// | an `escalate` that names no event at all | `ess-domain`, `BindingSpec::validate` | `ESS-BINDING-005`, as `missing_declaration` |
@@ -303,6 +304,15 @@ pub mod codes {
         /// it was arrives as a field rather than as a second code, because the repair is the same
         /// one — fix the name, or declare the event.
         BINDING_UNDECLARED_REFERENCE = family::BINDING, class::UNDECLARED;
+
+        /// An outcome's `instance:` names a field that is not typed as the entity's identity.
+        ///
+        /// The link between a command and the instance it acts on, checked at the only place that
+        /// can check it: `ess-domain` refuses it too, under `type_mismatch`, and both arrive here as
+        /// `ESS-COMMAND-002` so a consumer cannot tell which half noticed. `instance:
+        /// customer_email` resolves to a declared field and identifies no invoice; a scenario built
+        /// on it would send an address where an implementation expects an id.
+        COMMAND_TYPE_MISMATCH = family::COMMAND, class::TYPE_MISMATCH;
 
         /// A mapping's two types differ and no conversion between them is declared.
         ///
@@ -615,6 +625,7 @@ const STRUCTURAL: &[&str] = &[
     "creates",
     "moves",
     "updates",
+    "instance",
     "filter",
     "states",
     "terminal",
@@ -1261,7 +1272,15 @@ impl<'a> Resolver<'a> {
             let needles = vec![format!("name: {}", command.name)];
             let code = codes::COMMAND_UNDECLARED_REFERENCE;
             let input = self.fields(code, &command.input, &command.name, &path, &needles);
-            let outcomes = self.outcomes(&command, events, errors, entities, &path, &needles);
+            let outcomes = self.outcomes(
+                &command,
+                input.as_deref(),
+                events,
+                errors,
+                entities,
+                &path,
+                &needles,
+            );
             let domain = self.owner(code, &command.name, "command");
             if let (Some(input), Some(outcomes), Some(domain)) = (input, outcomes, domain) {
                 resolved.insert(
@@ -1280,9 +1299,11 @@ impl<'a> Resolver<'a> {
     }
 
     /// One command's outcomes, with the events and errors they name resolved.
+    #[allow(clippy::too_many_arguments)]
     fn outcomes(
         &mut self,
         command: &CommandSpec,
+        input: Option<&[ResolvedField]>,
         events: &BTreeMap<QualifiedName, ResolvedEvent>,
         errors: &BTreeMap<QualifiedName, ResolvedError>,
         entities: &BTreeMap<QualifiedName, ResolvedEntity>,
@@ -1339,7 +1360,9 @@ impl<'a> Resolver<'a> {
             };
             let mut subject = None;
             if let Some(declared) = &outcome.subject {
-                subject = self.subject(command, outcome, declared, entities, &path);
+                subject = self.subject(
+                    command, outcome, declared, input, &emits, events, entities, &path,
+                );
                 if subject.is_none() {
                     complete = false;
                 }
@@ -1369,11 +1392,15 @@ impl<'a> Resolver<'a> {
     /// The *causation* rule — a transition no outcome takes — is deliberately not restated here. An
     /// uncaused transition is perfectly representable in the IR, so by this pass's own doctrine it
     /// belongs to `ess-domain` alone and reaches a reader through [`diagnose`].
+    #[allow(clippy::too_many_arguments)]
     fn subject(
         &mut self,
         command: &CommandSpec,
         outcome: &Outcome,
         subject: &Subject,
+        input: Option<&[ResolvedField]>,
+        emits: &[EventHandle],
+        events: &BTreeMap<QualifiedName, ResolvedEvent>,
         entities: &BTreeMap<QualifiedName, ResolvedEntity>,
         path: &str,
     ) -> Option<ResolvedSubject> {
@@ -1443,7 +1470,126 @@ impl<'a> Resolver<'a> {
             }
         };
 
-        Some(ResolvedSubject { entity, effect })
+        let instance = self.instance(
+            command, outcome, subject, input, emits, events, entities, path,
+        )?;
+        Some(ResolvedSubject {
+            entity,
+            effect,
+            instance,
+        })
+    }
+
+    /// Where the identity of the instance an outcome acts on is read, resolved to a field.
+    ///
+    /// Which surface to look on is [`Subject::surface`]'s answer and never a second guess here: the
+    /// verb decides it, so one key stays unambiguous. `ess-domain` owns the rule — it refuses a name
+    /// that resolves to nothing and a field typed as something other than the entity's identity —
+    /// and this pass resolves it again for the reason it resolves anything: there is no
+    /// [`ResolvedField`] to carry for a field that is not there, and no [`EventHandle`] to mint for
+    /// the event a `creates:` publishes the new identity in.
+    #[allow(clippy::too_many_arguments)]
+    fn instance(
+        &mut self,
+        command: &CommandSpec,
+        outcome: &Outcome,
+        subject: &Subject,
+        input: Option<&[ResolvedField]>,
+        emits: &[EventHandle],
+        events: &BTreeMap<QualifiedName, ResolvedEvent>,
+        entities: &BTreeMap<QualifiedName, ResolvedEntity>,
+        path: &str,
+    ) -> Option<ResolvedInstance> {
+        let named = subject.instance.as_str();
+        let identity = entities.get(&subject.entity).map(|it| &it.identity)?;
+        let needles = vec![
+            format!("instance: {named}"),
+            format!("name: {}", command.name),
+        ];
+        let details = vec![
+            Detail::Typed {
+                subject: format!("{}.{named}", command.name),
+                type_ref: identity.type_ref.to_string(),
+                requires: true,
+            },
+            Detail::Note {
+                text: format!(
+                    "`{}` is identified by `{}`, typed `{}`",
+                    subject.entity, identity.name, identity.type_ref
+                ),
+            },
+        ];
+
+        // The surface is a function of the verb, so there is no lookup order and no ambiguity: a
+        // created instance's identity is published by an event, and an existing one's is supplied by
+        // the caller.
+        let (candidates, available): (Vec<ResolvedInstance>, Vec<String>) = match subject.surface()
+        {
+            InstanceSurface::CommandInput => {
+                let input = input?;
+                (
+                    input
+                        .iter()
+                        .filter(|field| field.name == named)
+                        .map(|field| ResolvedInstance::Supplied {
+                            field: field.clone(),
+                        })
+                        .collect(),
+                    input.iter().map(|field| field.name.clone()).collect(),
+                )
+            }
+            InstanceSurface::EmittedEvent => {
+                let mut found = Vec::new();
+                let mut offered = Vec::new();
+                for handle in emits {
+                    let Some(declared) = events.get(handle.name()) else {
+                        return None; // Reported where the event failed to resolve.
+                    };
+                    for field in &declared.fields {
+                        offered.push(format!("{}.{}", declared.name, field.name));
+                        if field.name == named {
+                            found.push(ResolvedInstance::Observed {
+                                event: handle.clone(),
+                                field: field.clone(),
+                            });
+                        }
+                    }
+                }
+                (found, offered)
+            }
+        };
+
+        if let Some(resolved) = candidates
+            .iter()
+            .find(|candidate| candidate.field().type_ref == identity.type_ref)
+        {
+            return Some(resolved.clone());
+        }
+        let (code, message) = if candidates.is_empty() {
+            (
+                codes::COMMAND_UNDECLARED_REFERENCE,
+                format!(
+                    "outcome `{}` of `{}` names its instance by `{named}`, which is no {} of it",
+                    outcome.name,
+                    command.name,
+                    subject.surface()
+                ),
+            )
+        } else {
+            (
+                codes::COMMAND_TYPE_MISMATCH,
+                format!(
+                    "outcome `{}` of `{}` names its instance by `{named}`, which is typed `{}`",
+                    outcome.name,
+                    command.name,
+                    candidates[0].field().type_ref
+                ),
+            )
+        };
+        let span = self.locator.span(format!("{path}.instance"), &needles);
+        let hint = format!("declared: {}", available.join(", "));
+        self.refuse(code, message, details, Some(&hint), span);
+        None
     }
 
     // ---- entities, views and actors --------------------------------------------------------

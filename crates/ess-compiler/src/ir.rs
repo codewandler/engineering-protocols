@@ -529,11 +529,60 @@ impl ResolvedEffect {
     }
 }
 
-/// The entity an outcome acts on, and what it does to it.
+/// Where a scenario reads the identity of the instance an outcome acts on, resolved.
+///
+/// The mirror of [`Subject::instance`](ess_domain::command::Subject::instance) with the lookup
+/// already done, and it is two variants rather than one field for the reason this module resolves
+/// anything: a consumer must not have to re-derive which surface the name belongs to, and a
+/// `creates:` link additionally needs the [`EventHandle`] of the event that publishes the identity —
+/// which is a lookup, and lookups are what this crate exists to have already performed.
+///
+/// The field is carried as a whole [`ResolvedField`], so a projection has the wire name and the type
+/// in hand: a generated scenario sends the wire name, and the type is the entity's identity type by
+/// construction, because `ess-domain` refuses the link otherwise.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "from", rename_all = "snake_case")]
+pub enum ResolvedInstance {
+    /// The caller names the instance in this field of the command's input — `moves:`, `updates:`.
+    Supplied {
+        /// The input field carrying the identity.
+        field: ResolvedField,
+    },
+    /// The new instance's identity is published in this field of this emitted event — `creates:`.
+    Observed {
+        /// The event that carries it.
+        event: EventHandle,
+        /// Its field.
+        field: ResolvedField,
+    },
+}
+
+impl ResolvedInstance {
+    /// The field carrying the identity, whichever surface it is on.
+    pub fn field(&self) -> &ResolvedField {
+        match self {
+            Self::Supplied { field } | Self::Observed { event: _, field } => field,
+        }
+    }
+
+    /// The event publishing the identity, where the identity is observed rather than supplied.
+    pub fn event(&self) -> Option<&EventHandle> {
+        match self {
+            Self::Supplied { .. } => None,
+            Self::Observed { event, .. } => Some(event),
+        }
+    }
+}
+
+/// The entity an outcome acts on, what it does to it, and which instance.
 ///
 /// Design §19's "subject and verb", resolved: the subject is an [`EntityHandle`], so
 /// [`EssIr::entity`] answers *whose* invariants a §20 scenario evaluates after this branch, and the
 /// verb is a [`ResolvedEffect`], so a §19 scenario knows which states to move between.
+///
+/// [`ResolvedSubject::instance`] is the third part, and without it the first two are not enough to
+/// write a scenario with: "a `PayInvoice` moves an invoice from `Issued` to `Paid`" does not say
+/// *which* invoice, and a synthesised id would be a test that fails a correct implementation.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ResolvedSubject {
     /// The entity this outcome acts on.
@@ -541,6 +590,8 @@ pub struct ResolvedSubject {
     /// What it does to it.
     #[serde(flatten)]
     pub effect: ResolvedEffect,
+    /// Where the identity of the instance it acts on is read.
+    pub instance: ResolvedInstance,
 }
 
 /// One thing a command can result in.

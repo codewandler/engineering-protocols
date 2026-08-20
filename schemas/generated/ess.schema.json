@@ -1109,6 +1109,13 @@
             "null"
           ]
         },
+        "instance": {
+          "description": "Which field carries the identity of the instance this outcome acts on.\n\nRequired beside `creates`, `moves` and `updates`, and meaningless without one. The verb decides which surface the name is read from — see [`Subject::surface`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "moves": {
           "description": "The transition this outcome takes, written as the entity's name followed by the transition's own — `billing.invoice.Invoice.settle`.\n\nOne name rather than an entity and a transition written separately, because a transition is declared *inside* an entity: `billing.invoice.Invoice.State` is already spelt this way by [`EntitySpec::state_type`](crate::entity::EntitySpec::state_type), and two keys that only mean something together are two keys an author can write half of.",
           "anyOf": [

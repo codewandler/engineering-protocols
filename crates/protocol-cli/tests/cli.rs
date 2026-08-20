@@ -88,9 +88,13 @@ entities:
           to: Placed
 commands:
   - name: shop.order.PlaceOrder
+    input:
+      - name: order_id
+        type: shop.order.OrderId
     outcomes:
       - name: placed
         moves: shop.order.Order.Place
+        instance: order_id
         emits: [shop.order.OrderPlaced]
 events:
   - name: shop.order.OrderPlaced

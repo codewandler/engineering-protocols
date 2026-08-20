@@ -27,7 +27,7 @@ use ess_compiler::source::SourceMap;
 use ess_conformance::scenario::{
     BindingAspect, BindingRef, CommandRef, ConformanceScenario, ConformanceSuite, DeclaredTypeRef,
     ErrorRef, EssSemanticRef, EventRef, OutcomeRef, ScenarioId, ScenarioPurpose, ScenarioStep,
-    SuiteFormat, SuiteProvenance, TransitionRef,
+    ScenarioValue, SuiteFormat, SuiteProvenance, TransitionRef,
 };
 use ess_domain::binding::BindingName;
 use ess_domain::command::OutcomeName;
@@ -126,13 +126,13 @@ fn money(amount: i64) -> Node {
 }
 
 /// The command input §10 uses, with the amount that decides the branch.
-fn create_invoice_input(amount: i64) -> BTreeMap<String, Node> {
+fn create_invoice_input(amount: i64) -> BTreeMap<String, ScenarioValue> {
     BTreeMap::from([
         (
             "customer_email".to_owned(),
-            Node::Text("ada@example.com".to_owned()),
+            ScenarioValue::literal(Node::Text("ada@example.com".to_owned())),
         ),
-        ("amount".to_owned(), money(amount)),
+        ("amount".to_owned(), ScenarioValue::literal(money(amount))),
     ])
 }
 
