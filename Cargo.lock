@@ -656,6 +656,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "infra-compiler"
+version = "0.1.0"
+dependencies = [
+ "infra-domain",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "infra-domain"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "invoice-service"
 version = "3.0.0"
 dependencies = [
@@ -960,6 +979,8 @@ dependencies = [
  "ess-domain",
  "ess-gen",
  "ess-synth",
+ "infra-compiler",
+ "infra-domain",
  "serde",
  "serde_json",
  "serde_yaml",

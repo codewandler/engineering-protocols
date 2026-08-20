@@ -223,6 +223,15 @@ enum Command {
         #[command(subcommand)]
         command: EssCommand,
     },
+    /// Work with an infrastructure observation bundle.
+    ///
+    /// The bundle comes from an external scanner (`infra-scout`); these verbs never reach a
+    /// cluster and never hold a credential — they read a file, refuse it or compile it.
+    Infra {
+        /// What to do with it.
+        #[command(subcommand)]
+        command: InfraCommand,
+    },
     /// Resolve a task into an execution plan.
     Resolve(ExecutionArgs),
     /// Show what a protocol, principle, workflow or profile declares.
@@ -430,6 +439,7 @@ fn run() -> Result<ExitCode> {
             format,
         } => validate(&root, artifacts.as_deref(), format),
         Command::Ess { command } => run_ess(command),
+        Command::Infra { command } => run_infra(&command),
         Command::Resolve(args) => resolve(&args),
         Command::Inspect {
             root,
@@ -3616,4 +3626,355 @@ fn exit_code(ok: bool) -> ExitCode {
     } else {
         ExitCode::from(1)
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// `protocol infra` — the observation half. The bundle is produced elsewhere; here it is a file.
+// ---------------------------------------------------------------------------------------------
+
+/// What can be done with an observation bundle.
+#[derive(Debug, Subcommand)]
+enum InfraCommand {
+    /// Check that a bundle is a valid `infra-observation/1` observation.
+    ///
+    /// Every problem is reported in one run, each with its stable `INFRA-` code; exit 1 when
+    /// anything is refused.
+    Validate {
+        /// The bundle file the scanner wrote.
+        #[arg(long)]
+        path: PathBuf,
+        /// How to render the result.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Compile a bundle into the content-addressed `infra-ir/1` document.
+    ///
+    /// A reference to something the cluster does not hold is not a refusal: the IR carries it
+    /// openly as an unresolved fact, because a degraded cluster is exactly what diagnosis is for.
+    Compile {
+        /// The bundle file the scanner wrote.
+        #[arg(long)]
+        path: PathBuf,
+        /// Where to persist the IR document. Without it the summary is printed and nothing is
+        /// written.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// How to render the result. `json` and `yaml` carry the whole document.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Summarize a bundle or a compiled IR document: counts per kind, digest, context.
+    ///
+    /// Reads either format. Given an `infra-ir/1` document it also recomputes the digest over
+    /// the document's model and refuses a mismatch — a persisted IR is content-addressed, so a
+    /// digest that does not match its content is a document someone edited.
+    Inspect {
+        /// A bundle or a persisted IR document.
+        #[arg(long)]
+        path: PathBuf,
+        /// How to render the result.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+}
+
+/// The `infra` verb family, one arm per subcommand.
+fn run_infra(command: &InfraCommand) -> Result<ExitCode> {
+    match command {
+        InfraCommand::Validate { path, format } => infra_validate(path, *format),
+        InfraCommand::Compile { path, out, format } => infra_compile(path, out.as_deref(), *format),
+        InfraCommand::Inspect { path, format } => infra_inspect(path, *format),
+    }
+}
+
+/// A parsed bundle: validated, or refused with everything that is wrong with it.
+enum InfraLoaded {
+    /// Every rule held.
+    Observed(Box<infra_domain::Observation>),
+    /// At least one did not; all of them are here.
+    Refused(infra_domain::ValidationErrors),
+}
+
+/// Reads and validates a bundle file.
+///
+/// An unreadable or non-JSON file is an error (`error:` on stderr), not a refusal: refusals are
+/// statements about an observation, and a file that does not parse observes nothing.
+fn infra_load(path: &Path) -> Result<InfraLoaded> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let raw: infra_domain::RawBundle = serde_json::from_str(&text)
+        .with_context(|| format!("{} is not a JSON observation bundle", path.display()))?;
+    Ok(match infra_domain::Observation::try_from(raw) {
+        Ok(observation) => InfraLoaded::Observed(Box::new(observation)),
+        Err(errors) => InfraLoaded::Refused(errors),
+    })
+}
+
+/// Counts per kind, the shape both `validate` and `inspect` report.
+#[derive(Debug, Default, serde::Serialize)]
+struct InfraCounts {
+    namespaces: usize,
+    nodes: usize,
+    workloads: usize,
+    services: usize,
+    ingresses: usize,
+    config_maps: usize,
+    secrets: usize,
+    service_accounts: usize,
+    claims: usize,
+    pods: usize,
+}
+
+impl InfraCounts {
+    fn of_observation(observation: &infra_domain::Observation) -> Self {
+        Self {
+            namespaces: observation.namespaces.len(),
+            nodes: observation.nodes.len(),
+            workloads: observation.workloads.len(),
+            services: observation.services.len(),
+            ingresses: observation.ingresses.len(),
+            config_maps: observation.config_maps.len(),
+            secrets: observation.secrets.len(),
+            service_accounts: observation.service_accounts.len(),
+            claims: observation.claims.len(),
+            pods: observation.pods.len(),
+        }
+    }
+
+    fn render(&self) -> String {
+        format!(
+            "{} namespace(s), {} node(s), {} workload(s), {} service(s), {} ingress(es), \
+             {} configmap(s), {} secret(s), {} service account(s), {} claim(s), {} pod(s)",
+            self.namespaces,
+            self.nodes,
+            self.workloads,
+            self.services,
+            self.ingresses,
+            self.config_maps,
+            self.secrets,
+            self.service_accounts,
+            self.claims,
+            self.pods
+        )
+    }
+}
+
+/// What `infra validate` reports.
+#[derive(Debug, serde::Serialize)]
+struct InfraValidation {
+    valid: bool,
+    context: Option<String>,
+    counts: Option<InfraCounts>,
+    refusals: infra_domain::ValidationErrors,
+}
+
+/// Prints an accumulated list of refusals in the shared shape, and nothing when there are none.
+fn infra_refusals(errors: &infra_domain::ValidationErrors) {
+    if errors.is_empty() {
+        return;
+    }
+    outln!("{} refusal(s):", errors.len());
+    for error in errors.as_slice() {
+        outln!("  - {error}");
+    }
+}
+
+/// `protocol infra validate`
+fn infra_validate(path: &Path, format: Format) -> Result<ExitCode> {
+    let report = match infra_load(path)? {
+        InfraLoaded::Observed(observation) => InfraValidation {
+            valid: true,
+            context: Some(observation.context.clone()),
+            counts: Some(InfraCounts::of_observation(&observation)),
+            refusals: infra_domain::ValidationErrors::new(),
+        },
+        InfraLoaded::Refused(errors) => InfraValidation {
+            valid: false,
+            context: None,
+            counts: None,
+            refusals: errors,
+        },
+    };
+    match format {
+        Format::Text => {
+            if let (Some(context), Some(counts)) = (&report.context, &report.counts) {
+                outln!("{} — {}", context, counts.render());
+                outln!("valid");
+            }
+            infra_refusals(&report.refusals);
+        }
+        Format::Yaml | Format::Json => print_serialised(&report, format)?,
+    }
+    Ok(exit_code(report.valid))
+}
+
+/// `protocol infra compile`
+fn infra_compile(path: &Path, out: Option<&Path>, format: Format) -> Result<ExitCode> {
+    let observation = match infra_load(path)? {
+        InfraLoaded::Observed(observation) => observation,
+        InfraLoaded::Refused(errors) => {
+            match format {
+                Format::Text => infra_refusals(&errors),
+                Format::Yaml | Format::Json => print_serialised(
+                    &InfraValidation {
+                        valid: false,
+                        context: None,
+                        counts: None,
+                        refusals: errors,
+                    },
+                    format,
+                )?,
+            }
+            return Ok(exit_code(false));
+        }
+    };
+    let ir = infra_compiler::compile(&observation);
+    let document = ir.document();
+    if let Some(out) = out {
+        let mut rendered =
+            serde_json::to_string_pretty(&document).context("rendering the IR document")?;
+        rendered.push('\n');
+        std::fs::write(out, rendered).with_context(|| format!("writing {}", out.display()))?;
+    }
+    match format {
+        Format::Text => {
+            outln!(
+                "{} — {}",
+                ir.provenance.context,
+                InfraCounts::of_observation(&observation).render()
+            );
+            outln!("digest {}", document.digest);
+            outln!("{} unresolved reference(s)", ir.model.unresolved.len());
+            if let Some(out) = out {
+                outln!("wrote {}", out.display());
+            }
+        }
+        Format::Yaml | Format::Json => print_serialised(&document, format)?,
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// What `infra inspect` reports, whichever format it read.
+#[derive(Debug, serde::Serialize)]
+struct InfraInspection {
+    /// Which format the file declared.
+    format: String,
+    context: String,
+    digest: String,
+    counts: InfraCounts,
+    unresolved: usize,
+}
+
+/// `protocol infra inspect`
+fn infra_inspect(path: &Path, format: Format) -> Result<ExitCode> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).with_context(|| format!("{} is not JSON", path.display()))?;
+    let declared = value.get("format").and_then(serde_json::Value::as_str);
+
+    let inspection = match declared {
+        Some(infra_domain::OBSERVATION_FORMAT) => {
+            let observation = match infra_load(path)? {
+                InfraLoaded::Observed(observation) => observation,
+                InfraLoaded::Refused(errors) => {
+                    match format {
+                        Format::Text => infra_refusals(&errors),
+                        Format::Yaml | Format::Json => print_serialised(&errors, format)?,
+                    }
+                    return Ok(exit_code(false));
+                }
+            };
+            let ir = infra_compiler::compile(&observation);
+            InfraInspection {
+                format: infra_domain::OBSERVATION_FORMAT.to_owned(),
+                context: ir.provenance.context.clone(),
+                digest: ir.digest(),
+                counts: InfraCounts::of_observation(&observation),
+                unresolved: ir.model.unresolved.len(),
+            }
+        }
+        Some(infra_compiler::IR_FORMAT) => inspect_ir_document(path, &value)?,
+        other => bail!(
+            "{} declares format {:?}; expected `{}` or `{}`",
+            path.display(),
+            other.unwrap_or("<none>"),
+            infra_domain::OBSERVATION_FORMAT,
+            infra_compiler::IR_FORMAT
+        ),
+    };
+
+    match format {
+        Format::Text => {
+            outln!(
+                "{} ({}) — {}",
+                inspection.context,
+                inspection.format,
+                inspection.counts.render()
+            );
+            outln!("digest {}", inspection.digest);
+            outln!("{} unresolved reference(s)", inspection.unresolved);
+        }
+        Format::Yaml | Format::Json => print_serialised(&inspection, format)?,
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Summarizes a persisted IR document, recomputing its digest.
+///
+/// The recomputation is the point: the document claims to be content-addressed, and an inspect
+/// that repeated the claim without checking it would notarise a hand-edited file.
+fn inspect_ir_document(path: &Path, value: &serde_json::Value) -> Result<InfraInspection> {
+    let model = value
+        .get("model")
+        .with_context(|| format!("{} carries no `model`", path.display()))?;
+    let claimed = value
+        .get("digest")
+        .and_then(serde_json::Value::as_str)
+        .with_context(|| format!("{} carries no `digest`", path.display()))?;
+
+    // The persisted maps are sorted (they were `BTreeMap`s when written), so re-serializing the
+    // parsed model compactly reproduces the canonical bytes the digest was computed over.
+    let canonical = serde_json::to_vec(model).context("re-serializing the model")?;
+    let recomputed = infra_compiler::digest_of_canonical(&canonical);
+    if recomputed != claimed {
+        bail!(
+            "{}: the digest does not match the content — claimed {claimed}, computed \
+             {recomputed}. The document was edited after it was compiled; re-run \
+             `protocol infra compile`.",
+            path.display()
+        );
+    }
+
+    let count = |map: &str| {
+        model
+            .get(map)
+            .and_then(serde_json::Value::as_object)
+            .map_or(0, serde_json::Map::len)
+    };
+    Ok(InfraInspection {
+        format: infra_compiler::IR_FORMAT.to_owned(),
+        context: value
+            .pointer("/provenance/context")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        digest: claimed.to_owned(),
+        counts: InfraCounts {
+            namespaces: count("namespaces"),
+            nodes: count("nodes"),
+            workloads: count("workloads"),
+            services: count("services"),
+            ingresses: count("ingresses"),
+            config_maps: count("config_maps"),
+            secrets: count("secrets"),
+            service_accounts: count("service_accounts"),
+            claims: count("claims"),
+            pods: count("pods"),
+        },
+        unresolved: model
+            .get("unresolved")
+            .and_then(serde_json::Value::as_array)
+            .map_or(0, Vec::len),
+    })
 }

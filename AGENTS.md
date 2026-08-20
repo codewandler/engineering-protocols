@@ -182,7 +182,7 @@ enforcement here that you cannot point at.
 task check
 ```
 
-Eight steps, all eight of which CI also runs, in this order:
+Nine steps, all nine of which CI also runs, in this order:
 
 1. `fmt-check` — `cargo xtask fmt --check`, which formats exactly the workspace members. Not
    `cargo fmt --all`: that flag also reaches every member's local path dependencies, which since
@@ -207,7 +207,7 @@ Eight steps, all eight of which CI also runs, in this order:
    catch it. A tree that matches its specification and still fails here is a defect in
    `ess-synth` or in the realization, not in any specification.
 
-Land nothing that does not pass all eight.
+Land nothing that does not pass all nine.
 
 **A green local gate does not guarantee a green CI.** The steps mirror each other exactly, but the
 *toolchain* does not: CI installs whatever `stable` is on the day, and a newer clippy can introduce a

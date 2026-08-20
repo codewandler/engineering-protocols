@@ -99,6 +99,24 @@ jobs:
       - name: Check generated projections
         run: cargo xtask generate --check
 
+  # Its own job for the reason `projections` is: stale observation IR reads as stale observation
+  # IR. The committed `examples/k3d-dev-cluster/cluster.ir.json` is what IW2's graph and diagnosis
+  # work will be reviewed against, and a document that no longer matches what its observation
+  # compiles to certifies a cluster state nobody observed. The fix is `cargo xtask infra`.
+  infra:
+    name: Observation IR up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the committed observation IR
+        run: cargo xtask infra --check
+
   # Its own job for the same reason again, and it is the reason that matters most here: a conformance
   # suite is a contract an implementation is built against, and a stale one holds fewer checks than
   # the specification requires — which no passing run can show. The failing check's name says that

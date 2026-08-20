@@ -1,0 +1,784 @@
+//! The validated observation, and the one door into it.
+//!
+//! [`Observation`] and everything it holds implement [`serde::Serialize`] and deliberately not
+//! `Deserialize`: the only way to obtain one is [`TryFrom<RawBundle>`], which is where every rule
+//! runs. The conversion accumulates — a bundle with forty defects reports forty refusals — and a
+//! bundle with any refusal yields no observation at all.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::code::{InfraCode, ValidationErrors};
+use crate::config::{ConfigMap, Secret};
+use crate::network::{Ingress, Service};
+use crate::raw::{
+    items, RawBundle, RawClaim, RawMeta, RawNamespace, RawNode, RawPod, RawServiceAccount,
+};
+use crate::workload::{Workload, WorkloadKind};
+
+/// The format string this model reads.
+pub const OBSERVATION_FORMAT: &str = "infra-observation/1";
+
+/// The kind keys a bundle must carry, in the scanner's order.
+pub const KINDS: &[&str] = &[
+    "namespaces",
+    "nodes",
+    "deployments",
+    "statefulsets",
+    "daemonsets",
+    "pods",
+    "services",
+    "ingresses",
+    "configmaps",
+    "secrets",
+    "serviceaccounts",
+    "persistentvolumeclaims",
+];
+
+/// An object's identity: what everything downstream keys on.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct Identity {
+    /// The namespace, absent on cluster-scoped kinds.
+    pub namespace: Option<String>,
+    /// The name.
+    pub name: String,
+    /// The API server's uid — carried as provenance of the observation, not used as a key,
+    /// because a redeployed object keeps its identity and changes its uid.
+    pub uid: String,
+}
+
+/// A namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Namespace {
+    /// Identity.
+    pub identity: Identity,
+    /// Labels.
+    pub labels: BTreeMap<String, String>,
+}
+
+/// A node, reduced to what scheduling and diagnosis read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Node {
+    /// Identity.
+    pub identity: Identity,
+    /// Labels.
+    pub labels: BTreeMap<String, String>,
+    /// Resource capacity, quantities as the API states them.
+    pub capacity: BTreeMap<String, String>,
+    /// Runtime and OS identification.
+    pub info: NodeInfo,
+}
+
+/// The slice of `nodeInfo` the model keeps.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct NodeInfo {
+    /// CPU architecture.
+    pub architecture: Option<String>,
+    /// Container runtime and version.
+    pub container_runtime: Option<String>,
+    /// Kernel version.
+    pub kernel: Option<String>,
+    /// Kubelet version.
+    pub kubelet: Option<String>,
+    /// Operating system.
+    pub operating_system: Option<String>,
+    /// OS image.
+    pub os_image: Option<String>,
+}
+
+/// A service account: pure identity in this subset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ServiceAccount {
+    /// Identity.
+    pub identity: Identity,
+    /// Labels.
+    pub labels: BTreeMap<String, String>,
+}
+
+/// A persistent volume claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PersistentVolumeClaim {
+    /// Identity.
+    pub identity: Identity,
+    /// Labels.
+    pub labels: BTreeMap<String, String>,
+    /// The storage class.
+    pub storage_class: Option<String>,
+    /// Access modes, sorted: the API treats them as a set, so the model does.
+    pub access_modes: Vec<String>,
+    /// The requested size, as the API states it.
+    pub requested_storage: Option<String>,
+}
+
+/// A pod's lifecycle phase.
+///
+/// The API defines exactly these five. A phase string outside them maps to [`Self::Unknown`],
+/// which is also what the API reports when the kubelet cannot be reached — tolerated rather than
+/// refused, because a phase is runtime observation, not document structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PodPhase {
+    /// Accepted, not yet running.
+    Pending,
+    /// Bound to a node, at least one container running.
+    Running,
+    /// All containers terminated successfully.
+    Succeeded,
+    /// All containers terminated, at least one in failure.
+    Failed,
+    /// The state could not be obtained.
+    Unknown,
+}
+
+impl PodPhase {
+    fn parse(phase: Option<&str>) -> Self {
+        match phase {
+            Some("Pending") => Self::Pending,
+            Some("Running") => Self::Running,
+            Some("Succeeded") => Self::Succeeded,
+            Some("Failed") => Self::Failed,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// The controller that owns a pod, as its owner reference states it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OwnerRef {
+    /// The owner's kind, such as `ReplicaSet` or `StatefulSet`.
+    pub kind: String,
+    /// The owner's name.
+    pub name: String,
+}
+
+/// One container's observed status.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ContainerStatus {
+    /// The container's name.
+    pub name: String,
+    /// Whether it currently passes readiness.
+    pub ready: bool,
+    /// How often it restarted.
+    pub restart_count: u32,
+}
+
+/// A pod, reduced to runtime essentials: what IW2's diagnosis reads.
+///
+/// Deliberately *not* a second copy of the workload model — a pod's spec is its template's, and
+/// carrying it twice would put two spellings of every container in the IR.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Pod {
+    /// Identity.
+    pub identity: Identity,
+    /// Labels — what service selectors match.
+    pub labels: BTreeMap<String, String>,
+    /// The lifecycle phase.
+    pub phase: PodPhase,
+    /// `true` when the pod has containers and every one passes readiness.
+    pub ready: bool,
+    /// The node the pod was scheduled to, absent while pending.
+    pub node: Option<String>,
+    /// The managing controller, when one is declared.
+    pub owner: Option<OwnerRef>,
+    /// Per-container readiness and restarts, in the API's order.
+    pub containers: Vec<ContainerStatus>,
+}
+
+/// A validated observation: one cluster, one scan, every rule already enforced.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Observation {
+    /// The kubeconfig context the scan targeted. Provenance, not semantic state.
+    pub context: String,
+    /// When the scan ran. Provenance, not semantic state.
+    pub scanned_at: String,
+    /// The scanner's version. Provenance, not semantic state.
+    pub scout_version: String,
+    /// Namespaces, in observed order; the compiler normalizes.
+    pub namespaces: Vec<Namespace>,
+    /// Nodes.
+    pub nodes: Vec<Node>,
+    /// Deployments, statefulsets and daemonsets, kind carried on each.
+    pub workloads: Vec<Workload>,
+    /// Services.
+    pub services: Vec<Service>,
+    /// Ingresses.
+    pub ingresses: Vec<Ingress>,
+    /// Configmaps: keys and value digests, never values.
+    pub config_maps: Vec<ConfigMap>,
+    /// Secrets: keys and value digests, never values.
+    pub secrets: Vec<Secret>,
+    /// Service accounts.
+    pub service_accounts: Vec<ServiceAccount>,
+    /// Persistent volume claims.
+    pub claims: Vec<PersistentVolumeClaim>,
+    /// Pods, runtime essentials only.
+    pub pods: Vec<Pod>,
+}
+
+impl TryFrom<RawBundle> for Observation {
+    type Error = ValidationErrors;
+
+    fn try_from(raw: RawBundle) -> Result<Self, Self::Error> {
+        let mut errors = ValidationErrors::new();
+
+        if raw.format != OBSERVATION_FORMAT {
+            errors.refuse(
+                InfraCode::UnsupportedFormat,
+                "format",
+                format!(
+                    "`{}` is not a format this build reads; expected `{OBSERVATION_FORMAT}`",
+                    raw.format
+                ),
+            );
+        }
+
+        let namespaces = items::<RawNamespace>(&raw, "namespaces", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| Namespace::from_raw(&item, &location, &mut errors))
+            .collect();
+        let nodes = items::<RawNode>(&raw, "nodes", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| Node::from_raw(&item, &location, &mut errors))
+            .collect();
+
+        let mut workloads = Vec::new();
+        for (kind_key, kind) in [
+            ("deployments", WorkloadKind::Deployment),
+            ("statefulsets", WorkloadKind::StatefulSet),
+            ("daemonsets", WorkloadKind::DaemonSet),
+        ] {
+            workloads.extend(
+                items::<crate::raw::RawWorkload>(&raw, kind_key, &mut errors)
+                    .into_iter()
+                    .filter_map(|(location, item)| {
+                        Workload::from_raw(&item, kind, &location, &mut errors)
+                    }),
+            );
+        }
+
+        let pods = items::<RawPod>(&raw, "pods", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| Pod::from_raw(&item, &location, &mut errors))
+            .collect();
+        let services = items::<crate::raw::RawService>(&raw, "services", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| Service::from_raw(&item, &location, &mut errors))
+            .collect();
+        let ingresses = items::<crate::raw::RawIngress>(&raw, "ingresses", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| Ingress::from_raw(&item, &location, &mut errors))
+            .collect();
+        let config_maps = items::<crate::raw::RawConfigMap>(&raw, "configmaps", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| ConfigMap::from_raw(&item, &location, &mut errors))
+            .collect();
+        let secrets = items::<crate::raw::RawSecret>(&raw, "secrets", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| Secret::from_raw(&item, &location, &mut errors))
+            .collect();
+        let service_accounts = items::<RawServiceAccount>(&raw, "serviceaccounts", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| ServiceAccount::from_raw(&item, &location, &mut errors))
+            .collect();
+        let claims = items::<RawClaim>(&raw, "persistentvolumeclaims", &mut errors)
+            .into_iter()
+            .filter_map(|(location, item)| {
+                PersistentVolumeClaim::from_raw(&item, &location, &mut errors)
+            })
+            .collect();
+
+        let observation = Self {
+            context: raw.context,
+            scanned_at: raw.scanned_at,
+            scout_version: raw.scout_version,
+            namespaces,
+            nodes,
+            workloads,
+            services,
+            ingresses,
+            config_maps,
+            secrets,
+            service_accounts,
+            claims,
+            pods,
+        };
+        observation.refuse_duplicates(&mut errors);
+
+        if errors.is_empty() {
+            Ok(observation)
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+impl Observation {
+    /// Refuses every pair of same-kind objects sharing a namespace and name.
+    ///
+    /// After collection rather than during it, so a duplicate is reported *as* a duplicate and
+    /// not as whatever second-order defect the collision would have caused downstream.
+    fn refuse_duplicates(&self, errors: &mut ValidationErrors) {
+        fn scan<'a>(
+            kind: &str,
+            identities: impl Iterator<Item = &'a Identity>,
+            errors: &mut ValidationErrors,
+        ) {
+            let mut seen = BTreeSet::new();
+            for identity in identities {
+                if !seen.insert((identity.namespace.clone(), identity.name.clone())) {
+                    let place = match &identity.namespace {
+                        Some(namespace) => format!("{namespace}/{}", identity.name),
+                        None => identity.name.clone(),
+                    };
+                    errors.refuse(
+                        InfraCode::DuplicateIdentity,
+                        format!("kinds.{kind}"),
+                        format!("`{place}` appears twice; identity must be unique per kind"),
+                    );
+                }
+            }
+        }
+
+        scan(
+            "namespaces",
+            self.namespaces.iter().map(|item| &item.identity),
+            errors,
+        );
+        scan(
+            "nodes",
+            self.nodes.iter().map(|item| &item.identity),
+            errors,
+        );
+        // Workloads deduplicate per kind, not across the three: a deployment and a statefulset
+        // may legally share a name.
+        for kind in [
+            WorkloadKind::Deployment,
+            WorkloadKind::StatefulSet,
+            WorkloadKind::DaemonSet,
+        ] {
+            scan(
+                kind.plural(),
+                self.workloads
+                    .iter()
+                    .filter(|workload| workload.kind == kind)
+                    .map(|item| &item.identity),
+                errors,
+            );
+        }
+        scan(
+            "services",
+            self.services.iter().map(|item| &item.identity),
+            errors,
+        );
+        scan(
+            "ingresses",
+            self.ingresses.iter().map(|item| &item.identity),
+            errors,
+        );
+        scan(
+            "configmaps",
+            self.config_maps.iter().map(|item| &item.identity),
+            errors,
+        );
+        scan(
+            "secrets",
+            self.secrets.iter().map(|item| &item.identity),
+            errors,
+        );
+        scan(
+            "serviceaccounts",
+            self.service_accounts.iter().map(|item| &item.identity),
+            errors,
+        );
+        scan(
+            "persistentvolumeclaims",
+            self.claims.iter().map(|item| &item.identity),
+            errors,
+        );
+        scan("pods", self.pods.iter().map(|item| &item.identity), errors);
+    }
+}
+
+/// Validates a `metadata` block into an [`Identity`], refusing what is missing.
+pub(crate) fn identity(
+    meta: &RawMeta,
+    namespaced: bool,
+    location: &str,
+    errors: &mut ValidationErrors,
+) -> Option<Identity> {
+    let mut complete = true;
+    for (field, present) in [
+        (
+            "name",
+            meta.name.as_deref().is_some_and(|name| !name.is_empty()),
+        ),
+        (
+            "uid",
+            meta.uid.as_deref().is_some_and(|uid| !uid.is_empty()),
+        ),
+        (
+            "namespace",
+            !namespaced
+                || meta
+                    .namespace
+                    .as_deref()
+                    .is_some_and(|namespace| !namespace.is_empty()),
+        ),
+    ] {
+        if !present {
+            errors.refuse(
+                InfraCode::MissingIdentity,
+                format!("{location}.metadata.{field}"),
+                format!(
+                    "`{field}` is missing or empty; identity is what everything downstream keys on"
+                ),
+            );
+            complete = false;
+        }
+    }
+    if !complete {
+        return None;
+    }
+    Some(Identity {
+        namespace: if namespaced {
+            meta.namespace.clone()
+        } else {
+            None
+        },
+        name: meta.name.clone().unwrap_or_default(),
+        uid: meta.uid.clone().unwrap_or_default(),
+    })
+}
+
+/// Validates a map whose values must all be strings — labels and selectors.
+///
+/// Each non-string value is refused with its own location and dropped; the strings survive, so
+/// one bad label does not hide the rest of the pass's findings.
+pub(crate) fn string_map(
+    raw: &BTreeMap<String, Value>,
+    location: &str,
+    errors: &mut ValidationErrors,
+) -> BTreeMap<String, String> {
+    let mut validated = BTreeMap::new();
+    for (key, value) in raw {
+        match value.as_str() {
+            Some(text) => {
+                validated.insert(key.clone(), text.to_owned());
+            }
+            None => {
+                errors.refuse(
+                    InfraCode::NonStringSelector,
+                    format!("{location}.{key}"),
+                    format!(
+                        "the value of `{key}` is {}, not a string",
+                        value_kind(value)
+                    ),
+                );
+            }
+        }
+    }
+    validated
+}
+
+/// Names a JSON value's kind for an error message without echoing the value.
+pub(crate) fn value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "a boolean",
+        Value::Number(_) => "a number",
+        Value::String(_) => "a string",
+        Value::Array(_) => "an array",
+        Value::Object(_) => "an object",
+    }
+}
+
+/// Renders an int-or-string port as its string form, refusing anything else.
+pub(crate) fn port_string(
+    value: &Value,
+    location: &str,
+    errors: &mut ValidationErrors,
+) -> Option<String> {
+    match value {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(name) => Some(name.clone()),
+        other => {
+            errors.refuse(
+                InfraCode::MalformedObject,
+                location.to_owned(),
+                format!(
+                    "a port must be a number or a name, found {}",
+                    value_kind(other)
+                ),
+            );
+            None
+        }
+    }
+}
+
+impl Namespace {
+    fn from_raw(raw: &RawNamespace, location: &str, errors: &mut ValidationErrors) -> Option<Self> {
+        let identity = identity(&raw.metadata, false, location, errors)?;
+        Some(Self {
+            identity,
+            labels: string_map(
+                &raw.metadata.labels,
+                &format!("{location}.metadata.labels"),
+                errors,
+            ),
+        })
+    }
+}
+
+impl Node {
+    fn from_raw(raw: &RawNode, location: &str, errors: &mut ValidationErrors) -> Option<Self> {
+        let identity = identity(&raw.metadata, false, location, errors)?;
+        Some(Self {
+            identity,
+            labels: string_map(
+                &raw.metadata.labels,
+                &format!("{location}.metadata.labels"),
+                errors,
+            ),
+            capacity: raw.status.capacity.clone(),
+            info: NodeInfo {
+                architecture: raw.status.node_info.architecture.clone(),
+                container_runtime: raw.status.node_info.container_runtime_version.clone(),
+                kernel: raw.status.node_info.kernel_version.clone(),
+                kubelet: raw.status.node_info.kubelet_version.clone(),
+                operating_system: raw.status.node_info.operating_system.clone(),
+                os_image: raw.status.node_info.os_image.clone(),
+            },
+        })
+    }
+}
+
+impl ServiceAccount {
+    fn from_raw(
+        raw: &RawServiceAccount,
+        location: &str,
+        errors: &mut ValidationErrors,
+    ) -> Option<Self> {
+        let identity = identity(&raw.metadata, true, location, errors)?;
+        Some(Self {
+            identity,
+            labels: string_map(
+                &raw.metadata.labels,
+                &format!("{location}.metadata.labels"),
+                errors,
+            ),
+        })
+    }
+}
+
+impl PersistentVolumeClaim {
+    fn from_raw(raw: &RawClaim, location: &str, errors: &mut ValidationErrors) -> Option<Self> {
+        let identity = identity(&raw.metadata, true, location, errors)?;
+        let mut access_modes = raw.spec.access_modes.clone();
+        access_modes.sort();
+        access_modes.dedup();
+        Some(Self {
+            identity,
+            labels: string_map(
+                &raw.metadata.labels,
+                &format!("{location}.metadata.labels"),
+                errors,
+            ),
+            storage_class: raw.spec.storage_class_name.clone(),
+            access_modes,
+            requested_storage: raw.spec.resources.requests.get("storage").cloned(),
+        })
+    }
+}
+
+impl Pod {
+    fn from_raw(raw: &RawPod, location: &str, errors: &mut ValidationErrors) -> Option<Self> {
+        let identity = identity(&raw.metadata, true, location, errors)?;
+        let mut containers = Vec::with_capacity(raw.status.container_statuses.len());
+        for (index, status) in raw.status.container_statuses.iter().enumerate() {
+            match status.name.as_deref() {
+                Some(name) if !name.is_empty() => containers.push(ContainerStatus {
+                    name: name.to_owned(),
+                    ready: status.ready,
+                    restart_count: status.restart_count,
+                }),
+                _ => errors.refuse(
+                    InfraCode::MissingIdentity,
+                    format!("{location}.status.containerStatuses[{index}].name"),
+                    "a container status without a name cannot be attributed",
+                ),
+            }
+        }
+        let ready = !containers.is_empty() && containers.iter().all(|status| status.ready);
+        Some(Self {
+            identity,
+            labels: string_map(
+                &raw.metadata.labels,
+                &format!("{location}.metadata.labels"),
+                errors,
+            ),
+            phase: PodPhase::parse(raw.status.phase.as_deref()),
+            ready,
+            node: raw.spec.node_name.clone(),
+            owner: raw
+                .metadata
+                .owner_references
+                .iter()
+                .find(|reference| reference.controller)
+                .map(|reference| OwnerRef {
+                    kind: reference.kind.clone(),
+                    name: reference.name.clone(),
+                }),
+            containers,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_bundle() -> serde_json::Value {
+        let mut kinds = serde_json::Map::new();
+        for kind in KINDS {
+            kinds.insert((*kind).to_owned(), serde_json::json!({ "items": [] }));
+        }
+        serde_json::json!({
+            "format": OBSERVATION_FORMAT,
+            "context": "test",
+            "scanned_at": "2026-08-20T22:30:30Z",
+            "scout_version": "0.1.0",
+            "kinds": kinds,
+        })
+    }
+
+    fn validate(bundle: serde_json::Value) -> Result<Observation, ValidationErrors> {
+        let raw: RawBundle = serde_json::from_value(bundle).expect("the bundle parses");
+        Observation::try_from(raw)
+    }
+
+    #[test]
+    fn an_empty_but_complete_bundle_is_a_valid_observation_of_nothing() {
+        let observation = validate(minimal_bundle()).expect("an empty cluster is observable");
+        assert_eq!(observation.context, "test");
+        assert!(observation.pods.is_empty());
+    }
+
+    #[test]
+    fn a_wrong_format_string_is_refused_with_its_own_code() {
+        let mut bundle = minimal_bundle();
+        bundle["format"] = serde_json::json!("infra-observation/2");
+        let errors = validate(bundle).expect_err("an unknown format is refused");
+        assert!(
+            errors.contains(InfraCode::UnsupportedFormat),
+            "expected INFRA-BUNDLE-001, got: {errors}"
+        );
+    }
+
+    #[test]
+    fn an_absent_kind_is_refused_because_not_scanned_is_not_the_same_as_none_exist() {
+        let mut bundle = minimal_bundle();
+        bundle["kinds"]
+            .as_object_mut()
+            .expect("kinds is an object")
+            .remove("ingresses");
+        let errors = validate(bundle).expect_err("a missing kind is refused");
+        assert!(
+            errors.contains(InfraCode::MissingKind),
+            "expected INFRA-BUNDLE-002, got: {errors}"
+        );
+    }
+
+    #[test]
+    fn a_thirteenth_kind_the_model_never_heard_of_is_tolerated() {
+        let mut bundle = minimal_bundle();
+        bundle["kinds"]["horizontalpodautoscalers"] = serde_json::json!({ "items": [{}] });
+        validate(bundle).expect("an unknown kind is a scanner ahead of the model, not a defect");
+    }
+
+    #[test]
+    fn every_identity_defect_in_one_object_is_reported_in_one_run() {
+        let mut bundle = minimal_bundle();
+        // No name, no uid, no namespace: three refusals from one pod, not one.
+        bundle["kinds"]["pods"]["items"] = serde_json::json!([{ "metadata": {} }]);
+        let errors = validate(bundle).expect_err("an unidentifiable pod is refused");
+        assert_eq!(
+            errors.len(),
+            3,
+            "name, uid and namespace are each refused: {errors}"
+        );
+        assert!(errors.contains(InfraCode::MissingIdentity));
+    }
+
+    #[test]
+    fn two_pods_sharing_namespace_and_name_are_refused_as_a_duplicate() {
+        let mut bundle = minimal_bundle();
+        let pod = serde_json::json!({
+            "metadata": { "name": "web-0", "namespace": "app", "uid": "aaa" }
+        });
+        let mut second = pod.clone();
+        second["metadata"]["uid"] = serde_json::json!("bbb");
+        bundle["kinds"]["pods"]["items"] = serde_json::json!([pod, second]);
+        let errors = validate(bundle).expect_err("a duplicate identity is refused");
+        assert!(
+            errors.contains(InfraCode::DuplicateIdentity),
+            "expected INFRA-OBJECT-003, got: {errors}"
+        );
+    }
+
+    #[test]
+    fn a_non_string_label_is_refused_and_named_by_key() {
+        let mut bundle = minimal_bundle();
+        bundle["kinds"]["namespaces"]["items"] = serde_json::json!([{
+            "metadata": { "name": "app", "uid": "aaa", "labels": { "tier": 3 } }
+        }]);
+        let errors = validate(bundle).expect_err("a numeric label is refused");
+        assert!(
+            errors.contains(InfraCode::NonStringSelector),
+            "expected INFRA-SELECTOR-001, got: {errors}"
+        );
+        assert!(
+            errors.as_slice()[0].location.ends_with("labels.tier"),
+            "the refusal names the key: {errors}"
+        );
+    }
+
+    #[test]
+    fn an_unknown_phase_string_maps_to_unknown_rather_than_refusing_the_pod() {
+        let mut bundle = minimal_bundle();
+        bundle["kinds"]["pods"]["items"] = serde_json::json!([{
+            "metadata": { "name": "web-0", "namespace": "app", "uid": "aaa" },
+            "status": { "phase": "Evicted" }
+        }]);
+        let observation = validate(bundle).expect("a strange phase is observation, not structure");
+        assert_eq!(observation.pods[0].phase, PodPhase::Unknown);
+    }
+
+    #[test]
+    fn readiness_requires_every_container_ready_and_at_least_one() {
+        let mut bundle = minimal_bundle();
+        bundle["kinds"]["pods"]["items"] = serde_json::json!([
+            {
+                "metadata": { "name": "a", "namespace": "app", "uid": "u1" },
+                "status": { "phase": "Running", "containerStatuses": [
+                    { "name": "main", "ready": true, "restartCount": 0 },
+                    { "name": "sidecar", "ready": false, "restartCount": 4 }
+                ] }
+            },
+            {
+                "metadata": { "name": "b", "namespace": "app", "uid": "u2" },
+                "status": { "phase": "Pending" }
+            }
+        ]);
+        let observation = validate(bundle).expect("both pods validate");
+        assert!(
+            !observation.pods[0].ready,
+            "one unready container is enough"
+        );
+        assert!(
+            !observation.pods[1].ready,
+            "no containers is not the same as all ready"
+        );
+    }
+}

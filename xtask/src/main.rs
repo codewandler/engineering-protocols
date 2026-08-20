@@ -3,7 +3,8 @@
 //! `cargo xtask schema` regenerates the published JSON Schemas from the Rust types;
 //! `cargo xtask generate` regenerates the committed projections of the normative specification;
 //! `cargo xtask suite` regenerates the committed conformance suites the example specifications
-//! oblige. All three take `--check`, which verifies the committed files still match instead of
+//! oblige; `cargo xtask infra` regenerates the committed infrastructure IR compiled from the
+//! example observation bundle. All take `--check`, which verifies the committed files still match instead of
 //! writing them, and that is what CI runs — one job each, so a stale artifact reads as a stale
 //! artifact rather than as "the gate failed". All three directories are outputs: editing one by hand
 //! is always wrong, because the next regeneration silently reverts it.
@@ -102,6 +103,18 @@ const REALIZATIONS: &[(&str, &str)] = &[("billing", "billing-realization")];
 /// nobody scans.
 const PROJECTION_EXCLUSIONS: &[&str] = &["rust"];
 
+/// The example observation bundle, and the IR document committed beside it.
+///
+/// A pair rather than a tree: `observation.json` is an input (derived from a real scan, trimmed
+/// by hand — see the fixture's README), `cluster.ir.json` is the one output `infra` owns, and a
+/// single-file comparison needs no orphan scan. The IR is committed for the reason the suites
+/// are: it is what IW2's graph and diagnosis will be built against, so its bytes must not move
+/// unless the observation or the compiler moved them.
+const OBSERVATION_FIXTURE: &str = "examples/k3d-dev-cluster/observation.json";
+
+/// Where the compiled IR of [`OBSERVATION_FIXTURE`] is committed.
+const OBSERVATION_IR: &str = "examples/k3d-dev-cluster/cluster.ir.json";
+
 /// Repository automation for engineering-protocols.
 #[derive(Debug, Parser)]
 #[command(name = "xtask", about, version)]
@@ -138,6 +151,12 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate the committed infrastructure IR of the example observation.
+    Infra {
+        /// Verify the committed document matches instead of writing it.
+        #[arg(long)]
+        check: bool,
+    },
     /// Format the source workspace's members — and only them.
     Fmt {
         /// Verify formatting instead of rewriting it.
@@ -166,6 +185,7 @@ fn main() -> Result<()> {
                 .collect();
             suite(&specifications, &root.join(SUITES), check)
         }
+        Command::Infra { check } => infra(&workspace_root(), check),
         Command::Fmt { check } => fmt(check),
         Command::Synth { check } => {
             let root = workspace_root();
@@ -535,6 +555,71 @@ fn protocol_json(args: &[&str], spec: &Path, doing: &str) -> Result<serde_json::
 
     serde_json::from_slice(&output.stdout)
         .with_context(|| format!("reading what `protocol {}` printed", args.join(" ")))
+}
+
+/// Runs the protocol CLI and returns raw stdout — for output that is a document, not a value.
+fn protocol_stdout(args: &[&str], doing: &str) -> Result<Vec<u8>> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = std::process::Command::new(&cargo)
+        .args(["run", "--quiet", "--package", "protocol-cli", "--"])
+        .args(args)
+        .current_dir(workspace_root())
+        .output()
+        .with_context(|| format!("running {cargo:?} for {doing}"))?;
+    if !output.status.success() {
+        bail!(
+            "`protocol {}` refused:\n{}{}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(output.stdout)
+}
+
+// ---- the infrastructure IR ---------------------------------------------------------------------
+
+/// Writes or checks the committed IR document compiled from the example observation.
+///
+/// The compiled bytes come from `protocol infra compile --format json`, which prints exactly what
+/// `--out` persists — one producer, so this check can never disagree with the CLI about what a
+/// compilation looks like. Byte comparison, not semantic: the document is content-addressed and
+/// deterministic by construction, so any byte drift is a real change in the model, the compiler
+/// or the fixture, and each of those must arrive as a reviewed diff of `cluster.ir.json`.
+fn infra(root: &Path, check: bool) -> Result<()> {
+    let fixture = root.join(OBSERVATION_FIXTURE);
+    let committed = root.join(OBSERVATION_IR);
+    let fixture_argument = fixture.to_str().context("the fixture path is printable")?;
+    let produced = protocol_stdout(
+        &[
+            "infra",
+            "compile",
+            "--path",
+            fixture_argument,
+            "--format",
+            "json",
+        ],
+        "compiling the example observation",
+    )?;
+
+    if check {
+        let existing = fs::read(&committed)
+            .with_context(|| format!("reading {}; run `cargo xtask infra`", committed.display()))?;
+        if existing != produced {
+            bail!(
+                "{} no longer matches what {} compiles to; run `cargo xtask infra` and review \
+                 the diff",
+                committed.display(),
+                OBSERVATION_FIXTURE
+            );
+        }
+        println!("ok: {OBSERVATION_IR} matches its observation");
+    } else {
+        fs::write(&committed, &produced)
+            .with_context(|| format!("writing {}", committed.display()))?;
+        println!("wrote {OBSERVATION_IR}");
+    }
+    Ok(())
 }
 
 // ---- the conformance suites --------------------------------------------------------------------

@@ -1,0 +1,152 @@
+{
+  "context": "many-defects",
+  "format": "infra-observation/2",
+  "kinds": {
+    "configmaps": {
+      "apiVersion": "v1",
+      "items": [],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "daemonsets": {
+      "apiVersion": "v1",
+      "items": [],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "deployments": {
+      "apiVersion": "v1",
+      "items": [
+        {
+          "metadata": {
+            "name": "idle",
+            "namespace": "app",
+            "uid": "d-1"
+          },
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": []
+              }
+            }
+          }
+        }
+      ],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "namespaces": {
+      "apiVersion": "v1",
+      "items": [
+        {
+          "metadata": {
+            "name": "app",
+            "uid": "ns-1"
+          }
+        }
+      ],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "nodes": {
+      "apiVersion": "v1",
+      "items": [],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "persistentvolumeclaims": {
+      "apiVersion": "v1",
+      "items": [],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "pods": {
+      "apiVersion": "v1",
+      "items": [
+        {
+          "metadata": {
+            "name": "web-0",
+            "namespace": "app",
+            "uid": "p-1"
+          }
+        },
+        {
+          "metadata": {
+            "name": "web-0",
+            "namespace": "app",
+            "uid": "p-2"
+          }
+        }
+      ],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "secrets": {
+      "apiVersion": "v1",
+      "items": [],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "serviceaccounts": {
+      "apiVersion": "v1",
+      "items": [],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "services": {
+      "apiVersion": "v1",
+      "items": [
+        {
+          "metadata": {
+            "name": "web",
+            "namespace": "app",
+            "uid": "s-1"
+          },
+          "spec": {
+            "ports": [
+              {
+                "port": 80
+              }
+            ],
+            "selector": {
+              "app": "web",
+              "tier": 3
+            }
+          }
+        }
+      ],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    },
+    "statefulsets": {
+      "apiVersion": "v1",
+      "items": [],
+      "kind": "List",
+      "metadata": {
+        "resourceVersion": ""
+      }
+    }
+  },
+  "scanned_at": "2026-08-20T22:30:30Z",
+  "scout_version": "0.0.1"
+}

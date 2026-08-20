@@ -9,7 +9,27 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`protocol infra validate | compile | inspect` — a scanned cluster becomes a validated,
+  content-addressed IR.** An external scanner (`infra-scout`, its own repository) writes an
+  `infra-observation/1` bundle; `validate` refuses a broken one with every problem in one run,
+  each under a stable `INFRA-` code; `compile` turns a valid one into an `infra-ir/1` document —
+  `BTreeMap`-normalized, references resolved to compiler-minted handles, danglings carried as
+  typed unresolved facts rather than refused, digest = full SHA-256 of the canonical model bytes,
+  provenance (`scanned_at`, `context`, `scout_version`) outside the digest so two scans of an
+  unchanged cluster address the same content; `inspect` summarizes either format and refuses a
+  persisted document whose digest no longer matches its content. The boundary is deliberate:
+  the scanner holds the credentials, and nothing in this workspace reaches a cluster or a
+  network — an observation arrives as a file or not at all.
+- **A bundle carrying a plain-string secret value is refused (`INFRA-SECRET-001`), and the
+  refusal never echoes the value.** The scanner already writes secrets as `{sha256, length}`;
+  this rule is the second, independent enforcement, so a secret value cannot enter the IR even
+  through a bundle the scanner never touched. Configmap values are digested the same way at
+  validation — keys and change-detection survive, content does not.
+- **`examples/k3d-dev-cluster/`** — a trimmed, reviewed observation derived from a real k3d
+  scan, and the committed IR it compiles to, drift-checked in the gate (`task infra-check`,
+  `cargo xtask infra --check`) and in its own CI job.
 
 ## [0.6.1-ess-wave-6.5] — 2026-08-21
 

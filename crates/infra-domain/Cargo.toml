@@ -1,0 +1,22 @@
+[package]
+name = "infra-domain"
+description = "The observation model for infrastructure: a scanned cluster, parsed permissively and validated strictly."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+# ConfigMap values are hashed at validation, so plaintext configuration leaves the model the same
+# way secret values never entered it: as `{sha256, length}`. Same version and same spelling as
+# `ess-gen`, deliberately — one hash implementation across the workspace. Default features stay on,
+# as in `ess-gen`: they are the pure Rust implementation and carry no I/O, network or unsafe code.
+sha2 = "0.10"
+
+[lints]
+workspace = true

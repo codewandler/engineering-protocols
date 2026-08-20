@@ -1,0 +1,23 @@
+[package]
+name = "infra-compiler"
+description = "Validated observation to infrastructure IR: normalized, content-addressed, deterministic."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+infra-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# The content digest: SHA-256 over the model's canonical JSON, the same construction and the same
+# full 64-hex width as `ess-gen`'s specification digest (gap register D-4 settled the width).
+# Same version and same spelling as `ess-gen` and `infra-domain`, deliberately — one hash
+# implementation across the workspace.
+sha2 = "0.10"
+
+[lints]
+workspace = true

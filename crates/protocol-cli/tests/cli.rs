@@ -2898,3 +2898,166 @@ fn ess_impact_narrows_the_committed_billing_suite_when_only_one_grant_moved() {
 
     std::fs::remove_dir_all(&directory).ok();
 }
+
+// -------------------------------------------------------------------------------------------
+// `protocol infra` — the observation bundle surface.
+// -------------------------------------------------------------------------------------------
+
+/// The committed trimmed observation, derived from a real k3d scan.
+const OBSERVATION: &str = "examples/k3d-dev-cluster/observation.json";
+
+/// The committed compiled IR the gate drift-checks against `OBSERVATION`.
+const COMMITTED_IR: &str = "examples/k3d-dev-cluster/cluster.ir.json";
+
+/// The deliberately unsanitized bundle: secret values still in the clear.
+const UNSANITIZED: &str = "crates/infra-domain/tests/fixtures/unsanitized-secret.observation.json";
+
+#[test]
+fn infra_validate_accepts_the_committed_observation() {
+    let output = protocol(&["infra", "validate", "--path", OBSERVATION]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("valid"), "the verdict is stated: {text}");
+    assert!(
+        text.contains("6 pod(s)"),
+        "the summary counts what was observed: {text}"
+    );
+}
+
+#[test]
+fn infra_validate_refuses_an_unsanitized_bundle_with_the_stable_code_and_exit_1() {
+    let output = protocol(&["infra", "validate", "--path", UNSANITIZED]);
+    assert_eq!(
+        code(&output),
+        1,
+        "a bundle carrying secret values must exit 1"
+    );
+    let text = stdout(&output);
+    assert_eq!(
+        text.matches("INFRA-SECRET-001").count(),
+        2,
+        "both plain values are refused in one run: {text}"
+    );
+    assert!(
+        !text.contains("cGxhaW50ZXh0") && !text.contains("YWRtaW4"),
+        "a refusal echoed a secret value: {text}"
+    );
+}
+
+#[test]
+fn infra_compile_writes_a_document_inspect_verifies_and_a_tampered_one_is_refused() {
+    let directory = scratch("protocol-infra-roundtrip");
+    let ir = directory.join("cluster.ir.json");
+    let compiled = protocol(&[
+        "infra",
+        "compile",
+        "--path",
+        OBSERVATION,
+        "--out",
+        printable(&ir),
+    ]);
+    assert_eq!(code(&compiled), 0, "{}", stderr(&compiled));
+
+    let inspected = protocol(&["infra", "inspect", "--path", printable(&ir)]);
+    assert_eq!(code(&inspected), 0, "{}", stderr(&inspected));
+    assert!(
+        stdout(&inspected).contains("digest "),
+        "the digest is reported: {}",
+        stdout(&inspected)
+    );
+
+    // Now edit one semantic byte. The document claims to be content-addressed; an inspect that
+    // still accepted it would notarise the edit.
+    let text = std::fs::read_to_string(&ir).expect("the written IR is readable");
+    let tampered = text.replacen("\"replicas\": 1", "\"replicas\": 7", 1);
+    assert_ne!(text, tampered, "the tampering has to land");
+    write(&ir, &tampered);
+    let refused = protocol(&["infra", "inspect", "--path", printable(&ir)]);
+    assert_eq!(code(&refused), 1, "a tampered document must be refused");
+    assert!(
+        stderr(&refused).contains("does not match the content"),
+        "the refusal says why: {}",
+        stderr(&refused)
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn infra_inspect_reads_a_bundle_and_the_committed_ir_and_both_agree_on_the_digest() {
+    let from_bundle = protocol(&[
+        "infra",
+        "inspect",
+        "--path",
+        OBSERVATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&from_bundle), 0, "{}", stderr(&from_bundle));
+    let bundle_view: serde_json::Value =
+        serde_json::from_str(&stdout(&from_bundle)).expect("the inspection is JSON");
+
+    let from_ir = protocol(&[
+        "infra",
+        "inspect",
+        "--path",
+        COMMITTED_IR,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&from_ir), 0, "{}", stderr(&from_ir));
+    let ir_view: serde_json::Value =
+        serde_json::from_str(&stdout(&from_ir)).expect("the inspection is JSON");
+
+    assert_eq!(
+        bundle_view["digest"], ir_view["digest"],
+        "compiling the bundle and reading the committed IR must address the same content"
+    );
+    assert_eq!(
+        bundle_view["digest"]
+            .as_str()
+            .expect("the digest is a string")
+            .len(),
+        64,
+        "the full SHA-256, not a truncation"
+    );
+    assert_eq!(bundle_view["counts"]["workloads"], 5);
+    assert_eq!(
+        bundle_view["unresolved"], 3,
+        "the three deliberate danglings of the fixture: the optional coredns configmap, the \
+         selector matching nothing, and the retired ingress backend"
+    );
+}
+
+#[test]
+fn infra_compile_reports_every_refusal_and_writes_nothing_for_a_refused_bundle() {
+    let directory = scratch("protocol-infra-refused");
+    let ir = directory.join("never.ir.json");
+    let output = protocol(&[
+        "infra",
+        "compile",
+        "--path",
+        "crates/infra-domain/tests/fixtures/many-defects.observation.json",
+        "--out",
+        printable(&ir),
+    ]);
+    assert_eq!(code(&output), 1, "a refused bundle compiles to nothing");
+    assert!(
+        !ir.exists(),
+        "no IR may be persisted from a bundle that failed validation"
+    );
+    let text = stdout(&output);
+    for expected in [
+        "INFRA-BUNDLE-001",
+        "INFRA-BUNDLE-002",
+        "INFRA-OBJECT-003",
+        "INFRA-SELECTOR-001",
+        "INFRA-WORKLOAD-001",
+    ] {
+        assert!(
+            text.contains(expected),
+            "every defect class arrives in one run; missing {expected}: {text}"
+        );
+    }
+    std::fs::remove_dir_all(&directory).ok();
+}
