@@ -720,28 +720,72 @@ fn every_scenario_id_the_billing_model_can_produce_reads_back() {
 
 #[test]
 fn no_source_file_in_this_crate_reads_a_clock_or_an_unordered_map() {
-    // Invariant 9's scan, which covers `ess-compiler` only, applied to the crate that now holds a
-    // generated artifact's definition. Two of the three failure modes are invisible to a test that
-    // serialises twice in one process: a `HashMap` iterates the same way twice in a row, and a
-    // timestamp only differs across runs. So they are read for, not trusted.
+    // Invariant 9's scan, which covers `ess-compiler` only, applied to the crate that holds both a
+    // generated artifact's definition and the runner that executes one. Two claims rest on it and
+    // neither is visible to a test that runs twice in one process: a `HashMap` iterates the same way
+    // twice in a row, and a wall-clock read only differs across runs. So they are read for, not
+    // trusted.
+    //
+    // `thread::sleep` is in the list for the runner's sake — §40 makes a fixed delay a test of the
+    // machine it runs on rather than of the system's semantics, and the repair everyone reaches for
+    // when an eventual assertion races a projection is exactly that.
+    //
+    // Comment lines are stripped first, because this crate's documentation names the tokens it
+    // refuses; a scan that could not tell an explanation from a call would have to be weakened until
+    // it caught nothing. What that costs is a banned token inside a block comment or a string
+    // literal, which is a price worth paying for a scan that stays on.
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut checked = 0;
     for entry in std::fs::read_dir(&source).expect("the crate has sources") {
         let path = entry.expect("an entry").path();
         if path.extension().is_some_and(|it| it == "rs") {
             let text = std::fs::read_to_string(&path).expect("readable");
-            for banned in ["HashMap", "HashSet", "SystemTime", "Instant", "rand::"] {
+            let code: String = text
+                .lines()
+                .filter(|line| !line.trim_start().starts_with("//"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            for banned in [
+                "HashMap",
+                "HashSet",
+                "SystemTime",
+                "Instant",
+                "rand::",
+                "thread::sleep",
+            ] {
                 assert!(
-                    !contains_token(&text, banned),
+                    !contains_token(&code, banned),
                     "{} uses {banned}, which makes a generated suite depend on when and where it \
-                     was built",
+                     was built, and a run depend on when and where it happened",
                     path.display()
                 );
             }
             checked += 1;
         }
     }
-    assert!(checked >= 3, "only {checked} source files were read");
+    assert!(checked >= 8, "only {checked} source files were read");
+}
+
+#[test]
+fn the_scan_for_a_clock_finds_one_and_does_not_find_a_word_that_merely_ends_in_a_banned_token() {
+    // The scan asserts the inverse too, for the reason `aep-domain`'s invariant scan does: a scan
+    // that has silently stopped working passes every file, and this one has two ways to stop —
+    // matching a substring of a longer identifier until someone deletes it as a false alarm, or
+    // matching nothing at all.
+    assert!(contains_token(
+        "let now = std::time::SystemTime::now();",
+        "SystemTime"
+    ));
+    assert!(contains_token("use rand::rngs::OsRng;", "rand::"));
+    assert!(contains_token(
+        "std::thread::sleep(delay);",
+        "thread::sleep"
+    ));
+    assert!(!contains_token(
+        "if let Operand::Fact(path) = operand {",
+        "rand::"
+    ));
+    assert!(!contains_token("let ranked = rank(status);", "rand::"));
 }
 
 /// `true` when `text` uses `token` as a token rather than as the tail of a longer identifier.

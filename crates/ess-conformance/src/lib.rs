@@ -1,7 +1,6 @@
-//! What a conformance suite is, whether a candidate command input reaches a guard in it, and how a
-//! specification becomes one.
+//! What a conformance suite is, how a specification becomes one, and what happens when one is run.
 //!
-//! Three things, in the order wave 4 needs them.
+//! Five things, in the order wave 4 needs them.
 //!
 //! [`scenario`] is the **canonical scenario IR** (design §21): the serialisable definition of every
 //! check a specification obliges an implementation to pass. It executes nothing. That separation is
@@ -71,6 +70,23 @@
 //! to change, because a suite quietly holding fewer checks than the specification requires is the
 //! one failure a passing run cannot show.
 //!
+//! # Execution: from a suite to a verdict
+//!
+//! [`target`] is what an implementation offers — nine methods, each traceable to a construct the
+//! specification declares, and not one of them an assertion. [`runner`] executes a suite against one
+//! and returns a [`report`]. The split is design §27's: the runner owns sequencing, isolation,
+//! bounded waiting, comparison and diagnostics; the target owns invoking the implementation,
+//! observing what the model declares observable, mapping its own failures into
+//! [`TargetError`], and waiting until it can satisfy a consistency requirement.
+//!
+//! §37 makes the same split about *variation*, and that is the stricter one: a [`Runner`] is
+//! constructed with a [`Clock`] and an id source, nothing below it reaches for an ambient one, and
+//! nothing anywhere sleeps. Two identically-constructed runners produce byte-identical reports
+//! against a deterministic target, which is what makes a stored report reviewable by diff.
+//!
+//! [`mod@reference`] is the target that proves the suite means anything: `examples/billing/`
+//! implemented by hand, in memory, passing all 27 scenarios its own specification obliges.
+//!
 //! # What is deliberately not here
 //!
 //! * **A constraint solver.** §11 names one as a later extension and not a requirement of the first
@@ -78,24 +94,41 @@
 //! * **Branch selection by inspection.** [`when`] returns the predicate an outcome declares, and
 //!   which branch a candidate reaches is read off `ResolvedOutcome::test_strategy`, never derived a
 //!   second time here.
-//! * **A runner.** [`scenario`] defines what a suite *is*; executing one against a target is a
-//!   later slice, and mixing the two is how a runner becomes the definition.
-//! * **A clock.** The crate that will hold one is this one; the part of it that needs one does not
-//!   exist yet.
+//! * **An async runtime.** Design's open decision D2, taken as its default: the runner is
+//!   synchronous, because nothing in this workspace can drive a future that really yields and
+//!   waiting belongs inside the target anyway (§15).
+//! * **Deliberately faulty implementations, and the fault matrix.** §25 and §26, and a slice of
+//!   their own on purpose: a suite is not trustworthy until its failures are demonstrated, and
+//!   defects co-designed with the suite that is meant to catch them demonstrate nothing.
 
 pub mod decision;
 pub mod input;
+pub mod reference;
+pub mod report;
+pub mod runner;
 pub mod scenario;
 pub mod synthesize;
+pub mod target;
 pub mod witness;
 
 pub use decision::{when, Decision, Reason, Unevaluable, UnknownCause};
 pub use input::{flatten, resolve_path, InputFacts, ShapeError, ShapeErrors, Target};
+pub use report::{
+    CheckCode, CheckResult, ConformanceReport, ConformanceStatus, Diagnostic, ScenarioResult,
+    Status,
+};
+pub use runner::{AdvancingClock, Clock, Ids, Runner, RunnerConfig};
 pub use scenario::{
     BindingAspect, ConformanceScenario, ConformanceSuite, EssSemanticRef, InstanceName, ScenarioId,
     ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance, ViewExpectation,
 };
 pub use synthesize::{
     synthesize, BindingGap, InstanceNeed, Refusal, RefusalCause, Synthesis, Unreachable,
+};
+pub use target::{
+    ConformanceTarget, Deadline, DeclaredErrorValue, EventObservationRequest,
+    ExternalOutcomeControl, ImplementationIdentity, InvocationObservationRequest, ObservedEvent,
+    ObservedInvocation, RedeliveryRequest, ScenarioContext, SemanticCommandRequest,
+    SemanticCommandResult, SemanticViewRequest, SemanticViewResult, TargetError, ViewRow,
 };
 pub use witness::WitnessGap;

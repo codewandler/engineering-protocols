@@ -41,6 +41,17 @@ belongs in the commit message or in `docs/design/`.
   proved and an illegal one refused, an entity's invariants checked after each state-changing command,
   and a binding checked for its mapping, its delivery guarantee and its failure policy. The normative
   example yields twenty-seven scenarios and the oracle fixture thirty-one. Nothing executes them yet.
+- **A generated suite runs against an implementation.** A `ConformanceTarget` offers nine methods,
+  each traceable to something the specification declares — execute a command, query a view, observe
+  events, configure an externally decided outcome, redeliver an event, isolate a scenario. There is no
+  assertion method and no escape hatch: if a step cannot be executed through concepts the model
+  declares, that is a finding about the model rather than a method on the trait. All twenty-seven
+  scenarios of the normative example pass against a hand-written reference implementation, and two
+  runs produce byte-identical reports, because the runner owns the clock and the id source and nothing
+  beneath it reaches for an ambient one.
+- **A scenario the target cannot observe fails the run rather than passing quietly.** `unsupported` is
+  its own status beside `passed`, `failed` and `error`, and a required scenario that ends in it makes
+  conformance fail — a skip that reads as a pass is how a suite comes to certify what it never checked.
 - **A binding's promises are each a test.** The mapping is asserted field by field, so a swap between
   two same-typed fields is caught rather than passing. `at_least_once` delivers the event twice and
   requires the consequence to survive it — not to happen exactly once, which is the assertion that

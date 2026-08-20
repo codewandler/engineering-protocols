@@ -367,6 +367,7 @@ dependencies = [
 name = "ess-conformance"
 version = "0.1.0"
 dependencies = [
+ "aep-contract",
  "aep-domain",
  "ess-compiler",
  "ess-domain",

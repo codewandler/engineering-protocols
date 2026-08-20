@@ -10,6 +10,12 @@ authors.workspace = true
 
 [dependencies]
 aep-domain.workspace = true
+
+# The consistency pair a view query needs. Design §14 is explicit that
+# `aep_contract::consistency::{ConsistencyToken, QueryConsistency}` already ship and that a second
+# pair here would buy nothing but a translation table for the two to drift across — so the runner
+# reuses them rather than restating them.
+aep-contract.workspace = true
 ess-compiler.workspace = true
 ess-domain.workspace = true
 
