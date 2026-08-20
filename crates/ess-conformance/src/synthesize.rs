@@ -58,17 +58,44 @@
 //! [`ScenarioStep::CaptureInstance`] — so the value is the target's, and the suite carries a
 //! reference to it rather than a guess at it.
 //!
+//! # A binding is four claims, and each one fails on its own
+//!
+//! §16 through §18. *When this event occurs, invoke this command, with this mapping, delivered this
+//! way, and on failure do this* — so a binding produces four scenarios rather than one, under the
+//! four [`BindingAspect`] keys, and each says what it can prove from
+//! the declared semantics and nothing more:
+//!
+//! | aspect | what it requires | why that and not more |
+//! |---|---|---|
+//! | `flow` | the event happens, and the invoked command's branch publishes what it declares | §16: prove the flow through the resulting event, never by observing the internal command |
+//! | `mapping` | each input receives the value the binding names for it | the only clause a document can get *silently* wrong — see [`ScenarioStep::ExpectInvocation`] |
+//! | `delivery` | the same event delivered twice still leaves the consequence observable | §17: `at_least_once` permits duplicates, so a count is a test that fails a correct target |
+//! | `on-failure` | the declared policy is observable, with the failure forced | §18: force it, and assert what the model says follows |
+//!
+//! `on_failure: drop` is the one that produces no scenario at all, and that is the model being
+//! honest rather than this crate being short: `drop` means the work is lost and nobody is told, so
+//! there is nothing to observe. §18 names the response — refuse the check rather than invent one —
+//! and [`BindingGap::PolicySilent`] is it.
+//!
+//! # An invariant is asserted where a view publishes what it reads
+//!
+//! §20, at the level it asks for: *evaluate invariants after successful state-changing commands,
+//! against observable entity or view state, where witnesses are available*. So one scenario per
+//! entity per state-changing branch, running that branch and then requiring that every row of a view
+//! satisfies the entity's invariants — [`ViewExpectation::Satisfies`], carrying the predicate the
+//! specification wrote.
+//!
+//! Where the witness is missing, it is missing *by construction*: an entity's invariant reads the
+//! entity's fields and a view publishes only what it declares, so an invariant over a field no view
+//! publishes is unobservable no matter how good the runner is. That is a fact about the
+//! specification, and [`RefusalCause::InvariantUnobservable`] says so with the paths in hand.
+//!
 //! # What is not here yet
 //!
-//! Binding scenarios (§16–§18) and the runner. Both are later slices, and the first appears as a
-//! refusal per binding rather than as silence, for the reason above.
-//!
-//! Invariant scenarios (§20) produce nothing at all, and the two things that stop them are not this
-//! gate. [`ScenarioId`] has four shapes — an outcome, a transition, a refusal and a binding — and an
-//! entity invariant is none of them; and [`ViewExpectation`] matches rows by field *values*, so
-//! there is no step that evaluates `total.amount >= 0` against what a view shows. Both are decisions
-//! about what a suite can say, in the sense §21 means: a new shape there is a change to what an ESS
-//! *means*, not a convenience for one generator.
+//! The runner, and a value object's invariants — `billing.invoice.Money` says `amount >= 0` of every
+//! `Money` in the system, which is a claim about a *type* rather than about an instance at rest, and
+//! rebasing it onto every entity field that reaches that type is a walk this slice does not do. It
+//! is a refusal ([`RefusalCause::NotSynthesisedYet`]) rather than a silence, for the reason above.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
@@ -78,21 +105,23 @@ use aep_domain::node::Node;
 use aep_domain::predicate::{Predicate, Truth};
 use ess_compiler::diagnostic::Code;
 use ess_compiler::ir::{
-    Driver, EntityHandle, EssIr, ResolvedBody, ResolvedCommand, ResolvedEffect, ResolvedInstance,
-    ResolvedOutcome, ResolvedSubject, ResolvedTypeRef, ResolvedView,
+    Driver, EntityHandle, EssIr, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedEffect,
+    ResolvedFailure, ResolvedInstance, ResolvedMappingValue, ResolvedOutcome, ResolvedSubject,
+    ResolvedTypeRef, ResolvedView,
 };
-use ess_domain::command::TestStrategy;
-use ess_domain::entity::{EntitySpec, StateName};
+use ess_domain::binding::Delivery;
+use ess_domain::command::{OutcomeName, TestStrategy};
+use ess_domain::entity::{EntitySpec, Invariant, StateName};
 use ess_domain::name::QualifiedName;
 use ess_domain::view::AssertionStyle;
 
 use crate::decision::{when, Decision, Unevaluable};
-use crate::input::{flatten, ShapeErrors};
+use crate::input::{flatten, resolve_path, ShapeErrors};
 use crate::scenario::{
-    ActorRef, BindingRef, CommandRef, ConformanceScenario, ConformanceSuite, DeclaredTypeRef,
-    EntityRef, ErrorRef, EssSemanticRef, EventRef, InstanceName, OutcomeRef, ScenarioId,
-    ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance, TransitionRef, ViewExpectation,
-    ViewRef,
+    ActorRef, BindingAspect, BindingRef, CommandRef, ComponentRef, ConformanceScenario,
+    ConformanceSuite, DeclaredTypeRef, EntityRef, ErrorRef, EssSemanticRef, EventRef, InstanceName,
+    OutcomeRef, ScenarioId, ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance,
+    TransitionRef, ViewExpectation, ViewRef,
 };
 use crate::witness::{candidates, WitnessGap, MAX_CANDIDATES};
 
@@ -260,6 +289,37 @@ pub enum RefusalCause {
         /// Where it is specified.
         sections: &'static str,
     },
+    /// A binding clause with nothing a scenario could observe.
+    ///
+    /// Not one reason but six, because the repairs differ: one of them is a policy that publishes
+    /// nothing *on purpose* (§18), and the others are shapes a specification can be edited out of.
+    BindingUnobservable {
+        /// Which binding.
+        binding: BindingRef,
+        /// Why the clause has no witness.
+        gap: BindingGap,
+    },
+    /// An entity invariant nothing observable reads.
+    ///
+    /// §20 evaluates invariants "against observable entity/view state where possible", and this is
+    /// where that qualifier bites. An entity's invariant reads the entity's **fields**; a view
+    /// publishes only what it **declares**. `weight_grams >= 0` on an entity whose views publish
+    /// `order_id` and `contact` is therefore unobservable by construction — no runner and no witness
+    /// generator can close it, and asserting it against something else would be asserting a
+    /// different claim.
+    InvariantUnobservable {
+        /// Whose invariant.
+        entity: EntityRef,
+        /// The condition, as the author wrote it.
+        invariant: String,
+        /// The paths it reads that no view of the entity publishes.
+        ///
+        /// Empty when every path *is* published and the problem is the other one: no view holds an
+        /// instance in the state the scenario reaches, so there would be no row to read.
+        unpublished: Vec<FactPath>,
+        /// The state the entity is in when the assertion would run.
+        state: StateName,
+    },
     /// Two scenarios claimed one id. A drift alarm: `ess-domain` refuses a duplicated declaration.
     DuplicateScenario,
     /// The outcome's strategy says an input reaches it and its condition declares no guard.
@@ -299,6 +359,8 @@ impl RefusalCause {
                 Self::DuplicateScenario => 7,
                 Self::StrategyWithoutGuard { .. } => 8,
                 Self::WitnessRejected(_) => 9,
+                Self::BindingUnobservable { .. } => 10,
+                Self::InvariantUnobservable { .. } => 11,
             },
         )
     }
@@ -323,6 +385,16 @@ impl RefusalCause {
                  after the command it ran"
             }
             Self::NotSynthesisedYet { .. } => "a later slice of `ess-conformance` synthesises this",
+            Self::BindingUnobservable { gap, .. } => gap.hint(),
+            Self::InvariantUnobservable { unpublished, .. } => {
+                if unpublished.is_empty() {
+                    "declare a view that holds an instance in this state, or the invariant cannot \
+                     be read after this branch"
+                } else {
+                    "publish the fields the invariant reads in a view of this entity, or state the \
+                     invariant over what one already publishes"
+                }
+            }
             Self::DuplicateScenario => {
                 "two declarations produced one scenario id; rename one of them"
             }
@@ -381,6 +453,153 @@ impl fmt::Display for RefusalCause {
                     f,
                     "the witness is not a value of the input's type:\n{errors}"
                 )
+            }
+            Self::BindingUnobservable { binding, gap } => write!(f, "`{binding}` {gap}"),
+            Self::InvariantUnobservable {
+                entity,
+                invariant,
+                unpublished,
+                state,
+            } => {
+                if unpublished.is_empty() {
+                    write!(
+                        f,
+                        "`{invariant}` cannot be read after this branch: no view of `{entity}` \
+                         holds an instance in `{state}`"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "`{invariant}` reads what no view of `{entity}` publishes"
+                    )?;
+                    for path in unpublished {
+                        write!(f, "\n  - `{path}` is published by no view of the entity")?;
+                    }
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+/// Why one clause of a binding has no scenario.
+///
+/// Six shapes, and the split that matters is between the first five — a specification an author can
+/// edit — and [`PolicySilent`](Self::PolicySilent), which is a decision the author already made and
+/// the model deliberately gives nothing to observe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BindingGap {
+    /// No command outcome emits the event the binding reacts to.
+    ///
+    /// Legal: an event may arrive from outside the specification, which is why `ess-domain` does not
+    /// refuse it. It still means nothing in a scenario can make the binding fire.
+    NothingPublishes {
+        /// The event nothing emits.
+        event: EventRef,
+    },
+    /// Which branch the invoked command takes depends on the values the event carries.
+    ///
+    /// A binding fills the command's input from the event, and no generator knows what the upstream
+    /// implementation will publish there — so with two branches an input decides between, a scenario
+    /// cannot say which one to require. Deciding it by inspecting the guard would be a claim about a
+    /// value nobody has.
+    BranchUndecided {
+        /// The invoked command.
+        command: CommandRef,
+        /// The branches a scenario cannot choose between, in declaration order.
+        branches: Vec<OutcomeName>,
+    },
+    /// The branch the binding reaches publishes nothing.
+    ///
+    /// §16 proves a flow through the event the invoked command publishes. A branch that emits none
+    /// leaves the flow with no observable consequence at all.
+    NothingPublished {
+        /// The branch that publishes nothing.
+        outcome: OutcomeRef,
+    },
+    /// The binding fills no input, so there is no mapping to check.
+    NothingMapped {
+        /// The invoked command.
+        command: CommandRef,
+    },
+    /// No branch of the invoked command can be made to fail.
+    ///
+    /// A failure policy is only observable once the failure has been forced, and the only branch a
+    /// scenario can force is one the specification declares `external:` (§12). Without one, the
+    /// declared policy is a word nothing exercises.
+    NoForcibleFailure {
+        /// The invoked command.
+        command: CommandRef,
+    },
+    /// The declared policy is `drop`, which publishes nothing on purpose.
+    ///
+    /// §18's rule, and the one refusal in this family that is not a defect: "give up silently" is
+    /// the whole content of the word, and `ess-domain` records why an event here would be wrong —
+    /// it would make the policy a notification, which is a different decision that already has a
+    /// name. So the check is refused rather than invented, and what a reader learns is that this
+    /// binding's failure path is *by declaration* unprovable.
+    PolicySilent,
+}
+
+impl BindingGap {
+    /// What would have to change.
+    fn hint(&self) -> &'static str {
+        match self {
+            Self::NothingPublishes { .. } => {
+                "give some command outcome `emits:` for this event; a binding on an event nothing \
+                 publishes can never fire"
+            }
+            Self::BranchUndecided { .. } => {
+                "leave the invoked command one branch an input does not choose, or declare the \
+                 others `external:` so a scenario can force them"
+            }
+            Self::NothingPublished { .. } => {
+                "emit an event from the branch the binding reaches; a flow with no consequence is a \
+                 flow nothing can observe"
+            }
+            Self::NothingMapped { .. } => {
+                "map the command's inputs from the event, or drop the binding: an invocation that \
+                 carries nothing carries nothing to check"
+            }
+            Self::NoForcibleFailure { .. } => {
+                "declare the branch that fails `external:`, which is what lets a scenario force it"
+            }
+            Self::PolicySilent => {
+                "`drop` is unobservable by design; write `escalate:` with an event if the failure \
+                 has to be provable"
+            }
+        }
+    }
+}
+
+impl fmt::Display for BindingGap {
+    /// Reads as the tail of "`<binding>` …".
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NothingPublishes { event } => {
+                write!(f, "reacts to `{event}`, which no outcome emits")
+            }
+            Self::BranchUndecided { command, branches } => write!(
+                f,
+                "invokes `{command}`, whose branch is decided by an input the event fills: {}",
+                branches
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::NothingPublished { outcome } => {
+                write!(f, "invokes `{outcome}`, which publishes nothing")
+            }
+            Self::NothingMapped { command } => {
+                write!(f, "fills none of `{command}`'s input")
+            }
+            Self::NoForcibleFailure { command } => write!(
+                f,
+                "declares a failure policy, and no branch of `{command}` can be forced to fail"
+            ),
+            Self::PolicySilent => {
+                f.write_str("gives up silently, which the model publishes nothing for")
             }
         }
     }
@@ -504,7 +723,8 @@ pub fn synthesize(ir: &EssIr) -> Synthesis {
         }
     }
     lifecycle(ir, &actors, &mut suite, &mut refusals);
-    bindings(ir, &mut refusals);
+    invariants(ir, &actors, &mut suite, &mut refusals);
+    bindings(ir, &actors, &mut suite, &mut refusals);
 
     Synthesis { suite, refusals }
 }
@@ -541,44 +761,20 @@ fn exercise(
     id: &ScenarioId,
     refusals: &mut Vec<Refusal>,
 ) -> Option<(Vec<ScenarioStep>, BTreeSet<EssSemanticRef>)> {
-    let setup = match prepare(ir, outcome, actors) {
-        Ok(setup) => setup,
-        Err(cause) => {
-            refusals.push(Refusal::about(id, cause));
-            return None;
-        }
-    };
-    let input = match reach(ir, command, outcome) {
-        Ok(input) => input,
+    let run = match run(ir, command, outcome, actors) {
+        Ok(run) => run,
         Err(cause) => {
             refusals.push(Refusal::about(id, cause));
             return None;
         }
     };
 
-    let command_ref = CommandRef::new(command.name.clone());
-    let outcome_ref = OutcomeRef::new(command_ref.clone(), outcome.name.clone());
     let emitted: Vec<EventRef> = outcome.emits.iter().map(EventRef::from).collect();
     let absent = siblings_emit(command, outcome, &emitted);
-    let actor = actors.get(&command.name).cloned();
-    let (view_steps, views) = view_expectations(ir, outcome, setup.after.as_ref(), id, refusals);
+    let actor = run.actor.clone();
+    let (view_steps, views) = view_expectations(ir, outcome, run.after.as_ref(), id, refusals);
 
-    let mut steps = setup.steps.clone();
-    if outcome.test_strategy == TestStrategy::InjectFault {
-        // §12: no predicate over a recipient and a template says whether a provider will accept the
-        // mail, so the suite injects the answer rather than inventing an input that produces it.
-        steps.push(ScenarioStep::ConfigureExternalOutcome {
-            force: outcome_ref.clone(),
-        });
-    }
-    steps.push(ScenarioStep::ExecuteCommand {
-        command: command_ref,
-        actor: actor.clone(),
-        input: supply(&input, outcome.subject.as_ref(), setup.instance.as_ref()),
-    });
-    steps.push(ScenarioStep::ExpectOutcome {
-        outcome: outcome_ref,
-    });
+    let mut steps = run.steps();
     if let Some(error) = &outcome.error {
         steps.push(ScenarioStep::ExpectError {
             error: ErrorRef::from(error),
@@ -601,8 +797,81 @@ fn exercise(
     steps.extend(view_steps);
 
     let mut source = dependencies(ir, command, outcome, &absent, actor, &views);
-    source.extend(setup.source);
+    source.extend(run.source);
     Some((steps, source))
+}
+
+/// One branch, arranged and run: everything before the assertions that are particular to a family.
+///
+/// The three families that execute a command all need the same four things — an instance in the
+/// state the branch may be taken from, an input that reaches the branch, the invocation, and the
+/// requirement that the declared branch was the one taken — and they differ only in what they assert
+/// afterwards. Sharing it is not only economy: an arrangement built two ways is two answers to
+/// "which invoice is this scenario about", and the second one is wrong eventually.
+///
+/// [`Run::steps`] is kept separate from the arrangement so a caller can inject something *between*
+/// them — which §18's failure scenario needs, because the control it arms must be armed after the
+/// arrangement's own commands have run and before the one that triggers the binding.
+struct Run {
+    /// The steps that bring the instance into the state the branch needs.
+    setup: Vec<ScenarioStep>,
+    /// Forcing the branch where it is externally decided, invoking it, and requiring it.
+    invoke: Vec<ScenarioStep>,
+    /// The state the subject is in afterwards, where there is a subject.
+    after: Option<StateName>,
+    /// The actor the command is invoked as, where the specification grants one.
+    actor: Option<ActorRef>,
+    /// What the arrangement depends on.
+    source: BTreeSet<EssSemanticRef>,
+}
+
+impl Run {
+    /// The arrangement and the invocation, in order.
+    fn steps(&self) -> Vec<ScenarioStep> {
+        let mut steps = self.setup.clone();
+        steps.extend(self.invoke.iter().cloned());
+        steps
+    }
+}
+
+/// Arranges the instance a branch acts on and invokes it, or says why neither is possible.
+fn run(
+    ir: &EssIr,
+    command: &ResolvedCommand,
+    outcome: &ResolvedOutcome,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+) -> Result<Run, RefusalCause> {
+    let setup = prepare(ir, outcome, actors)?;
+    let input = reach(ir, command, outcome)?;
+
+    let command_ref = CommandRef::new(command.name.clone());
+    let outcome_ref = OutcomeRef::new(command_ref.clone(), outcome.name.clone());
+    let actor = actors.get(&command.name).cloned();
+
+    let mut invoke = Vec::new();
+    if outcome.test_strategy == TestStrategy::InjectFault {
+        // §12: no predicate over a recipient and a template says whether a provider will accept the
+        // mail, so the suite injects the answer rather than inventing an input that produces it.
+        invoke.push(ScenarioStep::ConfigureExternalOutcome {
+            force: outcome_ref.clone(),
+        });
+    }
+    invoke.push(ScenarioStep::ExecuteCommand {
+        command: command_ref,
+        actor: actor.clone(),
+        input: supply(&input, outcome.subject.as_ref(), setup.instance.as_ref()),
+    });
+    invoke.push(ScenarioStep::ExpectOutcome {
+        outcome: outcome_ref,
+    });
+
+    Ok(Run {
+        setup: setup.steps,
+        invoke,
+        after: setup.after,
+        actor,
+        source: setup.source,
+    })
 }
 
 /// What has to be true before a branch can be run, and what is true of its subject afterwards.
@@ -1454,17 +1723,715 @@ fn clipped(text: &str) -> ScenarioPurpose {
         .unwrap_or_else(|error| panic!("a synthesised purpose is one line: {error}"))
 }
 
-/// One refusal per binding, until the slice that synthesises §16–§18 lands.
-fn bindings(ir: &EssIr, refusals: &mut Vec<Refusal>) {
-    for binding in ir.bindings.values() {
+/// What must still hold of an entity once a branch has changed one (§20).
+///
+/// One scenario per entity per state-changing branch: run the branch, then require that a view of
+/// the entity satisfies every invariant it declares. Not one per invariant — see
+/// [`ScenarioId::Invariant`] for why an invariant has no name to be keyed by, and what carrying them
+/// together costs.
+///
+/// A branch with no subject changes no entity, and an entity that declares no invariant has nothing
+/// to check; neither is a refusal, because neither is a check the specification asked for and did
+/// not get.
+fn invariants(
+    ir: &EssIr,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+    suite: &mut ConformanceSuite,
+    refusals: &mut Vec<Refusal>,
+) {
+    let projections = ir.projections();
+    for command in ir.commands.values() {
+        for outcome in &command.outcomes {
+            let Some(subject) = &outcome.subject else {
+                continue;
+            };
+            if ir.entity(&subject.entity).invariants.is_empty() {
+                continue;
+            }
+            let id = ScenarioId::Invariant {
+                entity: EntityRef::from(&subject.entity),
+                after: OutcomeRef::new(CommandRef::new(command.name.clone()), outcome.name.clone()),
+            };
+            let Some(scenario) =
+                holds_after(ir, command, outcome, &projections, actors, &id, refusals)
+            else {
+                continue;
+            };
+            insert(suite, id, scenario, refusals);
+        }
+    }
+    value_object_invariants(ir, refusals);
+}
+
+/// The scenario that runs one branch and then reads the entity's invariants off a view.
+///
+/// `None` where the branch cannot be run at all, and where **every** invariant was refused: a
+/// scenario that executes a command and asserts nothing about what it was written to check is the
+/// shape of green this milestone exists to rule out. A scenario that could assert some of them is
+/// still worth having, and the ones it could not appear as refusals beside it.
+#[allow(clippy::too_many_arguments)]
+fn holds_after(
+    ir: &EssIr,
+    command: &ResolvedCommand,
+    outcome: &ResolvedOutcome,
+    projections: &BTreeMap<&EntityHandle, Vec<&ResolvedView>>,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+    id: &ScenarioId,
+    refusals: &mut Vec<Refusal>,
+) -> Option<ConformanceScenario> {
+    let subject = outcome.subject.as_ref()?;
+    let entity = ir.entity(&subject.entity);
+    let entity_ref = EntityRef::from(&subject.entity);
+    let run = match run(ir, command, outcome, actors) {
+        Ok(run) => run,
+        Err(cause) => {
+            refusals.push(Refusal::about(id, cause));
+            return None;
+        }
+    };
+    // The state the branch leaves the instance in, which is what decides whether a filtered view
+    // holds a row to read the invariant off. A branch with a subject always has one.
+    let state = run.after.clone()?;
+    let views = projections
+        .get(&subject.entity)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+
+    let mut steps = run.steps();
+    let mut named: BTreeSet<ViewRef> = BTreeSet::new();
+    for invariant in &entity.invariants {
+        let witnesses = witnesses_for(ir, invariant, views, &state);
+        if witnesses.is_empty() {
+            refusals.push(Refusal::about(
+                id,
+                RefusalCause::InvariantUnobservable {
+                    entity: entity_ref.clone(),
+                    invariant: invariant.statement.clone(),
+                    unpublished: unpublished(ir, invariant, views),
+                    state: state.clone(),
+                },
+            ));
+            continue;
+        }
+        for view in witnesses {
+            steps.extend(assert_invariant(view, invariant));
+            named.insert(ViewRef::new(view.name.clone()));
+        }
+    }
+    if named.is_empty() {
+        return None;
+    }
+
+    let mut source: BTreeSet<EssSemanticRef> = run.source.clone();
+    let command_ref = CommandRef::new(command.name.clone());
+    source.insert(command_ref.clone().into());
+    source.insert(OutcomeRef::new(command_ref, outcome.name.clone()).into());
+    source.insert(entity_ref.clone().into());
+    if let Some(actor) = run.actor.clone() {
+        source.insert(actor.into());
+    }
+    source.extend(named.into_iter().map(EssSemanticRef::from));
+    source.extend(
+        input_types(ir, command)
+            .into_iter()
+            .map(EssSemanticRef::from),
+    );
+
+    let text = format!(
+        "a `{entity_ref}` still satisfies what it declares after `{}` on `{}`",
+        command.name, outcome.name
+    );
+    Some(ConformanceScenario::new(clipped(&text), steps, source))
+}
+
+/// Requiring one invariant of one view, in the block that view's consistency decides.
+///
+/// The style is read off [`ResolvedView::assertion_style`], exactly as §14 requires everywhere else:
+/// an invariant asserted immediately against an `eventual` projection races it, and the repair
+/// everyone reaches for is a sleep.
+fn assert_invariant(view: &ResolvedView, invariant: &Invariant) -> Vec<ScenarioStep> {
+    let name = ViewRef::new(view.name.clone());
+    let expectation = ViewExpectation::Satisfies {
+        predicate: invariant.predicate.clone(),
+    };
+    match view.assertion_style {
+        AssertionStyle::Expect => vec![
+            ScenarioStep::QueryView { view: name.clone() },
+            ScenarioStep::ExpectView {
+                view: name,
+                expectation,
+            },
+        ],
+        AssertionStyle::Eventually => vec![ScenarioStep::EventuallyView {
+            view: name,
+            expectation,
+        }],
+    }
+}
+
+/// One refusal per value object that declares an invariant this build does not evaluate.
+///
+/// A value object's invariant is a claim about a *type* — every `Money` in the system — rather than
+/// about one instance at rest, so it is not what §20's "after a state-changing command" evaluates.
+/// Reading one off an entity means rebasing `amount >= 0` onto every path that reaches a `Money`,
+/// which this slice does not do. §36's rule is that the gap is visible rather than silent, so it is
+/// a refusal per type and not an omission a reader has to notice.
+fn value_object_invariants(ir: &EssIr, refusals: &mut Vec<Refusal>) {
+    for declared in ir.types.values() {
+        let invariants = match &declared.body {
+            ResolvedBody::Newtype { invariants, .. } | ResolvedBody::Struct { invariants, .. } => {
+                invariants
+            }
+            ResolvedBody::Enum { .. } | ResolvedBody::Union { .. } => continue,
+        };
+        if invariants.is_empty() {
+            continue;
+        }
         refusals.push(Refusal {
-            subject: BindingRef::new(binding.name.clone()).into(),
+            subject: DeclaredTypeRef::new(declared.name.clone()).into(),
             scenario: None,
             cause: RefusalCause::NotSynthesisedYet {
-                construct: "a binding's flow and its failure policy",
-                sections: "design §16, §17 and §18",
+                construct: "reading a value object's own invariants off the fields that hold one",
+                sections: "design §20",
             },
         });
+    }
+}
+
+/// Every view that can answer this invariant about an instance resting in `state`.
+///
+/// Two conditions, and both are readings of the model rather than guesses about a runner. The view
+/// has to **publish what the invariant reads** — every path resolved against the view's own declared
+/// fields, by the same walk a guard's path takes through a command's input — and its filter has to
+/// **hold an instance in this state**, because an assertion about every row of an empty view is an
+/// assertion nothing can fail.
+///
+/// A view whose filter cannot be decided against the one fact a scenario knows is not a witness
+/// either. That view already has its own refusal under the outcome scenario, saying so with the
+/// paths; repeating it here would be one defect reported twice.
+fn witnesses_for<'a>(
+    ir: &EssIr,
+    invariant: &Invariant,
+    views: &[&'a ResolvedView],
+    state: &StateName,
+) -> Vec<&'a ResolvedView> {
+    views
+        .iter()
+        .filter(|view| {
+            invariant
+                .predicate
+                .fact_paths()
+                .into_iter()
+                .all(|path| resolve_path(ir, &view.fields, path).is_scalar())
+                && matches!(shows(view, state), Ok(true))
+        })
+        .copied()
+        .collect()
+}
+
+/// Every path an invariant reads that no view of the entity publishes.
+///
+/// The difference between "no view holds a row here" and "no view could ever answer this", which is
+/// the difference between a filter an author might widen and a field an author has to publish.
+fn unpublished(ir: &EssIr, invariant: &Invariant, views: &[&ResolvedView]) -> Vec<FactPath> {
+    invariant
+        .predicate
+        .fact_paths()
+        .into_iter()
+        .filter(|path| {
+            !views
+                .iter()
+                .any(|view| resolve_path(ir, &view.fields, path).is_scalar())
+        })
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Every declared type a command's input reaches.
+fn input_types(ir: &EssIr, command: &ResolvedCommand) -> BTreeSet<DeclaredTypeRef> {
+    let mut types = BTreeSet::new();
+    for field in &command.input {
+        reachable_types(ir, &field.type_ref, &mut types);
+    }
+    types
+}
+
+/// The four claims a binding makes, one scenario each (§16, §17, §18).
+///
+/// Every one of them starts the same way — make the event happen — and that alone is more than a
+/// preamble: the trigger is a whole outcome scenario's worth of arrangement, because the event a
+/// binding reacts to is published by a command that may itself need an instance driven into a state.
+///
+/// Where the trigger cannot be produced at all, the refusal is about the **binding** rather than
+/// about one of its four scenarios: none of the four exists, and four copies of one reason is a
+/// diagnostic a reader has to deduplicate by hand.
+fn bindings(
+    ir: &EssIr,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+    suite: &mut ConformanceSuite,
+    refusals: &mut Vec<Refusal>,
+) {
+    for binding in ir.bindings.values() {
+        let subject = BindingRef::new(binding.name.clone());
+        let event = EventRef::from(&binding.event);
+        let Some((publisher, published_by)) = publisher(ir, &binding.event) else {
+            refusals.push(Refusal {
+                subject: subject.clone().into(),
+                scenario: None,
+                cause: RefusalCause::BindingUnobservable {
+                    binding: subject,
+                    gap: BindingGap::NothingPublishes { event },
+                },
+            });
+            continue;
+        };
+        let trigger = match run(ir, publisher, published_by, actors) {
+            Ok(run) => run,
+            Err(cause) => {
+                refusals.push(Refusal {
+                    subject: subject.clone().into(),
+                    scenario: None,
+                    cause,
+                });
+                continue;
+            }
+        };
+
+        let invoked = ir.command(&binding.command);
+        let source = binding_source(ir, binding, publisher, published_by, &trigger);
+        for aspect in BindingAspect::ALL.map(|(aspect, _)| aspect) {
+            let id = ScenarioId::Binding {
+                binding: subject.clone(),
+                aspect,
+            };
+            let built = match aspect {
+                BindingAspect::Flow => flow(ir, invoked, &trigger, &event),
+                BindingAspect::Mapping => mapping(ir, binding, invoked, &trigger, &event),
+                BindingAspect::Delivery => delivery(ir, binding, invoked, &trigger, &event),
+                BindingAspect::OnFailure => on_failure(ir, binding, invoked, &trigger, &event),
+            };
+            let (steps, purpose, extra) = match built {
+                Ok(built) => built,
+                Err(gap) => {
+                    refusals.push(Refusal::about(
+                        &id,
+                        RefusalCause::BindingUnobservable {
+                            binding: subject.clone(),
+                            gap,
+                        },
+                    ));
+                    continue;
+                }
+            };
+            let mut depends = source.clone();
+            depends.extend(extra);
+            insert(
+                suite,
+                id,
+                ConformanceScenario::new(purpose, steps, depends),
+                refusals,
+            );
+        }
+    }
+}
+
+/// What one binding aspect produces: its steps, its one-line purpose, and what else it depends on.
+type Built = Result<(Vec<ScenarioStep>, ScenarioPurpose, BTreeSet<EssSemanticRef>), BindingGap>;
+
+/// §16: the event happens, and the invoked command publishes what its branch declares.
+///
+/// Proved through the downstream **event**, never by observing the invocation — that is §16's rule,
+/// and it is why a target with no command tracing can still be held to a binding's flow.
+///
+/// The observation is bounded rather than immediate ([`ScenarioStep::EventuallyEvent`]) because a
+/// binding crosses a component boundary: nothing in the model says the consequence has happened by
+/// the time the triggering command returns, and requiring that would be a transport assumption §41
+/// refuses.
+///
+/// # What a flow scenario cannot tell apart, and what covers it
+///
+/// Where two bindings invoke one command, the event this waits for is one either of them could have
+/// produced — and a binding whose trigger needs an arrangement may set the other one off while being
+/// arranged. So a dropped binding is provable here only when its consequence is its own.
+/// [`BindingAspect::Mapping`] is what closes that: [`ScenarioStep::ExpectInvocation`] names the
+/// binding, which no event does.
+fn flow(ir: &EssIr, invoked: &ResolvedCommand, trigger: &Run, event: &EventRef) -> Built {
+    let reached = reachable_branch(invoked)?;
+    let published = publishes(invoked, reached)?;
+
+    let mut steps = trigger.steps();
+    steps.push(ScenarioStep::ExpectEvent {
+        event: event.clone(),
+        payload: BTreeMap::new(),
+    });
+    for event in &published {
+        steps.push(ScenarioStep::EventuallyEvent {
+            event: event.clone(),
+            payload: BTreeMap::new(),
+        });
+    }
+
+    let text = format!(
+        "`{event}` invokes `{}`, which publishes {}",
+        invoked.name,
+        listed(&published)
+    );
+    Ok((steps, clipped(&text), downstream(ir, invoked, reached)))
+}
+
+/// §16: each input receives the value the binding's mapping names for it.
+///
+/// The one clause a document can get *silently* wrong, and the reason
+/// [`ScenarioStep::ExpectInvocation`] exists — a mapping's target is a command input, and the model
+/// relates a command's input to no observable fact afterwards. Every value here is read straight off
+/// the resolved mapping: a field of the triggering event becomes
+/// [`ScenarioValue::Observed`], because no generator knows what the upstream implementation
+/// published there, and a literal becomes the text the binding wrote.
+fn mapping(
+    ir: &EssIr,
+    binding: &ResolvedBinding,
+    invoked: &ResolvedCommand,
+    trigger: &Run,
+    event: &EventRef,
+) -> Built {
+    let command = CommandRef::new(invoked.name.clone());
+    if binding.mapping.is_empty() {
+        return Err(BindingGap::NothingMapped { command });
+    }
+    let input: BTreeMap<String, ScenarioValue> = binding
+        .mapping
+        .iter()
+        .map(|mapped| {
+            let value = match &mapped.value {
+                ResolvedMappingValue::EventField { field, .. } => {
+                    ScenarioValue::observed(event.clone(), field.clone())
+                }
+                // A literal reaches the model as text and fills a target that is a `String` or an
+                // enum underneath — `ess-domain` refuses any other target — so the text is the value
+                // and no conversion is being invented here.
+                ResolvedMappingValue::Literal { value } => {
+                    ScenarioValue::literal(Node::Text(value.clone()))
+                }
+            };
+            (mapped.target.clone(), value)
+        })
+        .collect();
+
+    let mut steps = trigger.steps();
+    steps.push(ScenarioStep::ExpectEvent {
+        event: event.clone(),
+        payload: BTreeMap::new(),
+    });
+    steps.push(ScenarioStep::ExpectInvocation {
+        binding: BindingRef::new(binding.name.clone()),
+        command: command.clone(),
+        input,
+    });
+
+    let text = format!(
+        "`{}` fills `{}` from `{event}` as it is mapped",
+        binding.name, invoked.name
+    );
+    // The invoked command's input types, because that is what the mapping fills: widen
+    // `Recipient` and this scenario's stored result is stale even though nothing it names moved.
+    let mut source: BTreeSet<EssSemanticRef> = [command.into()].into_iter().collect();
+    source.extend(
+        input_types(ir, invoked)
+            .into_iter()
+            .map(EssSemanticRef::from),
+    );
+    Ok((steps, clipped(&text), source))
+}
+
+/// §17: the same event delivered twice still leaves the declared consequence observable.
+///
+/// What `delivery: at_least_once` actually says, and the only thing it says. A conformant
+/// implementation **may** produce duplicates, so the assertion is deliberately not a count: §17
+/// writes "exactly one `EmailSent` exists" out as the bad test, because it fails a target that is
+/// doing exactly what the specification permits.
+///
+/// What is left is survivability, and it is worth a scenario of its own: an implementation that
+/// treats a redelivery as an error, or stops delivering after one, breaks here and nowhere else.
+fn delivery(
+    ir: &EssIr,
+    binding: &ResolvedBinding,
+    invoked: &ResolvedCommand,
+    trigger: &Run,
+    event: &EventRef,
+) -> Built {
+    let reached = reachable_branch(invoked)?;
+    let published = publishes(invoked, reached)?;
+
+    let mut steps = trigger.steps();
+    steps.push(ScenarioStep::ExpectEvent {
+        event: event.clone(),
+        payload: BTreeMap::new(),
+    });
+    // The second delivery, which is the whole scenario. A total match rather than a wildcard: a
+    // second delivery guarantee would mean something different here and must not inherit this.
+    match binding.delivery {
+        Delivery::AtLeastOnce => steps.push(ScenarioStep::RedeliverEvent {
+            event: event.clone(),
+        }),
+    }
+    for event in &published {
+        steps.push(ScenarioStep::EventuallyEvent {
+            event: event.clone(),
+            payload: BTreeMap::new(),
+        });
+    }
+
+    let text = format!(
+        "`{event}` delivered twice still leaves {} observable, and no count is required",
+        listed(&published)
+    );
+    Ok((steps, clipped(&text), downstream(ir, invoked, reached)))
+}
+
+/// §18: the declared failure policy, with the failure forced.
+///
+/// Forced by injection and by nothing else. A binding fills the command's input from the event, so a
+/// scenario cannot choose an input that fails; the only failure it can cause is one the
+/// specification declares `external:` (§12), which is why a command with no such branch refuses here
+/// rather than getting a scenario that hopes.
+///
+/// The control is armed **after** the arrangement and before the triggering command, because
+/// `ConfigureExternalOutcome` says what the adapter must produce *next*: arming it first would spend
+/// the injection on whatever the arrangement's own commands set off — in a system with several
+/// bindings, that is not hypothetical.
+///
+/// | policy | what the scenario requires | why |
+/// |---|---|---|
+/// | `retry` | the consequence happens anyway | one injection forces one failure; a handler that retries reaches the branch that publishes |
+/// | `escalate` | the declared escalation event | since gate G2 the model names it, so this is a reading rather than a hope |
+/// | `drop` | nothing — refused | "give up silently" is the whole content of the word |
+fn on_failure(
+    ir: &EssIr,
+    binding: &ResolvedBinding,
+    invoked: &ResolvedCommand,
+    trigger: &Run,
+    event: &EventRef,
+) -> Built {
+    // Read before the failure is forced, so a `drop` refuses for what it is rather than for a
+    // missing external branch it would not have used.
+    let policy = binding.on_failure();
+    if matches!(policy, ResolvedFailure::Drop) {
+        return Err(BindingGap::PolicySilent);
+    }
+    let forced = invoked
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.test_strategy == TestStrategy::InjectFault)
+        .ok_or_else(|| BindingGap::NoForcibleFailure {
+            command: CommandRef::new(invoked.name.clone()),
+        })?;
+    let forced_ref = OutcomeRef::new(CommandRef::new(invoked.name.clone()), forced.name.clone());
+
+    let mut steps = trigger.setup.clone();
+    steps.push(ScenarioStep::ConfigureExternalOutcome {
+        force: forced_ref.clone(),
+    });
+    steps.extend(trigger.invoke.iter().cloned());
+    steps.push(ScenarioStep::ExpectEvent {
+        event: event.clone(),
+        payload: BTreeMap::new(),
+    });
+
+    let mut source: BTreeSet<EssSemanticRef> = [
+        CommandRef::new(invoked.name.clone()).into(),
+        forced_ref.clone().into(),
+    ]
+    .into_iter()
+    .collect();
+    if let Some(component) = accepting_component(ir, &invoked.name) {
+        source.insert(component.into());
+    }
+
+    let text = match policy {
+        ResolvedFailure::Retry => {
+            let reached = reachable_branch(invoked)?;
+            let published = publishes(invoked, reached)?;
+            for event in &published {
+                steps.push(ScenarioStep::EventuallyEvent {
+                    event: event.clone(),
+                    payload: BTreeMap::new(),
+                });
+            }
+            source.extend(downstream(ir, invoked, reached));
+            format!(
+                "`{}` retries a failed `{}` until {} is published",
+                binding.name,
+                invoked.name,
+                listed(&published)
+            )
+        }
+        ResolvedFailure::Escalate { emits } => {
+            let escalation = EventRef::from(emits);
+            steps.push(ScenarioStep::EventuallyEvent {
+                event: escalation.clone(),
+                payload: BTreeMap::new(),
+            });
+            source.insert(escalation.clone().into());
+            format!(
+                "a failed `{}` makes `{}` escalate into `{escalation}`",
+                invoked.name, binding.name
+            )
+        }
+        // Refused above, before anything was forced.
+        ResolvedFailure::Drop => unreachable!("`drop` is refused before the failure is forced"),
+    };
+    Ok((steps, clipped(&text), source))
+}
+
+/// The branch a binding's invocation reaches, or why a scenario cannot say which one.
+///
+/// An input decides which branch a command takes, and a binding's input comes from the event — whose
+/// values the upstream implementation chose. So the branch is knowable only when the input does not
+/// choose it: exactly one branch that is not externally decided. Two of those and the answer depends
+/// on a value nobody has, which is a refusal rather than a guess (§11).
+fn reachable_branch(invoked: &ResolvedCommand) -> Result<&ResolvedOutcome, BindingGap> {
+    let reachable: Vec<&ResolvedOutcome> = invoked
+        .outcomes
+        .iter()
+        .filter(|outcome| outcome.test_strategy != TestStrategy::InjectFault)
+        .collect();
+    match reachable.as_slice() {
+        // One branch, and no guard on it — so no value the event carries can send the invocation
+        // anywhere else. A single *guarded* branch is not the same thing: it is a branch a
+        // specification says may not be taken, and a scenario that required it anyway would be
+        // claiming something about values only the upstream implementation knows.
+        [only] if only.test_strategy == TestStrategy::DefaultBranch => Ok(only),
+        branches => Err(BindingGap::BranchUndecided {
+            command: CommandRef::new(invoked.name.clone()),
+            branches: branches
+                .iter()
+                .map(|outcome| outcome.name.clone())
+                .collect(),
+        }),
+    }
+}
+
+/// What a branch publishes, which is what a flow is proved through.
+fn publishes(
+    invoked: &ResolvedCommand,
+    reached: &ResolvedOutcome,
+) -> Result<Vec<EventRef>, BindingGap> {
+    let published: Vec<EventRef> = reached.emits.iter().map(EventRef::from).collect();
+    if published.is_empty() {
+        return Err(BindingGap::NothingPublished {
+            outcome: OutcomeRef::new(CommandRef::new(invoked.name.clone()), reached.name.clone()),
+        });
+    }
+    Ok(published)
+}
+
+/// The command outcome that publishes an event, in name order, or nothing where none does.
+///
+/// The first in the model's own order, so the choice is a function of the specification and moves
+/// only when the specification does (§37). Where two branches publish one event, either would make
+/// the binding fire; taking the lower-named one keeps the suite stable when a third is added.
+fn publisher<'ir>(
+    ir: &'ir EssIr,
+    event: &ess_compiler::ir::EventHandle,
+) -> Option<(&'ir ResolvedCommand, &'ir ResolvedOutcome)> {
+    ir.commands.values().find_map(|command| {
+        command
+            .outcomes
+            .iter()
+            .find(|outcome| outcome.emits.contains(event))
+            .map(|outcome| (command, outcome))
+    })
+}
+
+/// Everything a binding scenario's result rests on before its own aspect adds to it.
+///
+/// Including the two **components** it crosses, which is what a binding is: an event one component
+/// publishes invoking a command another accepts. A semantic diff asking "did this change touch
+/// anything this scenario rests on" has to be able to answer yes when a command moves between
+/// components, and nothing else in a scenario names one.
+fn binding_source(
+    ir: &EssIr,
+    binding: &ResolvedBinding,
+    publisher: &ResolvedCommand,
+    published_by: &ResolvedOutcome,
+    trigger: &Run,
+) -> BTreeSet<EssSemanticRef> {
+    let mut source = trigger.source.clone();
+    source.insert(BindingRef::new(binding.name.clone()).into());
+    source.insert(EventRef::from(&binding.event).into());
+    let command_ref = CommandRef::new(publisher.name.clone());
+    source.insert(command_ref.clone().into());
+    source.insert(OutcomeRef::new(command_ref, published_by.name.clone()).into());
+    if let Some(subject) = &published_by.subject {
+        source.insert(EntityRef::from(&subject.entity).into());
+    }
+    if let Some(actor) = trigger.actor.clone() {
+        source.insert(actor.into());
+    }
+    if let Some(component) = accepting_component(ir, &publisher.name) {
+        source.insert(component.into());
+    }
+    source.extend(
+        input_types(ir, publisher)
+            .into_iter()
+            .map(EssSemanticRef::from),
+    );
+    source
+}
+
+/// What the branch a binding reaches depends on: the command, the branch, and what it publishes.
+fn downstream(
+    ir: &EssIr,
+    invoked: &ResolvedCommand,
+    reached: &ResolvedOutcome,
+) -> BTreeSet<EssSemanticRef> {
+    let command_ref = CommandRef::new(invoked.name.clone());
+    let mut source: BTreeSet<EssSemanticRef> = [
+        command_ref.clone().into(),
+        OutcomeRef::new(command_ref, reached.name.clone()).into(),
+    ]
+    .into_iter()
+    .collect();
+    for event in &reached.emits {
+        source.insert(EventRef::from(event).into());
+        for field in &ir.event(event).fields {
+            let mut types = BTreeSet::new();
+            reachable_types(ir, &field.type_ref, &mut types);
+            source.extend(types.into_iter().map(EssSemanticRef::from));
+        }
+    }
+    if let Some(component) = accepting_component(ir, &invoked.name) {
+        source.insert(component.into());
+    }
+    source
+}
+
+/// The component that accepts a command, where one does.
+///
+/// By name rather than by handle, because a command reached from a binding's own side is a
+/// `ResolvedCommand`. Deterministic: the components are a [`BTreeMap`], and `ess-domain` refuses one
+/// command accepted by two components.
+fn accepting_component(ir: &EssIr, command: &QualifiedName) -> Option<ComponentRef> {
+    ir.components
+        .values()
+        .find(|component| {
+            component
+                .accepts
+                .iter()
+                .any(|accepted| accepted.name() == command)
+        })
+        .map(|component| ComponentRef::new(component.name.clone()))
+}
+
+/// `a`, `a and b`, `a, b and c` — for the one line a report prints beside a verdict.
+fn listed(events: &[EventRef]) -> String {
+    let written: Vec<String> = events.iter().map(|event| format!("`{event}`")).collect();
+    match written.split_last() {
+        None => "nothing".to_owned(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
     }
 }
 
@@ -1489,7 +2456,9 @@ fn subject_of(id: &ScenarioId) -> EssSemanticRef {
     match id {
         ScenarioId::Outcome { outcome } => outcome.clone().into(),
         ScenarioId::Transition { transition, .. } => transition.clone().into(),
-        ScenarioId::Refusal { entity, .. } => entity.clone().into(),
+        ScenarioId::Refusal { entity, .. } | ScenarioId::Invariant { entity, .. } => {
+            entity.clone().into()
+        }
         ScenarioId::Binding { binding, .. } => binding.clone().into(),
     }
 }
@@ -1538,6 +2507,19 @@ mod tests {
             RefusalCause::DuplicateScenario,
             RefusalCause::StrategyWithoutGuard {
                 strategy: TestStrategy::ConstructInput,
+            },
+            RefusalCause::BindingUnobservable {
+                binding: BindingRef::new(
+                    ess_domain::binding::BindingName::new("notify-on-invoice-created")
+                        .expect("valid"),
+                ),
+                gap: BindingGap::PolicySilent,
+            },
+            RefusalCause::InvariantUnobservable {
+                entity: EntityRef::new(QualifiedName::new("oracle.order.Order").expect("valid")),
+                invariant: "weight_grams >= 0".to_owned(),
+                unpublished: vec![FactPath::new("weight_grams").expect("a fact path")],
+                state: StateName::new("Placed").expect("valid"),
             },
         ];
 

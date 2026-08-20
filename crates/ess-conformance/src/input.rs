@@ -49,7 +49,7 @@ use std::fmt;
 use aep_domain::facts::{FactPath, FactSource, FactStore, FactValue, Scales};
 use aep_domain::node::Node;
 use aep_domain::predicate::{Operand, Predicate, Truth};
-use ess_compiler::ir::{EssIr, ResolvedBody, ResolvedCommand, ResolvedTypeRef};
+use ess_compiler::ir::{EssIr, ResolvedBody, ResolvedCommand, ResolvedField, ResolvedTypeRef};
 use ess_domain::types::{Primitive, MAX_TYPE_DEPTH};
 
 use crate::decision::{Decision, Reason, Unevaluable, UnknownCause};
@@ -278,7 +278,7 @@ impl<'ir> InputFacts<'ir> {
     /// This is the whole difference between "supply a value" and "fix the specification", and it is
     /// only answerable with the types in hand — which is why [`InputFacts`] carries the IR.
     fn explain_path(&self, path: &FactPath) -> Reason {
-        match resolve_path(self.ir, self.command, path) {
+        match resolve_path(self.ir, &self.command.input, path) {
             Target::Scalar => Reason::ValueAbsent { path: path.clone() },
             Target::Aggregate(holds) => Reason::PathNotScalar {
                 path: path.clone(),
@@ -306,9 +306,15 @@ impl FactSource for InputFacts<'_> {
     }
 }
 
-/// Where a fact path lands in a command's declared input.
+/// Where a fact path lands in a set of declared fields.
+///
+/// Public because the same question is asked of two different surfaces. A guard reads a *command's
+/// input*, and an entity invariant read against a *view* asks the identical question of the fields
+/// that view publishes: does `total.amount` land on something a fact value can hold, or on nothing
+/// at all? One walk answers both, and a second one written beside it would be a second opinion about
+/// what `Optional<Money>` exposes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Target {
+pub enum Target {
     /// A primitive or an enum: something a fact value can hold.
     Scalar,
     /// A construct no fact value can hold, named as it reads in a diagnostic.
@@ -319,14 +325,27 @@ enum Target {
     TooDeep,
 }
 
-/// Resolves a fact path against a command's input types, without any candidate value.
-fn resolve_path(ir: &EssIr, command: &ResolvedCommand, path: &FactPath) -> Target {
+impl Target {
+    /// `true` only where the path lands on something a predicate can compare.
+    ///
+    /// Which is what "this surface publishes what the predicate reads" means: the other three cases
+    /// all end in a predicate that evaluates to `Unknown`, and `Unknown` refuses.
+    pub fn is_scalar(&self) -> bool {
+        matches!(self, Self::Scalar)
+    }
+}
+
+/// Resolves a fact path against a set of declared fields, without any value in hand.
+///
+/// The fields of a command's input, of a view's projection, or of anything else the model declares
+/// as a flat list of named, typed members.
+pub fn resolve_path(ir: &EssIr, fields: &[ResolvedField], path: &FactPath) -> Target {
     let segments = path.segments();
     // `FactPath::new` refuses an empty path, so there is always a first segment.
     let (root, rest) = segments
         .split_first()
         .expect("a fact path has at least one segment");
-    match command.input_field(root) {
+    match fields.iter().find(|field| &field.name == root) {
         Some(field) => walk(ir, &field.type_ref, rest, 0),
         None => Target::Undeclared(root.clone()),
     }

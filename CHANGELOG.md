@@ -35,6 +35,22 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **A specification generates its own conformance scenarios.** All five families: one per reachable
+  command outcome with the refusal branch asserting the success event did *not* occur, an externally
+  decided branch reached by configuring the fault rather than by an input, a lifecycle transition
+  proved and an illegal one refused, an entity's invariants checked after each state-changing command,
+  and a binding checked for its mapping, its delivery guarantee and its failure policy. The normative
+  example yields twenty-seven scenarios and the oracle fixture thirty-one. Nothing executes them yet.
+- **A binding's promises are each a test.** The mapping is asserted field by field, so a swap between
+  two same-typed fields is caught rather than passing. `at_least_once` delivers the event twice and
+  requires the consequence to survive it — not to happen exactly once, which is the assertion that
+  looks right and fails a correct at-least-once handler. An escalation asserts the event the model
+  now requires it to name.
+- **`on_failure: drop` generates a refusal rather than a scenario**, saying so in the suite: a policy
+  that gives up silently publishes nothing, so there is nothing to assert, and the hint says to write
+  `escalate:` if it has to be provable. The refusal is the honest output — a scenario would have to
+  invent an observation the specification declines to make.
+
 - **`protocol ess graph --format mermaid`.** The system graph as a Mermaid flowchart, unfenced, so it
   can be piped into a Markdown file, a docs site or a pull request without going through the generated
   documentation tree. `dot`, `json` and `yaml` are the other spellings; `--format text` still means DOT

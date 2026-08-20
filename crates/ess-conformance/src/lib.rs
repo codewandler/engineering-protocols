@@ -62,7 +62,9 @@
 //!
 //! [`synthesize()`] is the third part, and it is where the first two meet. It walks an
 //! [`EssIr`](ess_compiler::EssIr), asks [`witness`] for candidate inputs, asks [`decision`] whether
-//! one reaches a branch, and writes a [`scenario`] for every declared outcome it can reach.
+//! one reaches a branch, and writes a [`scenario`] for each of the five families a specification
+//! obliges: a declared outcome, a lifecycle move, a move that must **not** be honoured, what must
+//! still hold of an entity afterwards, and each of the four claims a binding makes.
 //!
 //! It returns a suite **and** typed refusals, never a silent omission — design §36. A construct
 //! that cannot be witnessed appears in the output saying which construct, why, and what would have
@@ -88,10 +90,12 @@ pub mod synthesize;
 pub mod witness;
 
 pub use decision::{when, Decision, Reason, Unevaluable, UnknownCause};
-pub use input::{flatten, InputFacts, ShapeError, ShapeErrors};
+pub use input::{flatten, resolve_path, InputFacts, ShapeError, ShapeErrors, Target};
 pub use scenario::{
-    ConformanceScenario, ConformanceSuite, EssSemanticRef, InstanceName, ScenarioId,
-    ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance,
+    BindingAspect, ConformanceScenario, ConformanceSuite, EssSemanticRef, InstanceName, ScenarioId,
+    ScenarioPurpose, ScenarioStep, ScenarioValue, SuiteProvenance, ViewExpectation,
 };
-pub use synthesize::{synthesize, InstanceNeed, Refusal, RefusalCause, Synthesis, Unreachable};
+pub use synthesize::{
+    synthesize, BindingGap, InstanceNeed, Refusal, RefusalCause, Synthesis, Unreachable,
+};
 pub use witness::WitnessGap;

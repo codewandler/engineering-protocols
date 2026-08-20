@@ -19,9 +19,10 @@ use ess_compiler::diagnostic::Code;
 use ess_compiler::ir::EssIr;
 use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
-use ess_conformance::scenario::{ScenarioStep, ScenarioValue, ViewExpectation};
-use ess_conformance::synthesize::{synthesize, RefusalCause, Synthesis, Unreachable};
+use ess_conformance::scenario::{BindingAspect, ScenarioStep, ScenarioValue, ViewExpectation};
+use ess_conformance::synthesize::{synthesize, BindingGap, RefusalCause, Synthesis, Unreachable};
 use ess_conformance::{flatten, when, Decision, ScenarioId};
+use ess_domain::binding::{Delivery, Failure};
 use ess_domain::name::QualifiedName;
 use ess_domain::spec::{RawSpecFile, Specification};
 use ess_domain::system::Source;
@@ -114,6 +115,8 @@ fn shape(synthesis: &Synthesis, id: &str) -> Vec<&'static str> {
             ScenarioStep::ExpectEvent { .. } => "event",
             ScenarioStep::ExpectNoEvent { .. } => "no-event",
             ScenarioStep::CaptureInstance { .. } => "capture",
+            ScenarioStep::RedeliverEvent { .. } => "redeliver",
+            ScenarioStep::ExpectInvocation { .. } => "invocation",
             ScenarioStep::QueryView { .. } => "query",
             ScenarioStep::ExpectView { .. } => "view",
             ScenarioStep::EventuallyEvent { .. } => "eventually-event",
@@ -862,26 +865,555 @@ fn a_move_is_observed_through_the_view_the_state_it_left_is_filtered_on() {
     );
 }
 
-// ---- §16–§18: what this build does not do yet ----------------------------------------------------
+// ---- §16, §17 and §18: a binding is four claims ------------------------------------------------
 
 #[test]
-fn a_binding_this_build_does_not_synthesise_is_visible_rather_than_missing() {
-    // A reader of a suite cannot tell an unimplemented slice from a specification with nothing to
-    // check. §36 rules that ambiguity out for refusals, and the same reasoning applies to a gap
-    // this crate has not closed yet.
+fn every_clause_of_every_binding_is_either_a_scenario_or_a_named_refusal() {
+    // §36's rule at the binding level, driven by `BindingAspect::ALL` rather than by a list written
+    // here: an aspect added without being synthesised or refused fails this rather than quietly
+    // producing a suite one check short. The fixture reaches the state where that bites — the
+    // oracle's third binding drops its failures, so one of the twelve is legitimately a refusal.
     for (system, bindings) in [("billing", 1), ("oracle-fixture", 3)] {
         let synthesis = synthesize(&example(system));
-        let named: Vec<String> = synthesis
-            .refused(code(6))
-            .map(|refusal| refusal.subject.to_string())
+        let ir = example(system);
+        assert_eq!(
+            ir.bindings.len(),
+            bindings,
+            "the fixture declares {bindings}"
+        );
+
+        let mut expected: BTreeSet<String> = BTreeSet::new();
+        for name in ir.bindings.keys() {
+            for (_, aspect) in BindingAspect::ALL {
+                expected.insert(format!("{name}/binding/{aspect}"));
+            }
+        }
+        let covered: BTreeSet<String> = ids(&synthesis)
+            .into_iter()
+            .chain(refused(&synthesis))
+            .filter(|id| id.contains("/binding/"))
             .collect();
 
-        assert_eq!(named.len(), bindings, "one refusal per binding: {named:?}");
-        assert!(
-            named.iter().all(|subject| subject.starts_with("binding ")),
-            "each names the binding it is about: {named:?}"
+        assert_eq!(
+            covered, expected,
+            "a binding clause that is neither in the suite nor in a refusal has disappeared"
+        );
+        assert_eq!(
+            expected.len(),
+            bindings * BindingAspect::ALL.len(),
+            "four claims per binding"
         );
     }
+}
+
+#[test]
+fn a_binding_flow_is_proved_through_the_event_the_invoked_command_publishes() {
+    // §16, both halves. The flow is proved *through the resulting event* — "do not require the
+    // runner to observe the internal `SendEmail` command" — so the negative half matters as much as
+    // the positive one: a flow scenario that reached for the invocation would make command tracing
+    // a requirement of every implementation, which is exactly what that section refuses.
+    let synthesis = synthesize(&example("billing"));
+    let id = "notify-on-invoice-created/binding/flow";
+
+    assert_eq!(
+        shape(&synthesis, id),
+        vec!["execute", "outcome", "event", "eventually-event"],
+        "create an invoice, observe `InvoiceCreated`, and wait for what `SendEmail` publishes"
+    );
+    let observed: Vec<String> = steps(&synthesis, id)
+        .iter()
+        .filter_map(|step| match step {
+            ScenarioStep::EventuallyEvent { event, .. } => Some(event.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        observed,
+        vec!["billing.email.EmailSent"],
+        "the downstream consequence is the event the branch declares, not the command"
+    );
+    assert!(
+        !shape(&synthesis, id).contains(&"invocation"),
+        "a flow proved by observing the invocation would require tracing of every target"
+    );
+    assert!(
+        !shape(&synthesis, id).contains(&"event-then-eventually"),
+        "and the downstream event is bounded rather than immediate: nothing in the model says it \
+         has happened by the time the upstream command returns"
+    );
+}
+
+#[test]
+fn a_binding_mapping_names_the_source_the_document_wrote_and_not_its_same_typed_sibling() {
+    // What `examples/oracle-fixture/` exists for. `OrderPlaced` carries `contact` *and*
+    // `alternate_contact`, both `oracle.order.Email`, so `recipient: event.alternate_contact` is a
+    // document that still compiles and a system that mails the wrong person. The fixture is
+    // asserted to hold that pair before the mapping is checked, because against an event with one
+    // address this assertion would pass whether or not the synthesizer read the mapping at all.
+    let ir = example("oracle-fixture");
+    let placed = ir
+        .events
+        .get(&QualifiedName::new("oracle.order.OrderPlaced").expect("valid"))
+        .expect("declared");
+    let same_typed: Vec<&str> = placed
+        .fields
+        .iter()
+        .filter(|field| field.type_ref.to_string() == "oracle.order.Email")
+        .map(|field| field.name.as_str())
+        .collect();
+    assert_eq!(
+        same_typed,
+        vec!["contact", "alternate_contact"],
+        "the fixture holds the pair a swapped mapping would hide behind"
+    );
+
+    let synthesis = synthesize(&ir);
+    let id = "handoff-on-placed/binding/mapping";
+    let invocation = steps(&synthesis, id)
+        .iter()
+        .find_map(|step| match step {
+            ScenarioStep::ExpectInvocation {
+                binding,
+                command,
+                input,
+            } => Some((binding.to_string(), command.to_string(), input.clone())),
+            _ => None,
+        })
+        .expect("the mapping scenario requires the invocation");
+
+    assert_eq!(
+        invocation.0, "handoff-on-placed",
+        "the assertion names the binding, so a system with three bindings on one command can say \
+         which one filled the input wrongly"
+    );
+    assert_eq!(invocation.1, "oracle.dispatch.Handoff");
+    assert_eq!(
+        invocation.2.get("recipient"),
+        Some(&ScenarioValue::observed(
+            "oracle.order.OrderPlaced".parse().expect("an event name"),
+            "contact"
+        )),
+        "`recipient: event.contact` — the sibling is what a wrong document would have named"
+    );
+    assert_eq!(
+        invocation.2.get("label"),
+        Some(&ScenarioValue::literal(Node::Text("placed".to_owned()))),
+        "and a literal mapping carries the text the binding wrote"
+    );
+    assert!(
+        !format!("{:?}", invocation.2).contains("alternate_contact"),
+        "the value asserted must be the one the document names: {:?}",
+        invocation.2
+    );
+}
+
+#[test]
+fn an_at_least_once_binding_delivers_the_event_twice_and_requires_no_count() {
+    // §17, and its worked bad test. `at_least_once` permits duplicates, so "exactly one `EmailSent`
+    // exists" fails a target doing exactly what the specification allows — what the scenario may
+    // require is that the consequence is still observable after the same event arrives again.
+    let ir = example("billing");
+    let binding = ir.bindings.values().next().expect("one binding");
+    assert_eq!(
+        binding.delivery,
+        Delivery::AtLeastOnce,
+        "the fixture declares the guarantee this scenario is about"
+    );
+
+    let synthesis = synthesize(&ir);
+    let id = "notify-on-invoice-created/binding/delivery";
+    assert_eq!(
+        shape(&synthesis, id),
+        vec![
+            "execute",
+            "outcome",
+            "event",
+            "redeliver",
+            "eventually-event"
+        ],
+        "publish the event, deliver it a second time, and require the consequence anyway"
+    );
+
+    let redelivered = steps(&synthesis, id)
+        .iter()
+        .find_map(|step| match step {
+            ScenarioStep::RedeliverEvent { event } => Some(event.to_string()),
+            _ => None,
+        })
+        .expect("the scenario delivers the event again");
+    assert_eq!(
+        redelivered, "billing.invoice.InvoiceCreated",
+        "the event delivered twice is the one the binding reacts to"
+    );
+    assert!(
+        !shape(&synthesis, id).contains(&"no-event"),
+        "nothing here may assert that a duplicate did *not* happen: {:?}",
+        shape(&synthesis, id)
+    );
+}
+
+#[test]
+fn a_binding_that_escalates_requires_the_event_the_escalation_declares() {
+    // §18, and what gate G2 made possible: `escalate` names the event it emits, so "the failure was
+    // escalated" is an assertion rather than a hope. Both examples escalate, and both are checked —
+    // billing because it is normative, the oracle because its escalation is one of three policies
+    // over one command, which is where naming the wrong event would hide.
+    for (system, id, escalation) in [
+        (
+            "billing",
+            "notify-on-invoice-created/binding/on-failure",
+            "billing.email.DeliveryEscalated",
+        ),
+        (
+            "oracle-fixture",
+            "handoff-on-held/binding/on-failure",
+            "oracle.dispatch.HandoffEscalated",
+        ),
+    ] {
+        let ir = example(system);
+        let synthesis = synthesize(&ir);
+        let declared = ir
+            .bindings
+            .values()
+            .find(|binding| id.starts_with(binding.name.as_str()))
+            .and_then(|binding| binding.escalation.clone())
+            .expect("the binding escalates, and the model says into what");
+        assert_eq!(
+            declared.name().to_string(),
+            escalation,
+            "the fixture escalates into the event this scenario asserts"
+        );
+
+        let observed: Vec<String> = steps(&synthesis, id)
+            .iter()
+            .filter_map(|step| match step {
+                ScenarioStep::EventuallyEvent { event, .. } => Some(event.to_string()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            observed,
+            vec![escalation.to_owned()],
+            "what is required is the escalation the model declares, and nothing else"
+        );
+        assert!(
+            shape(&synthesis, id).contains(&"inject"),
+            "and the failure is forced rather than waited for: {:?}",
+            shape(&synthesis, id)
+        );
+    }
+}
+
+#[test]
+fn a_binding_that_retries_forces_one_failure_and_still_requires_the_consequence() {
+    // The other observable policy. A retry publishes nothing of its own — `ess-domain` says so, and
+    // says why: "a retry is another invocation of the command", which `at_least_once` already
+    // obliges the handler to survive. So it is observable exactly once the failure is forced *once*:
+    // the injected outcome is what the adapter must produce next, so the second invocation reaches
+    // the branch that publishes, and a target that gave up instead never produces the event.
+    let synthesis = synthesize(&example("oracle-fixture"));
+    let id = "handoff-on-placed/binding/on-failure";
+
+    assert_eq!(
+        shape(&synthesis, id),
+        vec!["inject", "execute", "outcome", "event", "eventually-event"],
+        "arm the refusal, place the order, and require the handoff to arrive anyway"
+    );
+    let observed: Vec<String> = steps(&synthesis, id)
+        .iter()
+        .filter_map(|step| match step {
+            ScenarioStep::EventuallyEvent { event, .. } => Some(event.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(observed, vec!["oracle.dispatch.HandedOff".to_owned()]);
+}
+
+#[test]
+fn the_failure_control_is_armed_after_the_arrangement_and_before_the_command_that_triggers_it() {
+    // A one-shot control and a system with three bindings on one command: arming the refusal before
+    // the arrangement would spend it on `handoff-on-placed`, which the arrangement's own
+    // `PlaceOrder` sets off, and the scenario would then assert an escalation for a handoff that
+    // never failed. The fixture reaches that state — `handoff-on-held` needs an order placed before
+    // it can be held — which is why the order of these two steps is a check rather than a detail.
+    let synthesis = synthesize(&example("oracle-fixture"));
+    let id = "handoff-on-held/binding/on-failure";
+    let shape = shape(&synthesis, id);
+
+    let armed = shape
+        .iter()
+        .position(|step| *step == "inject")
+        .expect("the scenario forces the failure");
+    let arrangement = shape
+        .iter()
+        .position(|step| *step == "capture")
+        .expect("the arrangement places an order first");
+    let triggering = shape
+        .iter()
+        .rposition(|step| *step == "execute")
+        .expect("the scenario runs the command that publishes the event");
+
+    assert!(
+        arrangement < armed && armed < triggering,
+        "the control must be armed between the arrangement and the trigger: {shape:?}"
+    );
+}
+
+#[test]
+fn a_binding_that_drops_its_failures_refuses_that_check_and_names_the_reason() {
+    // §18's rule, on the one input in either example that reaches it: "if the ESS does not yet
+    // define an observable representation, scenario synthesis must refuse that check rather than
+    // invent one". `drop` is not an omission — it is the decision that the work is lost and nobody
+    // is told — so the refusal says so, and says which word to write instead.
+    let ir = example("oracle-fixture");
+    let dropping = ir
+        .bindings
+        .values()
+        .find(|binding| binding.failure == Failure::Drop)
+        .expect("the fixture declares a binding that drops");
+    assert_eq!(dropping.name.as_str(), "handoff-on-shipped");
+
+    let synthesis = synthesize(&ir);
+    let refusal = synthesis
+        .refused(code(10))
+        .next()
+        .unwrap_or_else(|| panic!("the failure check refuses: {:?}", refused(&synthesis)));
+
+    assert_eq!(
+        refusal
+            .scenario
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default(),
+        "handoff-on-shipped/binding/on-failure",
+        "the refusal names the one clause that has no witness"
+    );
+    assert!(
+        matches!(
+            refusal.cause,
+            RefusalCause::BindingUnobservable {
+                gap: BindingGap::PolicySilent,
+                ..
+            }
+        ),
+        "{refusal}"
+    );
+    assert!(
+        refusal.hint().contains("escalate:"),
+        "the hint names what to write if the failure has to be provable: {}",
+        refusal.hint()
+    );
+
+    // Refusing one clause is not refusing the binding: the other three are still checks.
+    let others: Vec<String> = ids(&synthesis)
+        .into_iter()
+        .filter(|id| id.starts_with("handoff-on-shipped/"))
+        .collect();
+    assert_eq!(
+        others,
+        vec![
+            "handoff-on-shipped/binding/delivery".to_owned(),
+            "handoff-on-shipped/binding/flow".to_owned(),
+            "handoff-on-shipped/binding/mapping".to_owned(),
+        ],
+        "the flow, the mapping and the delivery of a dropping binding are all still provable"
+    );
+}
+
+#[test]
+fn a_binding_whose_branch_the_event_decides_refuses_the_flow_and_still_checks_the_mapping() {
+    // Neither example reaches this, and it is the shape §11 is about. A binding fills the command's
+    // input from the event, so when two branches are decided by that input, which one the
+    // invocation reaches depends on a value only the upstream implementation knows — and requiring
+    // either would be a claim about a value nobody has. The mapping is unaffected: what the
+    // invocation *carries* is a reading of the document whatever branch it then takes.
+    let synthesis = synthesize(&fixture(UNDECIDED_BRANCH));
+    let gaps: BTreeMap<String, String> = synthesis
+        .refusals
+        .iter()
+        .filter_map(|refusal| match &refusal.cause {
+            RefusalCause::BindingUnobservable { gap, .. } => Some((
+                refusal
+                    .scenario
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_default(),
+                format!("{gap:?}"),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        gaps.keys().cloned().collect::<Vec<_>>(),
+        vec![
+            "notify-on-placed/binding/delivery".to_owned(),
+            "notify-on-placed/binding/flow".to_owned(),
+            "notify-on-placed/binding/on-failure".to_owned(),
+        ],
+        "the three clauses that need to know what the invocation does: {gaps:?}"
+    );
+    assert!(
+        gaps["notify-on-placed/binding/flow"].starts_with("BranchUndecided"),
+        "the flow cannot say which branch it reaches: {gaps:?}"
+    );
+    assert!(
+        gaps["notify-on-placed/binding/on-failure"].starts_with("NoForcibleFailure"),
+        "and nothing about this command can be made to fail, which is the earlier obstacle: {gaps:?}"
+    );
+    assert!(
+        ids(&synthesis)
+            .iter()
+            .any(|id| id == "notify-on-placed/binding/mapping"),
+        "the mapping is still a check: {:?}",
+        ids(&synthesis)
+    );
+}
+
+// ---- §20: what must still hold once a command has changed something ----------------------------
+
+#[test]
+fn an_invariant_is_asserted_against_every_view_that_publishes_what_it_reads() {
+    // §20 at the level it asks for: after a successful state-changing command, against observable
+    // view state. `InvoiceById` and `OutstandingInvoices` both publish `total`, so both can answer
+    // `total.amount >= 0` — and each is asserted in the block its own consistency decides, which is
+    // §14's rule reaching a second family rather than being decided again here.
+    let synthesis = synthesize(&example("billing"));
+    let id = "billing.invoice.Invoice/invariant/after/billing.invoice.IssueInvoice/issued";
+
+    assert_eq!(
+        shape(&synthesis, id),
+        vec![
+            "execute",
+            "outcome",
+            "capture",
+            "execute",
+            "outcome",
+            "eventually-view",
+            "query",
+            "view"
+        ],
+        "create an invoice, issue it, then read what must still hold of it"
+    );
+    for (view, block) in [
+        ("billing.invoice.InvoiceById", "eventually"),
+        ("billing.invoice.OutstandingInvoices", "expect"),
+    ] {
+        let (found, expectation) = expectation(&synthesis, id, view);
+        assert_eq!(
+            found, block,
+            "`{view}` is asserted where its consistency says"
+        );
+        let ViewExpectation::Satisfies { predicate } = expectation else {
+            panic!(
+                "an invariant is a range, which no set of field values expresses: {expectation:?}"
+            )
+        };
+        assert_eq!(
+            predicate.to_string(),
+            "total.amount >= 0",
+            "the predicate carried is the one the specification wrote"
+        );
+    }
+}
+
+#[test]
+fn a_view_that_does_not_hold_the_instance_yet_is_not_asked_about_its_invariants() {
+    // The negative half, and the reason `Satisfies` demands a row: every row of an empty view
+    // satisfies everything. `OutstandingInvoices` filters on `state == Issued` and a created
+    // invoice is in `Draft`, so asserting the invariant there would be a check nothing can fail.
+    let synthesis = synthesize(&example("billing"));
+    let id = "billing.invoice.Invoice/invariant/after/billing.invoice.CreateInvoice/accepted";
+    let asserted: Vec<String> = steps(&synthesis, id)
+        .iter()
+        .filter_map(|step| match step {
+            ScenarioStep::ExpectView { view, .. } | ScenarioStep::EventuallyView { view, .. } => {
+                Some(view.to_string())
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        asserted,
+        vec!["billing.invoice.InvoiceById".to_owned()],
+        "only the view that holds a `Draft` invoice is asked what must be true of one"
+    );
+}
+
+#[test]
+fn an_invariant_over_a_field_no_view_publishes_refuses_rather_than_being_dropped() {
+    // The specification fact this family runs into, and the one `examples/oracle-fixture/` reaches:
+    // an entity's invariant reads the entity's *fields*, and a view publishes only what it
+    // *declares*. `weight_grams >= 0` is therefore unobservable by construction — no runner and no
+    // witness generator closes it — so the suite says which path and which entity rather than
+    // holding one check fewer than the specification requires.
+    let ir = example("oracle-fixture");
+    let order = ir
+        .entities
+        .get(&QualifiedName::new("oracle.order.Order").expect("valid"))
+        .expect("declared");
+    assert_eq!(
+        order
+            .invariants
+            .iter()
+            .map(|invariant| invariant.statement.clone())
+            .collect::<Vec<_>>(),
+        vec!["weight_grams >= 0".to_owned()],
+        "the fixture declares the invariant this refusal is about"
+    );
+    assert!(
+        ir.views
+            .values()
+            .filter(|view| view.source.name() == &order.name)
+            .all(|view| view.field("weight_grams").is_none()),
+        "and no view of it publishes what that invariant reads, which is what makes it unobservable"
+    );
+
+    let synthesis = synthesize(&ir);
+    let refusal = synthesis
+        .refused(code(11))
+        .next()
+        .unwrap_or_else(|| panic!("the invariant refuses: {:?}", refused(&synthesis)));
+    let rendered = refusal.to_string();
+
+    assert!(
+        rendered.contains("weight_grams >= 0") && rendered.contains("`weight_grams`"),
+        "the refusal names the invariant and the path no view publishes: {rendered}"
+    );
+    assert!(
+        rendered.contains("oracle.order.Order/invariant/after/"),
+        "and the scenario that is missing: {rendered}"
+    );
+    assert!(
+        !ids(&synthesis).iter().any(|id| id.contains("/invariant/")),
+        "nothing is asserted about an invariant nothing can read: {:?}",
+        ids(&synthesis)
+    );
+    assert_eq!(
+        synthesis.refused(code(11)).count(),
+        5,
+        "one per state-changing branch, because each is a different check that is missing"
+    );
+}
+
+#[test]
+fn a_value_objects_own_invariants_are_refused_rather_than_silently_skipped() {
+    // `billing.invoice.Money` says `amount >= 0` of every `Money` in the system, and this build
+    // evaluates entity invariants only. A reader of the suite cannot tell that from a specification
+    // with nothing to check, so §36's rule applies to a gap in this crate exactly as it does to a
+    // gap in the model.
+    let synthesis = synthesize(&example("billing"));
+    let named: Vec<String> = synthesis
+        .refused(code(6))
+        .map(|refusal| refusal.subject.to_string())
+        .collect();
+
+    assert_eq!(
+        named,
+        vec!["type billing.invoice.Money".to_owned()],
+        "the one value object in the example that constrains its own values"
+    );
 }
 
 // ---- §23 and §37: provenance and determinism -----------------------------------------------------
@@ -892,30 +1424,100 @@ fn synthesising_the_same_specification_twice_produces_byte_identical_output() {
     // so an unordered map, a clock or an address-dependent iteration order anywhere in the path
     // shows up here as a diff rather than as a rumour — including in the refusals, which a report
     // prints and a reviewer diffs.
-    let first = synthesize(&example("billing"));
-    let second = synthesize(&example("billing"));
+    // Both examples, because the oracle is where the families that walk a second index live: the
+    // bindings, and the views an invariant is read off.
+    for system in ["billing", "oracle-fixture"] {
+        let first = synthesize(&example(system));
+        let second = synthesize(&example(system));
 
-    assert_eq!(
-        first.suite.to_canonical_json().as_bytes(),
-        second.suite.to_canonical_json().as_bytes(),
-        "the same model must produce the same suite, byte for byte"
-    );
-    let rendered = |synthesis: &Synthesis| {
-        synthesis
-            .refusals
+        assert_eq!(
+            first.suite.to_canonical_json().as_bytes(),
+            second.suite.to_canonical_json().as_bytes(),
+            "`{system}` must produce the same suite, byte for byte"
+        );
+        let rendered = |synthesis: &Synthesis| {
+            synthesis
+                .refusals
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            rendered(&first),
+            rendered(&second),
+            "and the same refusals, in the same order"
+        );
+        assert!(
+            first.suite.to_canonical_json().ends_with('\n'),
+            "a file without a trailing newline shows up modified"
+        );
+    }
+}
+
+#[test]
+fn each_example_synthesises_the_families_its_specification_declares() {
+    // The count, by family, for both examples — the one assertion that fails when a family stops
+    // being produced at all, which no test of one scenario's shape can see. Read as a table because
+    // that is what it is: what each specification declares, and what it therefore obliges.
+    for (system, expected, refusals) in [
+        (
+            "billing",
+            [
+                ("/outcome/", 8),
+                ("/transition/", 3),
+                ("/state/", 8),
+                ("/invariant/", 4),
+                ("/binding/", 4),
+            ],
+            1,
+        ),
+        (
+            "oracle-fixture",
+            [
+                ("/outcome/", 9),
+                ("/transition/", 3),
+                ("/state/", 8),
+                ("/invariant/", 0),
+                ("/binding/", 11),
+            ],
+            6,
+        ),
+    ] {
+        let synthesis = synthesize(&example(system));
+        let counted: Vec<(&str, usize)> = expected
             .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        rendered(&first),
-        rendered(&second),
-        "and the same refusals, in the same order"
-    );
-    assert!(
-        first.suite.to_canonical_json().ends_with('\n'),
-        "a file without a trailing newline shows up modified"
-    );
+            .map(|(family, _)| {
+                (
+                    *family,
+                    ids(&synthesis)
+                        .iter()
+                        .filter(|id| id.contains(family))
+                        .count(),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            counted,
+            expected.to_vec(),
+            "`{system}` synthesises a different suite than its specification declares"
+        );
+        assert_eq!(
+            synthesis.suite.len(),
+            expected.iter().map(|(_, count)| count).sum::<usize>(),
+            "and every scenario in it belongs to one of the five families"
+        );
+        assert_eq!(
+            synthesis.refusals.len(),
+            refusals,
+            "`{system}` refuses: {:?}",
+            synthesis
+                .refusals
+                .iter()
+                .map(|refusal| format!("{}", refusal.code()))
+                .collect::<Vec<_>>()
+        );
+    }
 }
 
 #[test]
@@ -1285,4 +1887,74 @@ commands:
         instance: order_id
         emits:
           - migrated.orders.OrderShipped
+";
+
+/// A binding whose invoked command has two branches an input decides between.
+///
+/// The values come from the event, so no scenario can say which branch the invocation reaches — and
+/// with no `external:` branch, nothing about the command can be forced to fail either. Neither
+/// example carries this: both invoke a command with one unconditional branch and one external one.
+///
+/// `skipped` is unconditional because `ess-domain` refuses a command whose every branch is
+/// conditional, which is what makes two *reachable* branches the smallest shape this can have.
+const UNDECIDED_BRANCH: &str = r"
+format: ess/1
+system: flow
+version: v1
+domain: flow.orders
+
+types:
+  - name: flow.orders.Recipient
+    kind: newtype
+    of: String
+
+events:
+  - name: flow.orders.OrderPlaced
+    fields:
+      - name: contact
+        type: flow.orders.Recipient
+
+  - name: flow.orders.Notified
+    fields:
+      - name: recipient
+        type: flow.orders.Recipient
+
+  - name: flow.orders.Skipped
+    fields:
+      - name: recipient
+        type: flow.orders.Recipient
+
+commands:
+  - name: flow.orders.PlaceOrder
+    input:
+      - name: contact
+        type: flow.orders.Recipient
+    outcomes:
+      - name: placed
+        emits:
+          - flow.orders.OrderPlaced
+
+  - name: flow.orders.Notify
+    input:
+      - name: recipient
+        type: flow.orders.Recipient
+    outcomes:
+      - name: sent
+        when: recipient == urgent
+        emits:
+          - flow.orders.Notified
+      - name: skipped
+        emits:
+          - flow.orders.Skipped
+
+bindings:
+  - id: notify-on-placed
+    when:
+      event: flow.orders.OrderPlaced
+    invoke:
+      command: flow.orders.Notify
+    mapping:
+      recipient: event.contact
+    delivery: at_least_once
+    on_failure: retry
 ";

@@ -64,6 +64,7 @@ use std::str::FromStr;
 use aep_domain::error::ParseError;
 use aep_domain::evidence::SpecDigest;
 use aep_domain::node::Node;
+use aep_domain::predicate::Predicate;
 use ess_compiler::ir::{
     ActorHandle, CommandHandle, ComponentHandle, DomainHandle, EntityHandle, ErrorHandle, EssIr,
     EventHandle, TypeHandle, ViewHandle,
@@ -414,14 +415,15 @@ impl<'de> serde::Deserialize<'de> for SuiteFormat {
 /// billing.invoice.CreateInvoice/outcome/rejected
 /// billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled
 /// billing.invoice.Invoice/state/Paid/refuses/billing.invoice.CancelInvoice
+/// billing.invoice.Invoice/invariant/after/billing.invoice.CreateInvoice/accepted
 /// notify-on-invoice-created/binding/on-failure
 /// ```
 ///
 /// Subject first because that is the order a person searches in — `grep CreateInvoice` finds every
 /// scenario about that command, and sorting groups them together in a report, in the artifact and in
 /// a diff. The second segment is a keyword from a closed set (`outcome`, `transition`, `state`,
-/// `binding`), which is what makes [`ScenarioId::parse`] total: no ESS name may contain a `/`, so
-/// splitting is unambiguous.
+/// `invariant`, `binding`), which is what makes [`ScenarioId::parse`] total: no ESS name may contain
+/// a `/`, so splitting is unambiguous.
 ///
 /// [`Ord`] is defined on the rendered form rather than derived, so the order of the keys in the
 /// committed file is plain lexicographic order — any tool that sorts the keys of the JSON object
@@ -460,11 +462,39 @@ pub enum ScenarioId {
         /// The command that must not move it.
         command: CommandRef,
     },
+    /// What must hold of an entity after a branch changed one (§20).
+    ///
+    /// `billing.invoice.Invoice/invariant/after/billing.invoice.CreateInvoice/accepted`. The
+    /// *entity* is the subject, because that is whose invariants these are, and the outcome is part
+    /// of the identity because §20 evaluates them **after a state-changing command** — the same
+    /// entity checked after two different commands is two checks, and one of them can fail while
+    /// the other passes.
+    ///
+    /// # Why an invariant does not name itself here
+    ///
+    /// An entity may declare several and the model gives none of them a name, so the only shapes
+    /// available would be a position (`…/invariant/0`) or the statement itself. A position is the
+    /// counter this whole type exists to refuse — insert an invariant above another and every
+    /// scenario after it re-keys. The statement is a sentence, not a name: it changes when an author
+    /// rewrites `total.amount >= 0` as `not (total.amount < 0)`, which re-keys a check whose meaning
+    /// did not move.
+    ///
+    /// So one scenario carries every invariant the entity declares, and adding one adds a step
+    /// rather than a key. What that costs is granularity in a report — a failure names the scenario
+    /// and the runner names which assertion inside it failed — and what it buys is that a stored
+    /// result still lines up with today's scenario after an invariant is added, which is what a
+    /// semantic diff needs from an id.
+    Invariant {
+        /// Whose invariants.
+        entity: EntityRef,
+        /// The branch after which they must hold.
+        after: OutcomeRef,
+    },
     /// A binding's observable behaviour: `notify-on-invoice-created/binding/flow`.
     Binding {
         /// Which binding.
         binding: BindingRef,
-        /// Which half of its semantics.
+        /// Which of its clauses.
         aspect: BindingAspect,
     },
 }
@@ -474,6 +504,7 @@ impl ScenarioId {
     const OUTCOME: &'static str = "outcome";
     const TRANSITION: &'static str = "transition";
     const STATE: &'static str = "state";
+    const INVARIANT: &'static str = "invariant";
     const BINDING: &'static str = "binding";
 
     /// Reads an id back from its rendered form.
@@ -511,19 +542,31 @@ impl ScenarioId {
                 state: StateName::new(state).map_err(|_| reject("has a malformed state name"))?,
                 command: CommandRef::new(name(command)?),
             }),
+            [entity, Self::INVARIANT, "after", command, outcome] => Ok(Self::Invariant {
+                entity: EntityRef::new(name(entity)?),
+                after: OutcomeRef::new(
+                    CommandRef::new(name(command)?),
+                    OutcomeName::new(outcome)
+                        .map_err(|_| reject("has a malformed outcome name"))?,
+                ),
+            }),
             [binding, Self::BINDING, aspect] => Ok(Self::Binding {
                 binding: BindingRef::new(
                     BindingName::new(binding)
                         .map_err(|_| reject("has a malformed binding name"))?,
                 ),
                 aspect: BindingAspect::parse(aspect).map_err(|()| {
-                    reject("names no binding aspect; expected `flow` or `on-failure`")
+                    reject(&format!(
+                        "names no binding aspect; expected one of {}",
+                        BindingAspect::expected()
+                    ))
                 })?,
             }),
             _ => Err(reject(
                 "is not a scenario name; expected `<command>/outcome/<name>`, \
                  `<entity>/transition/<name>/by/<command>/<outcome>`, \
-                 `<entity>/state/<state>/refuses/<command>` or `<binding>/binding/<aspect>`",
+                 `<entity>/state/<state>/refuses/<command>`, \
+                 `<entity>/invariant/after/<command>/<outcome>` or `<binding>/binding/<aspect>`",
             )),
         }
     }
@@ -553,6 +596,13 @@ impl fmt::Display for ScenarioId {
                 state,
                 command,
             } => write!(f, "{entity}/{}/{state}/refuses/{command}", Self::STATE),
+            Self::Invariant { entity, after } => write!(
+                f,
+                "{entity}/{}/after/{}/{}",
+                Self::INVARIANT,
+                after.command,
+                after.outcome
+            ),
             Self::Binding { binding, aspect } => {
                 write!(f, "{binding}/{}/{aspect}", Self::BINDING)
             }
@@ -604,33 +654,85 @@ impl<'de> serde::Deserialize<'de> for ScenarioId {
     }
 }
 
-/// Which half of a binding's semantics a scenario proves.
+/// Which clause of a binding a scenario proves.
+///
+/// A binding is four claims in one declaration — *when this event occurs, invoke this command, with
+/// this mapping, delivered this way, and on failure do this* — and each of them fails on its own. A
+/// single `binding` scenario would report one verdict for four checks, so a dropped binding and a
+/// swapped mapping would arrive as the same red line; and §26 asks a fault matrix to name the *one*
+/// scenario each deliberate defect breaks, which it cannot do if there is one scenario per binding.
+///
+/// They are also not equally demanding of a target, which is the second reason they are separate
+/// keys. [`Flow`](Self::Flow) is provable from events alone, which §16 requires; [`Mapping`](Self::Mapping)
+/// needs the invocation itself, which §16 permits as additional evidence and refuses to require of
+/// every implementation. Filing them apart is what lets a target that cannot expose an invocation
+/// report `unsupported` for that one scenario (§28) instead of failing the flow it can prove.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BindingAspect {
     /// The event arrives, the command runs, and what the model says follows is observable (§16).
     Flow,
+    /// Each of the command's inputs receives the value the binding's mapping names (§16).
+    Mapping,
+    /// The same event delivered twice does not stop the declared consequence happening (§17).
+    Delivery,
     /// The command does not run, and the declared failure policy is observable (§18).
     OnFailure,
 }
 
 impl BindingAspect {
-    /// Reads an aspect back. A word that is neither is not an aspect this build knows.
+    /// Every aspect, with how it is written — what a walk over the four iterates.
+    ///
+    /// Public for the reason `aep_conformance::Fault::ALL` is, and design §25 says it in as many
+    /// words: it is what makes a fault matrix a *matrix* rather than a list someone has to remember
+    /// to extend. Synthesis walks it to produce every scenario a binding obliges, and a later meta
+    /// test walks the same constant to assert each one is caught by something.
+    ///
+    /// It is a list rather than the definition: rendering and parsing are total matches over the
+    /// variants, so an aspect added without a spelling does not compile, and
+    /// `every_binding_aspect_is_in_the_list_that_is_walked_to_produce_them` fails if one is added
+    /// without being added here.
+    pub const ALL: [(Self, &'static str); 4] = [
+        (Self::Flow, Self::Flow.written()),
+        (Self::Mapping, Self::Mapping.written()),
+        (Self::Delivery, Self::Delivery.written()),
+        (Self::OnFailure, Self::OnFailure.written()),
+    ];
+
+    /// How this aspect is written, everywhere it is written.
+    const fn written(self) -> &'static str {
+        match self {
+            Self::Flow => "flow",
+            Self::Mapping => "mapping",
+            Self::Delivery => "delivery",
+            Self::OnFailure => "on-failure",
+        }
+    }
+
+    /// Reads an aspect back. A word that is none of them is not an aspect this build knows.
     fn parse(value: &str) -> Result<Self, ()> {
         match value {
             "flow" => Ok(Self::Flow),
+            "mapping" => Ok(Self::Mapping),
+            "delivery" => Ok(Self::Delivery),
             "on-failure" => Ok(Self::OnFailure),
             _ => Err(()),
         }
+    }
+
+    /// The words a suite may use, for a diagnostic that lists them.
+    fn expected() -> String {
+        Self::ALL
+            .iter()
+            .map(|(_, written)| format!("`{written}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
 impl fmt::Display for BindingAspect {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Flow => "flow",
-            Self::OnFailure => "on-failure",
-        })
+        f.write_str(self.written())
     }
 }
 
@@ -639,7 +741,8 @@ impl<'de> serde::Deserialize<'de> for BindingAspect {
         let raw = String::deserialize(deserializer)?;
         Self::parse(&raw).map_err(|()| {
             serde::de::Error::custom(format!(
-                "{raw:?} names no binding aspect; expected `flow` or `on-failure`"
+                "{raw:?} names no binding aspect; expected one of {}",
+                Self::expected()
             ))
         })
     }
@@ -840,12 +943,14 @@ impl<'de> serde::Deserialize<'de> for InstanceName {
     }
 }
 
-/// One value a scenario supplies to a command's input.
+/// One value a scenario supplies to a command's input, or requires one to have carried.
 ///
-/// Two cases, because a suite can decide one of them and not the other. A [`Literal`](Self::Literal)
-/// is a value synthesis chose and *decided* against the branch's guard; an
-/// [`Instance`](Self::Instance) is the identity of something an earlier step brought into existence,
-/// which no generator can know and every lifecycle scenario needs.
+/// Three cases, because a suite can decide one of them and not the other two. A
+/// [`Literal`](Self::Literal) is a value synthesis chose and *decided* against the branch's guard;
+/// an [`Instance`](Self::Instance) is the identity of something an earlier step brought into
+/// existence, which no generator can know and every lifecycle scenario needs; and an
+/// [`Observed`](Self::Observed) is a value the run itself produced and published in an event, which
+/// is what a binding's mapping is written in terms of.
 ///
 /// Tagged rather than untagged, deliberately: a declared struct may perfectly well have a field
 /// called `instance`, and an untagged encoding would read such a value as a reference. A tag is two
@@ -863,6 +968,23 @@ pub enum ScenarioValue {
         /// Which instance.
         instance: InstanceName,
     },
+    /// Whatever this event carried in this field, earlier in this scenario.
+    ///
+    /// The shape a binding's mapping has: `recipient: event.customer_email` says the command's
+    /// `recipient` receives *the value the triggering event published*, and no generator knows what
+    /// that value is — the upstream implementation chose it. Naming the event and the field is a
+    /// reading of the binding, where a literal would be a guess at what the upstream produced.
+    ///
+    /// It refers to an observation earlier in the same scenario, exactly as
+    /// [`Instance`](Self::Instance) refers to an earlier [`CaptureInstance`](ScenarioStep::CaptureInstance):
+    /// a suite that carried the value itself would be a suite whose meaning changed with the target
+    /// it ran against.
+    Observed {
+        /// The event that published it.
+        event: EventRef,
+        /// The field of that event's payload.
+        field: String,
+    },
 }
 
 impl ScenarioValue {
@@ -876,11 +998,19 @@ impl ScenarioValue {
         Self::Instance { instance: name }
     }
 
+    /// Whatever an event carried in one of its fields.
+    pub fn observed(event: EventRef, field: impl Into<String>) -> Self {
+        Self::Observed {
+            event,
+            field: field.into(),
+        }
+    }
+
     /// The value, where it is one the suite decided.
     pub fn as_literal(&self) -> Option<&Node> {
         match self {
             Self::Literal { value } => Some(value),
-            Self::Instance { .. } => None,
+            Self::Instance { .. } | Self::Observed { .. } => None,
         }
     }
 }
@@ -891,12 +1021,20 @@ impl ScenarioValue {
 ///
 /// # The vocabulary is closed
 ///
-/// Ten steps, listed in design §21, and a suite may contain nothing else. That is the point of a
-/// scenario IR: a check a runner can perform but this vocabulary cannot express is a semantic the
-/// specification does not have, and adding a step here is a decision about what an ESS *means* — not
-/// a convenience for one runner. When synthesis cannot express what a construct requires, §18's rule
-/// applies: refuse, and say the model is incomplete. Do not reach for an implementation-specific
-/// assertion.
+/// Thirteen steps, and a suite may contain nothing else. That is the point of a scenario IR: a check
+/// a runner can perform but this vocabulary cannot express is a semantic the specification does not
+/// have, and adding a step here is a decision about what an ESS *means* — not a convenience for one
+/// runner. When synthesis cannot express what a construct requires, §18's rule applies: refuse, and
+/// say the model is incomplete. Do not reach for an implementation-specific assertion.
+///
+/// Ten of them are the ones design §21 lists. Three are not, each added when a section of the design
+/// could not be written without it, and each argued on the variant itself:
+///
+/// | step | what could not be said without it | §|
+/// |---|---|---|
+/// | [`CaptureInstance`](Self::CaptureInstance) | which instance the second command in a sequence acts on | §19 |
+/// | [`RedeliverEvent`](Self::RedeliverEvent) | that the same event may arrive twice | §17 |
+/// | [`ExpectInvocation`](Self::ExpectInvocation) | which value a binding's mapping put in which input | §16 |
 ///
 /// # Negative assertions are first class
 ///
@@ -1019,6 +1157,58 @@ pub enum ScenarioStep {
         /// The field of that event's payload.
         field: String,
     },
+    /// Deliver an event the run has already published to its bindings a second time (§17).
+    ///
+    /// A **test adapter control**, exactly as [`ConfigureExternalOutcome`](Self::ConfigureExternalOutcome)
+    /// is, and it exists because `delivery: at_least_once` is precisely the claim that this happens:
+    /// the transport may deliver one occurrence more than once, and the handler has to survive it. A
+    /// suite that never delivers twice never tests the only thing that word says, and a suite that
+    /// re-ran the *upstream command* instead would be testing something else — two commands produce
+    /// two occurrences, which every implementation handles by handling each once.
+    ///
+    /// It does not say which binding: an event goes to everything that reacts to it, and naming one
+    /// would be a delivery the transport does not have.
+    ///
+    /// # What may not be asserted afterwards
+    ///
+    /// A count. §17 is explicit — under `at_least_once` a conformant implementation may produce
+    /// duplicates, so "exactly one `EmailSent` exists" is a test that fails a correct target. What
+    /// is required after a redelivery is what was required before it: the declared consequence is
+    /// still observable.
+    RedeliverEvent {
+        /// The event to deliver again.
+        event: EventRef,
+    },
+    /// Require that a binding invoked its command with these values (§16).
+    ///
+    /// The only assertion that can catch a **swapped mapping**. `recipient: event.contact` and
+    /// `recipient: event.alternate_contact` are the same document shape, the same types and two
+    /// different systems, and nothing downstream distinguishes them: the model relates a command's
+    /// input to no event payload, so the value handed to the command is observable only at the
+    /// invocation. Asserting a downstream event's field instead — because it happens to share the
+    /// input's *name* — is the inference this crate refuses everywhere else.
+    ///
+    /// # This is the one step §16 warns about, and why it is still here
+    ///
+    /// §16 says command tracing "may be additional evidence, but it should not become a requirement
+    /// for every implementation". So no flow scenario contains this step: a binding's flow is proved
+    /// through the event the invoked command publishes, and nothing else. It appears only under
+    /// [`BindingAspect::Mapping`], which is its own scenario id — so a target that cannot expose an
+    /// invocation reports `unsupported` for that one scenario (§28) and still proves everything
+    /// else. The alternative was to refuse the mapping check outright, which would leave the one
+    /// clause of a binding that a document can get wrong *silently* unchecked.
+    ExpectInvocation {
+        /// Whose invocation.
+        binding: BindingRef,
+        /// The command it invokes.
+        command: CommandRef,
+        /// What each input must have received, by declared field name.
+        ///
+        /// Partial: only the fields the binding maps are named, because the mapping is the only
+        /// claim the specification makes about this input.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        input: BTreeMap<String, ScenarioValue>,
+    },
     /// Read a view (§14).
     ///
     /// No freshness field, deliberately. The specification already decided it: `read_your_writes`
@@ -1089,6 +1279,37 @@ pub enum ViewExpectation {
     Excludes {
         /// The fields to match, by name.
         fields: BTreeMap<String, Node>,
+    },
+    /// Every row the view holds satisfies this predicate, and it holds at least one.
+    ///
+    /// What §20 needs and equality cannot express. An entity invariant states a *range* —
+    /// `total.amount >= 0` — where [`Contains`](Self::Contains) can only say which value a field
+    /// has, so there is no set of field matches that means the same thing. The predicate is carried
+    /// whole, in the model's own [`Predicate`] type, so it serialises with the suite and a runner in
+    /// another language reads the same expression the specification wrote.
+    ///
+    /// # "At least one" is part of the assertion
+    ///
+    /// Deliberately, and it is the difference between a check and a formality: *every row of an
+    /// empty view satisfies everything*, so a target that publishes nothing would pass an invariant
+    /// check that made no such demand. Synthesis only emits this against a view whose filter it has
+    /// decided **does** hold the entity the scenario just changed, so the demand is one the
+    /// specification already licenses.
+    ///
+    /// # `Unknown` refuses; it does not retry
+    ///
+    /// Evaluating a predicate against a row is three-valued (invariant 5), and only `True` passes.
+    /// `False` is a failed assertion — the implementation contradicted the specification. `Unknown`
+    /// is neither: it means the row could not answer the question, which is a defect in the
+    /// specification or in what the view publishes, and no amount of re-reading changes it. So a
+    /// runner that meets `Unknown` **stops and reports the predicate and the row**, even inside an
+    /// [`EventuallyView`](ScenarioStep::EventuallyView), where the temptation is to keep polling
+    /// until the deadline and then report a timeout — which is the same defect wearing a slower,
+    /// less legible costume. Synthesis closes the common cause in advance: it emits this only where
+    /// every path the predicate reads is a field the view publishes.
+    Satisfies {
+        /// The condition every row must satisfy.
+        predicate: Predicate,
     },
 }
 
@@ -1478,11 +1699,11 @@ mod tests {
 
     #[test]
     fn every_scenario_id_reads_back_from_the_form_a_report_prints() {
-        // One of each variant, because a rendering that cannot be parsed back is a rendering that
-        // makes a fault matrix's references unusable — and it is the fourth variant nobody checks
-        // that breaks.
+        // One of each variant, and one per binding aspect, because a rendering that cannot be
+        // parsed back is a rendering that makes a fault matrix's references unusable — and it is
+        // the variant nobody checks that breaks.
         let entity = EntityRef::new(QualifiedName::new("billing.invoice.Invoice").expect("valid"));
-        let ids = [
+        let mut ids = vec![
             ScenarioId::Outcome {
                 outcome: outcome("billing.invoice.CreateInvoice", "accepted"),
             },
@@ -1491,17 +1712,24 @@ mod tests {
                 by: outcome("billing.invoice.PayInvoice", "settled"),
             },
             ScenarioId::Refusal {
-                entity,
+                entity: entity.clone(),
                 state: StateName::new("Paid").expect("valid"),
                 command: command("billing.invoice.CancelInvoice"),
             },
-            ScenarioId::Binding {
-                binding: BindingRef::new(
-                    BindingName::new("notify-on-invoice-created").expect("valid"),
-                ),
-                aspect: BindingAspect::OnFailure,
+            ScenarioId::Invariant {
+                entity,
+                after: outcome("billing.invoice.CreateInvoice", "accepted"),
             },
         ];
+        ids.extend(BindingAspect::ALL.map(|(aspect, _)| ScenarioId::Binding {
+            binding: BindingRef::new(BindingName::new("notify-on-invoice-created").expect("valid")),
+            aspect,
+        }));
+        assert_eq!(
+            ids.len(),
+            8,
+            "five id shapes, and every aspect a binding scenario can be filed under"
+        );
 
         for id in ids {
             let rendered = id.to_string();
@@ -1514,6 +1742,57 @@ mod tests {
     }
 
     #[test]
+    fn every_binding_aspect_is_in_the_list_that_is_walked_to_produce_them() {
+        // `ALL` is what synthesis iterates, so an aspect missing from it is a scenario nothing
+        // produces and nothing refuses — the silent omission §36 exists to rule out, arriving as an
+        // array that still compiles. The check is that every spelling `parse` accepts is in it, and
+        // that each entry agrees with how the aspect renders.
+        for (aspect, written) in BindingAspect::ALL {
+            assert_eq!(aspect.to_string(), written, "`{written}` renders as itself");
+            assert_eq!(
+                BindingAspect::parse(written),
+                Ok(aspect),
+                "`{written}` reads back as the aspect it names"
+            );
+        }
+        for written in ["flow", "mapping", "delivery", "on-failure"] {
+            let aspect = BindingAspect::parse(written).expect("a word `parse` accepts");
+            assert!(
+                BindingAspect::ALL.contains(&(aspect, written)),
+                "`{written}` parses and is not in `ALL`, so nothing would ever produce it"
+            );
+        }
+        assert!(BindingAspect::parse("failure").is_err());
+    }
+
+    #[test]
+    fn an_invariant_scenario_is_keyed_by_the_entity_and_the_branch_and_never_by_a_position() {
+        // The property the last slice established, applied to the shape this one added: an id is a
+        // semantic name, so adding a second invariant to the entity must not re-key the scenario
+        // that carries the first. The fixture reaches that state by construction — the id has
+        // nowhere to *put* an invariant — and the assertion is that the rendered form names only
+        // the entity and the branch.
+        let entity = EntityRef::new(QualifiedName::new("billing.invoice.Invoice").expect("valid"));
+        let id = ScenarioId::Invariant {
+            entity,
+            after: outcome("billing.invoice.CreateInvoice", "accepted"),
+        };
+
+        assert_eq!(
+            id.to_string(),
+            "billing.invoice.Invoice/invariant/after/billing.invoice.CreateInvoice/accepted"
+        );
+        assert!(
+            !id.to_string().contains("total.amount"),
+            "an id that quoted the statement would re-key when an author rewrote it: {id}"
+        );
+        assert!(
+            id.to_string().starts_with("billing.invoice.Invoice"),
+            "the entity is the subject: `grep Invoice` finds what must hold of one"
+        );
+    }
+
+    #[test]
     fn a_scenario_id_that_names_no_construct_is_refused() {
         for malformed in [
             "billing.invoice.CreateInvoice",
@@ -1521,6 +1800,8 @@ mod tests {
             "billing.invoice.CreateInvoice/branch/accepted",
             "billing.invoice.CreateInvoice/outcome/Accepted",
             "billing.invoice.Invoice/state/paid/refuses/billing.invoice.CancelInvoice",
+            "billing.invoice.Invoice/invariant/0",
+            "billing.invoice.Invoice/invariant/before/billing.invoice.CreateInvoice/accepted",
             "notify-on-invoice-created/binding/failure",
             "3",
         ] {

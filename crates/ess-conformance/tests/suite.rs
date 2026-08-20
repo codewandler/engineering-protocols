@@ -27,7 +27,7 @@ use ess_compiler::source::SourceMap;
 use ess_conformance::scenario::{
     BindingAspect, BindingRef, CommandRef, ConformanceScenario, ConformanceSuite, DeclaredTypeRef,
     ErrorRef, EssSemanticRef, EventRef, OutcomeRef, ScenarioId, ScenarioPurpose, ScenarioStep,
-    ScenarioValue, SuiteFormat, SuiteProvenance, TransitionRef,
+    ScenarioValue, SuiteFormat, SuiteProvenance, TransitionRef, ViewExpectation,
 };
 use ess_domain::binding::BindingName;
 use ess_domain::command::OutcomeName;
@@ -424,6 +424,113 @@ fn a_suite_parses_from_text_alone_without_an_ir() {
 }
 
 #[test]
+fn the_steps_a_binding_and_an_invariant_need_survive_being_read_back_from_text() {
+    // The three steps §21 does not list, and the expectation that carries a predicate rather than a
+    // value. Each is only worth having if a runner that never saw the `EssIr` can read it — a
+    // `Predicate` in particular travels as the expression an author wrote and is parsed on the way
+    // in, so a suite naming a condition nothing can parse is refused here rather than at the step
+    // that would have evaluated it.
+    let written = r#"{
+  "provenance": {
+    "suite_version": "ess-conformance/1",
+    "system": "billing",
+    "specification_version": "v3",
+    "spec_digest": "0123456789abcdef",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "synthesizer_version": "0.1.0"
+  },
+  "scenarios": {
+    "billing.invoice.Invoice/invariant/after/billing.invoice.CreateInvoice/accepted": {
+      "purpose": "an invoice still satisfies what it declares",
+      "steps": [
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": { "expect": "satisfies", "predicate": "total.amount >= 0" }
+        }
+      ],
+      "source": [{ "kind": "entity", "name": "billing.invoice.Invoice" }]
+    },
+    "notify-on-invoice-created/binding/delivery": {
+      "purpose": "the same event twice",
+      "steps": [
+        { "step": "redeliver_event", "event": "billing.invoice.InvoiceCreated" },
+        { "step": "eventually_event", "event": "billing.email.EmailSent" }
+      ],
+      "source": [{ "kind": "binding", "name": "notify-on-invoice-created" }]
+    },
+    "notify-on-invoice-created/binding/mapping": {
+      "purpose": "the recipient is the address the event carried",
+      "steps": [
+        {
+          "step": "expect_invocation",
+          "binding": "notify-on-invoice-created",
+          "command": "billing.email.SendEmail",
+          "input": {
+            "recipient": {
+              "kind": "observed",
+              "event": "billing.invoice.InvoiceCreated",
+              "field": "customer_email"
+            },
+            "template": { "kind": "literal", "value": "invoice-created" }
+          }
+        }
+      ],
+      "source": [{ "kind": "binding", "name": "notify-on-invoice-created" }]
+    }
+  }
+}
+"#;
+
+    let suite = ConformanceSuite::from_json(written).expect("text alone is enough");
+
+    assert_eq!(suite.len(), 3);
+    let invariant = ScenarioId::parse(
+        "billing.invoice.Invoice/invariant/after/billing.invoice.CreateInvoice/accepted",
+    )
+    .expect("an id");
+    let ScenarioStep::ExpectView { expectation, .. } = &suite
+        .scenario(&invariant)
+        .expect("the invariant scenario")
+        .steps[0]
+    else {
+        panic!("the step came back as something else")
+    };
+    let ViewExpectation::Satisfies { predicate } = expectation else {
+        panic!("a predicate is not a set of field values: {expectation:?}")
+    };
+    assert_eq!(
+        predicate.to_string(),
+        "total.amount >= 0",
+        "the condition reads the same after a round trip as the specification wrote it"
+    );
+
+    let mapping = ScenarioId::parse("notify-on-invoice-created/binding/mapping").expect("an id");
+    let ScenarioStep::ExpectInvocation { input, .. } =
+        &suite.scenario(&mapping).expect("the mapping").steps[0]
+    else {
+        panic!("the step came back as something else")
+    };
+    assert_eq!(
+        input.get("recipient"),
+        Some(&ScenarioValue::observed(
+            "billing.invoice.InvoiceCreated"
+                .parse()
+                .expect("an event name"),
+            "customer_email"
+        )),
+        "a value nobody could have written down came back as the reference it is"
+    );
+
+    assert!(
+        ConformanceSuite::from_json(&written.replace("total.amount >= 0", "total amount >= 0"))
+            .is_err(),
+        "and a condition nothing can parse is refused while the suite is read"
+    );
+}
+
+#[test]
 fn a_suite_naming_something_that_is_not_an_ess_name_is_refused_while_it_is_read() {
     let malformed = r#"{
   "provenance": {
@@ -576,6 +683,13 @@ fn every_scenario_id_the_billing_model_can_produce_reads_back() {
         .expect("the example declares a binding");
 
     let ids = [
+        ScenarioId::Invariant {
+            entity: ess_conformance::scenario::EntityRef::from(entity_handle),
+            after: OutcomeRef::new(
+                CommandRef::from(command_handle(&ir, "billing.invoice.CreateInvoice")),
+                OutcomeName::new("accepted").expect("valid"),
+            ),
+        },
         ScenarioId::Transition {
             transition: TransitionRef::new(entity.clone(), &transition.name).expect("valid"),
             by: OutcomeRef::new(
