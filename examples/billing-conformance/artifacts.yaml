@@ -48,7 +48,7 @@ artifacts:
       path: examples/billing
     relations:
       - specifies: story:BILL-300
-    model_digest: e19d384dac86219a
+    model_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
     metadata:
       title: billing/v3
 

@@ -2127,7 +2127,7 @@ fn the_conformance_record_names_the_runner_as_its_producer_and_carries_the_spec_
     let document = stdout(&output);
     for required in [
         "kind: ess_conformance",
-        "spec_digest: e19d384dac86219a",
+        "spec_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5",
         "producer: verifier",
         "verifier: conformance-runner",
         "status: passed",
@@ -2250,12 +2250,15 @@ fn a_conformance_run_against_another_revision_of_the_model_does_not_close_the_ta
     let committed =
         std::fs::read_to_string(root().join(CONFORMANCE_ARTIFACTS)).expect("the manifest is there");
     assert!(
-        committed.contains("e19d384dac86219a"),
+        committed.contains("e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5"),
         "the fixture must pin the digest it is about to change, or it tests nothing"
     );
     write(
         &manifest,
-        &committed.replace("e19d384dac86219a", "0000000000000000"),
+        &committed.replace(
+            "e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5",
+            "0000000000000000000000000000000000000000000000000000000000000000",
+        ),
     );
 
     let output = evaluate_conformance_task(printable(&manifest), &[PASSING_RECORD]);
@@ -2266,7 +2269,8 @@ fn a_conformance_run_against_another_revision_of_the_model_does_not_close_the_ta
         "a passing run against yesterday's model must not close today's task: {text}"
     );
     assert!(
-        text.contains("e19d384dac86219a") && text.contains("0000000000000000"),
+        text.contains("e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5")
+            && text.contains("0000000000000000000000000000000000000000000000000000000000000000"),
         "the refusal must name both revisions so a person knows what to re-run: {text}"
     );
 }
@@ -2348,7 +2352,7 @@ fn ess_diff_names_the_four_changes_and_which_way_each_one_goes() {
         "every change carries the id a review comment quotes: {text}"
     );
     assert!(
-        text.contains("bc6f70b3dc81a99d"),
+        text.contains("bc6f70b3dc81a99d67c95510139c121d21bbef19f229f46ac7887551b31811d8"),
         "and the digest that says which resolution was compared, because `catalog/v2` is a label \
          two resolutions can share: {text}"
     );

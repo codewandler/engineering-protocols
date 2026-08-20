@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d9b93df3aab8ecff07788d04624ba0c2115ecb0803a2b79eb4011f51e9b71d31 # shrinks to text = "format: ess/1\nsystem: \"shop\"\nversion: \"v1\"\ndomain: shop.orders\ntypes: []\n"

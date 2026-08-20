@@ -119,7 +119,7 @@ impl EssRevisionRef {
     ///
     /// # Panics
     ///
-    /// If `ess-gen`'s digest stops being a digest. It is sixteen lower-case hexadecimal characters
+    /// If `ess-gen`'s digest stops being a digest. It is the full 64 lower-case hexadecimal characters of a SHA-256
     /// by construction, so the panic is how the two crates disagreeing becomes visible immediately
     /// rather than as a delta carrying an unparsable digest that no evidence record can be matched
     /// against. `SuiteProvenance::of` panics on the same line for the same reason.
@@ -284,7 +284,7 @@ mod tests {
         EssRevisionRef {
             system: QualifiedName::new("catalog").expect("a valid name"),
             specification_version: Version::V1,
-            spec_digest: SpecDigest::new(digest).expect("sixteen lower-case hex characters"),
+            spec_digest: SpecDigest::new(digest).expect("a full SHA-256 in lower-case hex"),
         }
     }
 
@@ -295,8 +295,8 @@ mod tests {
         // order, so nothing else in this crate would notice if the sort went away — which is exactly
         // why the fixture here hands them over backwards.
         let delta = EssDelta::new(
-            revision("0123456789abcdef"),
-            revision("fedcba9876543210"),
+            revision("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            revision("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"),
             vec![
                 SemanticChange::Actor {
                     subject: ActorRef::new(QualifiedName::new("catalog.a.Z").expect("a name")),

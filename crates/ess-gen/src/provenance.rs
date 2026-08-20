@@ -140,9 +140,12 @@ impl fmt::Display for Provenance {
 /// A digest of the resolved model.
 ///
 /// Over the IR's canonical JSON, so it is stable under anything that does not change what the system
-/// means. Truncated to 16 hex characters: this is for telling two models apart in a comment header,
-/// not for resisting an adversary, and a 64-character line nobody reads is worse than a short one
-/// someone checks.
+/// means. The full SHA-256, all 64 hex characters, and the width is load-bearing: this began as a
+/// 16-character truncation "for telling two models apart in a comment header, not for resisting an
+/// adversary" — and then gate G19 made completion decisions rest on it and wave 5 made suite
+/// acceptance rest on it (`ess impact` refuses a suite whose digest mismatches). A 64-bit digest is
+/// fine against drift and weak against construction, so once the digest became an acceptance
+/// criterion the truncation had to go (gap register D-4).
 fn digest(ir: &EssIr) -> String {
     use sha2::{Digest, Sha256};
 
@@ -150,8 +153,8 @@ fn digest(ir: &EssIr) -> String {
 
     let json = serde_json::to_vec(ir).unwrap_or_default();
     let hash = Sha256::digest(&json);
-    let mut out = String::with_capacity(16);
-    for byte in hash.iter().take(8) {
+    let mut out = String::with_capacity(64);
+    for byte in &hash {
         let _ = write!(out, "{byte:02x}");
     }
     out

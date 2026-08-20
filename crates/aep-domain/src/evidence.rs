@@ -689,10 +689,14 @@ pub struct SpecificationRecord {
 
 /// A digest of the resolved specification a conformance suite was generated from.
 ///
-/// Lower-case hexadecimal. `ess-gen` writes a 16-character truncated SHA-256 of the resolved model
-/// into every generated artifact's provenance header, so 16 is the length this workspace produces;
-/// a producer that records the whole hash is being more precise, not wrong, so anything from 16 to
-/// 64 characters is accepted.
+/// Lower-case hexadecimal. `ess-gen` writes the full 64-character SHA-256 of the resolved model
+/// into every generated artifact's provenance header, so 64 is the length this workspace produces.
+/// It wrote a 16-character truncation before the widening (gap register D-4: once suite acceptance
+/// and completion decisions rest on the digest, 64 bits is weak against construction), and records
+/// from before are still *parsed* — a digest from 16 to 64 characters is accepted — so a stale
+/// record fails at the digest comparison that names both digests, not at parse where the refusal
+/// could name only one. A truncated digest can never equal a full one, so nothing accepted here
+/// weakens the comparison.
 ///
 /// Case is fixed rather than folded, for the reason this repository keeps arriving at: two
 /// spellings of one value are two documents that disagree in text and agree in meaning, and here
@@ -703,10 +707,10 @@ pub struct SpecificationRecord {
 pub struct SpecDigest(String);
 
 impl SpecDigest {
-    /// The shortest accepted digest: what `ess-gen` writes.
+    /// The shortest accepted digest: what `ess-gen` wrote before the D-4 widening.
     pub const MIN_LENGTH: usize = 16;
 
-    /// The longest accepted digest: a full SHA-256, in hex.
+    /// The longest accepted digest: a full SHA-256 in hex, which is what `ess-gen` writes.
     pub const MAX_LENGTH: usize = 64;
 
     /// Builds a digest, refusing anything that is not one.
@@ -783,10 +787,11 @@ impl schemars::JsonSchema for SpecDigest {
              lower-case hexadecimal."
                 .to_owned(),
         );
-        schema.metadata().examples = ["4e1d3f8a9b2c1d0e"]
-            .iter()
-            .map(|value| serde_json::Value::String((*value).to_owned()))
-            .collect();
+        schema.metadata().examples =
+            ["4e1d3f8a9b2c1d0e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e"]
+                .iter()
+                .map(|value| serde_json::Value::String((*value).to_owned()))
+                .collect();
         schema.into()
     }
 }

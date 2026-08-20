@@ -16,6 +16,17 @@ serde_json.workspace = true
 
 [dev-dependencies]
 serde_yaml.workspace = true
+# Property-based tests that feed the whole pipeline adversarial specifications (phase 1 of the
+# property-testing decision on the wave 3.5 reconciliation page): any generated document either
+# yields at least one `ValidationCode` or compiles and re-serialises byte-identically — no panic, no
+# hang, no third outcome. What it buys over the billing fixture: inputs nobody thought to write,
+# shrunk to a minimal counterexample when one fails. `default-features = false, features = ["std"]`
+# drops `fork` and `timeout` and their transitive tree; safe because compilation here is a pure
+# function that must terminate on every input — a hang is a finding, not something to mask with a
+# timeout. The gate runs with a fixed seed (invariant 9's spirit: a gate must not be flaky); see
+# `tests/adversarial.rs` for the seed and how to widen locally. Same version and spelling as
+# `aep-domain`, deliberately.
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

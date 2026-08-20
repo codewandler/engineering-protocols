@@ -686,7 +686,7 @@ mod tests {
         EssRevisionRef {
             system: name("catalog"),
             specification_version: Version::V1,
-            spec_digest: SpecDigest::new(digest).expect("sixteen lower-case hex characters"),
+            spec_digest: SpecDigest::new(digest).expect("a full SHA-256 in lower-case hex"),
         }
     }
 
@@ -696,7 +696,10 @@ mod tests {
             suite_version: SuiteFormat::CURRENT,
             system: "catalog".to_owned(),
             specification_version: "v1".to_owned(),
-            spec_digest: SpecDigest::new("0123456789abcdef").expect("a digest"),
+            spec_digest: SpecDigest::new(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+            .expect("a digest"),
             compiler_version: "0.1.0".to_owned(),
             generator_version: "0.1.0".to_owned(),
             synthesizer_version: "0.1.0".to_owned(),
@@ -723,8 +726,8 @@ mod tests {
         // all against an empty graph is caught by the other mechanism, and the test would then pass
         // with mechanism 3 deleted.
         let delta = EssDelta::new(
-            revision("0123456789abcdef"),
-            revision("fedcba9876543210"),
+            revision("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            revision("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"),
             vec![SemanticChange::System {
                 subject: name("catalog"),
                 changed: SystemChange::VersionChanged {
@@ -755,8 +758,8 @@ mod tests {
         // is about a type — so a narrowing would report zero scenarios, correctly by its own
         // arithmetic and wrong about the world.
         let delta = EssDelta::new(
-            revision("0123456789abcdef"),
-            revision("fedcba9876543210"),
+            revision("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            revision("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"),
             vec![SemanticChange::Type {
                 subject: DeclaredTypeRef::new(name("catalog.pricing.Currency")),
                 changed: TypeChange::VariantRemoved {

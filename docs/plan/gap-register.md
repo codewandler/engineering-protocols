@@ -71,17 +71,25 @@ every committed suite and projection embeds the digest and the regeneration belo
 ## Open, owned by the post-wave-6 hardening batch
 
 One batch, one wave-sized commit series, sequenced after wave 6 so it does not race the synthesis
-work. Contents, each with its source:
+work. Five of its seven rows closed as chunk A (below); what remains, each with its source:
 
 | gap | evidence | close |
 |---|---|---|
-| invariant 7 — "engine never manufactures evidence" — enforced by nothing | `AGENTS.md:111` | a source scan over `crates/aep-engine`: no construction of evidence types outside test code |
-| invariant 8 — clock/RNG-free domain crate — scan covers `ess-compiler` only | `AGENTS.md:116` | extend the banned-token scan to `aep-domain` (and every crate that states the property) |
-| invariant 14 — one write path — enforced by nothing | `AGENTS.md:145` | a contract test that enumerates the write surface and fails when a second path appears |
-| digest widening (D-4 above) | `provenance.rs`, G19 | model change + one regeneration commit |
 | nothing relates a command's input to an emitted event payload — the one fault caught by nothing | `crates/ess-conformance/src/faulty.rs:254` | a model construct (payload-from-input mapping), then the fault matrix row stops saying "nothing" |
 | value-object invariant scenarios not synthesised (design §20) | `ess conform synthesize` prints the refusal today | a later `ess-conformance` slice, as the refusal text already promises |
-| property-based testing phase 1 (`proptest`) | decided earlier, queued behind model changes | lands with this batch, since the batch is the model change it waited for |
+
+## Closed by code, 2026-08-20 — wave 6.5 chunk A
+
+Each guard was verified by mutation before being trusted: the one-line violation it exists to catch
+was applied, the failure was watched naming the defect, and the mutation reverted.
+
+| gap | what closes it now |
+|---|---|
+| invariant 7 — "engine never manufactures evidence" | `crates/aep-engine/tests/evidence_scan.rs`: payload types read off `Evidence` itself, every construction in shipped engine code refused, destructuring and the `submit_evidence` envelope allowed. Mutation: a fabricated `Evidence::TestResult` in `submit_evidence`, caught at file:line |
+| invariant 8 — clock/RNG-free domain crate | `crates/aep-domain/tests/determinism.rs` and `crates/ess-gen/tests/determinism.rs` extend the banned-token scan to both crates that stated the property unscanned (`ess-diff` and `ess-synth` already scanned themselves; `ess-domain` states no claim). Mutations: a `SystemTime::now` in `time.rs`, a `HashMap` import in `types.rs`, both caught |
+| invariant 14 — one write path | `crates/aep-contract/tests/write_surface.rs`: every method of every public trait enumerated and pinned; `CommandService::execute` is the one write path. Mutation: a default-bodied `fn purge` on `CommandService`, caught by name |
+| digest widening (D-4) | `crates/ess-gen/src/provenance.rs` writes the full 64-hex SHA-256; every committed projection, suite and synthesised workspace regenerated once; `SpecDigest` still parses 16–64 so a pre-widening record fails at the comparison that names both digests, not at parse |
+| property-based testing phase 1 (`proptest`) | `crates/aep-domain/tests/truth_laws.rs` (Kleene laws over generated expressions) and `crates/ess-compiler/tests/adversarial.rs` (the recorded property: any generated document is refused with reasons or compiles byte-identically twice). Fixed seeds, so the gate cannot be flaky. Mutations: `and` collapsing `Unknown` to `False`, a clock read in `to_canonical_json`, both caught with shrunk counterexamples |
 
 ## Not gaps, verified closed
 

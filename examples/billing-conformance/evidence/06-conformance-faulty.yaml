@@ -1,6 +1,6 @@
 - kind: ess_conformance
   specification: billing/v3
-  spec_digest: e19d384dac86219a
+  spec_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
   implementation: billing-reference-accept-invalid-amount 0.1.0
   status: failed
   scenarios_total: 27

@@ -156,8 +156,8 @@ that removes a currency reports one narrowing.
 ```console
 $ protocol ess diff --from examples/revision-pair/before --to examples/revision-pair/after
 catalog v2 → v2
-  before  bc6f70b3dc81a99d
-  after   3e5ba8c16baf2d7d
+  before  bc6f70b3dc81a99d67c95510139c121d21bbef19f229f46ac7887551b31811d8
+  after   3e5ba8c16baf2d7d7316fd64fab88b6706cd3d6020562bd602ba1def8c196180
 
 4 change(s): 2 widening, 2 narrowing, 0 other
 
@@ -210,8 +210,8 @@ its result depends on.
 $ protocol ess impact --from examples/billing --to billing-with-one-grant-moved/ \
     --suite suites/generated/billing/suite.json
 billing v3 → v3
-  before  e19d384dac86219a
-  after   fd52355634fd35e7
+  before  e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
+  after   fd52355634fd35e7401e371f924e806f9f30b69e95f98bd5d5fcd8c0ef504f5a
 
 2 change(s): 1 widening, 1 narrowing, 0 other
 
@@ -220,7 +220,7 @@ billing v3 → v3
   narrows  actor billing.invoice.Customer: may no longer invoke `billing.invoice.CreateInvoice`
            actor/billing.invoice.Customer/grant-removed/billing.invoice.CreateInvoice
 
-suite billing v3 (e19d384dac86219a): 7 of 27 scenario(s) owed again
+suite billing v3 (e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5): 7 of 27 scenario(s) owed again
 2 construct(s) reached: 2 changed, 0 depend on one directly, 0 through another
 
   billing.invoice.CreateInvoice/outcome/accepted
@@ -489,7 +489,7 @@ as evidence:
 $ protocol ess conform evidence --path examples/billing --target billing
 - kind: ess_conformance
   specification: billing/v3
-  spec_digest: e19d384dac86219a
+  spec_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
   implementation: billing-reference 0.1.0
   status: passed
   scenarios_total: 27

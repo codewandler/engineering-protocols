@@ -44,7 +44,7 @@ See the status table in [`README.md`](README.md); keep it accurate when you land
 is the per-wave record of what actually shipped — read it before believing any prose about progress.
 
 **Every crate in the workspace is implemented and gated. There are no skeletons left.** The most
-recent tag is `0.5.0-ess-wave-5`; `task check` (eight steps) currently passes 63 suites and 1362
+recent tag is `0.6.0-ess-wave-6`; `task check` (eight steps) currently passes 69 suites and 1379
 tests, with 0 clippy warnings and 0 rustdoc warnings.
 
 * **AEP — the protocol; the v0.2 scope is implemented.** `aep-domain`, `aep-schema`, `aep-engine`,
@@ -66,7 +66,9 @@ tests, with 0 clippy warnings and 0 rustdoc warnings.
   the one scenario that exists to catch it). `generated/` holds the committed projections and the
   synthesised workspace, `suites/generated/` the committed conformance suites; all drift-checked
   in the gate.
-* **Not built yet:** the wave 6.5 hardening batch and wave 7, both scheduled on the roadmap;
+* **Not built yet:** the rest of the wave 6.5 hardening batch (chunk A — the three unenforced
+  invariants, the digest widening and `proptest` phase 1 — is done; the input→event-payload model
+  gap and value-object invariant scenarios remain) and wave 7, both scheduled on the roadmap;
   attested evidence (gap register D-3, proposed and unaccepted); any durable backend — the only
   implementation of the contract is in memory.
 * Work order: [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) §4 for AEP,
@@ -78,9 +80,9 @@ tests, with 0 clippy warnings and 0 rustdoc warnings.
 These hold across the workspace. Breaking one is a design change, not a refactor.
 
 Each carries what actually enforces it — a lint, a type, a test or a scan — because a rule nothing
-checks is a rule that has already drifted somewhere. Three say **nothing**. That is not an oversight
-to be papered over; it is the target list for the next mutation review, and it is only useful while it
-is honest. Do not write an enforcement here that you cannot point at.
+checks is a rule that has already drifted somewhere. Three said **nothing** until the wave 6.5
+hardening batch; none does now, and the register is only useful while it is honest. Do not write an
+enforcement here that you cannot point at.
 
 1. **Rust is the source of truth.** Schemas are generated. Never hand-edit `schemas/generated/`; run
    `cargo xtask schema`.
@@ -106,7 +108,9 @@ is honest. Do not write an enforcement here that you cannot point at.
 5. **`Unknown` is not `False`.** Predicate evaluation is three-valued; only `True` permits a
    transition. Never collapse unobserved to false.
    *Enforced by* the `Truth` type: three variants, Kleene `and`/`or`, no `From<bool>` and no
-   `as_bool`, so there is no boolean to collapse into. The Kleene tables have tests.
+   `as_bool`, so there is no boolean to collapse into. The Kleene tables have tests, and the
+   algebra's laws are property-checked over generated expressions
+   (`crates/aep-domain/tests/truth_laws.rs`).
 6. **Capabilities default to deny**, and `deny` beats `require_approval` beats `allow`. A principle
    may restrict; only a profile or protocol may grant.
    *Enforced by* `CapabilityPolicy::decide` plus tests that first construct the state where each link
@@ -115,19 +119,29 @@ is honest. Do not write an enforcement here that you cannot point at.
    before asserting the outcome, and `crates/aep-domain/tests/safety_envelope.rs` covers the approval
    floor. Verified by mutation, not by reading.
 7. **The engine never manufactures evidence.** It evaluates what verifiers and humans produced.
-   *Enforced by* **nothing**. It is a property of how the API is used, and `docs/guide/harness.md`
-   states it as a rule for harness authors — which is exactly the shape of rule this repository exists
-   to replace.
+   *Enforced by* a source scan, `crates/aep-engine/tests/evidence_scan.rs`, which reads the payload
+   types off `Evidence` itself and refuses any construction of one in shipped engine code — struct
+   literal, constructor path, variant expression or variant-as-function. Destructuring and the
+   envelope stamp in `submit_evidence` stay allowed: reading evidence and stamping the id, clock
+   time and producer onto a caller's payload are the engine's job. The scan's extractor is checked
+   against the engine's own test modules, which construct evidence constantly, so a scan that has
+   stopped seeing constructions fails on them instead of passing on everything.
 8. **The domain crate is clock-free and randomness-free.** No `SystemTime::now`, no RNG. The engine
    takes a `Clock` so an execution is replayable.
-   *Enforced by* **nothing**. `crates/aep-domain/src/` contains no `SystemTime` and no RNG today; the
-   scan that would catch one being added covers `ess-compiler` only (invariant 9).
+   *Enforced by* a banned-token scan, `crates/aep-domain/tests/determinism.rs` — boundary-aware,
+   because `Operand::` contains `rand::`, and comment-skipping, because prose about the rule is not
+   a breach of it. `aep-engine` is deliberately unscanned: `src/clock.rs` is the one place
+   `SystemTime::now` is allowed to live, behind the `Clock` trait.
 9. **Determinism.** Same validated state plus same evidence set ⇒ same decision. Iterate over
    `BTreeMap`/`BTreeSet`, never `HashMap`, so output ordering is stable.
-   *Enforced by* a banned-token scan over `crates/ess-compiler/src` **only**
-   (`no_source_file_in_the_compiler_reads_a_clock_or_an_unordered_map`, in
-   `crates/ess-compiler/tests/billing.rs`), beside a test that compiles the same source twice and
-   compares bytes. The other eleven crates and `xtask` are unscanned.
+   *Enforced by* banned-token scans over five crates that claim the property — `ess-compiler`
+   (`tests/billing.rs`), `ess-diff` (`tests/canonical.rs`), `ess-synth` (`tests/synthesis.rs`),
+   `aep-domain` and `ess-gen` (`tests/determinism.rs` in each) — beside tests that compile, diff or
+   generate twice and compare bytes, and a seeded property test that does the same for every
+   generated adversarial specification (`crates/ess-compiler/tests/adversarial.rs`).
+   Deliberately unscanned, because each owns a clock or a terminal: `aep-engine` (invariant 8),
+   `ess-conformance` (the runner takes a clock, wave 3.5 decision 3), the backends, the CLI and
+   `xtask`. `ess-domain` states no determinism claim of its own.
 10. **Document identity comes from document content**, not from filenames. A workflow's `id` is
     declared inside the file; loaders index by declared id.
     *Enforced by* the registry's signatures: `Registry::insert_*` takes a validated document and no
@@ -149,8 +163,10 @@ is honest. Do not write an enforcement here that you cannot point at.
     in as identity. Nothing stops code parsing the `Display` output back out.
 14. **Every mutation is a command.** There is no second write path, because a second path is a second
     place to forget validation, authorisation, idempotency, provenance and audit.
-    *Enforced by* **nothing**. One write path is a property of the contract's current shape; adding a
-    second would compile and pass the gate.
+    *Enforced by* `crates/aep-contract/tests/write_surface.rs`, which enumerates every method of
+    every public trait in the contract and pins the list: `CommandService::execute` is the one
+    write path. A new trait or method — required or default-bodied — fails the test with
+    instructions to model the mutation as a command payload, or to change this invariant first.
 15. **A refused command changes nothing and is still recorded.** `AuditRecord::validate` rejects a
     rejection that carries a change record.
     *Enforced by* `AuditRecord::validate` (`crates/aep-domain/src/audit.rs`) and its tests.
@@ -238,10 +254,13 @@ require a green full suite, not component gates.
 Written down because it is already practised, and an unwritten standard is one the next agent meets
 only by violating it.
 
-* **The workspace has nine direct third-party crates.** Seven are declared once in
+* **The workspace has ten direct third-party crates.** Seven are declared once in
   `[workspace.dependencies]` — `serde`, `serde_json`, `serde_yaml`, `schemars`, `thiserror`, `clap`,
-  `anyhow` — and two are crate-local: `sha2` in `ess-gen`, and `jsonschema` as a dev-dependency of
-  `ess-gen` and `aep-schema`. Reach for the workspace list before adding to it.
+  `anyhow` — and three are crate-local: `sha2` in `ess-gen`, `jsonschema` as a dev-dependency of
+  `ess-gen` and `aep-schema`, and `proptest` as a dev-dependency of `aep-domain` and `ess-compiler`
+  (`default-features = false`, and every property runs under a fixed seed so the gate cannot be
+  flaky — the seed and the way to widen locally are documented where each is used). Reach for the
+  workspace list before adding to it.
 * **A non-workspace dependency carries its justification in the manifest**, beside the line that adds
   it: what it buys, which features are dropped and why that is safe here, and why the version matches
   the other crate that uses it. `crates/ess-gen/Cargo.toml` is the model.

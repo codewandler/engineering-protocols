@@ -77,8 +77,9 @@ it implements the contract by running a suite against itself.
 | Generated conformance suites, committed and drift-checked | 100% | 27 scenarios from `examples/billing/` and 31 from `examples/oracle-fixture/`, under `suites/generated/`, with every construct that got no scenario listed with its reason |
 | Semantic diff — what a revision invalidates | 100% | `ess diff` and `ess impact`, `0.5.0-ess-wave-5` — first slice as scoped: six construct families; predicate-bearing constructs fall back to whole-suite invalidation |
 | Rust structural synthesis (`ess-synth`) | 100% | wave 6 complete: a language-neutral `SynthesisPlan` (every capability generated, owed or refused, with reasons), a committed zero-dependency workspace — semantic types, typestate lifecycles, component ports, one transport — and the executed criterion: the committed billing suite, unchanged, passes the workspace linked with `examples/billing-realization` (27 of 27) and fails the deliberately corrupted linkage at exactly the scenario that exists to catch it. Billing: 45 capabilities = 33 generated / 8 obligations / 4 refused; the linker never chooses (D-2) |
+| Wave 6.5 hardening — the gap register emptied by code | chunk A done | invariants 7, 8 and 14 now enforced by scans and a write-surface test; model digest widened to the full SHA-256 (D-4); `proptest` phase 1 landed, fixed-seed. Chunk B — the input→event-payload construct and value-object scenarios — still open |
 
-`task check` passes 63 suites and 1362 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
+`task check` passes 69 suites and 1379 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
 are an effort estimate, not a measurement; verify the "done" column with `task check`. The ESS roadmap
 is [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md).
 

@@ -1399,7 +1399,7 @@
     "SpecDigest": {
       "description": "A digest of the resolved specification a conformance suite was generated from, in lower-case hexadecimal.",
       "examples": [
-        "4e1d3f8a9b2c1d0e"
+        "4e1d3f8a9b2c1d0e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e"
       ],
       "type": "string",
       "pattern": "^[0-9a-f]{16,64}$"

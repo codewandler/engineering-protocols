@@ -9,7 +9,33 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **The model digest is the full SHA-256 — 64 hex characters, not 16 (gap register D-4).** Since
+  gate G19 a task's completion can rest on a conformance record's `spec_digest`, and since wave 5
+  `protocol ess impact` refuses a suite whose digest mismatches; a 64-bit truncation is fine
+  against drift and weak against construction, so the width had to follow the responsibility.
+  Every provenance header, committed projection, conformance suite and synthesised workspace now
+  carries the full digest, regenerated in one pass. A record written before the widening still
+  parses — `SpecDigest` accepts 16 to 64 characters — and is refused where it always would be: at
+  the comparison, which names both digests so the holder knows what to re-run.
+
+### Added
+
+- **The three invariants that were enforced by nothing are now enforced** (wave 6.5 chunk A, gap
+  register): an engine that constructs an evidence payload outside its test code fails the build
+  (`aep-engine/tests/evidence_scan.rs`, invariant 7); a clock, RNG or unordered map in `aep-domain`
+  or `ess-gen` fails the build (`tests/determinism.rs` in each, invariant 8 — `ess-diff` and
+  `ess-synth` already scanned themselves); and a second write path on the contract — any new public
+  trait method beside `CommandService::execute` and the seven queries — fails the build naming
+  itself (`aep-contract/tests/write_surface.rs`, invariant 14). Every scan carries an inverse
+  assertion, so a scan that silently stops seeing violations fails instead of passing.
+- **Property-based testing, phase 1 (`proptest`, dev-only, fixed seed).** The Kleene laws of
+  `Truth` hold over generated expressions (`aep-domain/tests/truth_laws.rs`), and any generated
+  adversarial specification is either refused with at least one reason or compiles to byte-identical
+  canonical JSON twice — no panic, no hang, no third outcome
+  (`ess-compiler/tests/adversarial.rs`). Seeds are fixed so the gate cannot be flaky; raise
+  `PROPTEST_CASES` to widen a local run.
 
 ## [0.6.0-ess-wave-6] — 2026-08-20
 

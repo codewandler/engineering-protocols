@@ -31,7 +31,7 @@ at evaluation time rather than guessed at when the profile resolves:
 ```yaml
   - id: ess:billing
     kind: executable-system-specification
-    model_digest: e19d384dac86219a
+    model_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
 ```
 
 ## 1. Run the specification's own suite against the implementation
@@ -52,7 +52,7 @@ a different document: it carries who produced it.
 $ $B ess conform evidence --path examples/billing --target billing
 - kind: ess_conformance
   specification: billing/v3
-  spec_digest: e19d384dac86219a
+  spec_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
   implementation: billing-reference 0.1.0
   status: passed
   scenarios_total: 27

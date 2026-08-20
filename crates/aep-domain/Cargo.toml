@@ -11,6 +11,16 @@ authors.workspace = true
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+# Property-based tests over the three-valued core (phase 1 of the property-testing decision on the
+# wave 3.5 reconciliation page). What it buys: the Kleene laws of `Truth` asserted over every
+# generated expression shape rather than the handful a table enumerates, with shrinking to a minimal
+# counterexample. `default-features = false, features = ["std"]` drops `fork` (process isolation for
+# tests that may abort — nothing here aborts) and `timeout`, so `rusty-fork` and its transitive tree
+# stay out of the build; safe because these tests are pure functions over three-valued logic. The
+# gate runs with a fixed seed (invariant 9's spirit: a gate must not be flaky); see
+# `tests/truth_laws.rs` for the seed and how to widen locally. Same version and spelling as
+# `ess-compiler`, deliberately — one generator behaviour across the workspace.
+proptest = { version = "1.11.0", default-features = false, features = ["std"] }
 schemars.workspace = true
 thiserror.workspace = true
 

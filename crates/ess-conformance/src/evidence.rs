@@ -272,7 +272,10 @@ mod tests {
                 suite_version: SuiteFormat::CURRENT,
                 system: "billing".to_owned(),
                 specification_version: "v3".to_owned(),
-                spec_digest: SpecDigest::new("e19d384dac86219a").expect("a digest"),
+                spec_digest: SpecDigest::new(
+                    "e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5",
+                )
+                .expect("a digest"),
                 compiler_version: "0.1.0".to_owned(),
                 generator_version: "0.1.0".to_owned(),
                 synthesizer_version: "0.1.0".to_owned(),
@@ -297,7 +300,10 @@ mod tests {
         .to_evidence();
 
         let result = evidence.result();
-        assert_eq!(result.spec_digest.as_str(), "e19d384dac86219a");
+        assert_eq!(
+            result.spec_digest.as_str(),
+            "e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5"
+        );
         assert_eq!(result.specification, "billing/v3");
         assert_eq!(result.implementation, "billing-reference 0.1.0");
         assert_eq!(result.status, VerificationStatus::Passed);
@@ -426,7 +432,7 @@ mod tests {
         );
         assert_eq!(
             facts.get("ess_conformance.spec_digest").map(String::as_str),
-            Some("e19d384dac86219a"),
+            Some("e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5"),
             "a failing run still names the revision it was run against"
         );
     }
@@ -447,7 +453,10 @@ mod tests {
         let json = serde_json::to_value(&record).expect("an evidence record serialises");
         assert_eq!(json["kind"], "ess_conformance");
         assert_eq!(json["specification"], "billing/v3");
-        assert_eq!(json["spec_digest"], "e19d384dac86219a");
+        assert_eq!(
+            json["spec_digest"],
+            "e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5"
+        );
         assert_eq!(json["suite_version"], "ess-conformance/1");
         assert_eq!(json["producer"]["producer"], "verifier");
         assert_eq!(json["producer"]["verifier"], "conformance-runner");

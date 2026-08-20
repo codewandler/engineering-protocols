@@ -271,8 +271,8 @@ impl SuiteProvenance {
     ///
     /// # Panics
     ///
-    /// If `ess-gen`'s digest stops being a digest. It is sixteen lower-case hexadecimal characters
-    /// by construction — the length [`SpecDigest::MIN_LENGTH`] documents as "what `ess-gen` writes" —
+    /// If `ess-gen`'s digest stops being a digest. It is the full 64 lower-case hexadecimal characters of a SHA-256
+    /// by construction — the length [`SpecDigest::MAX_LENGTH`] documents as what `ess-gen` writes —
     /// so the panic is how the two crates disagreeing becomes visible immediately rather than as an
     /// evidence record the protocol engine silently refuses later.
     pub fn of(ir: &EssIr) -> Self {
@@ -2228,7 +2228,10 @@ mod tests {
             suite_version: SuiteFormat::CURRENT,
             system: "billing".to_owned(),
             specification_version: "v3".to_owned(),
-            spec_digest: SpecDigest::new("0123456789abcdef").expect("a digest"),
+            spec_digest: SpecDigest::new(
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+            .expect("a digest"),
             compiler_version: "0.1.0".to_owned(),
             generator_version: "0.1.0".to_owned(),
             synthesizer_version: "0.1.0".to_owned(),

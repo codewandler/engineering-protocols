@@ -397,7 +397,7 @@ fn a_suite_parses_from_text_alone_without_an_ir() {
     "suite_version": "ess-conformance/1",
     "system": "billing",
     "specification_version": "v3",
-    "spec_digest": "0123456789abcdef",
+    "spec_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "synthesizer_version": "0.1.0"
@@ -456,7 +456,7 @@ fn the_steps_a_binding_and_an_invariant_need_survive_being_read_back_from_text()
     "suite_version": "ess-conformance/1",
     "system": "billing",
     "specification_version": "v3",
-    "spec_digest": "0123456789abcdef",
+    "spec_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "synthesizer_version": "0.1.0"
@@ -558,7 +558,7 @@ fn a_suite_naming_something_that_is_not_an_ess_name_is_refused_while_it_is_read(
     "suite_version": "ess-conformance/1",
     "system": "billing",
     "specification_version": "v3",
-    "spec_digest": "0123456789abcdef",
+    "spec_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "synthesizer_version": "0.1.0"
