@@ -35,6 +35,7 @@ generator wrote about itself.
 | hand-written code never enters the generated tree | obligation implementations live in a committed crate outside `generated/`, satisfying generated interfaces by import | design §17's ownership boundary, kept absolute so `generated/` stays fully disposable |
 | one transport | exactly the one the billing example's components and bindings require | every further adapter is a later wave; pretending otherwise is how a generator acquires six half-adapters |
 | the gate grows a step | `synth-check`: regenerate, diff, then `cargo test` in the generated workspace | the acceptance criterion that matters has to be the one CI executes, or it is a claim |
+| Rust is the first target, not the only one | the `SynthesisPlan` is language-neutral — dispositions, obligations and refusals are phrased against the model, never against Rust — and Rust lives only in the emission stage, behind the same surface a future Go, Zig, Java or TypeScript emitter would consume. `--target rust` is a one-variant enum, the default | the seam is the plan itself, so a second language is a second emitter rather than a second planner. What is *not* built: a target registry or any multi-language abstraction — one seam, one target behind it, and a target-specific refusal is marked as the target's, not the plan's |
 
 Rejected outright rather than deferred, with the roadmap: §36's behavioural synthesis, §41's agent
 loop, §38's residual-synthesizer framing. Deferred with their designs: `Realization` (§30–§34),
