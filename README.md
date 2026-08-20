@@ -35,6 +35,10 @@ This repository has two halves. **AEP** governs how engineering work is performe
 what software must exist. They meet at evidence: a task can be blocked until something proves an
 implementation conforms to its specification. See [`docs/VISION.md`](docs/VISION.md).
 
+Two halves is what exists. Four unaccepted designs in [`docs/design/`](docs/design/) would add a third
+axis (a system *changing* over time) and a fourth domain (infrastructure); they are proposals, and
+[`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* is where their status is kept.
+
 ### AEP — the protocol (v0.2 scope, complete)
 
 A task resolves against the document tree, evidence decides what may be done and whether the work is
@@ -64,12 +68,13 @@ it implements the contract by running a suite against itself.
 | `protocol ess validate\|compile\|inspect\|graph\|generate` | 100% | one file or a directory; every problem in one run |
 | The join — artifact kind, evidence kind, `ess-conformance` principle | 100% | a task can already be blocked until something proves conformance |
 | Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 100% | 27 artifacts plus a generated index, committed under `generated/`, provenance on each, drift-checked in CI |
+| [ESS wave 3.5 — reconciliation](docs/plan/ess-wave-3.5-reconciliation.md) | 15/19 | in progress, and where the work currently is: 19 gates, 15 closed. The open four are G2 and G15 in the model, G16's predicate flattener, and G19 binding evidence to a specification revision. Wave 4 does not start until they land |
 | Test synthesis, and an implementation deliberately wrong | 0% | ESS wave 4 |
 | Rust structural synthesis | 0% | ESS wave 5 |
 
-916 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement;
-verify the "done" column with `task check`. The ESS roadmap is
-[`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md).
+`task check` passes 41 suites and 953 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
+are an effort estimate, not a measurement; verify the "done" column with `task check`. The ESS roadmap
+is [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md).
 
 ### What works today
 
@@ -118,13 +123,12 @@ injected fault: a replayed command is applied a second time — expected to be c
 
 No durable backend — the only implementation is in memory. No federated artifact graphs across
 repositories. A specification projects into documentation and contracts, but not yet into tests or
-code: the generated conformance suite is ESS wave 4 and Rust structural synthesis is wave 5.
-Entities, views and actors are modelled and validated but do not reach the IR, so no projection
-renders them — each generated page that would have shown one names the construct that is missing
-instead. The generated OpenAPI and AsyncAPI documents are checked structurally rather than against
-the OpenAPI 3.1 and AsyncAPI 3.0 meta-schemas, neither of which is vendored here. See
-[`docs/plan/`](docs/plan/) for what was built and in what order, and [`docs/guide/`](docs/guide/) for
-how to use what exists.
+code: the generated conformance suite is ESS wave 4 and Rust structural synthesis is wave 5. The
+generated OpenAPI and AsyncAPI *envelopes* are checked structurally rather than against the OpenAPI
+3.1 and AsyncAPI 3.0 meta-schemas, neither of which is vendored here; every schema those documents
+embed is validated against the real JSON Schema 2020-12 meta-schema, so what is unchecked is the
+envelope, not the types. See [`docs/plan/`](docs/plan/) for what was built and in what order, and
+[`docs/guide/`](docs/guide/) for how to use what exists.
 
 ## Design decisions worth knowing
 
@@ -181,31 +185,39 @@ xtask/              repository automation
 Requires a recent stable Rust and [go-task](https://taskfile.dev).
 
 ```console
-task check          # format check, clippy (warnings are errors), tests, schema + projections
+task check          # six steps: format check, clippy, tests, rustdoc, schema, projections
 task test
 task schema         # regenerate schemas/generated/
 task generate       # regenerate generated/ — the projections of examples/billing/
 task doc
+task doc-check      # rustdoc with warnings as errors
 ```
 
 Without `task`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo test --workspace`, `cargo xtask schema --check`, `cargo xtask generate --check`.
+`cargo test --workspace`, `RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps`,
+`cargo xtask schema --check`, `cargo xtask generate --check`.
 
 ## Documents
 
 | Document | Role |
 |---|---|
 | [`docs/VISION.md`](docs/VISION.md) | why this exists, and how its two halves compose |
-| [`docs/design/consolidated-design-v0.2.md`](docs/design/consolidated-design-v0.2.md) | authoritative specification for the protocol (AEP) |
+| [`docs/design/consolidated-design-v0.2.md`](docs/design/consolidated-design-v0.2.md) | **normative** — the specification for the protocol (AEP) |
+| [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) | **normative** — what is implemented, what v0.2 adds, work order, recorded deviations |
 | [`docs/design/ess-implementor-design-v0.1.md`](docs/design/ess-implementor-design-v0.1.md) | design for the Executable System Specification (ESS) — the model and the compiler are built, and a specification projects into documentation and contracts |
 | [`docs/design/ess-review-v0.1.md`](docs/design/ess-review-v0.1.md) | review of that design, with the findings that change what gets built first |
-| [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) | what is implemented, what v0.2 adds, work order, recorded deviations |
+| [`docs/design/ess-closed-loop-execution-conformance-design-v0.1.md`](docs/design/ess-closed-loop-execution-conformance-design-v0.1.md) | *proposed, reconciled and frozen* — ESS wave 4: the specification as an oracle. Frozen for implementation except four named open decisions (D1–D4) |
+| [`docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | *proposed, unreviewed* — semantic diff, impact closure, evolution planning. Sequenced after wave 4 |
+| [`docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | *proposed, reviewed, not reconciled* — generated applications, and work as typed obligations. The feasibility review reads it as four waves rather than one, and none of its findings is folded in. Unsequenced |
+| [`docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | *proposed, unreviewed* — infrastructure as a fourth domain, `InfraSpec`/`InfraIr`. Unsequenced |
 | [`docs/plan/ess-wave-1-the-model.md`](docs/plan/ess-wave-1-the-model.md) | ESS wave 1 — the model, and what its review changed |
 | [`docs/plan/ess-wave-2-the-compiler.md`](docs/plan/ess-wave-2-the-compiler.md) | ESS wave 2 — the IR, and where validation turned out to belong |
 | [`docs/plan/ess-wave-3-projections.md`](docs/plan/ess-wave-3-projections.md) | ESS wave 3 — the projections, and what they refuse to guess |
+| [`docs/plan/ess-wave-3.5-reconciliation.md`](docs/plan/ess-wave-3.5-reconciliation.md) | **in progress** — the gates wave 4 waits behind, and the evidence each one closes on |
 | [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) | ESS waves 1 to 5, and what is deliberately outside them |
 | [`docs/plan/wave-1-execution-core.md`](docs/plan/wave-1-execution-core.md) | the protocol's four waves, with their acceptance criteria |
 | [`docs/plan/document-authoring-brief.md`](docs/plan/document-authoring-brief.md) | how to write a valid principle, workflow, profile or lifecycle |
+| [`docs/reviews/`](docs/reviews/) | *snapshots, not maintained* — five independent reviews: the vision, guard efficacy, next-wave feasibility and an outside pre-wave-4 readiness review, all at `3647f80`, plus a full-repository review at `95e210f`. Each describes the commit it names; where one disagrees with this README, this README is current |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |
 | [`examples/development-passkeys/`](examples/development-passkeys/) | a worked protocol example with real command output |
 | [`examples/billing/`](examples/billing/) | the normative executable system specification |

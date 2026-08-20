@@ -84,7 +84,7 @@ Use these spellings. Anything else is unobservable in practice even if the famil
 | `unit_tests.failed`, `contract_tests.failed`, `regression_suite.result` | aliases kept for the design documents' examples |
 | `static_analysis.{errors,warnings,result,exists}` | a `static_analysis` |
 | `contracts.{checked,failed,breaking_changes,result,exists}` | a `contract_result` |
-| `property_test.<claim>.{result,passed,cases,exists}` | a `property_test_result` |
+| `property_test.<claim>.{result,passed,cases,seed,exists}` | a `property_test_result`. `seed` is what re-runs the search that found the counterexample, so a result carrying one is reproducible and a result without one says so rather than looking reproducible |
 | `deployment.{status,succeeded,environment,revision}`, `deployment.previous_revision.exists`, `deployment.<env>.status` | a `deployment_result` |
 | `metric.<name>` and bare `<name>` | a `metric_observation` |
 | `service.health`, `service.<service>.health` | a `health_observation` |

@@ -94,30 +94,72 @@ services without the domain changing.
 > description rather than maintained beside it.
 
 The model reasons. The protocol constrains. The specification defines. The verifiers establish facts.
-Nothing in the loop asks anyone to be trusted.
+What the loop asks you to trust is narrow and named: that a producer declaring itself independent is.
+Everything downstream of that declaration is checked.
+
+That one declaration is a gap, and it is worth naming as one. `independent: true` is a boolean over a
+self-declared `Producer` (`crates/aep-domain/src/evidence.rs`); nothing binds a verifier's identity to
+the evidence it submits, and the harness guide says so outright — the engine will record a test result
+the harness invented. Closing it means attested
+evidence: a signature over the record and a key the protocol already knows. There is no signature, no
+key and no attestation anywhere in the workspace, and no plan document proposes one, so this is a gap
+rather than a horizon.
 
 ## Where this stands
 
-Honest as of `0.2.1`. See [`README.md`](../README.md) for the measured status table.
+Honest as of `0.3.2-ess-wave-3`. `task check` passes 41 suites and 953 tests, with 0 clippy warnings
+and 0 rustdoc warnings. `git tag -n99` is the per-wave record; see [`README.md`](../README.md) for the
+measured status table.
 
 | | State |
 |---|---|
-| AEP — domain model, engine, documents, CLI | implemented, 442 tests |
+| AEP — domain model, engine, documents, CLI | implemented |
 | AEP — interaction contract, identity, audit | implemented, with an in-memory reference backend |
 | AEP — conformance suites for backends | implemented, 16 suites checked against a deliberately broken backend |
 | AEP — running on a real project | in progress: a project can now be discovered, but nothing has been governed by it yet |
-| ESS — everything | specified, not built. [`docs/design/`](design/) |
+| ESS — the typed model, `ess-domain` | implemented, `0.3.0-ess-wave-1` |
+| ESS — resolution, IR and diagnostics, `ess-compiler` | implemented, `0.3.1-ess-wave-2`; an unresolved reference is unrepresentable |
+| ESS — four projections, `ess-gen` | implemented, `0.3.2-ess-wave-3`; 27 artifacts and a generated index committed under `generated/`, drift-checked |
+| ESS — the specification as an oracle, and generated code | specified, not built. [`docs/design/`](design/) |
 
-The next honest milestone for AEP is not a feature; it is a team whose work it actually governs. The
-first for ESS is parsing and validating one small system end to end — the billing example — because a
-model that cannot be validated cannot be compiled.
+The next honest milestone for AEP is not a feature; it is a team whose work it actually governs. ESS's
+first — parsing and validating one small system end to end, the billing example — was wave 1, and the
+specification now produces the documentation and the contracts too. Its next is the specification as
+an *oracle*: a verdict on an implementation rather than a projection of a model. That waits behind the
+gates in [`docs/plan/ess-wave-3.5-reconciliation.md`](plan/ess-wave-3.5-reconciliation.md), because a
+verdict is only worth what the guards under it are worth.
+
+## Proposed, not accepted
+
+Four design documents in [`docs/design/`](design/) propose extending this. None of them is part of the
+vision above, and they are listed here so that reading the newest file in that directory cannot be
+mistaken for reading what this project has agreed to build.
+
+| proposed design | what it would add | status |
+|---|---|---|
+| [closed-loop execution and conformance](design/ess-closed-loop-execution-conformance-design-v0.1.md) | the specification becomes an *oracle* — a verdict on an implementation, not only a projection of a model | reviewed, reconciled and frozen for implementation, except four named open decisions; **sequenced first**, as ESS wave 4 |
+| [semantic diff, impact and evolution](design/ess-semantic-diff-impact-evolution-design-v0.1.md) | a **third axis**: the system changing over time, impact closure, what a revision invalidates | proposed, unreviewed; **sequenced after wave 4** |
+| [structural synthesis, obligations and realizations](design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | generated applications, and human or agent work carried as typed obligations | proposed; reviewed once and not reconciled — that review reads it as four waves, not one; unsequenced |
+| [infrastructure discovery and multi-cloud realization](design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | a **fourth domain**: infrastructure, with `InfraSpec` and `InfraIr` beside the ESS pair | proposed, unreviewed; unsequenced |
+
+Closed-loop conformance and structural synthesis are horizons the two halves already imply — the
+thesis above already promises the tests and the skeleton. The other two are not: "specified once and
+compiled" says nothing about a system *changing*, and infrastructure is a second subject matter rather
+than a further projection of the first. Absorbing either of those into the thesis is a decision
+someone has to take deliberately, with a reason. Until then this section is where they live.
 
 ## What this is deliberately not
 
-Not an LLM orchestration framework, a CI system, a deployment platform, an incident-management
-product, a workflow engine, a message broker, or a policy language meant to replace OPA. Not a
-universal ontology of software engineering, and not a mandate for microservices, CQRS or event
-sourcing.
+Not an LLM orchestration framework, a CI system, an incident-management product, a workflow engine, a
+message broker, or a policy language meant to replace OPA. Not a universal ontology of software
+engineering, and not a mandate for microservices, CQRS or event sourcing.
+
+**Not a deployment platform**, and the infrastructure design does not change that — it makes the line
+worth drawing precisely. Generating an artifact is in scope: this project may compile a specification
+into the file that describes an infrastructure, and decide whether an infrastructure's observed state
+conforms to what was specified. *Operating* a system is not: nothing here calls a cloud API, holds a
+credential, applies a plan or watches a rollout. Actually deploying something is optional, later, and
+somebody else's process.
 
 The responsibility is narrower and stated twice, once per half:
 

@@ -1,7 +1,7 @@
 # ESS wave 3.5 — reconciliation, and the gates wave 4 waits behind
 
 > **In progress — 15 of 19 gates closed. All of wave A is done and `task check` is green with six
-> steps.** Remaining: the four model changes G14, G2, G15, G16. Wave 3 delivered the projections and is tagged `0.3.2-ess-wave-3`. This page is the list
+> steps.** Remaining: G2, G15, G16, G19. Wave 3 delivered the projections and is tagged `0.3.2-ess-wave-3`. This page is the list
 > of things that must be true before wave 4 — the specification as an executable oracle — is worth
 > starting, and the evidence each one is closed by. Nothing here is a redesign: every gate is bounded,
 > and four of them are hours of work rather than days.
@@ -34,6 +34,7 @@ findings are the subject of gate G5.
 | G5 | the guards on the safety envelope actually guard | **critical** | yes | **closed** — all 7 survivors fail a test; the engine's three `== Granted` sites verified by mutation |
 | G17 | a validated type cannot be conjured from a document | **critical** | yes | **closed** — a source scan over 10 `Raw*`→validated pairs, no new dependency |
 | G18 | a number a document cannot round-trip is refused at the door | high | no | **closed** — non-finite refused in `new`, in `parse_literal`, and in a hand-written `Deserialize` |
+| G19 | conformance evidence is bound to the specification *revision* it attests | high | no (blocks trusting wave 4's output) | an `Artifact` carries a model digest and `EvidenceRequirement` checks it, as `ReviewRequirement` already checks a review covers a revision |
 | G6 | property-test evidence can reproduce its own counterexample | medium | no (blocks the fuzz work) | **closed** — `Seed` on the run, an opaque string so no tool has to encode a lie |
 | G7 | HEAD passes its own gate | — | **already closed** | `task check` exit 0; CI green on `3647f80` |
 | G8 | MSRV and rustdoc are checked, not just declared | low | no | **closed** — MSRV job green on 1.85; rustdoc at 0 warnings and `doc-check` now in the gate |
@@ -42,7 +43,7 @@ findings are the subject of gate G5.
 | G11 | ESS conformance evidence names the specification it attests | high | yes | **closed** — `SpecDigest` required on `EssConformanceResult`, with `attests()` |
 | G12 | a conformance run is reproducible, not merely unslept | high | yes | **closed** — the runner's clock and id source are injected, as the engine's already are |
 | G13 | a duplicated YAML key is refused on the AEP side too | medium | no | **closed** — `read_yaml` guards every AEP document kind, re-parsing so spans survive |
-| G14 | a command can be tied to the transition and the entity it drives | **critical** | yes | a lifecycle scenario has a subject and a verb |
+| G14 | a command can be tied to the transition and the entity it drives | **critical** | yes | **closed** — an outcome declares `creates:`/`moves:`/`updates:`; an uncaused transition is refused |
 | G15 | the normative example can exercise what the oracle must prove | high | yes | its `read_your_writes` view can hold a row |
 | G16 | a candidate input can be evaluated against a predicate at all | high | yes (blocks witness synthesis) | an input projects into a `FactSource`, and `Unknown` refuses |
 
@@ -269,6 +270,30 @@ Both refused now: `is_finite` in the constructor and in `parse_literal`, and a h
 typed, which is both truthful and still comparable. Three tests, each verified by re-introducing the
 defect and watching it fail.
 
+### G19 — conformance evidence is bound to the specification *revision* it attests
+
+G11 closed the first half: an `EssConformanceResult` must carry a `SpecDigest`, and evidence naming one
+specification no longer satisfies a requirement about another. What is still unchecked is the digest
+itself. Evidence can name the right specification and carry a digest from an older revision of it, and
+nothing compares the two — because the artifact graph has no digest to compare against.
+
+The consequence is narrow but exactly the one wave 4 exists to prevent: a suite run against
+yesterday's specification produces evidence that satisfies today's requirement, and the task closes
+having proven conformance to a specification nobody is building against any more. That is the same
+defect class as an approval of version 3 covering version 7, which this repository already refuses —
+`ReviewRequirement::evaluate` calls `review.covers(artifact)` precisely so an approval cannot outlive
+the revision it approved.
+
+The fix mirrors it: `Artifact` carries the model digest, and `EvidenceRequirement` checks the
+evidence's digest against it. Two files in `aep-domain`, and the shipped
+`principles/verification/ess-conformance.yaml` then has something real to require. Deliberately not
+bodged in the meantime: adding an `ess_conformance.spec_digest.exists` predicate to that principle
+would pass on every well-formed record, since G11 made the field required — a check that cannot fail
+is the thing the guard-efficacy review spent the day finding.
+
+Not blocking wave 4's *implementation*, because the runner can be built and the evidence produced
+before the binding is enforced. Blocking anyone *trusting* the result.
+
 ## The property-based work, and where it sits
 
 Decided separately: `proptest` on stable, framework first. It is not a wave 4 gate — it is the answer
@@ -296,6 +321,27 @@ a generated literal like `en.US` silently becomes a path lookup.
 Phase 1 has a ready-made property, generalising the byte-identical test at
 `crates/ess-compiler/tests/billing.rs:256`: **any generated document either yields at least one
 `ValidationCode`, or compiles and re-serialises identically.** No panic, no hang, no third outcome.
+
+## Decisions taken
+
+Ten, on 2026-08-20, so the defaults on this page stop being provisional. Recorded because a default
+that was never chosen and a default that was chosen look identical six weeks later.
+
+| # | decision | taken |
+|---|---|---|
+| 1 | `on_failure: escalate` **emits a declared event** | the smallest change that makes escalation observable by the same mechanism as every other published fact. Not "invokes a command": that is a second binding in all but name, and the extra power buys nothing the oracle needs yet |
+| 2 | **ESS wave 4, then semantic diff** | the semantic-diff design says it can start as soon as `EssIr` is stable, which is now — but the oracle is what makes every other claim checkable, so it goes first |
+| 3 | the conformance runner is a **new crate** | `ess-gen`'s `Generator` is infallible by contract and the crate documents that it holds no clock. A runner is fallible and takes a clock; putting it there falsifies both claims |
+| 4 | the async runtime question stays open until implementation | `block_on` busy-polls a million times then panics, which is right for a future that never yields and unusable against a real target. The answer depends on the trait shape, which does not exist yet |
+| 5 | MSRV is a **build-only** contract | `rust-version` is a promise to whoever consumes the published crates, and a consumer never builds this workspace's dev-dependencies |
+| 6 | correct the VISION trust claim | attestation is a real feature that does not exist; the sentence claiming it does is the one the document turns on |
+| 7 | this project **generates deployment artifacts and does not deploy** | deploying stays an explicitly optional thing that could come much later. The infrastructure design made the old one-line boundary ambiguous |
+| 8 | **review the four proposed designs before wave 4 starts**, after the control documents are updated and committed | two of the four were written against the roadmap rather than the code, which already cost one reconciliation pass |
+| 9 | G15 gets a **second fixture**, not a larger normative example | the billing example should stay readable as a specification of a real system rather than a corner-case museum |
+| 10 | wave 3.5 gets **its own tag** | nineteen gates and four reviews is a wave by any measure |
+
+Defaulted rather than debated, and still open to reversal: no meta-schema vendoring, no `schemaFormat` on
+`AsyncAPI`, and the property-based work runs after the model changes rather than beside them.
 
 ## Schedule
 
