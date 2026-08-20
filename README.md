@@ -37,8 +37,8 @@ implementation conforms to its specification. See [`docs/VISION.md`](docs/VISION
 
 Two halves is what exists. Four further designs in [`docs/design/`](docs/design/) proposed extending
 it. Two have been taken up: the specification as an oracle is **implemented** as ESS wave 4, and
-semantic diff — what a revision invalidates — was **accepted into the thesis** as a stated amendment
-and sequenced next. Two are still proposals nobody has agreed to build, one of them a fourth domain
+semantic diff — what a revision invalidates — is **implemented** as ESS wave 5, after being
+accepted into the thesis as a stated amendment. Two are still proposals nobody has agreed to build, one of them a fourth domain
 (infrastructure). [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* is where their status
 is kept.
 
@@ -69,16 +69,16 @@ it implements the contract by running a suite against itself.
 | `ess-compiler` — resolution, IR, diagnostics | 100% | an unresolved reference is unrepresentable; codes, spans, byte-identical output |
 | `ess-gen` — four projections behind one `Generator` trait | 100% | Markdown + Mermaid, JSON Schema, OpenAPI 3.1, AsyncAPI 3.0; one shared type mapping, agreement asserted; 131 tests |
 | `ess-conformance` — the specification as an oracle | 100% | synthesis, a runner that owns its clock and id source, evidence, and twelve deliberately wrong implementations; 147 tests |
-| `ess-diff` — what moved, and what that invalidates | 45% | six construct families compared field by field, 65 typed changes; 159 changed text lines reduce to 4 semantic changes; impact closure over 21 typed relations, with the path recoverable and invalidation that can only narrow; 89 tests |
+| `ess-diff` — what moved, and what that invalidates | 45% | six construct families compared field by field, 65 typed changes; 208 changed text lines reduce to 4 semantic changes; impact closure over 21 typed relations, with the path recoverable and invalidation that can only narrow; 89 tests |
 | `protocol ess validate\|compile\|inspect\|graph\|generate\|conform` | 100% | one file or a directory; every problem in one run |
 | The join — artifact kind, evidence kind, `ess-conformance` principle | 100% | a task can already be blocked until something proves conformance |
 | Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 100% | 27 artifacts plus a generated index, committed under `generated/`, provenance on each, drift-checked in CI |
 | [ESS wave 3.5 — reconciliation](docs/plan/ess-wave-3.5-reconciliation.md) | 100% | all 20 gates closed, `0.3.3-ess-wave-3.5` |
 | Generated conformance suites, committed and drift-checked | 100% | 27 scenarios from `examples/billing/` and 31 from `examples/oracle-fixture/`, under `suites/generated/`, with every construct that got no scenario listed with its reason |
-| Semantic diff — what a revision invalidates | 0% | accepted and sequenced next; see [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) |
+| Semantic diff — what a revision invalidates | 100% | `ess diff` and `ess impact`, `0.5.0-ess-wave-5` — first slice as scoped: six construct families; predicate-bearing constructs fall back to whole-suite invalidation |
 | Rust structural synthesis | 0% | proposed; see [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) |
 
-`task check` passes 50 suites and 1216 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
+`task check` passes 57 suites and 1305 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
 are an effort estimate, not a measurement; verify the "done" column with `task check`. The ESS roadmap
 is [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md).
 
@@ -247,7 +247,7 @@ Without `task`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-ta
 | [`docs/design/ess-implementor-design-v0.1.md`](docs/design/ess-implementor-design-v0.1.md) | design for the Executable System Specification (ESS) — the model and the compiler are built, and a specification projects into documentation and contracts |
 | [`docs/design/ess-review-v0.1.md`](docs/design/ess-review-v0.1.md) | review of that design, with the findings that change what gets built first |
 | [`docs/design/ess-closed-loop-execution-conformance-design-v0.1.md`](docs/design/ess-closed-loop-execution-conformance-design-v0.1.md) | **implemented** as ESS wave 4 — the specification as an oracle. All four of its open decisions (D1–D4) were taken at their stated defaults |
-| [`docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | *core accepted, not built* — semantic diff, impact closure, evolution planning. The feasibility review reads it as four waves rather than one, and two of its seventy-eight sections were rejected outright rather than deferred |
+| [`docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | *core implemented* as ESS wave 5 — `ess diff` and `ess impact`. The feasibility review reads the full design as four waves rather than one, and two of its seventy-eight sections were rejected outright rather than deferred |
 | [`docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | *proposed, reviewed, not reconciled* — generated applications, and work as typed obligations. The feasibility review reads it as four waves rather than one, and none of its findings is folded in |
 | [`docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | *proposed, reviewed, deferred whole* — infrastructure as a fourth domain, `InfraSpec`/`InfraIr`. Two ideas harvested; the design itself would put cloud discovery adapters inside this workspace, which the vision refuses |
 | [`docs/plan/ess-wave-1-the-model.md`](docs/plan/ess-wave-1-the-model.md) | ESS wave 1 — the model, and what its review changed |

@@ -9,6 +9,10 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.0-ess-wave-5] — 2026-08-20
+
 ### Added
 
 - **`protocol ess impact --from <dir> --to <dir> --suite <file>`** — which scenarios a change
@@ -27,7 +31,7 @@ belongs in the commit message or in `docs/design/`.
   on an entity, so a type most entities reach is genuinely reached by most scenarios. Authority
   changes are where the narrowing pays; type changes are where it barely does.
 - **`protocol ess diff --from <dir> --to <dir>`** — what actually moved between two revisions of a
-  specification, as typed changes rather than as text. On the worked fixture pair, 159 changed lines
+  specification, as typed changes rather than as text. On the worked fixture pair, 208 changed lines
   across three files, one of them renamed, reduce to **four** semantic changes: renaming a file,
   reordering blocks, rewriting a comment and writing out a default that was already implied all reach
   nothing, and each of those is asserted by name rather than left to chance.
@@ -719,7 +723,8 @@ No compiler, no OpenAPI, no test synthesis: those are ESS waves 2 and 3 in
 - **`xtask schema [--check]`** — schemas are generated from the Rust types, and CI proves they match.
 - Repository scaffolding: workspace, `Taskfile.yml` gate, Apache-2.0 licence, `AGENTS.md`.
 
-[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.4.0-ess-wave-4...HEAD
+[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.5.0-ess-wave-5...HEAD
+[0.5.0-ess-wave-5]: https://github.com/codewandler/engineering-protocols/compare/0.4.0-ess-wave-4...0.5.0-ess-wave-5
 [0.4.0-ess-wave-4]: https://github.com/codewandler/engineering-protocols/compare/0.3.3-ess-wave-3.5...0.4.0-ess-wave-4
 [0.3.3-ess-wave-3.5]: https://github.com/codewandler/engineering-protocols/compare/0.3.2-ess-wave-3...0.3.3-ess-wave-3.5
 [0.3.2-ess-wave-3]: https://github.com/codewandler/engineering-protocols/compare/0.3.1-ess-wave-2...0.3.2-ess-wave-3
