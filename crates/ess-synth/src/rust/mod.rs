@@ -20,20 +20,27 @@
 //!
 //! # What the generated workspace is
 //!
-//! A standalone Cargo workspace with its own `[workspace]` root, zero dependencies, one types
-//! crate, one module per bounded context. Zero dependencies is a property of the *gate*, not a
-//! style preference: `cargo check` inside the generated tree is a step of `task check`, and a step
-//! that resolves crates is a step that reaches the network (AGENTS.md § Dependencies).
+//! A standalone Cargo workspace with its own `[workspace]` root and zero third-party
+//! dependencies: one types crate with a module per bounded context, one crate per component
+//! holding its port, and one system crate holding the bindings and the transport — the transport
+//! itself standard-library only, because the one delivery guarantee the model declares
+//! (`at_least_once`, in process) does not need a crate. Zero dependencies is a property of the
+//! *gate*, not a style preference: `cargo check` inside the generated tree is a step of
+//! `task check`, and a step that resolves crates is a step that reaches the network
+//! (AGENTS.md § Dependencies).
 
 mod entity;
 mod items;
 mod layout;
 mod name;
+mod obligation;
+mod port;
+mod system;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
-use ess_compiler::ir::EssIr;
+use ess_compiler::ir::{EssIr, EventHandle};
 use ess_domain::name::QualifiedName;
 use ess_gen::{Artifact, Provenance};
 
@@ -87,16 +94,43 @@ pub fn workspace(ir: &EssIr, plan: &SynthesisPlan) -> Vec<Artifact> {
     let provenance = &plan.provenance;
 
     let mut covered: BTreeSet<Capability> = BTreeSet::new();
+    let mut stubbed: BTreeSet<Capability> = BTreeSet::new();
+    let obligation_module =
+        obligation::obligation_module(ir, plan, &layout, provenance, &mut stubbed);
     let mut artifacts = vec![
-        workspace_manifest(&layout, provenance),
+        workspace_manifest(ir, &layout, provenance),
         crate_manifest(ir, &layout, provenance),
-        lib_module(ir, &layout, provenance),
+        lib_module(ir, &layout, provenance, obligation_module.is_some()),
         primitives_module(&layout, provenance),
     ];
+    artifacts.extend(obligation_module);
     let domains: Vec<QualifiedName> = layout.modules().map(|(domain, _)| domain.clone()).collect();
     for domain in &domains {
-        artifacts.push(domain_module(ir, plan, &layout, domain, &mut covered));
+        artifacts.push(domain_module(
+            ir,
+            plan,
+            &layout,
+            domain,
+            &mut covered,
+            &mut stubbed,
+        ));
     }
+    for component in ir.components.values() {
+        artifacts.extend(port::component_crate(
+            ir,
+            plan,
+            &layout,
+            component,
+            &mut covered,
+        ));
+    }
+    artifacts.extend(system::system_crate(
+        ir,
+        plan,
+        &layout,
+        &mut covered,
+        &mut stubbed,
+    ));
 
     let planned: BTreeSet<Capability> = plan.generated().cloned().collect();
     assert_eq!(
@@ -104,19 +138,77 @@ pub fn workspace(ir: &EssIr, plan: &SynthesisPlan) -> Vec<Artifact> {
         "the Rust emitter emitted a different set of capabilities than the plan marks generated; \
          that is a defect in ess-synth, and shipping it would make PLAN.md a lie about the workspace"
     );
+    let owed: BTreeSet<Capability> = plan
+        .obligations()
+        .map(|(capability, _)| capability.clone())
+        .collect();
+    assert_eq!(
+        stubbed, owed,
+        "the Rust emitter's stubs are not exactly the plan's obligations; that is a defect in \
+         ess-synth, and shipping it would break the promise that every owed capability is visible \
+         twice — in the plan, and as a typed refusal in the workspace"
+    );
     artifacts
+}
+
+/// One enum variant name per event of a set, collision-free by rule rather than by luck.
+///
+/// The candidate is the event's own type name, which is domain-relative. When two domains of one
+/// set declare same-named events, **every** variant switches to the event's full name (minus the
+/// system prefix every event carries), pascal-joined — all of them, not just the colliding pair,
+/// on the same reasoning as the module-identifier rule: adding one event must not silently rename
+/// an unrelated variant another crate matches on.
+pub(crate) fn event_variants<'a>(
+    ir: &EssIr,
+    layout: &Layout,
+    events: &BTreeSet<&'a EventHandle>,
+) -> BTreeMap<&'a EventHandle, String> {
+    let mut candidates: BTreeMap<&EventHandle, String> = events
+        .iter()
+        .map(|event| (*event, layout.type_name(event.name())))
+        .collect();
+    let distinct: BTreeSet<&String> = candidates.values().collect();
+    if distinct.len() != candidates.len() {
+        let prefix = ir.system.segments().len();
+        candidates = events
+            .iter()
+            .map(|event| {
+                let segments = event.name().segments();
+                let full: String = segments
+                    .get(prefix..)
+                    .unwrap_or(segments)
+                    .iter()
+                    .map(|segment| name::pascal(segment))
+                    .collect();
+                (*event, full)
+            })
+            .collect();
+    }
+    candidates
 }
 
 /// The `[workspace]` manifest at the generated root.
 ///
 /// Its own workspace root, always: it is what stops `cargo` inside the generated tree from walking
 /// up into this repository's workspace, and it is what a consumer who vendors the directory gets.
-fn workspace_manifest(layout: &Layout, provenance: &Provenance) -> Artifact {
+fn workspace_manifest(ir: &EssIr, layout: &Layout, provenance: &Provenance) -> Artifact {
+    let mut members = vec![layout.package().to_owned()];
+    for component in ir.components.keys() {
+        members.push(layout.component_package(component).to_owned());
+    }
+    if !ir.components.is_empty() || !ir.bindings.is_empty() {
+        members.push(layout.system_package().to_owned());
+    }
+    members.sort();
     let mut out = provenance.commented_for("#", REGENERATE);
     let _ = write!(
         out,
-        "\n[workspace]\nresolver = \"2\"\nmembers = [\"crates/{}\"]\n",
-        layout.package()
+        "\n[workspace]\nresolver = \"2\"\nmembers = [{}]\n",
+        members
+            .iter()
+            .map(|member| format!("\"crates/{member}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     Artifact::new("Cargo.toml", out)
 }
@@ -138,7 +230,12 @@ fn crate_manifest(ir: &EssIr, layout: &Layout, provenance: &Provenance) -> Artif
 }
 
 /// The crate root: docs, the two lints the generated code holds itself to, and the module list.
-fn lib_module(ir: &EssIr, layout: &Layout, provenance: &Provenance) -> Artifact {
+fn lib_module(
+    ir: &EssIr,
+    layout: &Layout,
+    provenance: &Provenance,
+    with_obligation_module: bool,
+) -> Artifact {
     let mut out = provenance.commented_for("//", REGENERATE);
     out.push('\n');
     let _ = writeln!(
@@ -156,8 +253,10 @@ fn lib_module(ir: &EssIr, layout: &Layout, provenance: &Provenance) -> Artifact 
     );
     out.push_str(REGENERATE);
     out.push_str(
-        "`. What is deliberately absent — behaviour, queries,\n//! ports — is listed with reasons \
-         in the `PLAN.md` beside this workspace.\n\n// `deny`, not the source workspace's lint \
+        "`. What is deliberately absent — behaviour, queries,\n//! escalations — is listed with \
+         reasons in the `PLAN.md` beside this workspace, and every entry\n//! there is owed \
+         through a typed seam in an `obligations` module here.\n\n// `deny`, not the source \
+         workspace's lint \
          set: this crate must hold on its own, and an undocumented\n// public item here is an \
          emitter defect worth failing the gate over.\n#![forbid(unsafe_code)]\n#![deny(missing_docs)]\n\n",
     );
@@ -166,6 +265,9 @@ fn lib_module(ir: &EssIr, layout: &Layout, provenance: &Provenance) -> Artifact 
         .map(|(_, module)| module.to_owned())
         .collect();
     modules.push("primitives".to_owned());
+    if with_obligation_module {
+        modules.push("obligation".to_owned());
+    }
     modules.sort();
     for module in modules {
         let _ = writeln!(out, "pub mod {module};");
@@ -230,6 +332,7 @@ fn domain_module(
     layout: &Layout,
     domain: &QualifiedName,
     covered: &mut BTreeSet<Capability>,
+    stubbed: &mut BTreeSet<Capability>,
 ) -> Artifact {
     let emit = Emit { ir, layout, domain };
     let resolved = ir
@@ -255,6 +358,7 @@ fn domain_module(
 
     render_declarations(&mut out, &emit, plan, covered);
     render_conversions(&mut out, &emit, plan, covered);
+    obligation::domain_obligations(&mut out, &emit, plan, stubbed);
 
     Artifact::new(layout.module_path(domain), out)
 }

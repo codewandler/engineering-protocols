@@ -135,10 +135,10 @@ fn the_billing_plan_counts_are_pinned() {
     // must be a failing test and an approved diff, not a quietly different document.
     let plan = SynthesisPlan::of(&billing());
     let counts = plan.counts();
-    assert_eq!(plan.capabilities.len(), 43, "capabilities in total");
-    assert_eq!(counts.generated, 29, "generated capabilities");
-    assert_eq!(counts.obligations, 7, "obligations");
-    assert_eq!(counts.refused, 7, "refusals");
+    assert_eq!(plan.capabilities.len(), 45, "capabilities in total");
+    assert_eq!(counts.generated, 33, "generated capabilities");
+    assert_eq!(counts.obligations, 8, "obligations");
+    assert_eq!(counts.refused, 4, "refusals");
 }
 
 #[test]
@@ -175,7 +175,11 @@ fn every_construct_of_the_specification_appears_in_the_plan() {
         require(CapabilityKind::ActorGrants, name.to_string());
     }
     for name in ir.bindings.keys() {
-        require(CapabilityKind::Binding, name.to_string());
+        require(CapabilityKind::BindingTransformation, name.to_string());
+        require(CapabilityKind::BindingDelivery, name.to_string());
+        // The billing binding escalates, so the escalation is a capability of its own — the
+        // declared event exists, and filling it is owed.
+        require(CapabilityKind::BindingEscalation, name.to_string());
     }
     for name in ir.components.keys() {
         require(CapabilityKind::ComponentPort, name.to_string());
@@ -261,19 +265,190 @@ fn grants_are_refused_rather_than_owed() {
 }
 
 #[test]
-fn the_binding_is_refused_at_the_planning_stage_with_its_facts() {
+fn the_billing_binding_is_generated_where_determined_and_owed_where_not() {
+    // The three capabilities one binding splits into, each with its honest disposition: the
+    // mapping is fully determined (an event field through the declared mechanical crossing, and a
+    // literal into a text-representation newtype), delivery has exactly one declared acceptor,
+    // and the escalation event's fields are declared nowhere — so two are generated and the third
+    // is owed.
     let plan = SynthesisPlan::of(&billing());
+    for kind in [
+        CapabilityKind::BindingTransformation,
+        CapabilityKind::BindingDelivery,
+    ] {
+        assert_eq!(
+            plan.disposition_of(kind, "notify-on-invoice-created"),
+            Some(&SynthesisDisposition::Generated),
+            "{kind:?} is fully determined by the billing specification"
+        );
+    }
     let disposition = plan
-        .disposition_of(CapabilityKind::Binding, "notify-on-invoice-created")
+        .disposition_of(
+            CapabilityKind::BindingEscalation,
+            "notify-on-invoice-created",
+        )
+        .expect("an escalating binding has an escalation capability");
+    let SynthesisDisposition::Obligation(obligation) = disposition else {
+        panic!("the escalation must be owed, not {disposition:?}");
+    };
+    assert_eq!(obligation.reason, ObligationReason::UnspecifiedAlgorithm);
+    assert!(
+        obligation
+            .contract
+            .contains("billing.email.DeliveryEscalated")
+            && obligation.contract.contains("how its fields are filled"),
+        "the contract names the declared event and what exactly is not declared: {}",
+        obligation.contract
+    );
+}
+
+#[test]
+fn a_mapping_through_a_non_mechanical_crossing_makes_the_transformation_an_obligation() {
+    // The one undetermined mapping the model can still express: the crossing is declared —
+    // `AccountId` over Uuid may be used as `AccountRef` over String — so the compiler admits the
+    // mapping, but the computation between two representations is nowhere declared. Generating
+    // one would be a guess, so the transformation is owed, and the pump routes through the owed
+    // seam instead.
+    let ir = fixture(&[
+        (
+            "system.yaml",
+            "format: ess/1\nsystem: relay\nversion: v1\ndomains:\n  - relay.core\n",
+        ),
+        (
+            "core.yaml",
+            "domain: relay.core\ntypes:\n  - name: relay.core.AccountId\n    kind: newtype\n    \
+             of: Uuid\n  - name: relay.core.AccountRef\n    kind: newtype\n    of: \
+             String\nconversions:\n  - from: relay.core.AccountId\n    to: \
+             relay.core.AccountRef\n    because: an account may be referred to by its id rendered \
+             as text.\nevents:\n  - name: relay.core.Fired\n    fields:\n      - name: account\n        \
+             type: relay.core.AccountId\n  - name: relay.core.Handled\n    fields:\n      - name: \
+             account\n        type: relay.core.AccountRef\ncommands:\n  - name: \
+             relay.core.Handle\n    input:\n      - name: account\n        type: \
+             relay.core.AccountRef\n    outcomes:\n      - name: done\n        emits:\n          - \
+             relay.core.Handled\n",
+        ),
+        (
+            "wiring.yaml",
+            "components:\n  - component: relay-service\n    accepts:\n      commands:\n        - \
+             relay.core.Handle\nbindings:\n  - id: relay-on-fired\n    when:\n      event: \
+             relay.core.Fired\n    invoke:\n      command: relay.core.Handle\n    mapping:\n      \
+             account: event.account\n    delivery: at_least_once\n    on_failure: retry\n",
+        ),
+    ]);
+    let plan = SynthesisPlan::of(&ir);
+    let disposition = plan
+        .disposition_of(CapabilityKind::BindingTransformation, "relay-on-fired")
+        .expect("the binding appears in the plan");
+    let SynthesisDisposition::Obligation(obligation) = disposition else {
+        panic!("a transformation over an owed crossing must be owed itself, not {disposition:?}");
+    };
+    assert_eq!(obligation.reason, ObligationReason::UnspecifiedAlgorithm);
+    assert!(
+        obligation.contract.contains("`account`")
+            && obligation.contract.contains("relay.core.AccountRef")
+            && obligation.contract.contains("whose computation is owed"),
+        "the contract names the input, the crossing's end, and what is owed: {}",
+        obligation.contract
+    );
+    // Delivery is independent of the transformation's disposition: one component accepts the
+    // command, so the transport is still generated — routed through the transformation seam.
+    assert_eq!(
+        plan.disposition_of(CapabilityKind::BindingDelivery, "relay-on-fired"),
+        Some(&SynthesisDisposition::Generated),
+        "delivery has exactly one declared acceptor"
+    );
+    // And the emitted system routes through the owed seam rather than inventing a computation.
+    let synthesis = synthesize(&ir);
+    let system = artifact(&synthesis, "crates/relay-system/src/lib.rs");
+    assert!(
+        system.contains("self.obligations.relay_on_fired_input(event)?"),
+        "the pump calls the transformation obligation, not a generated guess: {system}"
+    );
+}
+
+#[test]
+fn a_binding_whose_command_no_component_accepts_is_refused_never_guessed() {
+    let ir = fixture(&[
+        (
+            "system.yaml",
+            "format: ess/1\nsystem: relay\nversion: v1\ndomains:\n  - relay.core\n",
+        ),
+        (
+            "core.yaml",
+            "domain: relay.core\ntypes:\n  - name: relay.core.Code\n    kind: newtype\n    of: \
+             String\nevents:\n  - name: relay.core.Fired\n    fields:\n      - name: code\n        \
+             type: relay.core.Code\n  - name: relay.core.Handled\n    fields:\n      - name: \
+             code\n        type: relay.core.Code\ncommands:\n  - name: relay.core.Handle\n    \
+             input:\n      - name: code\n        type: relay.core.Code\n    outcomes:\n      - \
+             name: done\n        emits:\n          - relay.core.Handled\n",
+        ),
+        (
+            "wiring.yaml",
+            "bindings:\n  - id: relay-on-fired\n    when:\n      event: relay.core.Fired\n    \
+             invoke:\n      command: relay.core.Handle\n    mapping:\n      code: event.code\n    \
+             delivery: at_least_once\n    on_failure: retry\n",
+        ),
+    ]);
+    let plan = SynthesisPlan::of(&ir);
+    let disposition = plan
+        .disposition_of(CapabilityKind::BindingDelivery, "relay-on-fired")
         .expect("the binding appears in the plan");
     let SynthesisDisposition::Refused(refusal) = disposition else {
-        panic!("the binding must be refused in this scope, not {disposition:?}");
+        panic!("delivery with no acceptor must be refused, not {disposition:?}");
     };
-    assert_eq!(refusal.reason, RefusalReason::NeedsInteractionLayer);
+    assert_eq!(refusal.reason, RefusalReason::AcceptorUndetermined);
+    assert_eq!(refusal.stage, RefusalStage::Planning);
     assert!(
-        refusal.detail.contains("billing.invoice.InvoiceCreated")
-            && refusal.detail.contains("billing.email.SendEmail"),
-        "a refusal names the construct's own facts: {}",
+        refusal
+            .detail
+            .contains("no declared component accepts `relay.core.Handle`"),
+        "the refusal names the command nothing accepts: {}",
+        refusal.detail
+    );
+}
+
+#[test]
+fn two_components_accepting_one_command_is_refused_naming_both() {
+    // The D-2 rule, applied to delivery: the machinery never chooses among alternatives. Two
+    // acceptors is an honest refusal that names them, not a coin toss over who gets the command.
+    let ir = fixture(&[
+        (
+            "system.yaml",
+            "format: ess/1\nsystem: relay\nversion: v1\ndomains:\n  - relay.core\n",
+        ),
+        (
+            "core.yaml",
+            "domain: relay.core\ntypes:\n  - name: relay.core.Code\n    kind: newtype\n    of: \
+             String\nevents:\n  - name: relay.core.Fired\n    fields:\n      - name: code\n        \
+             type: relay.core.Code\n  - name: relay.core.Handled\n    fields:\n      - name: \
+             code\n        type: relay.core.Code\ncommands:\n  - name: relay.core.Handle\n    \
+             input:\n      - name: code\n        type: relay.core.Code\n    outcomes:\n      - \
+             name: done\n        emits:\n          - relay.core.Handled\n",
+        ),
+        (
+            "wiring.yaml",
+            "components:\n  - component: relay-alpha\n    accepts:\n      commands:\n        - \
+             relay.core.Handle\n  - component: relay-beta\n    accepts:\n      commands:\n        - \
+             relay.core.Handle\nbindings:\n  - id: relay-on-fired\n    when:\n      event: \
+             relay.core.Fired\n    invoke:\n      command: relay.core.Handle\n    mapping:\n      \
+             code: event.code\n    delivery: at_least_once\n    on_failure: retry\n",
+        ),
+    ]);
+    let plan = SynthesisPlan::of(&ir);
+    let disposition = plan
+        .disposition_of(CapabilityKind::BindingDelivery, "relay-on-fired")
+        .expect("the binding appears in the plan");
+    let SynthesisDisposition::Refused(refusal) = disposition else {
+        panic!("delivery with two acceptors must be refused, not {disposition:?}");
+    };
+    assert_eq!(refusal.reason, RefusalReason::AcceptorUndetermined);
+    assert!(
+        refusal.detail.contains("`relay-alpha`")
+            && refusal.detail.contains("`relay-beta`")
+            && refusal
+                .detail
+                .contains("choosing among them is not this synthesis's decision"),
+        "the refusal names both acceptors and refuses the choice: {}",
         refusal.detail
     );
 }
@@ -484,6 +659,277 @@ fn newtypes_stay_distinct_and_the_declared_crossing_is_the_only_bridge() {
     assert!(
         email.contains("validates it again on the way out"),
         "and it carries the author's stated reason for permitting it"
+    );
+}
+
+// ---- the component skeletons and the transport --------------------------------------------------
+
+/// Every stub's `(capability, source)` pair, read back out of the generated sources.
+///
+/// The stubs are found by their one construction site — the `UnmetObligation` struct literal —
+/// rather than by any list the emitter keeps, so this is an independent witness: an emitter that
+/// forgets a stub, or writes one the plan does not owe, fails here whatever its own bookkeeping
+/// says.
+fn stubs_in(synthesis: &ess_synth::Synthesis) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for emitted in synthesis.artifacts.values() {
+        let text = &emitted.contents;
+        let mut from = 0;
+        while let Some(position) = text[from..].find("UnmetObligation { capability: \"") {
+            let at = from + position + "UnmetObligation { capability: \"".len();
+            let capability_end = text[at..].find('"').expect("the capability closes") + at;
+            let source_at = text[capability_end..]
+                .find("source: \"")
+                .expect("the source follows")
+                + capability_end
+                + "source: \"".len();
+            let source_end = text[source_at..].find('"').expect("the source closes") + source_at;
+            found.push((
+                text[at..capability_end].to_owned(),
+                text[source_at..source_end].to_owned(),
+            ));
+            from = source_end;
+        }
+    }
+    found.sort();
+    found
+}
+
+#[test]
+fn the_plans_obligations_and_the_workspaces_stubs_are_the_same_list() {
+    // W6.2's acceptance criterion, executed: an obligation is visible twice — a plan entry and a
+    // typed stub — and the two lists are one list. A missing stub is a hole the plan promised
+    // would not exist; an extra stub is a refusal the plan cannot explain.
+    let synthesis = synthesize(&billing());
+    let stubs = stubs_in(&synthesis);
+    let mut owed: Vec<(String, String)> = synthesis
+        .plan
+        .capabilities
+        .iter()
+        .filter_map(|planned| match &planned.disposition {
+            SynthesisDisposition::Obligation(_) => Some((
+                planned.capability.kind.describes().to_owned(),
+                planned.capability.source.clone(),
+            )),
+            _ => None,
+        })
+        .collect();
+    owed.sort();
+    assert_eq!(owed.len(), 8, "the billing plan owes eight capabilities");
+    assert_eq!(
+        stubs, owed,
+        "the generated stubs are not exactly the plan's obligations"
+    );
+}
+
+#[test]
+fn a_stub_refuses_with_a_value_never_a_panic_and_never_a_todo() {
+    // The stub rule at its bluntest: nothing in a generated workspace panics or defers with
+    // `todo!`, because a hole that detonates at runtime is the exact failure a typed refusal
+    // exists to replace.
+    let synthesis = synthesize(&billing());
+    for (path, emitted) in &synthesis.artifacts {
+        for banned in ["todo!", "unimplemented!", "panic!", "unreachable!"] {
+            assert!(
+                !emitted.contents.contains(banned),
+                "`{path}` contains `{banned}`, and a generated gap must be a typed refusal"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_component_port_is_typed_against_the_generated_types() {
+    let synthesis = synthesize(&billing());
+    let port = artifact(&synthesis, "crates/invoice-service/src/lib.rs");
+    // The handler: typed input, typed outcome, and the refusal channel is the obligation type —
+    // not a string, not a panic.
+    assert!(
+        port.contains(
+            "pub fn create_invoice(&mut self, input: billing_types::invoice::CreateInvoice) -> \
+             Result<billing_types::invoice::CreateInvoiceOutcome, \
+             billing_types::obligation::UnmetObligation>"
+        ),
+        "the accepted command is a typed handler: {port}"
+    );
+    // The declared publication: the accepted branch's event reaches the outbox, and the refusal
+    // branch publishes nothing — a refused command changes nothing.
+    assert!(
+        port.contains("self.outbox.push(PublishedEvent::InvoiceCreated(invoice_created.clone()));"),
+        "the outcome's declared event is published: {port}"
+    );
+    assert!(
+        port.contains("CreateInvoiceOutcome::Rejected { .. } => {}"),
+        "the refusal branch publishes nothing: {port}"
+    );
+    // The view queries sit on the same port, typed against the row types.
+    assert!(
+        port.contains(
+            "pub fn outstanding_invoices(&self) -> \
+             Result<Vec<billing_types::invoice::OutstandingInvoices>, \
+             billing_types::obligation::UnmetObligation>"
+        ),
+        "the declared view is a typed query: {port}"
+    );
+    // And the port's bounds are exactly the obligation seams, so `Unimplemented` satisfies them.
+    assert!(
+        port.contains("billing_types::invoice::obligations::CreateInvoiceBehavior")
+            && port.contains("billing_types::invoice::obligations::OutstandingInvoicesQuery"),
+        "the port is generic over the obligation traits: {port}"
+    );
+}
+
+#[test]
+fn the_transport_is_the_one_the_billing_binding_requires() {
+    // Derived, not chosen: `delivery: at_least_once` and `on_failure: escalate` in the binding,
+    // plus who accepts `SendEmail`, fully determine an in-process at-least-once dispatch with the
+    // declared escalation — and that is everything the system crate contains.
+    let synthesis = synthesize(&billing());
+    let system = artifact(&synthesis, "crates/billing-system/src/lib.rs");
+
+    // The transformation: the event field crosses by the declared `From`, and the literal lands
+    // in the text-representation newtype — the specification's own words, as code.
+    assert!(
+        system.contains(
+            "recipient: billing_types::email::EmailAddress::from(event.customer_email.clone())"
+        ),
+        "the mapped field crosses by the declared conversion: {system}"
+    );
+    assert!(
+        system
+            .contains("template: billing_types::email::TemplateId(\"invoice-created\".to_owned())"),
+        "the literal is wrapped into its declared text newtype: {system}"
+    );
+
+    // The delivery: the binding's arm invokes the one declared acceptor, and failure takes the
+    // declared policy — escalation through the owed seam, published onto the log.
+    assert!(
+        system.contains("// `notify-on-invoice-created`: at_least_once, on failure escalate."),
+        "the arm carries the binding's own delivery facts: {system}"
+    );
+    assert!(
+        system.contains("if self.email_service.send_email(input.clone()).is_err()"),
+        "the command lands on the component that accepts it: {system}"
+    );
+    assert!(
+        system.contains("self.obligations.notify_on_invoice_created_escalation(&input)?")
+            && system.contains("self.published.push(SystemEvent::DeliveryEscalated(escalation));"),
+        "an escalation is built through the obligation seam and published: {system}"
+    );
+
+    // One transport: nothing here reaches a network, a broker, or a second delivery guarantee.
+    for absent in [
+        "http",
+        "tcp",
+        "kafka",
+        "amqp",
+        "exactly_once",
+        "at_most_once",
+    ] {
+        assert!(
+            !system.to_lowercase().contains(absent),
+            "`{absent}` appears in the system crate, which holds exactly one declared transport: \
+             {system}"
+        );
+    }
+}
+
+#[test]
+fn colliding_event_names_become_full_name_variants_by_rule_not_by_luck() {
+    // Two domains may each declare a `Ping`; one component may publish both. Two variants cannot
+    // share a name, so every variant switches to the full spelling — all of them, deterministically.
+    let ir = fixture(&[
+        (
+            "system.yaml",
+            "format: ess/1\nsystem: duo\nversion: v1\ndomains:\n  - duo.alpha\n  - duo.beta\n",
+        ),
+        (
+            "alpha.yaml",
+            "domain: duo.alpha\nevents:\n  - name: duo.alpha.Ping\n",
+        ),
+        (
+            "beta.yaml",
+            "domain: duo.beta\nevents:\n  - name: duo.beta.Ping\n",
+        ),
+        (
+            "wiring.yaml",
+            "components:\n  - component: fanout\n    publishes:\n      events:\n        - \
+             duo.alpha.Ping\n        - duo.beta.Ping\n",
+        ),
+    ]);
+    let synthesis = synthesize(&ir);
+    let port = artifact(&synthesis, "crates/fanout/src/lib.rs");
+    assert!(
+        port.contains("AlphaPing(duo_types::alpha::Ping)")
+            && port.contains("BetaPing(duo_types::beta::Ping)"),
+        "colliding events take their full names as variants: {port}"
+    );
+}
+
+#[test]
+fn a_component_named_like_a_reserved_package_is_renamed_by_rule() {
+    // `demo-types` is where the types crate lives; a component with that name cannot claim the
+    // same directory, and the repair is deterministic rather than positional.
+    let ir = fixture(&[
+        (
+            "system.yaml",
+            "format: ess/1\nsystem: demo\nversion: v1\ndomains:\n  - demo.core\n",
+        ),
+        (
+            "core.yaml",
+            "domain: demo.core\nevents:\n  - name: demo.core.Pinged\n",
+        ),
+        (
+            "wiring.yaml",
+            "components:\n  - component: demo-types\n    publishes:\n      events:\n        - \
+             demo.core.Pinged\n",
+        ),
+    ]);
+    let synthesis = synthesize(&ir);
+    assert!(
+        synthesis
+            .artifacts
+            .contains_key("crates/demo-types-component/Cargo.toml"),
+        "the colliding component moves to `-component`; got {:?}",
+        synthesis.artifacts.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        synthesis
+            .artifacts
+            .contains_key("crates/demo-types/Cargo.toml"),
+        "and the types crate keeps its own directory"
+    );
+}
+
+#[test]
+fn a_domain_named_obligation_cannot_shadow_the_refusal_module() {
+    // `obligation` joined `primitives` on the reserved list when the refusal type arrived; a
+    // bounded context with that local name moves aside by the same rule.
+    let ir = fixture(&[
+        (
+            "system.yaml",
+            "format: ess/1\nsystem: demo\nversion: v1\ndomains:\n  - demo.obligation\n",
+        ),
+        (
+            "obligation.yaml",
+            "domain: demo.obligation\nevents:\n  - name: demo.obligation.Ponged\ncommands:\n  - \
+             name: demo.obligation.Ping\n    input:\n      - name: note\n        type: \
+             String\n    outcomes:\n      - name: done\n        emits:\n          - \
+             demo.obligation.Ponged\n",
+        ),
+    ]);
+    let synthesis = synthesize(&ir);
+    assert!(
+        synthesis
+            .artifacts
+            .contains_key("crates/demo-types/src/obligation_domain.rs"),
+        "`obligation` is reserved for the refusal module; got {:?}",
+        synthesis.artifacts.keys().collect::<Vec<_>>()
+    );
+    let lib = artifact(&synthesis, "crates/demo-types/src/lib.rs");
+    assert!(
+        lib.contains("pub mod obligation;") && lib.contains("pub mod obligation_domain;"),
+        "both modules exist, distinctly: {lib}"
     );
 }
 

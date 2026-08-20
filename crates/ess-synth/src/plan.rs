@@ -21,6 +21,17 @@
 //! model's coverage from a fact about one language; every refusal this planner writes is
 //! [`RefusalStage::Planning`].
 //!
+//! # The scope owns ports and one transport
+//!
+//! The first slice planned semantic types only, and refused every binding and every component port
+//! as "needs the interaction layer". This scope holds that layer: a component's outer surface —
+//! command handlers and view queries — is generated, a binding's transformation is generated
+//! exactly where every mapped input is determined, and its delivery is generated as the one
+//! transport the specification's own words require (`at_least_once`, the only delivery guarantee
+//! the model declares). What the interaction layer still cannot determine — how an escalation
+//! event's fields are filled, how a value crosses a declared conversion that is not mechanical —
+//! becomes an obligation with its contract, never a hole.
+//!
 //! # No guessing
 //!
 //! Nothing becomes [`Generated`](SynthesisDisposition::Generated) unless the specification fully
@@ -48,8 +59,9 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use ess_compiler::ir::{
-    EssIr, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedCondition, ResolvedConversion,
-    ResolvedEffect, ResolvedTypeRef, ResolvedView, TypeHandle,
+    EssIr, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedComponent, ResolvedCondition,
+    ResolvedConversion, ResolvedEffect, ResolvedFailure, ResolvedField, ResolvedMappingValue,
+    ResolvedTypeRef, ResolvedView, TypeHandle,
 };
 use ess_gen::Provenance;
 
@@ -85,10 +97,11 @@ pub struct SynthesisScope {
 }
 
 impl SynthesisScope {
-    /// This wave's scope: semantic types only — no ports, no transport, no runtime.
-    fn semantic_types() -> Self {
+    /// This wave's scope: semantic types, component skeletons, and the one transport the
+    /// specification's bindings require — no topology, no runtime beyond in-process delivery.
+    fn component_skeletons() -> Self {
         Self {
-            profile: "semantic-types".to_owned(),
+            profile: "component-skeletons".to_owned(),
             planner_version: env!("CARGO_PKG_VERSION").to_owned(),
         }
     }
@@ -141,8 +154,16 @@ pub enum CapabilityKind {
     Conversion,
     /// An actor's grants.
     ActorGrants,
-    /// A binding's transformation and delivery.
-    Binding,
+    /// A binding's transformation: the triggering event, read as the invoked command's input.
+    BindingTransformation,
+    /// A binding's delivery: invoking the command on the component that accepts it, with the
+    /// declared guarantee and failure policy.
+    BindingDelivery,
+    /// A binding's escalation: the declared event that records a delivery being given up on.
+    ///
+    /// A capability only where the binding's failure policy is `escalate` — `retry` and `drop`
+    /// declare nothing to construct.
+    BindingEscalation,
     /// A component's port surface.
     ComponentPort,
     /// A component's runtime requirements.
@@ -163,7 +184,9 @@ impl CapabilityKind {
             Self::ViewQuery => "view query",
             Self::Conversion => "conversion",
             Self::ActorGrants => "actor grants",
-            Self::Binding => "binding",
+            Self::BindingTransformation => "binding transformation",
+            Self::BindingDelivery => "binding delivery",
+            Self::BindingEscalation => "binding escalation",
             Self::ComponentPort => "component port",
             Self::Workload => "workload",
         }
@@ -257,12 +280,14 @@ pub enum RefusalStage {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RefusalReason {
-    /// The capability needs ports and a transport, which the semantic-types scope does not hold.
-    NeedsInteractionLayer,
     /// The capability is about who may call, and types carry no caller identity. Deliberately not
     /// an obligation: deriving anything grant-shaped from a plan is the second grant path
     /// invariant 6 exists to forbid.
     NeedsCallerIdentity,
+    /// Delivery lands on the component that accepts the command, and the specification does not
+    /// declare exactly one. Deliberately not an obligation and never a choice: picking an acceptor
+    /// among zero or several is the selection the D-2 rule forbids the machinery to make.
+    AcceptorUndetermined,
     /// Topology synthesis is deferred with its design (§35).
     TopologyDeferred,
 }
@@ -271,11 +296,12 @@ impl RefusalReason {
     /// The reason as it reads in a sentence.
     pub fn describes(self) -> &'static str {
         match self {
-            Self::NeedsInteractionLayer => {
-                "needs the interaction layer, which the semantic-types scope does not hold"
-            }
             Self::NeedsCallerIdentity => {
                 "a grant is checked against a caller identity, which types do not carry"
+            }
+            Self::AcceptorUndetermined => {
+                "delivery lands on the component that accepts the command, and the specification \
+                 does not declare exactly one"
             }
             Self::TopologyDeferred => "topology synthesis is deferred with its design",
         }
@@ -326,7 +352,7 @@ impl SynthesisPlan {
 
         Self {
             provenance: Provenance::of(ir),
-            scope: SynthesisScope::semantic_types(),
+            scope: SynthesisScope::component_skeletons(),
             capabilities,
         }
     }
@@ -376,6 +402,32 @@ impl SynthesisPlan {
             matches!(planned.disposition, SynthesisDisposition::Generated)
                 .then_some(&planned.capability)
         })
+    }
+
+    /// What one capability owes, when the plan marks it an obligation — the question an emitter
+    /// asks before writing a stub, because a stub the plan does not owe is a hole wearing a
+    /// refusal's clothes.
+    pub fn obligation_of(
+        &self,
+        kind: CapabilityKind,
+        source: &str,
+    ) -> Option<&ImplementationObligation> {
+        match self.disposition_of(kind, source) {
+            Some(SynthesisDisposition::Obligation(obligation)) => Some(obligation),
+            _ => None,
+        }
+    }
+
+    /// Every capability the plan marks an obligation, with what is owed, in planning order.
+    pub fn obligations(&self) -> impl Iterator<Item = (&Capability, &ImplementationObligation)> {
+        self.capabilities
+            .iter()
+            .filter_map(|planned| match &planned.disposition {
+                SynthesisDisposition::Obligation(obligation) => {
+                    Some((&planned.capability, obligation))
+                }
+                _ => None,
+            })
     }
 
     /// The plan as canonical JSON: stable key order, two-space indentation, trailing newline — the
@@ -744,37 +796,273 @@ fn plan_actors(ir: &EssIr, capabilities: &mut Vec<PlannedCapability>) {
     }
 }
 
-/// A binding's transformation and delivery both need the interaction layer.
+/// A binding is three capabilities with three honest dispositions: the transformation is
+/// generated exactly where every mapped input is determined, the delivery is generated onto the
+/// one component that accepts the command, and an escalation — the one failure policy that
+/// declares an event — is owed, because nothing declares how that event's fields are filled.
 fn plan_bindings(ir: &EssIr, capabilities: &mut Vec<PlannedCapability>) {
     for binding in ir.bindings.values() {
         capabilities.push(PlannedCapability {
             capability: Capability {
-                kind: CapabilityKind::Binding,
+                kind: CapabilityKind::BindingTransformation,
                 source: binding.name.to_string(),
             },
-            disposition: SynthesisDisposition::Refused(SynthesisRefusal {
-                reason: RefusalReason::NeedsInteractionLayer,
-                stage: RefusalStage::Planning,
-                detail: binding_detail(binding),
-            }),
+            disposition: transformation_disposition(ir, binding),
         });
+        capabilities.push(PlannedCapability {
+            capability: Capability {
+                kind: CapabilityKind::BindingDelivery,
+                source: binding.name.to_string(),
+            },
+            disposition: delivery_disposition(ir, binding),
+        });
+        if let ResolvedFailure::Escalate { emits } = binding.on_failure() {
+            capabilities.push(PlannedCapability {
+                capability: Capability {
+                    kind: CapabilityKind::BindingEscalation,
+                    source: binding.name.to_string(),
+                },
+                disposition: SynthesisDisposition::Obligation(ImplementationObligation {
+                    reason: ObligationReason::UnspecifiedAlgorithm,
+                    contract: format!(
+                        "the declared `{emits}`, recording that delivering `{}` for `{}` was \
+                         given up on — the event is declared; how its fields are filled from the \
+                         failed invocation is not",
+                        binding.command, binding.name
+                    ),
+                }),
+            });
+        }
     }
 }
 
-/// The binding's facts, so the refusal reads as a description rather than a shrug.
-fn binding_detail(binding: &ResolvedBinding) -> String {
-    format!(
-        "reacts to `{}` by invoking `{}` ({}, on failure {}); both the transformation and the \
-         delivery guarantee need the interaction layer, which the semantic-types scope does not \
-         hold",
-        binding.event,
-        binding.command,
-        ess_gen::graph::delivery_word(binding.delivery),
-        binding.failure.as_str()
-    )
+/// The transformation: generated when every input of the invoked command is filled by a
+/// determined mapping, owed otherwise — with the undetermined entries named, because "write the
+/// transformation" without them sends the implementor back to diff the plan against the source.
+fn transformation_disposition(ir: &EssIr, binding: &ResolvedBinding) -> SynthesisDisposition {
+    let undetermined = undetermined_mappings(ir, binding);
+    if undetermined.is_empty() {
+        SynthesisDisposition::Generated
+    } else {
+        SynthesisDisposition::Obligation(ImplementationObligation {
+            reason: ObligationReason::UnspecifiedAlgorithm,
+            contract: format!(
+                "a transformation from `{}` to `{}` input — {}",
+                binding.event,
+                binding.command,
+                undetermined.join("; ")
+            ),
+        })
+    }
 }
 
-/// A component's port surface arrives with the scope that owns ports, not this one.
+/// The delivery: the one transport this scope holds, generated onto the one declared acceptor.
+///
+/// The transport is derived, not chosen: `at_least_once` is the only delivery guarantee the model
+/// declares, and the component surfaces say who invokes whom — so what is generated is an
+/// in-process, at-least-once dispatch from the publisher's events to the acceptor's port, and
+/// nothing else, because no other transport is declared anywhere to derive from.
+fn delivery_disposition(ir: &EssIr, binding: &ResolvedBinding) -> SynthesisDisposition {
+    let acceptors = accepting_components(ir, binding);
+    if acceptors.len() == 1 {
+        return SynthesisDisposition::Generated;
+    }
+    let detail = if acceptors.is_empty() {
+        format!(
+            "reacts to `{}` by invoking `{}` ({}, on failure {}); no declared component accepts \
+             `{}`, so there is no surface to deliver to",
+            binding.event,
+            binding.command,
+            ess_gen::graph::delivery_word(binding.delivery),
+            binding.failure.as_str(),
+            binding.command,
+        )
+    } else {
+        format!(
+            "reacts to `{}` by invoking `{}` ({}, on failure {}); {} components accept `{}` ({}), \
+             and choosing among them is not this synthesis's decision",
+            binding.event,
+            binding.command,
+            ess_gen::graph::delivery_word(binding.delivery),
+            binding.failure.as_str(),
+            acceptors.len(),
+            binding.command,
+            acceptors
+                .iter()
+                .map(|component| format!("`{}`", component.name))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )
+    };
+    SynthesisDisposition::Refused(SynthesisRefusal {
+        reason: RefusalReason::AcceptorUndetermined,
+        stage: RefusalStage::Planning,
+        detail,
+    })
+}
+
+/// The components that accept a binding's command, in name order.
+///
+/// A model-level fact decided here and reused by emitters — the delivery's target is the same
+/// answer whether the plan is judging it or a transport is being written from it.
+pub(crate) fn accepting_components<'a>(
+    ir: &'a EssIr,
+    binding: &ResolvedBinding,
+) -> Vec<&'a ResolvedComponent> {
+    ir.components
+        .values()
+        .filter(|component| component.accepts.contains(&binding.command))
+        .collect()
+}
+
+/// How one command input is filled, where the specification fully determines it.
+///
+/// Model-level, like [`mechanical_conversion`]: the plan uses it to judge a transformation and an
+/// emitter uses it to write one, and a decision made twice is a decision made two ways.
+pub(crate) enum DeterminedInput<'a> {
+    /// The event field's value already has the target type.
+    Copy {
+        /// The event field.
+        field: &'a str,
+    },
+    /// The event field's value crosses by the declared mechanical conversion.
+    Convert {
+        /// The event field.
+        field: &'a str,
+        /// The declared type it is wrapped into.
+        to: &'a TypeHandle,
+    },
+    /// The literal, wrapped outside-in by this chain of newtypes over text.
+    Literal {
+        /// The value, as the binding wrote it.
+        value: &'a str,
+        /// The newtypes around it, outermost first; empty when the target is plain text.
+        wraps: Vec<&'a TypeHandle>,
+    },
+    /// The literal names a declared variant of the target enum.
+    Variant {
+        /// The target enum.
+        of: &'a TypeHandle,
+        /// The variant, as the binding wrote it.
+        value: &'a str,
+    },
+    /// The input is optional and the binding deliberately leaves it absent — "a decision, not an
+    /// omission", in the compiler's own words.
+    Omitted,
+}
+
+/// What determines one command input under a binding, or `None` where nothing does.
+///
+/// The determined shapes are the ones the model itself closes. `ess-domain` refuses an unmapped
+/// *required* input and a literal into anything but text or an enum's variants, and the compiler
+/// verifies event fields and requires a declared crossing where types differ — so what is left
+/// undetermined here is exactly one reachable case: a declared crossing that is not mechanical,
+/// whose computation is the conversion obligation's to satisfy. The other `None` branches are
+/// defensive: unrepresentable after validation, but this function does not get to assume that.
+pub(crate) fn determined_input<'a>(
+    ir: &'a EssIr,
+    binding: &'a ResolvedBinding,
+    input: &'a ResolvedField,
+) -> Option<DeterminedInput<'a>> {
+    let Some(mapping) = binding
+        .mapping
+        .iter()
+        .find(|mapping| mapping.target == input.name)
+    else {
+        return matches!(input.type_ref, ResolvedTypeRef::Optional { .. })
+            .then_some(DeterminedInput::Omitted);
+    };
+    match &mapping.value {
+        ResolvedMappingValue::EventField { field, type_ref } => {
+            if mapping.conversion.is_none() {
+                return Some(DeterminedInput::Copy { field });
+            }
+            let (ResolvedTypeRef::Declared { name: from }, ResolvedTypeRef::Declared { name: to }) =
+                (type_ref, &mapping.target_type)
+            else {
+                return None;
+            };
+            let (
+                ResolvedBody::Newtype { of: from_inner, .. },
+                ResolvedBody::Newtype { of: to_inner, .. },
+            ) = (&ir.named_type(from).body, &ir.named_type(to).body)
+            else {
+                return None;
+            };
+            (from_inner == to_inner).then_some(DeterminedInput::Convert { field, to })
+        }
+        ResolvedMappingValue::Literal { value } => {
+            if let ResolvedTypeRef::Declared { name } = &mapping.target_type {
+                if matches!(&ir.named_type(name).body, ResolvedBody::Enum { .. }) {
+                    return Some(DeterminedInput::Variant { of: name, value });
+                }
+            }
+            let mut wraps = Vec::new();
+            literal_reaches_text(ir, &mapping.target_type, &mut wraps)
+                .then_some(DeterminedInput::Literal { value, wraps })
+        }
+    }
+}
+
+/// `true` when a target type is text under however many newtype wrappers, collecting the
+/// wrappers outermost-first on the way down.
+fn literal_reaches_text<'a>(
+    ir: &'a EssIr,
+    target: &'a ResolvedTypeRef,
+    wraps: &mut Vec<&'a TypeHandle>,
+) -> bool {
+    match target {
+        ResolvedTypeRef::Primitive { name } => *name == ess_domain::types::Primitive::String,
+        ResolvedTypeRef::Declared { name } => match &ir.named_type(name).body {
+            ResolvedBody::Newtype { of, .. } => {
+                wraps.push(name);
+                literal_reaches_text(ir, of, wraps)
+            }
+            ResolvedBody::Struct { .. }
+            | ResolvedBody::Enum { .. }
+            | ResolvedBody::Union { .. } => false,
+        },
+        ResolvedTypeRef::Optional { .. }
+        | ResolvedTypeRef::List { .. }
+        | ResolvedTypeRef::Map { .. } => false,
+    }
+}
+
+/// The undetermined entries of a binding's mapping, each as a phrase naming its own facts.
+fn undetermined_mappings(ir: &EssIr, binding: &ResolvedBinding) -> Vec<String> {
+    let command = ir.command(&binding.command);
+    let mut undetermined = Vec::new();
+    for input in &command.input {
+        if determined_input(ir, binding, input).is_some() {
+            continue;
+        }
+        let Some(mapping) = binding
+            .mapping
+            .iter()
+            .find(|mapping| mapping.target == input.name)
+        else {
+            undetermined.push(format!("`{}` has no mapping", input.name));
+            continue;
+        };
+        undetermined.push(match &mapping.value {
+            ResolvedMappingValue::EventField { field, .. } => format!(
+                "`{}` is filled from event field `{field}` through the declared crossing to `{}`, \
+                 whose computation is owed",
+                mapping.target, mapping.target_type
+            ),
+            ResolvedMappingValue::Literal { value } => format!(
+                "`{}` is filled from the literal `{value}`, and no reading of it as `{}` is \
+                 declared",
+                mapping.target, mapping.target_type
+            ),
+        });
+    }
+    undetermined
+}
+
+/// A component's port surface is fully determined: which commands it accepts, which events it
+/// publishes and which views its domains declare are all validated declarations, and the handlers
+/// behind the surface are the behaviour obligations the plan already carries.
 fn plan_components(ir: &EssIr, capabilities: &mut Vec<PlannedCapability>) {
     for component in ir.components.values() {
         capabilities.push(PlannedCapability {
@@ -782,16 +1070,7 @@ fn plan_components(ir: &EssIr, capabilities: &mut Vec<PlannedCapability>) {
                 kind: CapabilityKind::ComponentPort,
                 source: component.name.to_string(),
             },
-            disposition: SynthesisDisposition::Refused(SynthesisRefusal {
-                reason: RefusalReason::NeedsInteractionLayer,
-                stage: RefusalStage::Planning,
-                detail: format!(
-                    "accepts {} command(s) and publishes {} event(s); a port surface {}",
-                    component.accepts.len(),
-                    component.publishes.len(),
-                    RefusalReason::NeedsInteractionLayer.describes()
-                ),
-            }),
+            disposition: SynthesisDisposition::Generated,
         });
     }
 }

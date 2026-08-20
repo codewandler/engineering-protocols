@@ -9,7 +9,8 @@
 //!
 //! Generated, not written: the specification is the source of truth, and the door to changing
 //! anything here is `protocol ess synthesize`. What is deliberately absent — behaviour, queries,
-//! ports — is listed with reasons in the `PLAN.md` beside this workspace.
+//! escalations — is listed with reasons in the `PLAN.md` beside this workspace, and every entry
+//! there is owed through a typed seam in an `obligations` module here.
 
 // `deny`, not the source workspace's lint set: this crate must hold on its own, and an undocumented
 // public item here is an emitter defect worth failing the gate over.
@@ -18,4 +19,5 @@
 
 pub mod email;
 pub mod invoice;
+pub mod obligation;
 pub mod primitives;

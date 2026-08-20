@@ -6,9 +6,9 @@
 -->
 # Synthesis plan — billing v3
 
-Scope: `semantic-types`, planner `ess-synth 0.1.0`. Regenerate with `protocol ess synthesize`.
+Scope: `component-skeletons`, planner `ess-synth 0.1.0`. Regenerate with `protocol ess synthesize`.
 
-43 capabilities: **29 generated**, **7 obligations**, **7 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
+45 capabilities: **33 generated**, **8 obligations**, **4 refused**. An obligation is yours to implement against its contract; a refusal is a fact about this synthesis scope, not about the specification.
 
 ## Generated
 
@@ -43,6 +43,10 @@ Scope: `semantic-types`, planner `ess-synth 0.1.0`. Regenerate with `protocol es
 | view type | `billing.invoice.InvoiceById` |
 | view type | `billing.invoice.OutstandingInvoices` |
 | conversion | `billing.invoice.Email -> billing.email.EmailAddress` |
+| binding transformation | `notify-on-invoice-created` |
+| binding delivery | `notify-on-invoice-created` |
+| component port | `email-service` |
+| component port | `invoice-service` |
 
 ## Obligations — yours to implement
 
@@ -55,6 +59,7 @@ Scope: `semantic-types`, planner `ess-synth 0.1.0`. Regenerate with `protocol es
 | command behaviour | `billing.invoice.PayInvoice` | the contract is declared; the algorithm is not | given `billing.invoice.PayInvoice` input, decide and enact exactly one outcome — `settled` when `amount.amount > 0`, takes `settle` of `billing.invoice.Invoice`, emits `billing.invoice.InvoicePaid`; `rejected` otherwise, error `billing.invoice.InvalidAmount`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict` |
 | view query | `billing.invoice.InvoiceById` | how the projection is kept current is a storage decision | a query answering `billing.invoice.InvoiceById` with rows projected from `billing.invoice.Invoice` at `eventual` consistency |
 | view query | `billing.invoice.OutstandingInvoices` | how the projection is kept current is a storage decision | a query answering `billing.invoice.OutstandingInvoices` with rows projected from `billing.invoice.Invoice` at `read_your_writes` consistency, containing instances where `state == Issued` |
+| binding escalation | `notify-on-invoice-created` | the contract is declared; the algorithm is not | the declared `billing.email.DeliveryEscalated`, recording that delivering `billing.email.SendEmail` for `notify-on-invoice-created` was given up on — the event is declared; how its fields are filled from the failed invocation is not |
 
 ## Refused — not represented by this synthesis
 
@@ -62,8 +67,5 @@ Scope: `semantic-types`, planner `ess-synth 0.1.0`. Regenerate with `protocol es
 | --- | --- | --- | --- |
 | actor grants | `billing.invoice.Auditor` | planning | observes only; it may invoke no command; a grant is checked against a caller identity, which types do not carry, and enforcement belongs to the layer that knows who is calling |
 | actor grants | `billing.invoice.Customer` | planning | may invoke `billing.invoice.CreateInvoice`; a grant is checked against a caller identity, which types do not carry, and enforcement belongs to the layer that knows who is calling |
-| binding | `notify-on-invoice-created` | planning | reacts to `billing.invoice.InvoiceCreated` by invoking `billing.email.SendEmail` (at_least_once, on failure escalate); both the transformation and the delivery guarantee need the interaction layer, which the semantic-types scope does not hold |
-| component port | `email-service` | planning | accepts 1 command(s) and publishes 2 event(s); a port surface needs the interaction layer, which the semantic-types scope does not hold |
-| component port | `invoice-service` | planning | accepts 4 command(s) and publishes 4 event(s); a port surface needs the interaction layer, which the semantic-types scope does not hold |
 | workload | `email-service` | planning | requires at least 2 replica(s); topology synthesis is deferred with its design |
 | workload | `invoice-service` | planning | requires at least 2 replica(s); topology synthesis is deferred with its design |

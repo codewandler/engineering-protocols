@@ -176,7 +176,7 @@ Eight steps, all eight of which CI also runs, in this order:
    under `generated/rust/` differ from what the specifications determine, or if a matching tree no
    longer passes `cargo check` — the latter being a defect in `ess-synth`, not in any specification.
 
-Land nothing that does not pass all seven.
+Land nothing that does not pass all eight.
 
 **A green local gate does not guarantee a green CI.** The steps mirror each other exactly, but the
 *toolchain* does not: CI installs whatever `stable` is on the day, and a newer clippy can introduce a

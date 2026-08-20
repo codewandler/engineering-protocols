@@ -43,6 +43,19 @@ pub fn pascal(word: &str) -> String {
     out
 }
 
+/// A Rust type-name fragment for an arbitrary specification spelling — `ledger.core.AccountId`
+/// is `LedgerCoreAccountId`, `Optional<String>` is `OptionalString`.
+///
+/// The full spelling, not the last segment, because the fragments are joined into identifiers
+/// (a conversion obligation's trait is named from both of its ends) and two spellings that differ
+/// anywhere must not produce one identifier.
+pub fn type_fragment(text: &str) -> String {
+    text.split(|character: char| !character.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(pascal)
+        .collect()
+}
+
 /// A Rust value identifier for a specification word: lower snake case, keyword-escaped.
 ///
 /// Fields, methods and modules all take this path, so `invoice_id` stays itself, a transition named

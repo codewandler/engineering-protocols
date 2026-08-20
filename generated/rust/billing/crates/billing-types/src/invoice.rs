@@ -536,3 +536,130 @@ pub struct OutstandingInvoices {
     /// `total` — `billing.invoice.Money`.
     pub total: Money,
 }
+
+/// What this bounded context owes its implementor, as typed seams.
+///
+/// One trait per obligation in the synthesis plan, each carrying the plan's own contract.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every trait by refusing in the type system, so the workspace builds —
+/// and says exactly what it cannot yet do — before a line is hand-written.
+pub mod obligations {
+    /// The behaviour `billing.invoice.CancelInvoice` — an implementation obligation.
+    ///
+    /// Why it is not generated: the contract is declared; the algorithm is not.
+    ///
+    /// Contract: given `billing.invoice.CancelInvoice` input, decide and enact exactly one outcome — `cancelled` otherwise, takes `cancel` of `billing.invoice.Invoice`, emits `billing.invoice.InvoiceCancelled`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`.
+    pub trait CancelInvoiceBehavior {
+        /// Decides and enacts exactly one declared outcome of `billing.invoice.CancelInvoice`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn cancel_invoice(&mut self, input: super::CancelInvoice) -> Result<super::CancelInvoiceOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `billing.invoice.CreateInvoice` — an implementation obligation.
+    ///
+    /// Why it is not generated: the contract is declared; the algorithm is not.
+    ///
+    /// Contract: given `billing.invoice.CreateInvoice` input, decide and enact exactly one outcome — `accepted` when `amount.amount > 0`, creates `billing.invoice.Invoice`, emits `billing.invoice.InvoiceCreated`; `rejected` otherwise, error `billing.invoice.InvalidAmount`.
+    pub trait CreateInvoiceBehavior {
+        /// Decides and enacts exactly one declared outcome of `billing.invoice.CreateInvoice`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn create_invoice(&mut self, input: super::CreateInvoice) -> Result<super::CreateInvoiceOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `billing.invoice.IssueInvoice` — an implementation obligation.
+    ///
+    /// Why it is not generated: the contract is declared; the algorithm is not.
+    ///
+    /// Contract: given `billing.invoice.IssueInvoice` input, decide and enact exactly one outcome — `issued` otherwise, takes `issue` of `billing.invoice.Invoice`, emits `billing.invoice.InvoiceIssued`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`.
+    pub trait IssueInvoiceBehavior {
+        /// Decides and enacts exactly one declared outcome of `billing.invoice.IssueInvoice`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn issue_invoice(&mut self, input: super::IssueInvoice) -> Result<super::IssueInvoiceOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The behaviour `billing.invoice.PayInvoice` — an implementation obligation.
+    ///
+    /// Why it is not generated: the contract is declared; the algorithm is not.
+    ///
+    /// Contract: given `billing.invoice.PayInvoice` input, decide and enact exactly one outcome — `settled` when `amount.amount > 0`, takes `settle` of `billing.invoice.Invoice`, emits `billing.invoice.InvoicePaid`; `rejected` otherwise, error `billing.invoice.InvalidAmount`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`.
+    pub trait PayInvoiceBehavior {
+        /// Decides and enacts exactly one declared outcome of `billing.invoice.PayInvoice`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn pay_invoice(&mut self, input: super::PayInvoice) -> Result<super::PayInvoiceOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// The query `billing.invoice.InvoiceById` — an implementation obligation.
+    ///
+    /// Why it is not generated: how the projection is kept current is a storage decision.
+    ///
+    /// Contract: a query answering `billing.invoice.InvoiceById` with rows projected from `billing.invoice.Invoice` at `eventual` consistency.
+    pub trait InvoiceByIdQuery {
+        /// Serves `billing.invoice.InvoiceById` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn invoice_by_id(&self) -> Result<Vec<super::InvoiceById>, crate::obligation::UnmetObligation>;
+    }
+
+    /// The query `billing.invoice.OutstandingInvoices` — an implementation obligation.
+    ///
+    /// Why it is not generated: how the projection is kept current is a storage decision.
+    ///
+    /// Contract: a query answering `billing.invoice.OutstandingInvoices` with rows projected from `billing.invoice.Invoice` at `read_your_writes` consistency, containing instances where `state == Issued`.
+    pub trait OutstandingInvoicesQuery {
+        /// Serves `billing.invoice.OutstandingInvoices` rows at the view's declared consistency.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn outstanding_invoices(&self) -> Result<Vec<super::OutstandingInvoices>, crate::obligation::UnmetObligation>;
+    }
+
+    /// Every obligation of this bounded context, refused in the type system.
+    ///
+    /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
+    /// value — so a workspace built on this stub compiles and reports its own gaps.
+    pub struct Unimplemented;
+
+    impl CancelInvoiceBehavior for Unimplemented {
+        fn cancel_invoice(&mut self, _input: super::CancelInvoice) -> Result<super::CancelInvoiceOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "billing.invoice.CancelInvoice" })
+        }
+    }
+
+    impl CreateInvoiceBehavior for Unimplemented {
+        fn create_invoice(&mut self, _input: super::CreateInvoice) -> Result<super::CreateInvoiceOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "billing.invoice.CreateInvoice" })
+        }
+    }
+
+    impl IssueInvoiceBehavior for Unimplemented {
+        fn issue_invoice(&mut self, _input: super::IssueInvoice) -> Result<super::IssueInvoiceOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "billing.invoice.IssueInvoice" })
+        }
+    }
+
+    impl PayInvoiceBehavior for Unimplemented {
+        fn pay_invoice(&mut self, _input: super::PayInvoice) -> Result<super::PayInvoiceOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "billing.invoice.PayInvoice" })
+        }
+    }
+
+    impl InvoiceByIdQuery for Unimplemented {
+        fn invoice_by_id(&self) -> Result<Vec<super::InvoiceById>, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "view query", source: "billing.invoice.InvoiceById" })
+        }
+    }
+
+    impl OutstandingInvoicesQuery for Unimplemented {
+        fn outstanding_invoices(&self) -> Result<Vec<super::OutstandingInvoices>, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "view query", source: "billing.invoice.OutstandingInvoices" })
+        }
+    }
+}

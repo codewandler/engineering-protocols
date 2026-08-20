@@ -85,3 +85,35 @@ impl From<crate::invoice::Email> for EmailAddress {
         Self(value.0)
     }
 }
+
+/// What this bounded context owes its implementor, as typed seams.
+///
+/// One trait per obligation in the synthesis plan, each carrying the plan's own contract.
+/// [`Unimplemented`](obligations::Unimplemented) satisfies every trait by refusing in the type system, so the workspace builds —
+/// and says exactly what it cannot yet do — before a line is hand-written.
+pub mod obligations {
+    /// The behaviour `billing.email.SendEmail` — an implementation obligation.
+    ///
+    /// Why it is not generated: decided outside the system: the provider rejects the recipient address.
+    ///
+    /// Contract: given `billing.email.SendEmail` input, decide and enact exactly one outcome — `sent` otherwise, emits `billing.email.EmailSent`; `failed` externally decided (the provider rejects the recipient address), error `billing.email.Undeliverable`.
+    pub trait SendEmailBehavior {
+        /// Decides and enacts exactly one declared outcome of `billing.email.SendEmail`.
+        ///
+        /// `Err` is the typed refusal of an obligation nothing has satisfied; a satisfying
+        /// implementation never returns it.
+        fn send_email(&mut self, input: super::SendEmail) -> Result<super::SendEmailOutcome, crate::obligation::UnmetObligation>;
+    }
+
+    /// Every obligation of this bounded context, refused in the type system.
+    ///
+    /// Each method returns the typed refusal naming what is owed — never a panic, never a guessed
+    /// value — so a workspace built on this stub compiles and reports its own gaps.
+    pub struct Unimplemented;
+
+    impl SendEmailBehavior for Unimplemented {
+        fn send_email(&mut self, _input: super::SendEmail) -> Result<super::SendEmailOutcome, crate::obligation::UnmetObligation> {
+            Err(crate::obligation::UnmetObligation { capability: "command behaviour", source: "billing.email.SendEmail" })
+        }
+    }
+}

@@ -11,6 +11,25 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`protocol ess synthesize` now emits component skeletons and one transport.** The plan's scope
+  grows from `semantic-types` to `component-skeletons`: each component becomes its own generated
+  crate whose port is the specification's declared surface — accepted commands as typed handlers,
+  declared views as typed queries, published events as a typed outbox — and a system crate wires
+  the bindings over the one transport the specification's own words determine (`at_least_once`,
+  in-process, standard library only; the log of published events is the observable record). On
+  billing, three of the interaction-layer refusals become generated — the binding's
+  transformation and delivery, and both component ports — so the plan moves from 43 capabilities
+  (29 generated / 7 obligations / 7 refused) to 45 (33 / 8 / 4). A binding is now three
+  capabilities with three honest dispositions; the new obligation is the escalation, because the
+  declared `DeliveryEscalated` event says nothing about how its fields are filled. A binding
+  whose command zero or several components accept is refused rather than routed by guesswork.
+- **Every obligation is now a typed stub in the generated workspace.** Each owed behaviour, query,
+  conversion, transformation and escalation gets a trait beside its contract and an
+  `Unimplemented` implementation whose body returns `UnmetObligation { capability, source }` —
+  a value naming the plan entry, never `todo!()` and never a panic — so a workspace built
+  entirely on stubs compiles and reports exactly what it cannot yet do. The plan's obligation
+  list and the workspace's stub set are held to a bijection by the emitter and by a test.
+
 - **`protocol ess synthesize --path <spec> [--out <dir>] [--target rust]`** — the part of an
   implementation that was never yours to write, plus the typed list of exactly what remains. Every
   semantic capability of the specification gets exactly one disposition in a language-neutral

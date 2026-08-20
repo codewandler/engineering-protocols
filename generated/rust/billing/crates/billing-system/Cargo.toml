@@ -1,0 +1,15 @@
+# generated from billing v3
+# model digest e19d384dac86219a
+# compiler 0.1.0 · generator 0.1.0
+# do not edit: regenerate with `protocol ess synthesize`
+
+[package]
+name = "billing-system"
+description = "The `billing` system, v3: its bindings and its one transport, generated."
+version = "3.0.0"
+edition = "2021"
+
+[dependencies]
+billing-types = { path = "../billing-types" }
+email-service = { path = "../email-service" }
+invoice-service = { path = "../invoice-service" }

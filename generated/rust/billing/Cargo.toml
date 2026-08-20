@@ -5,4 +5,4 @@
 
 [workspace]
 resolver = "2"
-members = ["crates/billing-types"]
+members = ["crates/billing-system", "crates/billing-types", "crates/email-service", "crates/invoice-service"]

@@ -1568,7 +1568,7 @@ fn ess_synthesize_plans_the_normative_example_and_says_what_it_refuses() {
     // The counts are the shape of the answer: what the specification determines, what it leaves
     // to the implementor, and what this synthesis refuses to pretend it can represent.
     assert!(
-        text.contains("billing v3 — 43 capabilities: 29 generated, 7 obligation(s), 7 refused"),
+        text.contains("billing v3 — 45 capabilities: 33 generated, 8 obligation(s), 4 refused"),
         "{text}"
     );
     // Obligations and refusals are said out loud, never as a count alone: an obligation nobody
@@ -1579,7 +1579,11 @@ fn ess_synthesize_plans_the_normative_example_and_says_what_it_refuses() {
         "the external obligation carries the specification author's own cause: {text}"
     );
     assert!(
-        text.contains("refused: binding `notify-on-invoice-created`"),
+        text.contains("obligation: binding escalation `notify-on-invoice-created`"),
+        "the interaction layer's owed half is said out loud too: {text}"
+    );
+    assert!(
+        text.contains("refused: workload `invoice-service`"),
         "{text}"
     );
     assert!(
@@ -1619,9 +1623,9 @@ fn ess_synthesize_carries_the_plan_and_every_artifacts_contents_in_json() {
     assert_eq!(parsed["provenance"]["system"], "billing");
     assert_eq!(parsed["provenance"]["specification_version"], "v3");
     assert_eq!(parsed["target"], "rust");
-    assert_eq!(parsed["generated"], 29);
-    assert_eq!(parsed["obligations"], 7);
-    assert_eq!(parsed["refused"], 7);
+    assert_eq!(parsed["generated"], 33);
+    assert_eq!(parsed["obligations"], 8);
+    assert_eq!(parsed["refused"], 4);
 
     let artifacts = parsed["artifacts"].as_array().expect("artifacts is a list");
     let paths: Vec<&str> = artifacts
@@ -1635,6 +1639,8 @@ fn ess_synthesize_carries_the_plan_and_every_artifacts_contents_in_json() {
         "plan.json",
         "Cargo.toml",
         "crates/billing-types/src/invoice.rs",
+        "crates/invoice-service/src/lib.rs",
+        "crates/billing-system/src/lib.rs",
     ] {
         assert!(paths.contains(&expected), "no `{expected}` in {paths:?}");
     }

@@ -7,7 +7,7 @@
     "generator_version": "0.1.0"
   },
   "scope": {
-    "profile": "semantic-types",
+    "profile": "component-skeletons",
     "planner_version": "0.1.0"
   },
   "capabilities": [
@@ -313,33 +313,42 @@
       }
     },
     {
-      "kind": "binding",
+      "kind": "binding_transformation",
       "source": "notify-on-invoice-created",
       "disposition": {
-        "disposition": "refused",
-        "reason": "needs_interaction_layer",
-        "stage": "planning",
-        "detail": "reacts to `billing.invoice.InvoiceCreated` by invoking `billing.email.SendEmail` (at_least_once, on failure escalate); both the transformation and the delivery guarantee need the interaction layer, which the semantic-types scope does not hold"
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "binding_delivery",
+      "source": "notify-on-invoice-created",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "binding_escalation",
+      "source": "notify-on-invoice-created",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "unspecified_algorithm"
+        },
+        "contract": "the declared `billing.email.DeliveryEscalated`, recording that delivering `billing.email.SendEmail` for `notify-on-invoice-created` was given up on — the event is declared; how its fields are filled from the failed invocation is not"
       }
     },
     {
       "kind": "component_port",
       "source": "email-service",
       "disposition": {
-        "disposition": "refused",
-        "reason": "needs_interaction_layer",
-        "stage": "planning",
-        "detail": "accepts 1 command(s) and publishes 2 event(s); a port surface needs the interaction layer, which the semantic-types scope does not hold"
+        "disposition": "generated"
       }
     },
     {
       "kind": "component_port",
       "source": "invoice-service",
       "disposition": {
-        "disposition": "refused",
-        "reason": "needs_interaction_layer",
-        "stage": "planning",
-        "detail": "accepts 4 command(s) and publishes 4 event(s); a port surface needs the interaction layer, which the semantic-types scope does not hold"
+        "disposition": "generated"
       }
     },
     {

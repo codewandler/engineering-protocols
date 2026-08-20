@@ -191,6 +191,40 @@ pub(super) fn command_contract(out: &mut String, emit: &Emit<'_>, command: &Reso
     out.push_str("}\n");
 }
 
+/// One emitted event's field on an outcome's enum variant: the field identifier and the event it
+/// carries.
+pub(super) struct OutcomeEventField<'a> {
+    /// The variant field's identifier.
+    pub field: String,
+    /// The event the field carries.
+    pub event: &'a ess_compiler::ir::EventHandle,
+}
+
+/// The event fields one outcome's variant carries, in emission order.
+///
+/// Computed once and shared: the outcome enum declares these fields and a component's port
+/// matches on them to publish, and two renderers numbering duplicate events independently is how
+/// a pattern comes to name a field the variant does not have.
+pub(super) fn outcome_event_fields<'a>(
+    emit: &Emit<'_>,
+    outcome: &'a ResolvedOutcome,
+) -> Vec<OutcomeEventField<'a>> {
+    let mut used: BTreeMap<String, usize> = BTreeMap::new();
+    let mut fields = Vec::new();
+    for event in &outcome.emits {
+        let mut field = name::value_ident(&emit.layout.type_name(event.name()));
+        let repeats = used.entry(field.clone()).or_insert(0);
+        *repeats += 1;
+        if *repeats > 1 {
+            // The same event emitted twice on one branch is legal in the model; two fields with
+            // one name are not legal here, so the copies are numbered in emission order.
+            let _ = write!(field, "_{repeats}");
+        }
+        fields.push(OutcomeEventField { field, event });
+    }
+    fields
+}
+
 /// One variant of a command's outcome enum: what it publishes and what it reports.
 fn outcome_variant(out: &mut String, emit: &Emit<'_>, outcome: &ResolvedOutcome) {
     let _ = writeln!(
@@ -208,20 +242,13 @@ fn outcome_variant(out: &mut String, emit: &Emit<'_>, outcome: &ResolvedOutcome)
         return;
     }
     let _ = writeln!(out, "    {variant} {{");
-    let mut used: BTreeMap<String, usize> = BTreeMap::new();
-    for event in &outcome.emits {
-        let mut field = name::value_ident(&emit.layout.type_name(event.name()));
-        let repeats = used.entry(field.clone()).or_insert(0);
-        *repeats += 1;
-        if *repeats > 1 {
-            // The same event emitted twice on one branch is legal in the model; two fields with
-            // one name are not legal here, so the copies are numbered in emission order.
-            let _ = write!(field, "_{repeats}");
-        }
+    for carried in outcome_event_fields(emit, outcome) {
         let _ = writeln!(
             out,
-            "        /// The `{event}` this outcome publishes.\n        {field}: {},",
-            emit.reference_name(event.name())
+            "        /// The `{}` this outcome publishes.\n        {}: {},",
+            carried.event,
+            carried.field,
+            emit.reference_name(carried.event.name())
         );
     }
     if let Some(error) = &outcome.error {

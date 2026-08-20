@@ -8,30 +8,40 @@
 use std::collections::BTreeMap;
 
 use ess_compiler::ir::{EssIr, ResolvedTypeRef};
+use ess_domain::component::ComponentName;
 use ess_domain::name::QualifiedName;
 use ess_domain::types::Primitive;
 
 use super::name;
 
-/// The shape of the generated workspace: one types crate, one module per bounded context.
+/// The shape of the generated workspace: one types crate with one module per bounded context, one
+/// crate per component, and one system crate holding the bindings and the transport.
 ///
-/// One crate rather than one per domain, deliberately: the domains of one system reference each
-/// other's types — the billing example's declared conversion crosses two of them — and modules make
-/// that a `crate::` path where separate crates would make it a dependency graph this slice has no
-/// reason to invent. Component crates arrive with the ports, in the next slice.
+/// One types crate rather than one per domain, deliberately: the domains of one system reference
+/// each other's types — the billing example's declared conversion crosses two of them — and
+/// modules make that a `crate::` path where separate crates would make it a dependency graph this
+/// slice has no reason to invent. Components *are* separate crates, on the opposite reasoning: a
+/// component is the specification's own unit of ownership and deployment, so someone taking one
+/// takes its crate, not a module inside somebody else's.
 pub struct Layout {
     /// The package name of the types crate — `billing-types`.
     package: String,
+    /// The package name of the system crate — `billing-system` — holding bindings and transport.
+    system_package: String,
     /// Module identifier per bounded context, keyed by the domain's qualified name.
     modules: BTreeMap<QualifiedName, String>,
     /// The bounded context that owns each declaration.
     owners: BTreeMap<QualifiedName, QualifiedName>,
+    /// Package name per component, keyed by the component's name.
+    component_packages: BTreeMap<ComponentName, String>,
 }
 
 impl Layout {
     /// Derives the layout of a resolved specification.
     pub fn of(ir: &EssIr) -> Self {
         let package = format!("{}-types", ir.system.segments().join("-"));
+        let system_package = format!("{}-system", ir.system.segments().join("-"));
+        let component_packages = component_packages(ir, &package, &system_package);
 
         let modules = module_idents(ir);
         let mut owners = BTreeMap::new();
@@ -57,14 +67,38 @@ impl Layout {
         }
         Self {
             package,
+            system_package,
             modules,
             owners,
+            component_packages,
         }
     }
 
     /// The package name of the types crate.
     pub fn package(&self) -> &str {
         &self.package
+    }
+
+    /// The package name of the system crate: the bindings, the transport, and the assembled
+    /// components.
+    pub fn system_package(&self) -> &str {
+        &self.system_package
+    }
+
+    /// The package name of a component's crate.
+    ///
+    /// Total for the same reason [`Self::owner`] is: every component the IR carries got a package
+    /// when this layout was derived, so a miss is a name from a different compilation.
+    pub fn component_package(&self, component: &ComponentName) -> &str {
+        self.component_packages.get(component).map_or_else(
+            || panic!("`{component}` is not a component this layout knows: it was derived from a different IR"),
+            String::as_str,
+        )
+    }
+
+    /// A package name as the identifier `use` and paths spell it.
+    pub fn crate_ident(package: &str) -> String {
+        package.replace('-', "_")
     }
 
     /// Every bounded context and its module identifier, in name order.
@@ -115,6 +149,30 @@ impl Layout {
         }
     }
 
+    /// A resolved type reference as a Rust type, spelled absolutely — `crate::module::Type` for
+    /// every declared name — for the modules that belong to no bounded context, like the root
+    /// `obligation` module.
+    pub fn absolute_type(&self, type_ref: &ResolvedTypeRef) -> String {
+        match type_ref {
+            ResolvedTypeRef::Primitive { name } => primitive(*name).to_owned(),
+            ResolvedTypeRef::Declared { name } => {
+                let declared = name.name();
+                format!(
+                    "crate::{}::{}",
+                    self.module(self.owner(declared)),
+                    self.type_name(declared)
+                )
+            }
+            ResolvedTypeRef::Optional { of } => format!("Option<{}>", self.absolute_type(of)),
+            ResolvedTypeRef::List { of } => format!("Vec<{}>", self.absolute_type(of)),
+            ResolvedTypeRef::Map { key, value } => format!(
+                "std::collections::BTreeMap<{}, {}>",
+                primitive(*key),
+                self.absolute_type(value)
+            ),
+        }
+    }
+
     /// A resolved type reference as a Rust type, from inside the module of `from`.
     pub fn rust_type(&self, type_ref: &ResolvedTypeRef, from: &QualifiedName) -> String {
         match type_ref {
@@ -139,8 +197,9 @@ impl Layout {
 /// 1. When two domains share a last segment, **every** domain switches to its full name joined
 ///    with underscores — all of them, not just the colliding pair, so adding one domain cannot
 ///    silently rename an unrelated module's path in generated output that another crate imports.
-/// 2. A module that would be spelled `primitives` gets `_domain` appended, because that name is
-///    reserved for the representation module every generated crate carries.
+/// 2. A module that would be spelled `primitives` or `obligation` gets `_domain` appended,
+///    because those names are reserved: `primitives` for the representation module every
+///    generated crate carries, `obligation` for the typed refusal an unmet obligation returns.
 fn module_idents(ir: &EssIr) -> BTreeMap<QualifiedName, String> {
     let mut candidates: BTreeMap<QualifiedName, String> = ir
         .domains
@@ -172,11 +231,37 @@ fn module_idents(ir: &EssIr) -> BTreeMap<QualifiedName, String> {
     }
 
     for module in candidates.values_mut() {
-        if module == "primitives" {
+        if module == "primitives" || module == "obligation" {
             module.push_str("_domain");
         }
     }
     candidates
+}
+
+/// One package name per component, collision-free by rule rather than by luck.
+///
+/// The candidate is the component's own name — already unique among components, and already the
+/// kebab-case shape a package name wants. The one way it can collide is with the two package
+/// names this layout reserves (`{system}-types`, `{system}-system`); a colliding candidate gets
+/// `-component` appended, repeatedly if a component was itself named the repaired spelling,
+/// because a deterministic rename that can still collide is a collision with extra steps.
+fn component_packages(
+    ir: &EssIr,
+    types_package: &str,
+    system_package: &str,
+) -> BTreeMap<ComponentName, String> {
+    let mut taken: std::collections::BTreeSet<String> =
+        [types_package.to_owned(), system_package.to_owned()].into();
+    let mut packages = BTreeMap::new();
+    for component in ir.components.keys() {
+        let mut candidate = component.to_string();
+        while taken.contains(&candidate) {
+            candidate.push_str("-component");
+        }
+        taken.insert(candidate.clone());
+        packages.insert(component.clone(), candidate);
+    }
+    packages
 }
 
 /// The Rust representation of each specification primitive.
