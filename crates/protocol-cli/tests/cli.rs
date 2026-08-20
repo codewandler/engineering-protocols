@@ -954,14 +954,20 @@ fn ess_inspect_refuses_a_name_two_namespaces_declare() {
 }
 
 #[test]
-fn ess_graph_is_dot_and_two_runs_are_byte_identical() {
+fn ess_graph_is_dot_by_default_and_two_runs_are_byte_identical() {
     let first = protocol(&["ess", "graph", "--path", SPECIFICATION]);
     assert_eq!(code(&first), 0, "{}", stderr(&first));
     let text = stdout(&first);
     assert!(text.contains("digraph \"billing\" {"), "{text}");
     assert!(
         text.contains("subgraph \"cluster_email-service\""),
-        "a component owns domains, and the graph says so: {text}"
+        "a component declares a surface, and the graph boxes it: {text}"
+    );
+    assert!(
+        text.contains(
+            "\"billing.invoice.Customer\" -> \"billing.invoice.CreateInvoice\" [label=\"may invoke\"]"
+        ),
+        "a grant is an edge here too, not only on the documentation page: {text}"
     );
     assert!(
         text.contains("\"billing.invoice.CreateInvoice\" -> \"billing.invoice.InvoiceCreated\""),
@@ -977,6 +983,16 @@ fn ess_graph_is_dot_and_two_runs_are_byte_identical() {
     assert_eq!(
         first.stdout, second.stdout,
         "two runs over one specification must produce identical bytes"
+    );
+
+    // `text` was this verb's name for DOT before there was a second diagram to tell it apart from.
+    // Renaming it to `dot` is not permission to break the scripts that already type the old word.
+    let renamed = protocol(&["ess", "graph", "--path", SPECIFICATION, "--format", "text"]);
+    assert_eq!(
+        first.stdout,
+        renamed.stdout,
+        "`--format text` still means DOT: {}",
+        stderr(&renamed)
     );
 }
 
@@ -996,17 +1012,42 @@ fn ess_graph_renders_nodes_and_edges_as_json() {
         .expect("the example declares CreateInvoice");
     assert_eq!(command["kind"], "command");
     assert_eq!(
-        command["component"], "invoice-service",
-        "which component owns it is part of the graph: {parsed}"
+        command["domain"], "billing.invoice",
+        "the context that declares it is part of the graph: {parsed}"
+    );
+
+    // Which component holds it is a group rather than a field on the node, because §6 lets two
+    // components publish one event: a scalar here would have to pick one of them and call it the
+    // answer.
+    let groups = parsed["groups"].as_array().expect("groups is a list");
+    let unit = groups
+        .iter()
+        .find(|group| group["label"] == "invoice-service")
+        .expect("the example declares invoice-service");
+    assert_eq!(unit["kind"], "component");
+    assert!(
+        unit["members"]
+            .as_array()
+            .expect("members is a list")
+            .contains(&serde_json::json!("billing.invoice.CreateInvoice")),
+        "the component that accepts it is the box it is drawn in: {parsed}"
     );
 
     let edges = parsed["edges"].as_array().expect("edges is a list");
     let reaction = edges
         .iter()
-        .find(|edge| edge["kind"] == "invokes")
+        .find(|edge| edge["kind"] == "binding")
         .expect("the example declares a binding");
-    assert_eq!(reaction["binding"], "notify-on-invoice-created");
+    assert_eq!(reaction["label"], "notify-on-invoice-created");
+    assert_eq!(reaction["delivery"], "at_least_once");
     assert_eq!(reaction["on_failure"], "escalate");
+
+    let grant = edges
+        .iter()
+        .find(|edge| edge["kind"] == "grant")
+        .expect("the example declares an actor with a grant");
+    assert_eq!(grant["from"], "billing.invoice.Customer");
+    assert_eq!(grant["to"], "billing.invoice.CreateInvoice");
 }
 
 /// A workload block, which is where one duplicated key silently lost a declaration.

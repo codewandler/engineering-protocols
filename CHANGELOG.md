@@ -9,6 +9,22 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+### Added
+
+- **`protocol ess graph --format mermaid`.** The system graph as a Mermaid flowchart, unfenced, so it
+  can be piped into a Markdown file, a docs site or a pull request without going through the generated
+  documentation tree. `dot`, `json` and `yaml` are the other spellings; `--format text` still means DOT
+  and is kept as an alias of it.
+
+### Fixed
+
+- **The CLI and the documentation page were drawing two different system graphs.** The command line
+  showed no actors and no grants at all, and it grouped a command by which component *owns* its domain
+  while the page grouped by what a component *accepts* and *publishes* — and the model allows those to
+  differ, since a component may accept a command from a domain it does not own. Two pictures of one
+  system, from two code paths, with nothing comparing them. There is now one renderer and a test that
+  runs the real binary and the real generator and requires their output to match.
+
 ## [0.3.3-ess-wave-3.5] — 2026-08-20
 
 ### Added

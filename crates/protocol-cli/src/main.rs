@@ -28,6 +28,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ess_compiler::diagnostic::Diagnostics;
 use ess_compiler::ir::EssIr;
 use ess_compiler::source::SourceMap;
+use ess_gen::graph::{delivery_word, failure_word, SystemGraph};
 use ess_gen::{Artifact, Generator, Provenance};
 
 /// Who the entity surface seeds as.
@@ -67,6 +68,43 @@ enum Format {
     Yaml,
     /// JSON, for another tool to read.
     Json,
+}
+
+/// How to render the system graph.
+///
+/// Its own enum rather than a variant on [`Format`], which every subcommand shares: `protocol
+/// validate --format mermaid` and `protocol audit --format mermaid` would parse and mean nothing,
+/// and a value a verb cannot honour is worse than a value it does not offer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum GraphFormat {
+    /// Graphviz DOT, for `dot -Tsvg`.
+    ///
+    /// Spelled `dot`, and `text` is still accepted for it. `--format text` was what this verb
+    /// called DOT before there was a second diagram to tell it apart from, and a word that no
+    /// longer says which of two diagrams you get is a word worth replacing without breaking.
+    #[value(alias = "text")]
+    Dot,
+    /// Mermaid, for a Markdown file, a documentation site or a pull request.
+    Mermaid,
+    /// YAML, for another tool to read.
+    Yaml,
+    /// JSON, for another tool to read.
+    Json,
+}
+
+impl GraphFormat {
+    /// How a specification that does not compile is reported when this was asked for.
+    ///
+    /// A diagnostic is not a diagram: `--format mermaid` on a broken specification wants the reason
+    /// in words, not a flowchart of nothing. `--format json` and `--format yaml` keep their shape,
+    /// because a tool that parses the graph parses the refusal too.
+    fn diagnostics(self) -> Format {
+        match self {
+            Self::Dot | Self::Mermaid => Format::Text,
+            Self::Yaml => Format::Yaml,
+            Self::Json => Format::Json,
+        }
+    }
 }
 
 /// Where the documents are.
@@ -569,17 +607,20 @@ enum EssCommand {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
-    /// Print the event and command graph.
+    /// Print the actor, event and command graph.
     ///
-    /// `text` is DOT, for `dot -Tsvg`; `json` and `yaml` are the same graph as nodes and edges, for
-    /// a consumer that would otherwise have to parse DOT to get at it.
+    /// `dot` is for `dot -Tsvg`, and `text` is still accepted as its old name. `mermaid` is the
+    /// same graph as a `flowchart`, unfenced, so it can be redirected into a Markdown file, a
+    /// documentation site or a pull request — it is the diagram the generated `docs/README.md`
+    /// opens with, from the same renderer. `json` and `yaml` are the nodes and edges themselves,
+    /// for a consumer that would otherwise have to parse a diagram to get at them.
     Graph {
         /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
         #[arg(long, default_value = ".")]
         path: PathBuf,
         /// How to render the graph.
-        #[arg(long, value_enum, default_value_t = Format::Text)]
-        format: Format,
+        #[arg(long, value_enum, default_value_t = GraphFormat::Dot)]
+        format: GraphFormat,
     },
 }
 
@@ -1469,8 +1510,8 @@ fn ess_render_declaration(ir: &EssIr, declaration: &EssDeclaration<'_>) {
                     ess_line_at(4, "converted", because);
                 }
             }
-            ess_line("delivery", ess_delivery_word(binding.delivery));
-            ess_line("on failure", ess_failure_word(binding.failure));
+            ess_line("delivery", delivery_word(binding.delivery));
+            ess_line("on failure", failure_word(binding.failure));
             ess_render_naming(&binding.naming);
         }
         EssDeclaration::Component(component) => {
@@ -1575,271 +1616,25 @@ fn ess_mapping_value(value: &ess_compiler::ir::ResolvedMappingValue) -> String {
     }
 }
 
-/// The word the document used for a delivery guarantee.
-///
-/// Spelled as the author typed it, because that is what they will search their sources for.
-fn ess_delivery_word(delivery: ess_domain::binding::Delivery) -> &'static str {
-    match delivery {
-        ess_domain::binding::Delivery::AtLeastOnce => "at_least_once",
-    }
-}
-
-/// The word the document used for what happens when a binding fails.
-fn ess_failure_word(failure: ess_domain::binding::Failure) -> &'static str {
-    match failure {
-        ess_domain::binding::Failure::Retry => "retry",
-        ess_domain::binding::Failure::Escalate => "escalate",
-        ess_domain::binding::Failure::Drop => "drop",
-    }
-}
-
-/// The graph the interaction layer is about.
-///
-/// Nodes are commands and events; edges are what an outcome emits and what a binding invokes. Two
-/// decisions worth stating. **Components are on the nodes rather than being nodes**: a component
-/// owns domains, and a graph that dropped that would answer "what reacts to this" while hiding who
-/// has to ship the answer — so a component is a cluster the nodes sit inside. **Errors are not
-/// nodes**: nothing reacts to one, so an error would be a leaf that cannot participate in the
-/// causality this graph exists to show. `ess inspect` is where a command's errors are.
-#[derive(serde::Serialize)]
-struct EssGraph<'a> {
-    system: &'a ess_domain::name::QualifiedName,
-    version: String,
-    nodes: Vec<EssGraphNode<'a>>,
-    edges: Vec<EssGraphEdge<'a>>,
-}
-
-/// A command or an event, and who owns it.
-#[derive(serde::Serialize)]
-struct EssGraphNode<'a> {
-    kind: &'static str,
-    name: &'a ess_domain::name::QualifiedName,
-    domain: &'a ess_domain::name::QualifiedName,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    component: Option<&'a ess_domain::component::ComponentName>,
-}
-
-/// A command emitting an event, or an event invoking a command through a binding.
-#[derive(serde::Serialize)]
-struct EssGraphEdge<'a> {
-    kind: &'static str,
-    from: &'a ess_domain::name::QualifiedName,
-    to: &'a ess_domain::name::QualifiedName,
-    /// Which branch emits it — an event emitted only on refusal is not the same edge as one emitted
-    /// on success, and a graph that merged them would say the happy path always produces both.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    outcome: Option<&'a ess_domain::command::OutcomeName>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    binding: Option<&'a ess_domain::binding::BindingName>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    delivery: Option<&'static str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    on_failure: Option<&'static str>,
-}
-
-/// Which component owns which domain.
-///
-/// First owner in component order wins. Two components owning one domain is refused before an IR
-/// exists; if that ever stopped being true, this would still answer the same way twice.
-fn ess_owners(
-    ir: &EssIr,
-) -> std::collections::BTreeMap<
-    &ess_domain::name::QualifiedName,
-    &ess_domain::component::ComponentName,
-> {
-    let mut owners = std::collections::BTreeMap::new();
-    for component in ir.components.values() {
-        for domain in &component.owns {
-            owners.entry(domain.name()).or_insert(&component.name);
-        }
-    }
-    owners
-}
-
-/// Reads the graph out of the IR.
-///
-/// Every iteration here is over a `BTreeMap`, a `BTreeSet` or a declaration-order `Vec`, which is
-/// what makes two runs byte-identical rather than usually byte-identical.
-fn ess_graph_of(ir: &EssIr) -> EssGraph<'_> {
-    let owners = ess_owners(ir);
-    let mut nodes = Vec::new();
-    let mut edges = Vec::new();
-
-    for command in ir.commands.values() {
-        nodes.push(EssGraphNode {
-            kind: "command",
-            name: &command.name,
-            domain: command.domain.name(),
-            component: owners.get(command.domain.name()).copied(),
-        });
-    }
-    for event in ir.events.values() {
-        nodes.push(EssGraphNode {
-            kind: "event",
-            name: &event.name,
-            domain: event.domain.name(),
-            component: owners.get(event.domain.name()).copied(),
-        });
-    }
-
-    for command in ir.commands.values() {
-        for outcome in &command.outcomes {
-            for event in &outcome.emits {
-                edges.push(EssGraphEdge {
-                    kind: "emits",
-                    from: &command.name,
-                    to: event.name(),
-                    outcome: Some(&outcome.name),
-                    binding: None,
-                    delivery: None,
-                    on_failure: None,
-                });
-            }
-        }
-    }
-    // `reactions` rather than the binding map directly: the IR defines this half of the graph, and a
-    // second reading of it here would disagree the first time an event grew a second binding.
-    for (event, bindings) in ir.reactions() {
-        for binding in bindings {
-            edges.push(EssGraphEdge {
-                kind: "invokes",
-                from: event.name(),
-                to: binding.command.name(),
-                outcome: None,
-                binding: Some(&binding.name),
-                delivery: Some(ess_delivery_word(binding.delivery)),
-                on_failure: Some(ess_failure_word(binding.failure)),
-            });
-        }
-    }
-
-    EssGraph {
-        system: &ir.system,
-        version: ir.version.to_string(),
-        nodes,
-        edges,
-    }
-}
-
-/// Escapes what DOT treats specially inside a quoted string.
-///
-/// Nothing in the model can hold a quote or a backslash today. The escaping is here anyway, because
-/// the alternative is a rendering whose correctness depends on a regular expression in another
-/// crate.
-fn dot_escape(value: &str) -> String {
-    value.replace('\\', "\\\\").replace('"', "\\\"")
-}
-
-/// A DOT identifier or attribute value.
-fn dot_string(value: &str) -> String {
-    format!("\"{}\"", dot_escape(value))
-}
-
-/// A DOT label whose parts are shown on separate lines.
-fn dot_label(lines: &[&str]) -> String {
-    let escaped: Vec<String> = lines.iter().map(|line| dot_escape(line)).collect();
-    format!("\"{}\"", escaped.join("\\n"))
-}
-
-/// The graph as DOT, ready for `dot -Tsvg`.
-fn ess_graph_dot(graph: &EssGraph<'_>) {
-    outln!(
-        "// {} {} — {} node(s), {} edge(s)",
-        graph.system,
-        graph.version,
-        graph.nodes.len(),
-        graph.edges.len()
-    );
-    outln!("digraph {} {{", dot_string(&graph.system.to_string()));
-    outln!("  rankdir=LR;");
-    outln!("  node [fontname=\"sans-serif\"];");
-    outln!("  edge [fontname=\"sans-serif\"];");
-
-    let mut owned: std::collections::BTreeMap<&str, Vec<&EssGraphNode<'_>>> =
-        std::collections::BTreeMap::new();
-    let mut unowned: Vec<&EssGraphNode<'_>> = Vec::new();
-    for node in &graph.nodes {
-        match node.component {
-            Some(component) => owned.entry(component.as_str()).or_default().push(node),
-            None => unowned.push(node),
-        }
-    }
-
-    for (component, nodes) in &owned {
-        outln!(
-            "  subgraph {} {{",
-            dot_string(&format!("cluster_{component}"))
-        );
-        outln!("    label={};", dot_string(component));
-        outln!("    style=rounded;");
-        for node in nodes {
-            ess_graph_dot_node(node, 4);
-        }
-        outln!("  }}");
-    }
-    for node in &unowned {
-        ess_graph_dot_node(node, 2);
-    }
-
-    for edge in &graph.edges {
-        ess_graph_dot_edge(edge);
-    }
-
-    outln!("}}");
-}
-
-/// One node, indented to sit inside its cluster or outside every cluster.
-fn ess_graph_dot_node(node: &EssGraphNode<'_>, indent: usize) {
-    // A command is a box and an event is an ellipse, so every arrow's direction is readable without
-    // following the labels: a box makes ellipses, an ellipse re-enters a box.
-    let shape = if node.kind == "command" {
-        "box"
-    } else {
-        "ellipse"
-    };
-    outln!(
-        "{:indent$}{} [label={}, shape={shape}];",
-        "",
-        dot_string(&node.name.to_string()),
-        dot_label(&[node.name.local(), &node.domain.to_string()]),
-        indent = indent
-    );
-}
-
-/// One edge, labelled with what makes it happen.
-fn ess_graph_dot_edge(edge: &EssGraphEdge<'_>) {
-    let label = match (edge.binding, edge.delivery, edge.on_failure, edge.outcome) {
-        (Some(binding), Some(delivery), Some(failure), _) => {
-            dot_label(&[binding.as_str(), &format!("{delivery} / {failure}")])
-        }
-        (_, _, _, Some(outcome)) => dot_label(&["emits", &outcome.to_string()]),
-        _ => dot_label(&[edge.kind]),
-    };
-    // A binding crosses contexts asynchronously; an emission is part of the command. Dashing the
-    // first is the one visual difference a reader needs in order to see where a queue is.
-    let style = if edge.binding.is_some() {
-        ", style=dashed"
-    } else {
-        ""
-    };
-    outln!(
-        "  {} -> {} [label={label}{style}];",
-        dot_string(&edge.from.to_string()),
-        dot_string(&edge.to.to_string())
-    );
-}
-
 /// `protocol ess graph`
-fn ess_graph(path: &Path, format: Format) -> Result<ExitCode> {
-    let ir = match ess_compiled(path, format)? {
+///
+/// The graph itself comes from `ess-gen`, which is where the documentation page's copy of it comes
+/// from too. Both renderings project one `SystemGraph`, so this verb and the generated
+/// `docs/README.md` cannot come to draw two different pictures of one system.
+fn ess_graph(path: &Path, format: GraphFormat) -> Result<ExitCode> {
+    let ir = match ess_compiled(path, format.diagnostics())? {
         EssCompiled::Compiled { ir, .. } => ir,
         EssCompiled::Reported => return Ok(exit_code(false)),
     };
 
-    let graph = ess_graph_of(&ir);
+    let graph = SystemGraph::of(&ir);
     match format {
-        Format::Text => ess_graph_dot(&graph),
-        Format::Yaml | Format::Json => print_serialised(&graph, format)?,
+        // No fence around the Mermaid: this is what a reader redirects into a file or pastes into a
+        // pull request, and three backticks they did not ask for are three characters to delete.
+        GraphFormat::Mermaid => out!("{}", graph.mermaid()),
+        GraphFormat::Dot => out!("{}", graph.dot()),
+        GraphFormat::Yaml => print_serialised(&graph, Format::Yaml)?,
+        GraphFormat::Json => print_serialised(&graph, Format::Json)?,
     }
 
     Ok(ExitCode::SUCCESS)

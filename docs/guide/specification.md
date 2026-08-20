@@ -17,7 +17,7 @@ its HTTP layer.
 | Refuse a malformed one, naming every problem at once | same, exit 1 |
 | Resolve every reference into a normalized IR | `protocol ess compile --path <path>` |
 | Look one declaration up, resolved | `protocol ess inspect --path <path> <name>` |
-| See the event/command graph | `protocol ess graph --path <path>` (DOT) |
+| See the actor/command/event graph | `protocol ess graph --path <path> --format dot\|mermaid\|json\|yaml` |
 | Derive documentation, schemas and contracts | `protocol ess generate --kind docs\|schema\|openapi\|asyncapi` |
 | Validate in an editor as you type | [`schemas/generated/ess.schema.json`](../../schemas/generated/ess.schema.json) |
 | Require conformance to one, as a protocol rule | [`principles/verification/ess-conformance.yaml`](../../principles/verification/ess-conformance.yaml) |
@@ -27,6 +27,24 @@ its HTTP layer.
 implementation that proves a generated suite bites. What exists is the model, the compiler that
 resolves it, four projections derived from it, and the join: a task can already be blocked until
 something proves an implementation conforms, with a human producing that evidence by hand.
+
+### The graph, without generating a documentation tree
+
+`protocol ess graph` prints the same picture the generated `docs/README.md` opens with — the actors,
+the commands each component accepts, the events it publishes, and the bindings between them.
+
+| `--format` | output |
+|---|---|
+| `dot` (default, and `text` still means it) | Graphviz, for `dot -Tsvg` |
+| `mermaid` | a `flowchart`, unfenced, to redirect into a Markdown file or paste into a pull request |
+| `json`, `yaml` | the nodes, edges and groups themselves |
+
+```console
+protocol ess graph --path examples/billing --format mermaid >> notes.md
+```
+
+One renderer produces both the CLI's diagram and the page's, so the two cannot drift apart;
+`crates/protocol-cli/tests/graph.rs` compares them and fails if they do.
 
 ### What gets derived, and what each projection is for
 

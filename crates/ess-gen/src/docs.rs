@@ -34,7 +34,7 @@
 //! `tests/docs.rs` generates twice and compares bytes, because that is the only form in which this
 //! paragraph is worth anything.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use ess_compiler::ir::{
@@ -51,6 +51,7 @@ use ess_domain::name::{Naming, QualifiedName};
 use ess_domain::view::{AssertionStyle, Consistency};
 
 use crate::artifact::{Artifact, Generator};
+use crate::graph::{label, SystemGraph};
 use crate::provenance::Provenance;
 
 /// Markdown and Mermaid: the cheapest check that every construct can be described.
@@ -1696,148 +1697,14 @@ fn failure_label(ir: &EssIr, binding: &ResolvedBinding) -> String {
     }
 }
 
-/// The whole system: actors, then commands and events grouped by the component that owns them.
+/// The whole system: actors, and the commands and events each component declares.
+///
+/// The diagram is [`SystemGraph`]'s, fenced. The graph itself is not read here: `protocol ess
+/// graph` publishes the same picture, and a second reading of the IR in this file is how the two
+/// came to be different graphs wearing one name — see [`crate::graph`] for what they disagreed
+/// about. The fence is this page's furniture and the only thing added.
 fn system_graph(ir: &EssIr) -> String {
-    let commands: BTreeMap<&QualifiedName, String> = ir
-        .commands
-        .keys()
-        .enumerate()
-        .map(|(index, name)| (name, format!("cmd{index}")))
-        .collect();
-    let events: BTreeMap<&QualifiedName, String> = ir
-        .events
-        .keys()
-        .enumerate()
-        .map(|(index, name)| (name, format!("evt{index}")))
-        .collect();
-    let actors: BTreeMap<&QualifiedName, String> = ir
-        .actors
-        .keys()
-        .enumerate()
-        .map(|(index, name)| (name, format!("who{index}")))
-        .collect();
-
-    let mut out = String::from("```mermaid\nflowchart TB\n");
-    system_graph_actors(&actors, &mut out);
-    let mut placed: BTreeSet<&QualifiedName> = BTreeSet::new();
-    for (index, component) in ir.components.values().enumerate() {
-        let _ = writeln!(
-            out,
-            "    subgraph unit{index}[\"{}\"]",
-            label(component.name.as_str())
-        );
-        for handle in &component.accepts {
-            placed.insert(handle.name());
-            let _ = writeln!(
-                out,
-                "        {}[\"{}\"]",
-                commands[handle.name()],
-                label(&handle.to_string())
-            );
-        }
-        for handle in &component.publishes {
-            placed.insert(handle.name());
-            let _ = writeln!(
-                out,
-                "        {}[\"{}\"]",
-                events[handle.name()],
-                label(&handle.to_string())
-            );
-        }
-        out.push_str("    end\n");
-    }
-    system_graph_orphans(&commands, &events, &placed, &mut out);
-    system_graph_edges(ir, &commands, &events, &actors, &mut out);
-    out.push_str("```\n");
-    out
-}
-
-/// The actors, in a group of their own outside every component.
-///
-/// Outside on purpose. An actor is who *asks*, not something a component holds, and drawing one
-/// inside `invoice-service` would claim the service contains it. Drawn first because that is where
-/// design §9's graph starts, and an actor with no outgoing edge stays in the picture: "may invoke
-/// nothing" is a grant list, not a missing arrow.
-fn system_graph_actors(actors: &BTreeMap<&QualifiedName, String>, out: &mut String) {
-    if actors.is_empty() {
-        return;
-    }
-    let _ = writeln!(out, "    subgraph who[\"who may ask\"]");
-    for (name, id) in actors {
-        let _ = writeln!(out, "        {id}[\"{}\"]", label(&name.to_string()));
-    }
-    out.push_str("    end\n");
-}
-
-/// The commands and events no component claims, drawn outside every box.
-///
-/// Their own group rather than silently dropped: a command no component accepts is a hole in the
-/// decomposition, and it should look like one.
-fn system_graph_orphans(
-    commands: &BTreeMap<&QualifiedName, String>,
-    events: &BTreeMap<&QualifiedName, String>,
-    placed: &BTreeSet<&QualifiedName>,
-    out: &mut String,
-) {
-    let loose: Vec<_> = commands
-        .iter()
-        .chain(events.iter())
-        .filter(|(name, _)| !placed.contains(*name))
-        .collect();
-    if loose.is_empty() {
-        return;
-    }
-    let _ = writeln!(out, "    subgraph unowned[\"owned by no component\"]");
-    for (name, id) in loose {
-        let _ = writeln!(out, "        {id}[\"{}\"]", label(&name.to_string()));
-    }
-    out.push_str("    end\n");
-}
-
-/// Actor may invoke command, command emits event, and binding carries event into command.
-///
-/// Three edge kinds and three shapes, because a reader has to be able to tell a permission from a
-/// consequence: a grant is solid out of an actor, an emission is solid out of a command, and a
-/// binding is dashed.
-fn system_graph_edges(
-    ir: &EssIr,
-    commands: &BTreeMap<&QualifiedName, String>,
-    events: &BTreeMap<&QualifiedName, String>,
-    actors: &BTreeMap<&QualifiedName, String>,
-    out: &mut String,
-) {
-    for actor in ir.actors.values() {
-        for handle in &actor.may {
-            let _ = writeln!(
-                out,
-                "    {} -->|\"may invoke\"| {}",
-                actors[&actor.name],
-                commands[handle.name()]
-            );
-        }
-    }
-    for command in ir.commands.values() {
-        for outcome in &command.outcomes {
-            for handle in &outcome.emits {
-                let _ = writeln!(
-                    out,
-                    "    {} -->|\"{}\"| {}",
-                    commands[&command.name],
-                    label(outcome.name.as_str()),
-                    events[handle.name()]
-                );
-            }
-        }
-    }
-    for binding in ir.bindings.values() {
-        let _ = writeln!(
-            out,
-            "    {} -.->|\"{}\"| {}",
-            events[binding.event.name()],
-            label(binding.name.as_str()),
-            commands[binding.command.name()]
-        );
-    }
+    format!("```mermaid\n{}```\n", SystemGraph::of(ir).mermaid())
 }
 
 // ---- plumbing ---------------------------------------------------------------------------------
@@ -2028,11 +1895,6 @@ fn quote(text: &str) -> String {
 /// Text safe inside a Markdown table cell.
 fn cell(text: &str) -> String {
     text.replace('|', "\\|").replace('\n', " ")
-}
-
-/// Text safe inside a Mermaid quoted label.
-fn label(text: &str) -> String {
-    text.replace('"', "#quot;").replace('\n', " ")
 }
 
 /// An English list: `a`, `a and b`, `a, b and c`.

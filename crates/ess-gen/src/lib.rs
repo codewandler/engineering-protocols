@@ -28,11 +28,13 @@
 pub mod artifact;
 pub mod asyncapi;
 pub mod docs;
+pub mod graph;
 pub mod openapi;
 pub mod provenance;
 pub mod schema;
 
 pub use artifact::{Artifact, Generator};
+pub use graph::SystemGraph;
 pub use provenance::Provenance;
 
 /// Every projection this build publishes, in the order they were built.
