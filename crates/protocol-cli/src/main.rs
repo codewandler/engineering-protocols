@@ -6,6 +6,7 @@
 //!
 //! Exit codes: `0` success, `1` the documents or the execution say no, `2` bad usage.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -36,6 +37,13 @@ const SEED_ACTOR: &str = "service:protocol-cli";
 /// Fixed so two runs over the same manifest produce byte-identical output. A wall clock here would
 /// make every `--format json` diff noise.
 const SEED_AT: Timestamp = Timestamp::EPOCH;
+
+/// The file that makes a directory a specification rather than a directory that holds YAML.
+///
+/// A specification directory is recognised, not assumed: `--path` defaults to `.`, so without a
+/// marker every `protocol ess validate` typed in an ordinary repository would read its CI workflow
+/// and its fixtures and call each one a broken specification.
+const SPECIFICATION_HEADER: &str = "system.yaml";
 
 /// Reference CLI for the Agentic Engineering Protocol.
 #[derive(Debug, Parser)]
@@ -128,6 +136,12 @@ enum Command {
         /// How to render the result.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
+    },
+    /// Work with an executable system specification.
+    Ess {
+        /// What to do with it.
+        #[command(subcommand)]
+        command: EssCommand,
     },
     /// Resolve a task into an execution plan.
     Resolve(ExecutionArgs),
@@ -325,6 +339,9 @@ fn run() -> Result<ExitCode> {
             artifacts,
             format,
         } => validate(&root, artifacts.as_deref(), format),
+        Command::Ess { command } => match command {
+            EssCommand::Validate { path, format } => ess_validate(&path, format),
+        },
         Command::Resolve(args) => resolve(&args),
         Command::Inspect {
             root,
@@ -472,6 +489,180 @@ fn kebab(value: &str) -> String {
         }
     }
     rendered
+}
+
+/// What can be done with a specification.
+#[derive(Debug, Subcommand)]
+enum EssCommand {
+    /// Check that a specification is well formed and internally consistent.
+    Validate {
+        /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// How to render the result.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+}
+
+/// Every `.yaml` file that makes up a specification, in a stable order.
+///
+/// A specification may be one file or a directory (design §24), and the two are told apart by
+/// asking the filesystem rather than by a flag: an author who has just split one file into a
+/// directory should not also have to change how they invoke the tool.
+fn ess_files(path: &Path) -> Result<Vec<PathBuf>> {
+    if path.is_file() {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    if !path.join(SPECIFICATION_HEADER).is_file() {
+        bail!(
+            "{} is not a specification: a specification directory holds `{SPECIFICATION_HEADER}` \
+             (point --path at the specification, or at the single file it is written in)",
+            path.display()
+        );
+    }
+
+    let mut found = Vec::new();
+    let mut visited = BTreeSet::new();
+    let mut directories = vec![path.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        // A symlink pointing back up the tree makes the walk re-enter directories it has already
+        // read, under an ever longer name, so every file is read again and again and declares
+        // everything in it a second time. Left to itself it stops only when the path outgrows what
+        // the filesystem will open.
+        let identity = directory
+            .canonicalize()
+            .with_context(|| format!("resolving {}", directory.display()))?;
+        if !visited.insert(identity) {
+            continue;
+        }
+        let entries =
+            fs::read_dir(&directory).with_context(|| format!("reading {}", directory.display()))?;
+        for entry in entries {
+            let entry = entry.with_context(|| format!("reading {}", directory.display()))?;
+            let child = entry.path();
+            if child.is_dir() {
+                directories.push(child);
+            } else if child
+                .extension()
+                .is_some_and(|ext| ext == "yaml" || ext == "yml")
+            {
+                found.push(child);
+            }
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// `protocol ess validate`
+fn ess_validate(path: &Path, format: Format) -> Result<ExitCode> {
+    let root = path
+        .canonicalize()
+        .with_context(|| format!("resolving {}", path.display()))?;
+    let files = ess_files(&root)?;
+
+    // What a source is named relative to. For a one-file specification that is the directory
+    // holding it: relative to the file itself every path is empty, which leaves each diagnostic
+    // naming no file at all — in the one case where there is nothing else to go on.
+    let base = if root.is_file() {
+        root.parent().unwrap_or(root.as_path())
+    } else {
+        root.as_path()
+    };
+
+    let mut parsed = Vec::new();
+    let mut problems: Vec<String> = Vec::new();
+    for file in &files {
+        // The source is the path the author typed, not the absolute one: an error that names
+        // `/home/someone/checkout/domains/invoice.yaml` is harder to act on than one naming
+        // `domains/invoice.yaml`, and impossible to compare between two machines.
+        let relative = file.strip_prefix(base).unwrap_or(file.as_path());
+        let source = ess_domain::system::Source::new(relative.display().to_string());
+        let text =
+            fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
+        match serde_yaml::from_str::<ess_domain::spec::RawSpecFile>(&text) {
+            Ok(raw) => parsed.push((source, raw)),
+            Err(error) => problems.push(format!("{}: {error}", source.as_str())),
+        }
+    }
+
+    let mut summary = EssSummary {
+        files_read: files.len(),
+        ..EssSummary::default()
+    };
+
+    // A file that did not parse cannot be assembled with the rest, and assembling the remainder
+    // would report every reference into it as undeclared — noise on top of the real error.
+    if problems.is_empty() {
+        match ess_domain::spec::Specification::assemble(parsed) {
+            Ok(specification) => {
+                summary.system = Some(specification.system.name.to_string());
+                summary.version = Some(specification.system.version.to_string());
+                summary.domains = specification.system.domains.len();
+                summary.entities = specification.entities.len();
+                summary.commands = specification.commands.len();
+                summary.events = specification.events.len();
+                summary.errors = specification.errors.len();
+                summary.views = specification.views.len();
+                summary.actors = specification.actors.len();
+            }
+            Err(errors) => {
+                problems.extend(errors.as_slice().iter().map(ToString::to_string));
+            }
+        }
+    }
+    summary.problems.clone_from(&problems);
+
+    match format {
+        Format::Text => {
+            if let Some(system) = &summary.system {
+                outln!(
+                    "{} {} — {} file(s): {} domain(s), {} entit(ies), {} command(s), {} event(s), \
+                     {} error(s), {} view(s), {} actor(s)",
+                    system,
+                    summary.version.as_deref().unwrap_or("?"),
+                    summary.files_read,
+                    summary.domains,
+                    summary.entities,
+                    summary.commands,
+                    summary.events,
+                    summary.errors,
+                    summary.views,
+                    summary.actors
+                );
+            } else {
+                outln!("{} file(s)", summary.files_read);
+            }
+            if problems.is_empty() {
+                outln!("valid");
+            } else {
+                outln!("{} problem(s):", problems.len());
+                for problem in &problems {
+                    outln!("  - {problem}");
+                }
+            }
+        }
+        Format::Yaml | Format::Json => print_serialised(&summary, format)?,
+    }
+
+    Ok(exit_code(problems.is_empty()))
+}
+
+/// What `ess validate` reports.
+#[derive(Debug, Default, serde::Serialize)]
+struct EssSummary {
+    system: Option<String>,
+    version: Option<String>,
+    files_read: usize,
+    domains: usize,
+    entities: usize,
+    commands: usize,
+    events: usize,
+    errors: usize,
+    views: usize,
+    actors: usize,
+    problems: Vec<String>,
 }
 
 /// `protocol validate`

@@ -666,7 +666,9 @@ pub struct SpecificationRecord {
 ///
 /// Facts: `ess_conformance.{status,passed,spec_version}`,
 /// `ess_conformance.scenarios.{total,failed}`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(deny_unknown_fields)]
 pub struct EssConformanceResult {
     /// Which specification, at which version, such as `billing/v3`.
@@ -794,24 +796,11 @@ pub struct Provenance {
 }
 
 /// A kind of evidence.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-    schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum EvidenceKind {
     /// A test run.
-    #[serde(alias = "test_execution")]
     TestResult,
     /// Static analysis output.
     StaticAnalysis,
@@ -828,22 +817,16 @@ pub enum EvidenceKind {
     /// A human approval.
     Approval,
     /// A set of source changes.
-    #[serde(alias = "source_diff")]
     Diff,
     /// An observation about an artifact.
-    #[serde(alias = "artifact_evidence")]
     Artifact,
     /// A review outcome.
-    #[serde(alias = "review_result")]
     Review,
     /// A verifier's statement about a claim.
-    #[serde(alias = "verification_record")]
     Verification,
     /// Specification satisfaction.
-    #[serde(alias = "specification_record")]
     Specification,
     /// An implementation checked against an executable system specification.
-    #[serde(alias = "ess_conformance_result")]
     EssConformance,
 }
 
@@ -886,32 +869,42 @@ impl EvidenceKind {
         }
     }
 
+    /// Spellings accepted alongside [`EvidenceKind::as_str`], kept for documents written against
+    /// earlier drafts.
+    ///
+    /// One list, read by [`EvidenceKind::parse`], by `Deserialize` through it, and by the generated
+    /// schema. It used to be three — a `match` arm, a `#[serde(alias)]` and nothing at all in the
+    /// schema — which is how the published vocabulary came to be smaller than the parser's.
+    pub const ALIASES: &'static [(&'static str, Self)] = &[
+        ("test_execution", Self::TestResult),
+        ("source_diff", Self::Diff),
+        ("artifact_evidence", Self::Artifact),
+        ("review_result", Self::Review),
+        ("verification_record", Self::Verification),
+        ("specification_record", Self::Specification),
+        ("ess_conformance_result", Self::EssConformance),
+    ];
+
     /// Parses a kind name, accepting the documented aliases.
     pub fn parse(value: &str) -> Result<Self, ParseError> {
         if let Some(known) = Self::ALL.iter().find(|kind| kind.as_str() == value) {
             return Ok(*known);
         }
-        match value {
-            "test_execution" => Ok(Self::TestResult),
-            "source_diff" => Ok(Self::Diff),
-            "artifact_evidence" => Ok(Self::Artifact),
-            "review_result" => Ok(Self::Review),
-            "verification_record" => Ok(Self::Verification),
-            "specification_record" => Ok(Self::Specification),
-            "ess_conformance_result" => Ok(Self::EssConformance),
-            other => Err(ParseError::identifier(
-                "evidence kind",
-                other,
-                format!(
-                    "expected one of {}",
-                    Self::ALL
-                        .iter()
-                        .map(|kind| kind.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ),
-            )),
+        if let Some((_, kind)) = Self::ALIASES.iter().find(|(alias, _)| *alias == value) {
+            return Ok(*kind);
         }
+        Err(ParseError::identifier(
+            "evidence kind",
+            value,
+            format!(
+                "expected one of {}",
+                Self::ALL
+                    .iter()
+                    .map(|kind| kind.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        ))
     }
 
     /// Verifier classes that can establish this kind of evidence.
@@ -949,6 +942,42 @@ impl std::str::FromStr for EvidenceKind {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         Self::parse(value)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for EvidenceKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse(&raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for EvidenceKind {
+    fn schema_name() -> String {
+        "EvidenceKind".to_owned()
+    }
+
+    // Written by hand because [`EvidenceKind::parse`] is: it accepts the aliases as well as the
+    // canonical names, and a derived schema publishes only what the variants are called — so an
+    // editor marks `source_diff` invalid in a document the engine reads without complaint.
+    fn json_schema(_: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let spellings = Self::ALL
+            .iter()
+            .map(|kind| kind.as_str().to_owned())
+            .chain(Self::ALIASES.iter().map(|(alias, _)| (*alias).to_owned()))
+            .map(serde_json::Value::String)
+            .collect();
+        let mut schema = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        };
+        schema.enum_values = Some(spellings);
+        schema.metadata().description = Some(
+            "A kind of evidence. The canonical names come first; the rest are older spellings \
+             still accepted."
+                .to_owned(),
+        );
+        schema.into()
     }
 }
 
@@ -1347,7 +1376,10 @@ impl Evidence {
             }
             Self::EssConformance(result) => {
                 let base = path(&["ess_conformance"]);
-                facts.push((base.child("status"), FactValue::text(result.status.as_str())));
+                facts.push((
+                    base.child("status"),
+                    FactValue::text(result.status.as_str()),
+                ));
                 facts.push((
                     base.child("passed"),
                     FactValue::bool(result.status.is_pass() && result.scenarios_failed == 0),
@@ -1593,7 +1625,10 @@ mod tests {
         });
         let facts = store(&evidence);
 
-        assert_eq!(value(&facts, "ess_conformance.passed"), Some(FactValue::bool(true)));
+        assert_eq!(
+            value(&facts, "ess_conformance.passed"),
+            Some(FactValue::bool(true))
+        );
         assert_eq!(
             value(&facts, "ess_conformance.spec_version"),
             Some(FactValue::text("billing/v3"))
@@ -1630,7 +1665,11 @@ mod tests {
             value(&facts, "ess_conformance.scenarios.failed"),
             Some(FactValue::count(2))
         );
-        assert!(evidence.summary().contains("2/24"), "{}", evidence.summary());
+        assert!(
+            evidence.summary().contains("2/24"),
+            "{}",
+            evidence.summary()
+        );
     }
 
     #[test]
@@ -1653,6 +1692,26 @@ mod tests {
             EvidenceKind::Diff
         );
         assert!(EvidenceKind::parse("vibes").is_err());
+    }
+
+    #[test]
+    fn deserializing_an_evidence_kind_accepts_exactly_what_parsing_it_accepts() {
+        // The generated schema publishes `ALL` and `ALIASES`; `Deserialize` goes through `parse`,
+        // so the vocabulary an editor is shown and the one a document is read with are one list.
+        for kind in EvidenceKind::ALL {
+            let parsed: EvidenceKind = serde_json::from_str(&format!("\"{}\"", kind.as_str()))
+                .expect("serde reads the canonical name");
+            assert_eq!(parsed, *kind);
+        }
+        for (alias, kind) in EvidenceKind::ALIASES {
+            let parsed: EvidenceKind =
+                serde_json::from_str(&format!("\"{alias}\"")).expect("serde reads the alias");
+            assert_eq!(parsed, *kind, "serde reads `{alias}` as something else");
+        }
+        assert!(
+            serde_json::from_str::<EvidenceKind>("\"vibes\"").is_err(),
+            "serde must refuse a kind `parse` refuses"
+        );
     }
 
     #[test]

@@ -193,106 +193,30 @@
       "type": "string"
     },
     "EvidenceKind": {
-      "description": "A kind of evidence.",
-      "oneOf": [
-        {
-          "description": "A test run.",
-          "type": "string",
-          "enum": [
-            "test_result"
-          ]
-        },
-        {
-          "description": "Static analysis output.",
-          "type": "string",
-          "enum": [
-            "static_analysis"
-          ]
-        },
-        {
-          "description": "Contract verification output.",
-          "type": "string",
-          "enum": [
-            "contract_result"
-          ]
-        },
-        {
-          "description": "A property test.",
-          "type": "string",
-          "enum": [
-            "property_test_result"
-          ]
-        },
-        {
-          "description": "A deployment.",
-          "type": "string",
-          "enum": [
-            "deployment_result"
-          ]
-        },
-        {
-          "description": "A measured value.",
-          "type": "string",
-          "enum": [
-            "metric_observation"
-          ]
-        },
-        {
-          "description": "A health check.",
-          "type": "string",
-          "enum": [
-            "health_observation"
-          ]
-        },
-        {
-          "description": "A human approval.",
-          "type": "string",
-          "enum": [
-            "approval"
-          ]
-        },
-        {
-          "description": "A set of source changes.",
-          "type": "string",
-          "enum": [
-            "diff"
-          ]
-        },
-        {
-          "description": "An observation about an artifact.",
-          "type": "string",
-          "enum": [
-            "artifact"
-          ]
-        },
-        {
-          "description": "A review outcome.",
-          "type": "string",
-          "enum": [
-            "review"
-          ]
-        },
-        {
-          "description": "A verifier's statement about a claim.",
-          "type": "string",
-          "enum": [
-            "verification"
-          ]
-        },
-        {
-          "description": "Specification satisfaction.",
-          "type": "string",
-          "enum": [
-            "specification"
-          ]
-        },
-        {
-          "description": "An implementation checked against an executable system specification.",
-          "type": "string",
-          "enum": [
-            "ess_conformance"
-          ]
-        }
+      "description": "A kind of evidence. The canonical names come first; the rest are older spellings still accepted.",
+      "type": "string",
+      "enum": [
+        "test_result",
+        "static_analysis",
+        "contract_result",
+        "property_test_result",
+        "deployment_result",
+        "metric_observation",
+        "health_observation",
+        "approval",
+        "diff",
+        "artifact",
+        "review",
+        "verification",
+        "specification",
+        "ess_conformance",
+        "test_execution",
+        "source_diff",
+        "artifact_evidence",
+        "review_result",
+        "verification_record",
+        "specification_record",
+        "ess_conformance_result"
       ]
     },
     "FactPattern": {

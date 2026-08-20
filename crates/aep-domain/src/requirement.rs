@@ -43,6 +43,9 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use schemars::gen::SchemaGenerator;
+use schemars::schema::{ArrayValidation, InstanceType, NumberValidation, Schema, SchemaObject};
+
 use crate::artifact::{
     Artifact, ArtifactGraph, ArtifactKind, ArtifactRef, ArtifactStatus, RelationKind,
 };
@@ -173,7 +176,7 @@ impl RequirementReport {
 }
 
 /// Evidence that must have been produced.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct EvidenceRequirement {
     /// Which kind of evidence.
     pub kind: EvidenceKind,
@@ -315,7 +318,7 @@ impl fmt::Display for EvidenceRequirement {
 }
 
 /// A relationship an artifact must have.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct RelationRequirement {
     /// Which relation.
     pub kind: RelationKind,
@@ -334,7 +337,7 @@ impl fmt::Display for RelationRequirement {
 }
 
 /// An artifact that must exist in the graph.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ArtifactRequirement {
     /// Which kind of artifact; kinds that specialise it also count.
     pub kind: ArtifactKind,
@@ -518,7 +521,7 @@ impl fmt::Display for ArtifactRequirement {
 }
 
 /// A review that must have happened.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ReviewRequirement {
     /// What kind of thing must have been reviewed.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -705,7 +708,7 @@ impl fmt::Display for ReviewRequirement {
 }
 
 /// An approval that must have been granted.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ApprovalRequirement {
     /// Which approval.
     pub approval: ApprovalId,
@@ -806,7 +809,7 @@ impl fmt::Display for ApprovalRequirement {
 /// This is where governance stops being a convention: *if* the change is architectural, *then*
 /// an architecture design and an ADR are required — checkable, and not dependent on anyone
 /// remembering the rule.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ConditionalRequirement {
     /// When these requirements apply.
     pub when: Predicate,
@@ -848,7 +851,7 @@ impl ConditionalRequirement {
 }
 
 /// Everything that must hold at one point in a workflow.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct RequirementSet {
     /// Conditions over facts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1204,6 +1207,285 @@ impl<'de> serde::Deserialize<'de> for ApprovalRequirement {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let node = Node::deserialize(deserializer)?;
         Self::from_node(&node).map_err(serde::de::Error::custom)
+    }
+}
+
+// The document form of a requirement is not the shape of the validated type. `EvidenceRequirement`
+// stores `at_least` and `independent` because evaluation needs them, and `from_node` supplies both
+// from defaults nobody writes; a schema derived from the stored shape therefore declares
+// `- verification` — the form every principle in this repository uses — invalid. These impls
+// describe what `from_node` accepts, and sit beside it so the two are read together.
+
+/// An object schema with these properties, none required.
+///
+/// Unknown keys stay allowed on purpose: every `from_node` here reads the keys it knows and leaves
+/// the rest, so a schema that forbade them would refuse documents the engine accepts.
+fn mapping(properties: Vec<(&str, Schema)>) -> SchemaObject {
+    let mut schema = SchemaObject {
+        instance_type: Some(InstanceType::Object.into()),
+        ..Default::default()
+    };
+    for (name, property) in properties {
+        schema.object().properties.insert(name.to_owned(), property);
+    }
+    schema
+}
+
+/// A schema satisfied by any mapping carrying `key`, for "one of these spellings".
+fn carries(key: &str) -> Schema {
+    let mut schema = SchemaObject::default();
+    schema.object().required.insert(key.to_owned());
+    schema.into()
+}
+
+/// The shorthand form or the mapping form, which no value can be both of.
+fn either(shorthand: Schema, mapping: SchemaObject, description: &str) -> Schema {
+    let mut schema = SchemaObject::default();
+    schema.subschemas().one_of = Some(vec![shorthand, mapping.into()]);
+    schema.metadata().description = Some(description.to_owned());
+    schema.into()
+}
+
+/// A count, as [`number_field`] reads one.
+fn count() -> Schema {
+    SchemaObject {
+        instance_type: Some(InstanceType::Integer.into()),
+        number: Some(Box::new(NumberValidation {
+            minimum: Some(0.0),
+            ..Default::default()
+        })),
+        ..Default::default()
+    }
+    .into()
+}
+
+/// One item or a list of them, as [`Node::as_seq_or_single`] reads one.
+fn one_or_many(item: Schema) -> Schema {
+    let list = SchemaObject {
+        instance_type: Some(InstanceType::Array.into()),
+        array: Some(Box::new(ArrayValidation {
+            items: Some(item.clone().into()),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    let mut schema = SchemaObject::default();
+    schema.subschemas().any_of = Some(vec![item, list.into()]);
+    schema.into()
+}
+
+/// The statuses a requirement may name.
+///
+/// [`parse_status`] normalises `-` to `_`, so `in-review` is accepted where the `ArtifactStatus`
+/// schema — which knows only the canonical spelling — would refuse it.
+fn requirement_status() -> Schema {
+    let mut spellings = Vec::new();
+    for status in ArtifactStatus::ALL {
+        spellings.push(serde_json::Value::String(status.as_str().to_owned()));
+        let hyphenated = status.as_str().replace('_', "-");
+        if hyphenated != status.as_str() {
+            spellings.push(serde_json::Value::String(hyphenated));
+        }
+    }
+    let mut schema = SchemaObject {
+        instance_type: Some(InstanceType::String.into()),
+        ..Default::default()
+    };
+    schema.enum_values = Some(spellings);
+    schema.metadata().description = Some("The status the artifact must have reached.".to_owned());
+    schema.into()
+}
+
+impl schemars::JsonSchema for EvidenceRequirement {
+    fn schema_name() -> String {
+        "EvidenceRequirement".to_owned()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut form = mapping(vec![
+            ("kind", generator.subschema_for::<EvidenceKind>()),
+            ("at_least", count()),
+            ("subject", generator.subschema_for::<SubjectRef>()),
+            ("verifier", generator.subschema_for::<Verifier>()),
+            ("independent", <bool>::json_schema(generator)),
+        ]);
+        form.object().required.insert("kind".to_owned());
+        either(
+            generator.subschema_for::<EvidenceKind>(),
+            form,
+            "Evidence that must have been produced: an evidence kind on its own, or a mapping \
+             naming the `kind` and adding `at_least` (1 by default), `subject`, `verifier` and \
+             `independent` (false by default).",
+        )
+    }
+}
+
+impl schemars::JsonSchema for RelationRequirement {
+    fn schema_name() -> String {
+        "RelationRequirement".to_owned()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut form = mapping(vec![
+            ("kind", generator.subschema_for::<RelationKind>()),
+            ("target_kind", generator.subschema_for::<ArtifactKind>()),
+        ]);
+        form.object().required.insert("kind".to_owned());
+        either(
+            generator.subschema_for::<RelationKind>(),
+            form,
+            "A relationship the artifact must have: a relation name on its own, or a mapping \
+             naming the `kind` and the `target_kind` it must point at.",
+        )
+    }
+}
+
+impl schemars::JsonSchema for ArtifactRequirement {
+    fn schema_name() -> String {
+        "ArtifactRequirement".to_owned()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut form = mapping(vec![
+            ("kind", generator.subschema_for::<ArtifactKind>()),
+            ("status", requirement_status()),
+            ("at_least", count()),
+            ("relation", generator.subschema_for::<RelationRequirement>()),
+            ("fresh", <bool>::json_schema(generator)),
+        ]);
+        form.object().required.insert("kind".to_owned());
+        either(
+            generator.subschema_for::<ArtifactKind>(),
+            form,
+            "An artifact that must exist: an artifact kind on its own, or a mapping naming the \
+             `kind` and adding `status`, `at_least` (1 by default), `relation` and `fresh` (true \
+             by default).",
+        )
+    }
+}
+
+impl schemars::JsonSchema for ReviewRequirement {
+    fn schema_name() -> String {
+        "ReviewRequirement".to_owned()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut form = mapping(vec![
+            ("subject_kind", generator.subschema_for::<ArtifactKind>()),
+            ("kind", generator.subschema_for::<ArtifactKind>()),
+            ("subject", generator.subschema_for::<ArtifactRef>()),
+            ("result", generator.subschema_for::<ReviewDisposition>()),
+            ("human", <bool>::json_schema(generator)),
+            ("fresh", <bool>::json_schema(generator)),
+        ]);
+        // A review requirement that says neither what kind of thing nor which thing was reviewed
+        // matches every review there is, which is never what an author meant.
+        form.subschemas().any_of = Some(vec![
+            carries("subject_kind"),
+            carries("kind"),
+            carries("subject"),
+        ]);
+        either(
+            generator.subschema_for::<ArtifactKind>(),
+            form,
+            "A review that must have happened: an artifact kind on its own, meaning an approving \
+             review of one, or a mapping naming `subject_kind` (or `kind`) or a specific \
+             `subject`, and adding `result` (approved by default), `human` and `fresh`.",
+        )
+    }
+}
+
+impl schemars::JsonSchema for ApprovalRequirement {
+    fn schema_name() -> String {
+        "ApprovalRequirement".to_owned()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut form = mapping(vec![
+            ("approval", generator.subschema_for::<ApprovalId>()),
+            ("id", generator.subschema_for::<ApprovalId>()),
+            ("human", <bool>::json_schema(generator)),
+        ]);
+        form.subschemas().any_of = Some(vec![carries("approval"), carries("id")]);
+        either(
+            generator.subschema_for::<ApprovalId>(),
+            form,
+            "An approval that must have been granted: an approval identifier on its own, or a \
+             mapping naming the `approval` (or `id`) and whether a person must have granted it.",
+        )
+    }
+}
+
+impl schemars::JsonSchema for ConditionalRequirement {
+    fn schema_name() -> String {
+        "ConditionalRequirement".to_owned()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut form = mapping(vec![
+            ("when", generator.subschema_for::<Predicate>()),
+            ("require", generator.subschema_for::<RequirementSet>()),
+            ("requires", generator.subschema_for::<RequirementSet>()),
+        ]);
+        form.object().required.insert("when".to_owned());
+        form.subschemas().any_of = Some(vec![carries("require"), carries("requires")]);
+        form.metadata().description = Some(
+            "Requirements that apply only when a condition holds: `when` says under what, \
+             `require` (or `requires`) says what is then owed."
+                .to_owned(),
+        );
+        form.into()
+    }
+}
+
+impl schemars::JsonSchema for RequirementSet {
+    fn schema_name() -> String {
+        "RequirementSet".to_owned()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let artifact = generator.subschema_for::<ArtifactRequirement>();
+        let review = generator.subschema_for::<ReviewRequirement>();
+        let approval = generator.subschema_for::<ApprovalRequirement>();
+        let conditional = generator.subschema_for::<ConditionalRequirement>();
+        let structured = mapping(vec![
+            (
+                "predicates",
+                one_or_many(generator.subschema_for::<Predicate>()),
+            ),
+            (
+                "evidence",
+                one_or_many(generator.subschema_for::<EvidenceRequirement>()),
+            ),
+            ("artifacts", one_or_many(artifact.clone())),
+            ("artifact", one_or_many(artifact)),
+            ("reviews", one_or_many(review.clone())),
+            ("review", one_or_many(review)),
+            ("approvals", one_or_many(approval.clone())),
+            ("approval", one_or_many(approval)),
+            ("conditional", one_or_many(conditional.clone())),
+            ("conditional_requirements", one_or_many(conditional)),
+        ]);
+        let nothing = SchemaObject {
+            instance_type: Some(InstanceType::Null.into()),
+            ..Default::default()
+        };
+        let mut schema = SchemaObject::default();
+        // `any_of` rather than `one_of`: a mapping of fact paths is a predicate *and* a mapping,
+        // and the two branches overlap by design.
+        schema.subschemas().any_of = Some(vec![
+            generator.subschema_for::<Predicate>(),
+            structured.into(),
+            nothing.into(),
+        ]);
+        schema.metadata().description = Some(
+            "What must hold: a predicate, a list of predicates, or a mapping using `predicates`, \
+             `evidence`, `artifacts`, `reviews`, `approvals` and `conditional`. Any other key in \
+             the mapping is read as a fact predicate, so `{change.architectural: true}` works \
+             wherever a requirement set is expected."
+                .to_owned(),
+        );
+        schema.into()
     }
 }
 

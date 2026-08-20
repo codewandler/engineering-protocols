@@ -176,7 +176,7 @@ impl schemars::JsonSchema for TaskKind {
 }
 
 /// What the task is for.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct Objective {
     /// A one-line statement, such as `add-passkey-support`.
     pub summary: String,
@@ -233,6 +233,43 @@ impl<'de> serde::Deserialize<'de> for Objective {
             ))),
         }
     }
+}
+
+impl schemars::JsonSchema for Objective {
+    fn schema_name() -> String {
+        "Objective".to_owned()
+    }
+
+    // Written by hand because [`Objective`]'s `Deserialize` is: a derived schema describes the
+    // stored shape, a mapping with a required `summary`, and every task document ever written says
+    // `objective: add-passkey-support`.
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut form = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::Object.into()),
+            ..Default::default()
+        };
+        for name in ["summary", "objective", "details"] {
+            form.object()
+                .properties
+                .insert(name.to_owned(), <String>::json_schema(generator));
+        }
+        form.subschemas().any_of = Some(vec![required_key("summary"), required_key("objective")]);
+        let mut schema = schemars::schema::SchemaObject::default();
+        schema.subschemas().one_of = Some(vec![<String>::json_schema(generator), form.into()]);
+        schema.metadata().description = Some(
+            "What the task is for: a one-line statement, or a mapping with `summary` (or \
+             `objective`) and longer `details`."
+                .to_owned(),
+        );
+        schema.into()
+    }
+}
+
+/// A schema satisfied by any mapping carrying `key`.
+fn required_key(key: &str) -> schemars::schema::Schema {
+    let mut schema = schemars::schema::SchemaObject::default();
+    schema.object().required.insert(key.to_owned());
+    schema.into()
 }
 
 /// Limits and inputs that apply to one task.
@@ -392,7 +429,7 @@ impl TryFrom<RawTask> for Task {
             match artifact_reference(node, &format!("task {}.derived_from[{index}]", raw.id)) {
                 Ok(reference) => derived_from.push(reference),
                 Err(error) => errors.push(crate::error::ValidationError::new(
-                    crate::error::ValidationCode::UnknownState,
+                    crate::error::ValidationCode::TypeMismatch,
                     format!("task {}.derived_from[{index}]", raw.id),
                     error.to_string(),
                 )),
@@ -407,7 +444,7 @@ impl TryFrom<RawTask> for Task {
                 {
                     Ok(reference) => references.push(reference),
                     Err(error) => errors.push(crate::error::ValidationError::new(
-                        crate::error::ValidationCode::UnknownState,
+                        crate::error::ValidationCode::TypeMismatch,
                         format!("task {}.context.{label}[{index}]", raw.id),
                         error.to_string(),
                     )),

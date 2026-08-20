@@ -237,7 +237,7 @@ impl TryFrom<RawProtocol> for Protocol {
         if let Some(extends) = &raw.extends {
             if extends.protocol() == &raw.id {
                 errors.push(ValidationError::new(
-                    ValidationCode::UnknownProtocol,
+                    ValidationCode::SelfReference,
                     format!("{location}.extends"),
                     format!("`{extends}` cannot extend itself"),
                 ));
@@ -248,7 +248,7 @@ impl TryFrom<RawProtocol> for Protocol {
         if raw.observables.is_empty() && raw.extends.is_none() {
             errors.push(
                 ValidationError::new(
-                    ValidationCode::UnobservableFact,
+                    ValidationCode::EmptyDeclaration,
                     format!("{location}.observables"),
                     "a protocol that declares no observables makes every predicate unreadable"
                         .to_owned(),

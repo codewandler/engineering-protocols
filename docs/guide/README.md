@@ -24,6 +24,7 @@ From the [status table](../../README.md#status). Everything else there is at 100
 | [`adopting.md`](adopting.md) | You have engineering rules you want enforced, and a repository to put them in |
 | [`harness.md`](harness.md) | You are building an agent harness and want the protocol to decide what it may do |
 | [`backend.md`](backend.md) | You are storing engineering entities — designs, reviews, approvals — and want them to survive an audit |
+| [`specification.md`](specification.md) | You want a system's contracts, tests and documentation derived from one document instead of maintained beside it |
 
 For the full document vocabulary — every capability, evidence kind, fact path and predicate operator —
 see the [document authoring brief](../plan/document-authoring-brief.md). This guide is the narrative
@@ -37,7 +38,7 @@ Build the CLI, check the documents, watch a refusal.
 $ cargo build -p protocol-cli
 $ B=target/debug/protocol
 $ $B validate
-38 file(s): 3 protocol(s), 21 principle(s), 4 workflow(s), 5 profile(s), 5 lifecycle(s)
+39 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 5 profile(s), 5 lifecycle(s)
 valid
 ```
 
@@ -50,6 +51,7 @@ nothing else stated:
 
 ```console
 $ $B resolve --task examples/development-passkeys/task.yaml
+inputs      . and examples/development-passkeys/task.yaml
 task        AUTH-142 (feature)
 objective   add-passkey-support
 protocol    adp/1

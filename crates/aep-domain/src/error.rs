@@ -115,117 +115,211 @@ impl ParseError {
     }
 }
 
-/// Stable machine-readable classification of a semantic validation failure.
+/// Declares every validation code once.
 ///
-/// Codes are part of the public interface: harnesses and tests match on them rather than on
-/// message text.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ValidationCode {
-    /// A workflow declares no states.
-    EmptyWorkflow,
-    /// The initial state does not exist.
-    UnknownInitialState,
-    /// A transition, obligation or override references a state that does not exist.
-    UnknownState,
-    /// A non-terminal state has no outgoing transition, so execution would wedge.
-    DeadEndState,
-    /// A state cannot be reached from the initial state.
-    UnreachableState,
-    /// Two transitions share the same source and target.
-    DuplicateTransition,
-    /// A referenced principle is not in the registry.
-    UnknownPrinciple,
-    /// The same principle is listed twice.
-    DuplicatePrinciple,
-    /// A referenced profile is not in the registry.
-    UnknownProfile,
-    /// A referenced workflow is not in the registry.
-    UnknownWorkflow,
-    /// A referenced protocol is not in the registry.
-    UnknownProtocol,
-    /// A document requires a protocol major version this build does not implement.
-    UnsupportedProtocolVersion,
-    /// A profile or task references a capability the protocol does not declare.
-    UndeclaredCapability,
-    /// A requirement references an evidence kind the protocol does not declare.
-    UndeclaredEvidenceKind,
-    /// Required evidence has no verifier that can establish it.
-    NoVerifierForEvidence,
-    /// Rollback is required for a state marked irreversible.
-    RollbackOnIrreversibleState,
-    /// A capability is both needed and explicitly denied.
-    CapabilityConflict,
-    /// Production mutation is allowed without an approval requirement.
-    ProductionWriteWithoutApproval,
-    /// A predicate references a fact the protocol does not declare observable.
-    UnobservableFact,
-    /// An obligation is timed against a phase no state declares.
-    UnknownPhase,
-    /// A version mismatch between a pinned reference and the registry entry.
-    VersionMismatch,
-    /// A rollback failure policy is declared with no way to identify what to roll back to.
-    IncompleteRollbackPolicy,
-    /// Something references itself where that cannot mean anything.
-    SelfReference,
-    /// A command would change nothing, so accepting it produces a revision nobody can explain.
-    EmptyChange,
-    /// An audit record says an action was refused and also records a change.
-    RefusalMutatedState,
-    /// An audit record says an entity changed without recording what changed.
-    UnreconstructableChange,
-    /// A record of a decision does not say what was decided.
-    UnexplainedDecision,
-    /// An audit record's redaction fields contradict each other.
-    RedactionInconsistent,
-    /// An event's declared type does not match what its payload asserts.
-    EventPayloadMismatch,
-    /// An event names a subject without the revision it describes, or the reverse.
-    IncompleteEventSubject,
-    /// An event caused by a command does not name that command as its cause.
-    MissingCausation,
+/// The wire string and the [`ValidationCode::ALL`] list are generated from the same line as the
+/// variant, because both were previously maintained by hand and both had silently fallen behind:
+/// five codes existed, were emitted, and were absent from the list the tests iterate — so the guard
+/// that was supposed to catch exactly that reported success.
+macro_rules! validation_codes {
+    ($( $(#[$attribute:meta])* $variant:ident => $wire:literal, )*) => {
+        /// Stable machine-readable classification of a semantic validation failure.
+        ///
+        /// Codes are part of the public interface: harnesses and tests match on them rather than on
+        /// message text.
+        #[derive(
+            Debug,
+            Clone,
+            Copy,
+            PartialEq,
+            Eq,
+            PartialOrd,
+            Ord,
+            Hash,
+            serde::Serialize,
+            schemars::JsonSchema,
+        )]
+        #[serde(rename_all = "snake_case")]
+        #[non_exhaustive]
+        pub enum ValidationCode {
+            $( $(#[$attribute])* $variant, )*
+        }
+
+        impl ValidationCode {
+            /// Every code this build can produce, in declaration order.
+            ///
+            /// Generated, so it cannot fall behind the enum.
+            pub const ALL: &'static [Self] = &[ $( Self::$variant, )* ];
+
+            /// The code as it appears in output, such as `unreachable_state`.
+            pub fn as_str(self) -> &'static str {
+                match self {
+                    $( Self::$variant => $wire, )*
+                }
+            }
+        }
+    };
 }
 
-impl ValidationCode {
-    /// The code as it appears in output, such as `unreachable_state`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::EmptyWorkflow => "empty_workflow",
-            Self::UnknownInitialState => "unknown_initial_state",
-            Self::UnknownState => "unknown_state",
-            Self::DeadEndState => "dead_end_state",
-            Self::UnreachableState => "unreachable_state",
-            Self::DuplicateTransition => "duplicate_transition",
-            Self::UnknownPrinciple => "unknown_principle",
-            Self::DuplicatePrinciple => "duplicate_principle",
-            Self::UnknownProfile => "unknown_profile",
-            Self::UnknownWorkflow => "unknown_workflow",
-            Self::UnknownProtocol => "unknown_protocol",
-            Self::UnsupportedProtocolVersion => "unsupported_protocol_version",
-            Self::UndeclaredCapability => "undeclared_capability",
-            Self::UndeclaredEvidenceKind => "undeclared_evidence_kind",
-            Self::NoVerifierForEvidence => "no_verifier_for_evidence",
-            Self::RollbackOnIrreversibleState => "rollback_on_irreversible_state",
-            Self::CapabilityConflict => "capability_conflict",
-            Self::ProductionWriteWithoutApproval => "production_write_without_approval",
-            Self::UnobservableFact => "unobservable_fact",
-            Self::UnknownPhase => "unknown_phase",
-            Self::VersionMismatch => "version_mismatch",
-            Self::IncompleteRollbackPolicy => "incomplete_rollback_policy",
-            Self::SelfReference => "self_reference",
-            Self::EmptyChange => "empty_change",
-            Self::RefusalMutatedState => "refusal_mutated_state",
-            Self::UnreconstructableChange => "unreconstructable_change",
-            Self::UnexplainedDecision => "unexplained_decision",
-            Self::RedactionInconsistent => "redaction_inconsistent",
-            Self::EventPayloadMismatch => "event_payload_mismatch",
-            Self::IncompleteEventSubject => "incomplete_event_subject",
-            Self::MissingCausation => "missing_causation",
-        }
-    }
+validation_codes! {
+    /// A workflow declares no states.
+    EmptyWorkflow => "empty_workflow",
+
+    /// The initial state does not exist.
+    UnknownInitialState => "unknown_initial_state",
+
+    /// A transition, obligation or override references a state that does not exist.
+    UnknownState => "unknown_state",
+
+    /// A non-terminal state has no outgoing transition, so execution would wedge.
+    DeadEndState => "dead_end_state",
+
+    /// A state cannot be reached from the initial state.
+    UnreachableState => "unreachable_state",
+
+    /// Two transitions share the same source and target.
+    DuplicateTransition => "duplicate_transition",
+
+    /// A referenced principle is not in the registry.
+    UnknownPrinciple => "unknown_principle",
+
+    /// The same principle is listed twice.
+    DuplicatePrinciple => "duplicate_principle",
+
+    /// A referenced profile is not in the registry.
+    UnknownProfile => "unknown_profile",
+
+    /// A referenced workflow is not in the registry.
+    UnknownWorkflow => "unknown_workflow",
+
+    /// A referenced protocol is not in the registry.
+    UnknownProtocol => "unknown_protocol",
+
+    /// A document requires a protocol major version this build does not implement.
+    UnsupportedProtocolVersion => "unsupported_protocol_version",
+
+    /// A document is written in a specification format version this build does not implement.
+    ///
+    /// Distinct from [`Self::UnsupportedProtocolVersion`], which is about the protocol a project
+    /// executes: `ess/2` names how a document is written, not what governs the work, and a tool
+    /// told the wrong one goes looking for the wrong upgrade.
+    UnsupportedFormatVersion => "unsupported_format_version",
+
+    /// A profile or task references a capability the protocol does not declare.
+    UndeclaredCapability => "undeclared_capability",
+
+    /// A requirement references an evidence kind the protocol does not declare.
+    UndeclaredEvidenceKind => "undeclared_evidence_kind",
+
+    /// Required evidence has no verifier that can establish it.
+    NoVerifierForEvidence => "no_verifier_for_evidence",
+
+    /// Rollback is required for a state marked irreversible.
+    RollbackOnIrreversibleState => "rollback_on_irreversible_state",
+
+    /// A capability is both needed and explicitly denied.
+    CapabilityConflict => "capability_conflict",
+
+    /// Production mutation is allowed without an approval requirement.
+    ProductionWriteWithoutApproval => "production_write_without_approval",
+
+    /// A condition reads something nothing makes available.
+    ///
+    /// In a protocol, a predicate references a fact the protocol does not declare observable. In a
+    /// specification, a command's guard or a view's filter reads a field its subject does not have.
+    /// Both are conditions nobody can decide.
+    UnobservableFact => "unobservable_fact",
+
+    /// An obligation is timed against a phase no state declares.
+    UnknownPhase => "unknown_phase",
+
+    /// A version mismatch between a pinned reference and the registry entry.
+    VersionMismatch => "version_mismatch",
+
+    /// A rollback failure policy is declared with no way to identify what to roll back to.
+    IncompleteRollbackPolicy => "incomplete_rollback_policy",
+
+    /// Something references itself where that cannot mean anything.
+    SelfReference => "self_reference",
+
+    /// Something that exists to change state changes nothing.
+    ///
+    /// A command whose acceptance would produce a revision nobody can explain; a specified outcome
+    /// that neither emits an event nor names an error, so nothing about it is observable.
+    EmptyChange => "empty_change",
+
+    /// A refusal is recorded together with a change.
+    ///
+    /// An audit record that says an action was refused and also records a change; a specified
+    /// outcome that reports an error and also emits. A refused command changes nothing, so either
+    /// is two outcomes wearing one name.
+    RefusalMutatedState => "refusal_mutated_state",
+
+    /// An audit record says an entity changed without recording what changed.
+    UnreconstructableChange => "unreconstructable_change",
+
+    /// Something that settles an outcome does not say on what.
+    ///
+    /// A record of a decision that does not say what was decided; a specified outcome decided
+    /// outside the input that names no cause, which leaves nobody able to reproduce it.
+    UnexplainedDecision => "unexplained_decision",
+
+    /// An audit record's redaction fields contradict each other.
+    RedactionInconsistent => "redaction_inconsistent",
+
+    /// An event's declared type does not match what its payload asserts.
+    EventPayloadMismatch => "event_payload_mismatch",
+
+    /// An event names a subject without the revision it describes, or the reverse.
+    IncompleteEventSubject => "incomplete_event_subject",
+
+    /// An event caused by a command does not name that command as its cause.
+    MissingCausation => "missing_causation",
+
+    /// A reference names something nothing declares.
+    ///
+    /// Distinct from [`Self::UnknownState`], which is about workflow states specifically: a
+    /// specification refers to types, events, errors, entities, fields and domains too, and a tool
+    /// reading `unknown_state` off a missing event learns the wrong thing about what to fix.
+    UndeclaredReference => "undeclared_reference",
+
+    /// The same name is declared twice, and neither declaration can be said to win.
+    DuplicateDeclaration => "duplicate_declaration",
+
+    /// A declaration declares nothing that could have an effect: no fields, no outcomes, no
+    /// states, nothing to enforce, no statement of what being finished means.
+    EmptyDeclaration => "empty_declaration",
+
+    /// A document does not make a declaration it is required to make: a required key is absent, or
+    /// nothing declares the thing every other source contributes to.
+    ///
+    /// Distinct from [`Self::EmptyDeclaration`], which is about a declaration that is there and
+    /// says nothing. Here there is nothing to read at all, and the repair is to write one.
+    MissingDeclaration => "missing_declaration",
+
+    /// Two declarations are each well formed and cannot both hold.
+    ConflictingDeclaration => "conflicting_declaration",
+
+    /// A declared value is not the kind of thing its position requires.
+    ///
+    /// A declared type disagreeing with the type it must match; a task naming something that is not
+    /// an artifact reference; an absolute path where only a relative one has a meaning.
+    TypeMismatch => "type_mismatch",
+
+    /// A set of conditional branches leaves some input with no branch, so what happens to it is
+    /// unspecified.
+    ///
+    /// Distinct from [`Self::DeadEndState`], which is about a state machine with no way onward: the
+    /// branches here are each fine, and it is the gap between them that nobody has decided.
+    NonExhaustiveBranches => "non_exhaustive_branches",
+
+    /// Every branch of a declaration is decided outside its input, so no caller can reach one by
+    /// choosing what to send.
+    ///
+    /// Distinct from [`Self::UnreachableState`], which is about a graph nothing walks into, and
+    /// from [`Self::EmptyChange`], which is about a branch that does nothing: these branches do
+    /// something, and nothing a caller can write selects between them.
+    UnreachableBranch => "unreachable_branch",
 }
 
 impl fmt::Display for ValidationCode {
@@ -385,48 +479,10 @@ impl std::error::Error for ValidationErrors {}
 mod tests {
     use super::*;
 
-    /// Every code this build can produce.
-    ///
-    /// Listed by hand on purpose: adding a variant without adding it here fails the test below,
-    /// which is the point — a code with no stable string is a code nothing downstream can match on.
-    const ALL: &[ValidationCode] = &[
-        ValidationCode::EmptyWorkflow,
-        ValidationCode::UnknownInitialState,
-        ValidationCode::UnknownState,
-        ValidationCode::DeadEndState,
-        ValidationCode::UnreachableState,
-        ValidationCode::DuplicateTransition,
-        ValidationCode::UnknownPrinciple,
-        ValidationCode::DuplicatePrinciple,
-        ValidationCode::UnknownProfile,
-        ValidationCode::UnknownWorkflow,
-        ValidationCode::UnknownProtocol,
-        ValidationCode::UnsupportedProtocolVersion,
-        ValidationCode::UndeclaredCapability,
-        ValidationCode::UndeclaredEvidenceKind,
-        ValidationCode::NoVerifierForEvidence,
-        ValidationCode::RollbackOnIrreversibleState,
-        ValidationCode::CapabilityConflict,
-        ValidationCode::ProductionWriteWithoutApproval,
-        ValidationCode::UnobservableFact,
-        ValidationCode::UnknownPhase,
-        ValidationCode::VersionMismatch,
-        ValidationCode::IncompleteRollbackPolicy,
-        ValidationCode::SelfReference,
-        ValidationCode::EmptyChange,
-        ValidationCode::RefusalMutatedState,
-        ValidationCode::UnreconstructableChange,
-        ValidationCode::UnexplainedDecision,
-        ValidationCode::RedactionInconsistent,
-        ValidationCode::EventPayloadMismatch,
-        ValidationCode::IncompleteEventSubject,
-        ValidationCode::MissingCausation,
-    ];
-
     #[test]
     fn every_code_has_a_distinct_stable_string() {
         let mut seen: Vec<&str> = Vec::new();
-        for code in ALL {
+        for code in ValidationCode::ALL {
             let rendered = code.as_str();
             assert!(
                 !rendered.is_empty()
@@ -443,7 +499,7 @@ mod tests {
 
     #[test]
     fn the_serialised_form_matches_the_string_form() {
-        for code in ALL {
+        for code in ValidationCode::ALL {
             let json = serde_json::to_string(code).expect("serialises");
             assert_eq!(
                 json,

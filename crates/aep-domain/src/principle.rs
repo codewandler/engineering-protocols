@@ -679,7 +679,7 @@ impl TryFrom<RawPrinciple> for Principle {
         {
             errors.push(
                 ValidationError::new(
-                    ValidationCode::UnknownPhase,
+                    ValidationCode::EmptyDeclaration,
                     format!("principle {}", raw.id),
                     "declares no obligations, evidence, verification or capability policy, so it \
                      cannot change any outcome"
@@ -996,7 +996,7 @@ summary: Feels right.
         )
         .expect("document parses");
         let errors = Principle::try_from(raw).expect_err("nothing enforced");
-        assert!(errors.contains(ValidationCode::UnknownPhase));
+        assert!(errors.contains(ValidationCode::EmptyDeclaration));
         assert!(
             errors.to_string().contains("cannot change any outcome"),
             "{errors}"

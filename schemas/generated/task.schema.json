@@ -126,6 +126,12 @@
     "CapabilityPolicy": {
       "description": "The capabilities an execution may exercise.",
       "type": "object",
+      "not": {
+        "required": [
+          "approval_required",
+          "require_approval"
+        ]
+      },
       "properties": {
         "allow": {
           "description": "Capabilities that may be exercised.",
@@ -145,6 +151,14 @@
         },
         "deny": {
           "description": "Capabilities that must never be exercised.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Capability"
+          },
+          "uniqueItems": true
+        },
+        "require_approval": {
+          "description": "An accepted spelling of `approval_required`; give one or the other, not both.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/Capability"
@@ -202,24 +216,38 @@
       "description": "Any JSON/YAML value: null, boolean, number, string, array or object."
     },
     "Objective": {
-      "description": "What the task is for.",
-      "type": "object",
-      "required": [
-        "summary"
-      ],
-      "properties": {
-        "details": {
-          "description": "Anything longer.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "summary": {
-          "description": "A one-line statement, such as `add-passkey-support`.",
+      "description": "What the task is for: a one-line statement, or a mapping with `summary` (or `objective`) and longer `details`.",
+      "oneOf": [
+        {
           "type": "string"
+        },
+        {
+          "type": "object",
+          "anyOf": [
+            {
+              "required": [
+                "summary"
+              ]
+            },
+            {
+              "required": [
+                "objective"
+              ]
+            }
+          ],
+          "properties": {
+            "details": {
+              "type": "string"
+            },
+            "objective": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            }
+          }
         }
-      }
+      ]
     },
     "PrincipleId": {
       "description": "principle identifier.",

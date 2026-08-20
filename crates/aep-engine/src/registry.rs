@@ -88,7 +88,7 @@ impl Registry {
     ) -> Result<(), ValidationError> {
         let Some(kind) = lifecycle.kind.clone() else {
             return Err(ValidationError::new(
-                ValidationCode::UnknownState,
+                ValidationCode::EmptyDeclaration,
                 "lifecycle.kind",
                 "a lifecycle document must name the artifact kind it governs",
             )

@@ -1,8 +1,8 @@
 # ESS roadmap — waves 1 to 3
 
-> **Proposed.** Numbering restarts: these are ESS waves, not a continuation of the protocol's. Tags
-> would be `0.3.0-ess-wave-1` and so on, keeping the convention that a tag is named after its
-> changelog heading.
+> **Wave 1 delivered; waves 2 and 3 proposed.** Numbering restarts: these are ESS waves, not a
+> continuation of the protocol's. Tags are `0.3.0-ess-wave-1` and so on, keeping the convention that
+> a tag is named after its changelog heading.
 
 Scope and ordering follow [`ess-review-v0.1.md`](../design/ess-review-v0.1.md): the review's findings
 are folded into the waves that would otherwise have to unlearn them. Rust structural synthesis
@@ -15,6 +15,8 @@ artifact nothing can check is a claim, not a deliverable.
 ---
 
 ## ESS wave 1 — the join, and the model
+
+> **Delivered.** See [`ess-wave-1-the-model.md`](ess-wave-1-the-model.md).
 
 **Goal: an ESS is a document this repository can parse, validate and refuse — and the protocol can
 already require conformance to one.**

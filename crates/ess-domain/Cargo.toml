@@ -1,6 +1,6 @@
 [package]
-name = "aep-schema"
-description = "Wire representations and generated JSON Schema for the Agentic Engineering Protocol."
+name = "ess-domain"
+description = "Typed model for an Executable System Specification (ESS)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,15 +10,17 @@ authors.workspace = true
 
 [dependencies]
 aep-domain.workspace = true
-ess-domain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
 schemars.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+serde_yaml.workspace = true
+
+[[test]]
+name = "billing"
+path = "tests/billing.rs"
+
 [lints]
 workspace = true
-
-[dev-dependencies]
-jsonschema = { version = "0.49.9", default-features = false }

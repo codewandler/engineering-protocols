@@ -184,7 +184,7 @@ impl TryFrom<RawProjectConfig> for ProjectConfig {
             if path.is_absolute() {
                 errors.push(
                     ValidationError::new(
-                        ValidationCode::UnknownState,
+                        ValidationCode::TypeMismatch,
                         format!("project.{label}"),
                         format!("`{}` is absolute", path.display()),
                     )

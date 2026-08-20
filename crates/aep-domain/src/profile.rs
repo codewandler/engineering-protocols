@@ -170,7 +170,7 @@ impl TryFrom<RawProfile> for Profile {
         if raw.workflow.is_none() && raw.extends.is_none() {
             errors.push(
                 ValidationError::new(
-                    ValidationCode::UnknownWorkflow,
+                    ValidationCode::EmptyDeclaration,
                     format!("{location}.workflow"),
                     "a profile must name a workflow, or extend a profile that does".to_owned(),
                 )
@@ -181,7 +181,7 @@ impl TryFrom<RawProfile> for Profile {
         if raw.completion.is_empty() && raw.extends.is_none() {
             errors.push(
                 ValidationError::new(
-                    ValidationCode::UnobservableFact,
+                    ValidationCode::EmptyDeclaration,
                     format!("{location}.completion"),
                     "a profile must say what being finished means, or extend a profile that does"
                         .to_owned(),
@@ -209,7 +209,7 @@ impl TryFrom<RawProfile> for Profile {
         for dropped in &raw.without_principles {
             if seen.contains(&dropped) {
                 errors.push(ValidationError::new(
-                    ValidationCode::DuplicatePrinciple,
+                    ValidationCode::ConflictingDeclaration,
                     format!("{location}.without_principles"),
                     format!("`{dropped}` is both listed and dropped"),
                 ));
@@ -281,10 +281,22 @@ principles: [test-driven]
 ",
         )
         .expect_err("incomplete");
-        assert!(errors.contains(ValidationCode::UnknownWorkflow), "{errors}");
         assert!(
-            errors.contains(ValidationCode::UnobservableFact),
+            errors.contains(ValidationCode::EmptyDeclaration),
             "{errors}"
+        );
+        let locations: Vec<&str> = errors
+            .as_slice()
+            .iter()
+            .map(|error| error.location.as_str())
+            .collect();
+        assert!(
+            locations.contains(&"profile development.vague.workflow"),
+            "the missing workflow was not reported: {errors}"
+        );
+        assert!(
+            locations.contains(&"profile development.vague.completion"),
+            "the missing completion condition was not reported: {errors}"
         );
     }
 
@@ -380,7 +392,7 @@ completion:
         )
         .expect_err("contradiction");
         assert!(
-            errors.contains(ValidationCode::DuplicatePrinciple),
+            errors.contains(ValidationCode::ConflictingDeclaration),
             "{errors}"
         );
     }

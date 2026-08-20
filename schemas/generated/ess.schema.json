@@ -1,0 +1,927 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawSpecFile",
+  "description": "One source file, as parsed.\n\nA file may carry the system header, one domain's contents, or both — which is what lets a small specification be one file and a large one be a directory (design §24).",
+  "type": "object",
+  "properties": {
+    "actors": {
+      "description": "Actors declared here.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawActorSpec"
+      }
+    },
+    "commands": {
+      "description": "Commands declared here.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawCommandSpec"
+      }
+    },
+    "domain": {
+      "description": "The domain this file contributes to, when it contributes to one.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/QualifiedName"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "domains": {
+      "description": "The domains this system has.\n\nA roster, not a comment: when the header lists any, the list and the domains the sources contribute have to agree in both directions. Writing it is optional; writing it wrongly is not, because a header that says `billing.invoce` while a file declares `billing.invoice` is a typo that would otherwise change nothing.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/QualifiedName"
+      }
+    },
+    "entities": {
+      "description": "Entities declared here.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawEntitySpec"
+      }
+    },
+    "errors": {
+      "description": "Errors declared here.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawErrorSpec"
+      }
+    },
+    "events": {
+      "description": "Events declared here.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawEventSpec"
+      }
+    },
+    "format": {
+      "description": "The specification language, on the file that carries the header.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FormatVersion"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "summary": {
+      "description": "What the system is, in one paragraph.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "system": {
+      "description": "The system's namespace.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/QualifiedName"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "types": {
+      "description": "Types declared here.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/NamedType"
+      }
+    },
+    "version": {
+      "description": "The system's version.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Version"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "views": {
+      "description": "Views declared here.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawViewSpec"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Consistency": {
+      "description": "How soon a view reflects a command that has already returned.\n\nThis decides whether a generated scenario asserts the view with `expect` or with `eventually` — which is the entire reason the field exists. Getting it wrong in the model is how a generated suite acquires a sleep.",
+      "oneOf": [
+        {
+          "description": "The view is current as soon as the command that changed it returns.\n\nOnly for an implementation that reads the same store it wrote, or one that carries a consistency token from the write to the read.",
+          "type": "string",
+          "enum": [
+            "read_your_writes"
+          ]
+        },
+        {
+          "description": "The view catches up some time after the command returns.\n\nThe default, because assuming read-your-writes and being wrong produces a flaky suite, while assuming eventual and being wrong produces a slower but correct one.",
+          "type": "string",
+          "enum": [
+            "eventual"
+          ]
+        }
+      ]
+    },
+    "Field": {
+      "description": "One field of a struct or an event.",
+      "type": "object",
+      "required": [
+        "name",
+        "type"
+      ],
+      "properties": {
+        "display": {
+          "description": "What a person is shown.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Its name.",
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+        },
+        "summary": {
+          "description": "One line about what it is, for generated documentation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "Its type.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TypeRef"
+            }
+          ]
+        },
+        "wire": {
+          "description": "What this is called on the wire — an HTTP path segment, a topic name, a JSON field.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FormatVersion": {
+      "description": "The specification language version, such as `ess/1`.",
+      "type": "string",
+      "pattern": "^ess/[1-9][0-9]*$"
+    },
+    "Invariant": {
+      "description": "A condition every instance must satisfy, as a predicate over its fields — an entity's may also read the pseudo-field `state`, a newtype's reads `value`. Transition legality is not written here: a move that is not declared is already impossible.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Node"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Node"
+          }
+        }
+      ]
+    },
+    "NamedType": {
+      "description": "What a named type is made of, as parsed.\n\n`deny_unknown_fields` sits here rather than on [`RawNamedType`], which cannot carry it: serde ignores the attribute on a struct with a flattened field. The body is what the keys nothing else claimed are offered to, so refusing an unknown one here is what refuses `invarants:` and `namin:` — each of which used to parse clean and silently drop what the author wrote.",
+      "oneOf": [
+        {
+          "description": "A wrapper around one representation, distinct from it.",
+          "type": "object",
+          "required": [
+            "kind",
+            "name",
+            "of"
+          ],
+          "properties": {
+            "invariants": {
+              "description": "Conditions every value must satisfy, as predicates over `value`, what it wraps.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Invariant"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "newtype"
+              ]
+            },
+            "name": {
+              "description": "Its stable identity.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/QualifiedName"
+                }
+              ]
+            },
+            "naming": {
+              "description": "What it is called on the wire and shown as.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Naming"
+                }
+              ]
+            },
+            "of": {
+              "description": "What it wraps.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/TypeRef"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Named fields.",
+          "type": "object",
+          "required": [
+            "fields",
+            "kind",
+            "name"
+          ],
+          "properties": {
+            "fields": {
+              "description": "Its fields.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Field"
+              }
+            },
+            "invariants": {
+              "description": "Conditions every value must satisfy, as predicates over those fields.",
+              "type": "array",
+              "items": {
+                "$ref": "#/definitions/Invariant"
+              }
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "struct"
+              ]
+            },
+            "name": {
+              "description": "Its stable identity.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/QualifiedName"
+                }
+              ]
+            },
+            "naming": {
+              "description": "What it is called on the wire and shown as.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Naming"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "One of a fixed set of names.",
+          "type": "object",
+          "required": [
+            "kind",
+            "name",
+            "variants"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "enum"
+              ]
+            },
+            "name": {
+              "description": "Its stable identity.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/QualifiedName"
+                }
+              ]
+            },
+            "naming": {
+              "description": "What it is called on the wire and shown as.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Naming"
+                }
+              ]
+            },
+            "variants": {
+              "description": "The variants, in declaration order.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "One of several shapes, distinguished by a tag field.",
+          "type": "object",
+          "required": [
+            "kind",
+            "name",
+            "tag",
+            "variants"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "union"
+              ]
+            },
+            "name": {
+              "description": "Its stable identity.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/QualifiedName"
+                }
+              ]
+            },
+            "naming": {
+              "description": "What it is called on the wire and shown as.",
+              "allOf": [
+                {
+                  "$ref": "#/definitions/Naming"
+                }
+              ]
+            },
+            "tag": {
+              "description": "The field carrying the variant's name.",
+              "type": "string"
+            },
+            "variants": {
+              "description": "The variants, by tag value.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/definitions/TypeRef"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ],
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "description": "Its stable identity.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        },
+        "naming": {
+          "description": "What it is called on the wire and shown as.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Naming"
+            }
+          ]
+        }
+      }
+    },
+    "Naming": {
+      "description": "What a concept is called on the wire, and what a person is shown.\n\nBoth are optional and both default to the qualified name's last segment. The point of separating them is that changing either is a different kind of event: a display change is free, a wire change breaks deployed consumers, and a qualified-name change breaks the model.",
+      "type": "object",
+      "properties": {
+        "display": {
+          "description": "What a person is shown.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary": {
+          "description": "One line about what it is, for generated documentation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wire": {
+          "description": "What this is called on the wire — an HTTP path segment, a topic name, a JSON field.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Node": {
+      "description": "Any JSON/YAML value: null, boolean, number, string, array or object."
+    },
+    "OutcomeName": {
+      "description": "The lower-kebab name of one outcome, such as `accepted`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "Predicate": {
+      "description": "A condition over facts: the compact expression form (`tests.unit.failed == 0`), a list (implicit `all`), or a mapping using `all`, `any`, `not`, `none` or a fact path with an operator constraint.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Node"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Node"
+          }
+        }
+      ]
+    },
+    "QualifiedName": {
+      "description": "Stable logical identity, such as `billing.invoice.CreateInvoice`. Not a wire name.",
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_-]*(\\.[A-Za-z][A-Za-z0-9_-]*)*$"
+    },
+    "RawActorSpec": {
+      "description": "An actor, as parsed.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "may": {
+          "description": "The commands it may invoke.\n\nAbsent means it may invoke none, which is a legitimate thing to say: an actor that only observes still belongs in the model, because \"who is in this picture\" is part of what the specification describes.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/QualifiedName"
+          },
+          "uniqueItems": true
+        },
+        "name": {
+          "description": "Its stable logical identity.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        },
+        "naming": {
+          "description": "What it is called on the wire and shown as.",
+          "default": {},
+          "allOf": [
+            {
+              "$ref": "#/definitions/Naming"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawCommandSpec": {
+      "description": "A command as written in a document, before validation.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "input": {
+          "description": "What the caller supplies.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Field"
+          }
+        },
+        "name": {
+          "description": "Its stable identity.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        },
+        "naming": {
+          "description": "What it is called on the wire and shown as.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Naming"
+            }
+          ]
+        },
+        "outcomes": {
+          "description": "Everything it can result in.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RawOutcome"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawEntitySpec": {
+      "description": "An entity, as parsed.\n\nA lifecycle is required rather than defaulted. An entity with one state says so in three lines; a default would invent a state name the author never wrote, and every generated enum, diagram and stored value would then carry a word from this file rather than from the specification.",
+      "type": "object",
+      "required": [
+        "identity",
+        "lifecycle",
+        "name"
+      ],
+      "properties": {
+        "fields": {
+          "description": "What it holds.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Field"
+          }
+        },
+        "identity": {
+          "description": "How the entity is identified.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Field"
+            }
+          ]
+        },
+        "invariants": {
+          "description": "What must hold of every instance.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Invariant"
+          }
+        },
+        "lifecycle": {
+          "description": "Its lifecycle, under `lifecycle`.\n\n§4.7 writes `states` and `transitions` as keys of the entity itself. They are nested here instead, because flattening them would cost every unknown-key check in the document: serde ignores `deny_unknown_fields` on a struct that flattens *and* on the struct flattened into it, so `invariant:` for `invariants:` would silently drop every invariant an author wrote. A nested key is a small deviation; a specification that quietly means something else is not.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawStateMachine"
+            }
+          ]
+        },
+        "name": {
+          "description": "Its stable logical identity.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        },
+        "naming": {
+          "description": "What it is called on the wire and shown as.",
+          "default": {},
+          "allOf": [
+            {
+              "$ref": "#/definitions/Naming"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawErrorSpec": {
+      "description": "An error as written in a document, before validation.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "fields": {
+          "description": "What the error carries.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Field"
+          }
+        },
+        "name": {
+          "description": "Its stable identity.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        },
+        "summary": {
+          "description": "One line saying what went wrong.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawEventSpec": {
+      "description": "An event as written in a document, before validation.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "fields": {
+          "description": "What the fact records.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Field"
+          }
+        },
+        "name": {
+          "description": "Its stable identity.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        },
+        "naming": {
+          "description": "What it is called on the wire and shown as.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Naming"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawOutcome": {
+      "description": "One outcome as written in a document, before validation.\n\n`when` and `external` are the two spellings of a condition; writing neither is the default branch, and writing both is refused.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "emits": {
+          "description": "The events it emits.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/QualifiedName"
+          }
+        },
+        "error": {
+          "description": "The error it reports.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "external": {
+          "description": "What outside the input decides this branch.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "What this outcome is called.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/OutcomeName"
+            }
+          ]
+        },
+        "summary": {
+          "description": "One line for generated documentation.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when": {
+          "description": "A predicate over the command's input.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Predicate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawStateMachine": {
+      "description": "An entity's lifecycle, as parsed.\n\nTransitions are a sequence rather than §4.7's mapping keyed by name, because a mapping cannot hold two transitions with the same name: a duplicate would be swallowed by the YAML parser instead of reported, and the rule against it would be unenforceable.",
+      "type": "object",
+      "required": [
+        "initial",
+        "states"
+      ],
+      "properties": {
+        "initial": {
+          "description": "Where a new entity starts.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateName"
+            }
+          ]
+        },
+        "states": {
+          "description": "Every state the entity can be in.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StateName"
+          },
+          "uniqueItems": true
+        },
+        "terminal": {
+          "description": "States the entity may rest in forever.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StateName"
+          },
+          "uniqueItems": true
+        },
+        "transitions": {
+          "description": "The moves that are permitted.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Transition"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawViewSpec": {
+      "description": "A view as written in a document, before validation.",
+      "type": "object",
+      "required": [
+        "name",
+        "source"
+      ],
+      "properties": {
+        "consistency": {
+          "description": "How soon it reflects a command that has already returned. Defaults to `eventual`.",
+          "default": "eventual",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Consistency"
+            }
+          ]
+        },
+        "fields": {
+          "description": "What it exposes.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Field"
+          }
+        },
+        "filter": {
+          "description": "Which instances it contains.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Predicate"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "description": "Its stable identity.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        },
+        "naming": {
+          "description": "What it is called on the wire and shown as.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Naming"
+            }
+          ]
+        },
+        "source": {
+          "description": "The entity it projects.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "StateName": {
+      "description": "One state of an entity's lifecycle, in UpperCamelCase, such as `Draft`.",
+      "type": "string",
+      "pattern": "^[A-Z][A-Za-z0-9]*$"
+    },
+    "Transition": {
+      "description": "A named move between states.\n\nThe name is the transition's own, unqualified: the entity's namespace plus this name is the qualified name a command of the same name resolves against, so `IssueInvoice` on `billing.invoice.Invoice` is `billing.invoice.IssueInvoice`.\n\n`from` is a set because one move can start in several states — §4.7's `CancelInvoice` leaves both `Draft` and `Issued` — and `to` is one state because a move with two destinations is two moves with different guards.",
+      "type": "object",
+      "required": [
+        "from",
+        "name",
+        "to"
+      ],
+      "properties": {
+        "from": {
+          "description": "The states it may start in.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StateName"
+          },
+          "uniqueItems": true
+        },
+        "name": {
+          "description": "Its own name, such as `IssueInvoice`.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The state it ends in.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/StateName"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "TypeRef": {
+      "description": "A type: a primitive, a named type, or `Optional<T>`, `List<T>` or `Map<K, V>`.",
+      "examples": [
+        "Email",
+        "Money",
+        "Optional<CustomerId>",
+        "List<Money>"
+      ],
+      "type": "string"
+    },
+    "Version": {
+      "description": "A major version, written `v1`. A bare `1` is accepted too.",
+      "examples": [
+        "v1",
+        "v3"
+      ],
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^v[1-9][0-9]*$"
+        },
+        {
+          "type": "integer",
+          "minimum": 1.0
+        }
+      ]
+    }
+  }
+}

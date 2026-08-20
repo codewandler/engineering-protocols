@@ -477,9 +477,7 @@ impl fmt::Display for PolicySource {
 }
 
 /// The capabilities an execution may exercise.
-#[derive(
-    Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityPolicy {
     /// Capabilities that may be exercised.
@@ -497,6 +495,66 @@ pub struct CapabilityPolicy {
     /// Capabilities that must never be exercised.
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub deny: BTreeSet<Capability>,
+}
+
+impl schemars::JsonSchema for CapabilityPolicy {
+    fn schema_name() -> String {
+        "CapabilityPolicy".to_owned()
+    }
+
+    // Written by hand because `#[serde(alias)]` is invisible to the derive. The parser reads
+    // `require_approval`, every principle and profile in this repository writes it, and a derived
+    // schema publishes only `approval_required` — which `deny_unknown_fields` then turns into an
+    // editor error on a document the engine accepts.
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut schema = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::Object.into()),
+            ..Default::default()
+        };
+        for (name, description) in [
+            ("allow", "Capabilities that may be exercised."),
+            (
+                "approval_required",
+                "Capabilities that may be exercised only with a recorded approval.",
+            ),
+            (
+                "require_approval",
+                "An accepted spelling of `approval_required`; give one or the other, not both.",
+            ),
+            ("deny", "Capabilities that must never be exercised."),
+        ] {
+            schema
+                .object()
+                .properties
+                .insert(name.to_owned(), capability_set(generator, description));
+        }
+        schema.object().additional_properties =
+            Some(Box::new(schemars::schema::Schema::Bool(false)));
+
+        // Serde reads the two spellings into one field, so a document giving both is a duplicate
+        // field rather than a merge.
+        let mut both = schemars::schema::SchemaObject::default();
+        both.object()
+            .required
+            .insert("approval_required".to_owned());
+        both.object().required.insert("require_approval".to_owned());
+        schema.subschemas().not = Some(Box::new(both.into()));
+
+        schema.metadata().description =
+            Some("The capabilities an execution may exercise.".to_owned());
+        schema.into()
+    }
+}
+
+/// A described set of capabilities.
+fn capability_set(
+    generator: &mut schemars::gen::SchemaGenerator,
+    description: &str,
+) -> schemars::schema::Schema {
+    let mut schema =
+        <BTreeSet<Capability> as schemars::JsonSchema>::json_schema(generator).into_object();
+    schema.metadata().description = Some(description.to_owned());
+    schema.into()
 }
 
 impl CapabilityPolicy {

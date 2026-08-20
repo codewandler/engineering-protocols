@@ -39,8 +39,54 @@ fn code(output: &Output) -> i32 {
     output.status.code().expect("the process exited normally")
 }
 
+/// A fixture path as an argument.
+fn printable(path: &Path) -> &str {
+    path.to_str().expect("a printable path")
+}
+
+/// An empty scratch directory to build a fixture in.
+fn scratch(name: &str) -> PathBuf {
+    let directory = std::env::temp_dir().join(name);
+    std::fs::remove_dir_all(&directory).ok();
+    std::fs::create_dir_all(&directory).expect("the temporary tree is writable");
+    directory
+}
+
+/// Writes a fixture file, creating the directories above it.
+fn write(path: &Path, contents: &str) {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).expect("the temporary tree is writable");
+    }
+    std::fs::write(path, contents).expect("the fixture is writable");
+}
+
 const TASK: &str = "examples/development-passkeys/task.yaml";
 const ARTIFACTS: &str = "examples/development-passkeys/artifacts.yaml";
+const SPECIFICATION: &str = "examples/billing";
+
+/// The header of a one-domain specification, as `system.yaml` carries it.
+const SYSTEM: &str = "format: ess/1\nsystem: shop\nversion: v1\ndomains:\n  - shop.order\n";
+
+/// A domain file, written out because YAML this deeply indented does not survive `\n` escapes.
+const DOMAIN: &str = r"domain: shop.order
+types:
+  - name: shop.order.OrderId
+    kind: newtype
+    of: Uuid
+entities:
+  - name: shop.order.Order
+    identity:
+      name: order_id
+      type: shop.order.OrderId
+    lifecycle:
+      initial: Draft
+      states: [Draft, Placed]
+      terminal: [Placed]
+      transitions:
+        - name: Place
+          from: [Draft]
+          to: Placed
+";
 
 #[test]
 fn validate_accepts_the_repositorys_own_documents() {
@@ -232,11 +278,21 @@ fn inspect_lists_documents_and_shows_one() {
 fn schema_lists_and_prints_generated_schemas() {
     let listing = protocol(&["schema"]);
     assert_eq!(code(&listing), 0);
+    let text = stdout(&listing);
+    // One line per published schema, checked against what the library publishes rather than
+    // against a number: a count only ever fails with "the number changed".
     assert_eq!(
-        stdout(&listing).lines().count(),
-        11,
-        "one line per published schema"
+        text.lines().count(),
+        aep_schema::generated_schemas().len(),
+        "{text}"
     );
+    for entry in aep_schema::generated_schemas() {
+        assert!(
+            text.contains(&entry.filename),
+            "{} is not listed: {text}",
+            entry.filename
+        );
+    }
 
     let single = protocol(&["schema", "workflow"]);
     assert_eq!(code(&single), 0);
@@ -399,5 +455,170 @@ fn conformance_rejects_an_unknown_level_or_fault() {
         stderr(&fault).contains("is not a fault"),
         "{}",
         stderr(&fault)
+    );
+}
+
+#[test]
+fn ess_validate_accepts_the_normative_example() {
+    let output = protocol(&["ess", "validate", "--path", SPECIFICATION]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("billing v3"), "{text}");
+    assert!(text.contains("valid"), "{text}");
+}
+
+#[test]
+fn ess_validate_refuses_a_reference_to_something_nothing_declares() {
+    let directory = scratch("aep-cli-broken-spec");
+    write(&directory.join("system.yaml"), SYSTEM);
+    write(
+        &directory.join("domains/order.yaml"),
+        &DOMAIN.replace("type: shop.order.OrderId", "type: shop.order.Missing"),
+    );
+
+    let output = protocol(&["ess", "validate", "--path", printable(&directory)]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("undeclared_reference"),
+        "{}",
+        stdout(&output)
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_validate_names_the_file_a_problem_is_in() {
+    // Named relative to the specification, so the same problem reads the same on two machines —
+    // and so it is named at all, which an absolute path stripped of its own prefix is not.
+    let directory = scratch("aep-cli-duplicating-spec");
+    write(&directory.join("system.yaml"), SYSTEM);
+    write(&directory.join("domains/one.yaml"), DOMAIN);
+    write(&directory.join("domains/two.yaml"), DOMAIN);
+
+    let output = protocol(&["ess", "validate", "--path", printable(&directory)]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("duplicate_declaration"), "{text}");
+    assert!(
+        text.contains("domains/two.yaml"),
+        "a diagnostic has to say which file to open: {text}"
+    );
+    assert!(
+        !text.contains(printable(&directory)),
+        "and not where the specification happens to sit on this machine: {text}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_validate_names_the_one_file_a_specification_is_written_in() {
+    // A one-file specification is first class (design §24), and it is the case where a path
+    // relative to the specification is empty — so it is the case that loses its filename.
+    let directory = scratch("aep-cli-one-file-spec");
+    let orphaned = directory.join("shop.yaml");
+    write(&orphaned, &DOMAIN.replace("domain: shop.order\n", ""));
+
+    let output = protocol(&["ess", "validate", "--path", printable(&orphaned)]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("shop.yaml"), "{text}");
+
+    // And the same for a file that never parses, which is reported on a different path.
+    let mangled = directory.join("mangled.yaml");
+    write(&mangled, "format: ess/1\nsystem: [shop\n");
+
+    let refusal = protocol(&["ess", "validate", "--path", printable(&mangled)]);
+    assert_eq!(code(&refusal), 1, "{}", stderr(&refusal));
+    let reason = stdout(&refusal);
+    assert!(reason.contains("mangled.yaml"), "{reason}");
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_validate_renders_json_for_another_tool() {
+    let output = protocol(&[
+        "ess",
+        "validate",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the summary is valid JSON");
+    assert_eq!(parsed["system"], "billing");
+    assert_eq!(parsed["version"], "v3");
+    assert_eq!(parsed["domains"], 2);
+    assert_eq!(
+        parsed["problems"]
+            .as_array()
+            .expect("problems is a list")
+            .len(),
+        0,
+        "{parsed}"
+    );
+}
+
+#[test]
+fn ess_validate_refuses_a_directory_that_is_not_a_specification() {
+    // `--path` defaults to `.`, so this is what someone typing the command in the wrong directory
+    // gets: the repository root holds 50-odd unrelated YAML files, and reporting each of them as a
+    // broken specification says nothing about what actually went wrong.
+    let output = protocol(&["ess", "validate"]);
+    assert_eq!(code(&output), 1);
+    let errors = stderr(&output);
+    assert!(errors.contains("is not a specification"), "{errors}");
+    assert!(errors.contains("system.yaml"), "{errors}");
+    assert!(
+        stdout(&output).is_empty(),
+        "nothing was validated: {}",
+        stdout(&output)
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn ess_validate_reads_each_file_once_when_a_symlink_points_back_up_the_tree() {
+    let directory = scratch("aep-cli-looping-spec");
+    write(&directory.join("system.yaml"), SYSTEM);
+    write(&directory.join("domains/order.yaml"), DOMAIN);
+    std::os::unix::fs::symlink("..", directory.join("domains/back")).expect("symlinks are allowed");
+
+    let output = protocol(&["ess", "validate", "--path", printable(&directory)]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(
+        text.contains("2 file(s)"),
+        "a file reachable by two paths is still one file: {text}"
+    );
+    assert!(!text.contains("duplicate_declaration"), "{text}");
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_validate_output_survives_a_reader_that_stops_reading() {
+    // The pipe is closed before the first line is written, which is what `protocol ess validate |
+    // head -0` does. `println!` would end that shell idiom in a stack trace.
+    use std::process::Stdio;
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_protocol"))
+        .args(["ess", "validate", "--path", SPECIFICATION])
+        .current_dir(root())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("the protocol binary runs");
+    drop(child.stdout.take().expect("stdout is piped"));
+
+    let output = child.wait_with_output().expect("the child finishes");
+    let errors = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !errors.contains("panicked"),
+        "a reader that stopped reading is not a crash: {errors}"
     );
 }

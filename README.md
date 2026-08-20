@@ -31,25 +31,43 @@ The agent may be probabilistic. The protocol semantics are not.
 
 ## Status
 
-**The v0.2 scope is implemented.** A task resolves against the document tree, evidence decides what
-may be done and whether the work is finished, every object it touches has identity, revision and an
-audit trail, and a backend can prove it implements the contract by running a suite against itself.
+This repository has two halves. **AEP** governs how engineering work is performed; **ESS** specifies
+what software must exist. They meet at evidence: a task can be blocked until something proves an
+implementation conforms to its specification. See [`docs/VISION.md`](docs/VISION.md).
+
+### AEP — the protocol (v0.2 scope, complete)
+
+A task resolves against the document tree, evidence decides what may be done and whether the work is
+finished, every object it touches has identity, revision and an audit trail, and a backend can prove
+it implements the contract by running a suite against itself.
 
 | Component | Weight | Done | State |
 |---|---:|---:|---|
-| `aep-domain` — core model | 25% | 100% | 26 modules, 150 tests |
-| `aep-engine` — resolution, evaluation, transitions | 15% | 100% | 38 unit + 16 integration tests |
-| Protocol, principle, workflow and profile documents | 10% | 100% | 49 documents, validated in CI |
-| `protocol-cli` | 7% | 100% | 14 subcommands, 27 integration tests |
-| `aep-schema` + `xtask` — documents and generated schemas | 6% | 100% | 10 schemas, drift-checked |
+| `aep-domain` — core model | 25% | 100% | 26 modules, 164 tests |
+| `aep-engine` — resolution, evaluation, transitions | 15% | 100% | 51 unit + 16 integration tests |
+| Protocol, principle, workflow and profile documents | 10% | 100% | 39 documents, validated in CI |
+| `protocol-cli` | 7% | 100% | 11 subcommands, 38 tests |
+| `aep-schema` + `xtask` — documents and generated schemas | 6% | 100% | 12 schemas, drift-checked, each validated against every document shipped |
 | `aep-contract` — command/query contract | 12% | 100% | 21 tests |
 | Entity identity, locators and types | 5% | 100% | 14 tests; commands, events and audit add 57 more |
 | In-memory reference backend | 3% | 100% | passes the §104 reference scenario |
 | `aep-conformance` — black-box backend suites | 12% | 100% | 16 suites, 3 levels, a faulty backend that proves they bite |
-| `adp-domain`, `aop-domain` | 5% | 100% | 93 tests |
+| `adp-domain`, `aop-domain` | 5% | 100% | 44 + 49 tests |
 
-442 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
-the "done" column with `task check`.
+### ESS — executable system specifications (~20% of the design)
+
+| Component | Done | State |
+|---|---:|---|
+| `ess-domain` — the typed model | 100% | 10 modules, 169 tests; the billing example parsed from disk |
+| `protocol ess validate` + generated JSON Schema | 100% | one file or a directory; every problem in one run |
+| The join — artifact kind, evidence kind, `ess-conformance` principle | 100% | a task can already be blocked until something proves conformance |
+| Compiler — source to a normalized IR | 0% | ESS wave 2 |
+| Projections — OpenAPI, AsyncAPI, documentation | 0% | ESS wave 3 |
+| Test synthesis, structural code | 0% | ESS wave 3+ |
+
+642 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
+the "done" column with `task check`. The ESS roadmap is
+[`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md).
 
 ### What works today
 
@@ -74,7 +92,7 @@ production.write denied
 * **An approval names the revision it approved**, so an approval of design version 3 stops satisfying
   a review requirement once the design is at version 7.
 * **Every decision is explainable**, as a `✓ / ✗ / ?` checklist or as a machine-readable refusal.
-* 49 documents — 3 protocols, 21 principles, 4 workflows, 5 profiles, 5 artifact lifecycles — each
+* 39 documents — 3 protocols, 22 principles, 4 workflows, 5 profiles, 5 artifact lifecycles — each
   validated against the protocol vocabulary in CI.
 
 * **Every mutation goes through one boundary.** `CommandService` carries actor *and* executor,
@@ -97,8 +115,10 @@ injected fault: a replayed command is applied a second time — expected to be c
 ### What does not work yet
 
 No durable backend — the only implementation is in memory. No federated artifact graphs across
-repositories. See [`docs/plan/`](docs/plan/) for what was built and in what order, and
-[`docs/guide/`](docs/guide/) for how to use what exists.
+repositories. Nothing is generated from a specification yet: `ess-domain` models one and
+`protocol ess validate` refuses a malformed one, but the compiler, the projections and the test
+synthesis are ESS waves 2 and 3. See [`docs/plan/`](docs/plan/) for what was built and in what order,
+and [`docs/guide/`](docs/guide/) for how to use what exists.
 
 ## Design decisions worth knowing
 
@@ -166,15 +186,18 @@ Without `task`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-ta
 |---|---|
 | [`docs/VISION.md`](docs/VISION.md) | why this exists, and how its two halves compose |
 | [`docs/design/consolidated-design-v0.2.md`](docs/design/consolidated-design-v0.2.md) | authoritative specification for the protocol (AEP) |
-| [`docs/design/ess-implementor-design-v0.1.md`](docs/design/ess-implementor-design-v0.1.md) | design for the Executable System Specification (ESS) — specified, not built |
+| [`docs/design/ess-implementor-design-v0.1.md`](docs/design/ess-implementor-design-v0.1.md) | design for the Executable System Specification (ESS) — the model is built; nothing is generated from it yet |
 | [`docs/design/ess-review-v0.1.md`](docs/design/ess-review-v0.1.md) | review of that design, with the findings that change what gets built first |
 | [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) | what is implemented, what v0.2 adds, work order, recorded deviations |
-| [`docs/plan/wave-1-execution-core.md`](docs/plan/wave-1-execution-core.md) | the wave just delivered, with its acceptance criteria |
+| [`docs/plan/ess-wave-1-the-model.md`](docs/plan/ess-wave-1-the-model.md) | the wave just delivered, and what its review changed |
+| [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) | ESS waves 1 to 3, and what is deliberately outside them |
+| [`docs/plan/wave-1-execution-core.md`](docs/plan/wave-1-execution-core.md) | the protocol's four waves, with their acceptance criteria |
 | [`docs/plan/document-authoring-brief.md`](docs/plan/document-authoring-brief.md) | how to write a valid principle, workflow, profile or lifecycle |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |
-| [`examples/development-passkeys/`](examples/development-passkeys/) | a worked example with real command output |
+| [`examples/development-passkeys/`](examples/development-passkeys/) | a worked protocol example with real command output |
+| [`examples/billing/`](examples/billing/) | the normative executable system specification |
 | [`docs/design/archive/`](docs/design/archive/) | v0.1 draft and artifact-model extension, kept for provenance |
-| [`docs/guide/`](docs/guide/) | how to adopt the protocol, wire a harness, and implement and prove a backend |
+| [`docs/guide/`](docs/guide/) | how to adopt the protocol, wire a harness, prove a backend, and specify a system |
 | [`AGENTS.md`](AGENTS.md) | working agreement for humans and agents contributing here |
 
 ## Licence

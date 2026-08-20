@@ -1,0 +1,193 @@
+domain: billing.invoice
+
+summary: Issuing invoices and tracking whether they are paid.
+
+naming:
+  wire: invoices
+  display: Invoicing
+
+types:
+  # A wrapper, not an alias. `Email` is not `String`: the value of naming it separately is entirely
+  # in the conversions the model then refuses.
+  - name: billing.invoice.InvoiceId
+    kind: newtype
+    of: Uuid
+
+  - name: billing.invoice.Email
+    kind: newtype
+    of: String
+
+  - name: billing.invoice.Money
+    kind: struct
+    fields:
+      - name: amount
+        type: Decimal
+      - name: currency
+        type: String
+    # Checked against this type's own fields, not stored as a sentence.
+    invariants:
+      - amount >= 0
+
+  # A closed set of names, so a projection of it cannot be spelt wrong.
+  - name: billing.invoice.Channel
+    kind: enum
+    variants: [Email, Post, Portal]
+    naming:
+      display: Delivery channel
+
+  # Tagged, always. An untagged union cannot round-trip through JSON Schema, OpenAPI or Serde
+  # without ambiguity, and the ambiguity surfaces as a decoder picking the wrong branch at runtime.
+  - name: billing.invoice.Payee
+    kind: union
+    tag: kind
+    variants:
+      person: billing.invoice.Email
+      company: billing.invoice.CompanyRef
+
+  - name: billing.invoice.CompanyRef
+    kind: newtype
+    of: String
+
+  - name: billing.invoice.LineItem
+    kind: struct
+    fields:
+      - name: description
+        type: String
+      - name: quantity
+        type: Integer
+      - name: unit_price
+        type: billing.invoice.Money
+
+entities:
+  - name: billing.invoice.Invoice
+
+    # The identity carries a name as well as a type. Without the name, every generator would invent
+    # its own, and the view below could not agree with any of them.
+    identity:
+      name: invoice_id
+      type: billing.invoice.InvoiceId
+
+    fields:
+      - name: total
+        type: billing.invoice.Money
+      - name: payee
+        type: billing.invoice.Payee
+      - name: channel
+        type: billing.invoice.Channel
+      - name: lines
+        type: List<billing.invoice.LineItem>
+      - name: note
+        type: Optional<String>
+      - name: metadata
+        type: Map<String, String>
+      - name: issued_at
+        type: Optional<Timestamp>
+      - name: settlement_window
+        type: Duration
+      - name: is_recurring
+        type: Boolean
+      - name: signature
+        type: Bytes
+
+    invariants:
+      - total.amount >= 0
+
+    # Illegal transitions are illegal by absence. `Paid → Cancelled` is not forbidden by a rule,
+    # because a rule would be a second place for the same truth to live.
+    lifecycle:
+      initial: Draft
+      states: [Draft, Issued, Paid, Cancelled]
+      terminal: [Paid, Cancelled]
+      transitions:
+        - name: issue
+          from: [Draft]
+          to: Issued
+        - name: settle
+          from: [Issued]
+          to: Paid
+        - name: cancel
+          from: [Draft, Issued]
+          to: Cancelled
+
+actors:
+  - name: billing.invoice.Customer
+    may:
+      - billing.invoice.CreateInvoice
+    naming:
+      display: Customer
+
+  # An actor that only observes still belongs in the model: "who is in this picture" is part of what
+  # the specification describes.
+  - name: billing.invoice.Auditor
+
+errors:
+  - name: billing.invoice.InvalidAmount
+    summary: The requested amount is not positive.
+    # An error carries what a caller needs in order to react, not just a name.
+    fields:
+      - name: submitted
+        type: billing.invoice.Money
+
+commands:
+  - name: billing.invoice.CreateInvoice
+
+    naming:
+      wire: create-invoice
+      display: Create invoice
+
+    input:
+      - name: customer_email
+        type: billing.invoice.Email
+      - name: amount
+        type: billing.invoice.Money
+
+    # Two outcomes, because this command can be refused. A specification that recorded only the
+    # first would generate a suite that never checks what happens when the amount is wrong.
+    outcomes:
+      - name: accepted
+        when: amount.amount > 0
+        emits:
+          - billing.invoice.InvoiceCreated
+        summary: The invoice is created in Draft.
+
+      - name: rejected
+        error: billing.invoice.InvalidAmount
+        summary: The amount was not positive, and nothing was created.
+
+events:
+  - name: billing.invoice.InvoiceCreated
+    fields:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
+      - name: customer_email
+        type: billing.invoice.Email
+      - name: amount
+        type: billing.invoice.Money
+
+views:
+  - name: billing.invoice.InvoiceById
+    source: billing.invoice.Invoice
+    # A projection. A generated scenario must therefore assert it with `eventually`, not immediately.
+    consistency: eventual
+    fields:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
+      - name: total
+        type: billing.invoice.Money
+
+  # Read-your-writes, so a generated scenario asserts this one immediately: a caller that has just
+  # issued an invoice and cannot see it in its own list has been told a lie about what it did.
+  - name: billing.invoice.OutstandingInvoices
+    source: billing.invoice.Invoice
+    consistency: read_your_writes
+    # The filter is checked against the lifecycle's states, so a misspelt `Issed` is refused rather
+    # than silently matching nothing.
+    filter: state == Issued
+    fields:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
+      - name: total
+        type: billing.invoice.Money
+    naming:
+      wire: outstanding
+      display: Outstanding invoices

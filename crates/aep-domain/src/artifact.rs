@@ -1425,7 +1425,7 @@ impl ArtifactGraph {
             if graph.artifacts.insert(id.clone(), artifact).is_some() {
                 errors.push(
                     ValidationError::new(
-                        ValidationCode::UnknownState,
+                        ValidationCode::DuplicateDeclaration,
                         format!("artifacts.{id}"),
                         format!("artifact {id} is declared more than once"),
                     )
@@ -1523,7 +1523,7 @@ impl ArtifactGraph {
                 if !self.artifacts.contains_key(relation.target.id()) {
                     errors.push(
                         ValidationError::new(
-                            ValidationCode::UnknownState,
+                            ValidationCode::UndeclaredReference,
                             location.clone(),
                             format!(
                                 "{} {} points at {}, which the manifest does not declare",
@@ -1538,7 +1538,7 @@ impl ArtifactGraph {
                 }
                 if relation.target.id() == &artifact.id {
                     errors.push(ValidationError::new(
-                        ValidationCode::UnknownState,
+                        ValidationCode::SelfReference,
                         location,
                         format!("{} {} itself", artifact.id, relation.kind),
                     ));
@@ -1550,7 +1550,7 @@ impl ArtifactGraph {
             if let Some(cycle) = self.find_cycle(*relation) {
                 errors.push(
                     ValidationError::new(
-                        ValidationCode::UnknownState,
+                        ValidationCode::SelfReference,
                         "artifacts",
                         format!(
                             "`{relation}` edges form a cycle: {}",
@@ -1659,7 +1659,7 @@ impl ArtifactGraph {
             {
                 errors.push(
                     ValidationError::new(
-                        ValidationCode::UnknownState,
+                        ValidationCode::UndeclaredReference,
                         format!("artifacts.{}.status", artifact.id),
                         format!(
                             "{} is marked superseded but nothing declares `supersedes: {}`",
@@ -1678,7 +1678,7 @@ impl ArtifactGraph {
             {
                 errors.push(
                     ValidationError::new(
-                        ValidationCode::UnknownState,
+                        ValidationCode::EmptyDeclaration,
                         format!("artifacts.{}.relations", artifact.id),
                         format!("review {} does not say what it reviews", artifact.id),
                     )

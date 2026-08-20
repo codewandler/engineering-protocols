@@ -246,7 +246,9 @@ fn a_specification_governed_task_is_not_finished_until_something_else_says_it_co
     // The loop the vision describes, exercised end to end before any of ESS exists: a task whose
     // artifact graph holds an executable system specification owes conformance evidence, and the
     // protocol refuses to call it complete without a run by something other than the agent.
-    use aep_domain::artifact::{Artifact, ArtifactId, ArtifactKind, ArtifactLocation, ArtifactStatus};
+    use aep_domain::artifact::{
+        Artifact, ArtifactId, ArtifactKind, ArtifactLocation, ArtifactStatus,
+    };
 
     let engine = engine();
     let mut graph = artifacts();
@@ -345,7 +347,9 @@ fn a_task_without_a_specification_owes_no_conformance() {
         .map(|item| item.requirement.clone())
         .collect();
     assert!(
-        !outstanding.iter().any(|item| item.contains("ess_conformance")),
+        !outstanding
+            .iter()
+            .any(|item| item.contains("ess_conformance")),
         "a rule that does not apply must not be owed: {outstanding:?}"
     );
 }
