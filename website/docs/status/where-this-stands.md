@@ -6,12 +6,13 @@ description: What is implemented, what is in progress, and what is not built —
 
 # Where this stands
 
-Honest as of the tag `0.5.0-ess-wave-5`. The repository's gate, `task check`, runs seven steps —
+Honest as of the tag `0.6.1-ess-wave-6.5`. The repository's gate, `task check`, runs eight steps —
 formatting, clippy with warnings as errors, the test suite, rustdoc with warnings as errors, a schema
-drift check, a projection drift check and a conformance-suite drift check — and reports **57 suites
-and 1305 tests, with 0 clippy warnings and 0 rustdoc warnings**.
+drift check, a projection drift check, a conformance-suite drift check and a synthesis check that
+regenerates the generated workspaces, compiles them and runs the committed suite against them — and
+reports **69 suites and 1397 tests, with 0 clippy warnings and 0 rustdoc warnings**.
 
-Nothing lands that does not pass all seven, and CI runs the same seven.
+Nothing lands that does not pass all eight, and CI runs the same eight.
 
 ## AEP — the protocol
 
@@ -32,8 +33,9 @@ CI fails on if they drift from the Rust types.
 
 ## ESS — executable system specifications
 
-Five waves delivered. A specification is now the source of its own documentation, its own
-contracts and its own tests — and when it changes, the change itself is a typed, queryable object.
+Six waves delivered, and the hardening batch behind the sixth. A specification is now the source of its own documentation, its own
+contracts, its own tests and the structural part of its own implementation — and when it changes,
+the change itself is a typed, queryable object.
 
 | | State |
 |---|---|
@@ -42,16 +44,19 @@ contracts and its own tests — and when it changes, the change itself is a type
 | four projections: docs, JSON Schema, OpenAPI 3.1, AsyncAPI 3.0 | implemented, `0.3.2-ess-wave-3` — output committed and drift-checked |
 | the model reconciled before the oracle was built | implemented, `0.3.3-ess-wave-3.5` — 20 gates closed before the oracle was allowed to start |
 | the join: artifact kind, evidence kind, the `ess-conformance` principle | implemented — a task can be blocked until something proves conformance |
-| the specification as an oracle: generated suites, a conformance runner, evidence | implemented, `0.4.0-ess-wave-4` — 27 scenarios from the normative example and 31 from a second fixture, committed and drift-checked |
+| the specification as an oracle: generated suites, a conformance runner, evidence | implemented, `0.4.0-ess-wave-4` — 27 scenarios from the normative example and 31 from a second fixture at that tag, committed and drift-checked |
 | what a change to a specification invalidates | implemented, `0.5.0-ess-wave-5` — a semantic delta over six construct families, and an impact closure that narrows what is owed and can never say "still valid" |
-| generated Rust code | **not built.** Proposed, and sequenced next |
+| generated Rust code — structural synthesis | implemented, `0.6.0-ess-wave-6`, **first slice as scoped**: a language-neutral plan giving every capability exactly one disposition — on billing, 45 capabilities: 33 generated, 8 obligations, 4 refused — and a committed zero-dependency Rust workspace: semantic types, typestate lifecycles whose illegal transitions do not compile, component ports, one transport. The committed wave-4 suite, unchanged, passes 27 of 27 against it linked with hand-written obligations, and fails a deliberately corrupted linkage at exactly the scenario that exists to catch it. Behaviour is never generated: every algorithm is a named obligation, yours to implement |
+| the hardening batch — the claims made mechanical | implemented, `0.6.1-ess-wave-6.5` — three invariants that were enforced by nothing are now enforced by build-failing scans, the model digest is the full SHA-256, `proptest` phase 1 landed, an outcome can declare where an event's payload comes from (the one fault that was caught by nothing is now caught), and value-object invariant scenarios grow the billing suite 27→29 with its refusal count at zero |
 
 Building the oracle changed the specification language four times, and that is the part worth
 knowing. Two of the four gaps were found by review before a line of the synthesizer existed; the
 other two were found by the synthesizer **refusing to generate a scenario** and saying which construct
 it could not test. Every one of the four had been rendered without complaint by all four projections,
 because a document does not have to run. `docs/plan/ess-wave-4-the-oracle.md` in the repository is
-the full account, including what the wave did not close.
+the full account, including what the wave did not close — and the wave-6 story repeated the pattern
+at the next layer: the generated suite caught a real defect in the code generator before any human
+did, a delivery policy that conflated a declared refusal with an unmet obligation.
 
 ## What works today
 
@@ -73,13 +78,22 @@ the full account, including what the wave did not close.
   deliberately broken backend — because a suite that passes everything tells you nothing.
 * **A specification compiles** into documentation, JSON Schema, OpenAPI 3.1 and AsyncAPI 3.0, all
   drift-checked.
-* **A specification generates its own conformance suite** — 27 scenarios from the normative example,
+* **A specification generates its own conformance suite** — 29 scenarios from the normative example,
   31 from a second fixture — committed to the repository and drift-checked in CI, with every
   construct that got *no* scenario listed with the reason it got none.
-* **The suite is known to bite.** Twelve implementations that are wrong in exactly one way each are
-  run against it, and the matrix asserts *which named scenario* catches each fault, plus how many
-  unrelated scenarios it is allowed to disturb. Eleven of the twelve are caught. The twelfth is
-  recorded as caught by nothing, with the reason.
+* **The suite is known to bite.** Thirteen implementations that are wrong in exactly one way each
+  are run against it, and the matrix asserts *which named scenario* catches each fault, plus how
+  many unrelated scenarios it is allowed to disturb. All thirteen are caught — the three faults once
+  recorded as caught by nothing have each since been closed, two by teaching synthesis to ask for
+  more and the last by changing the model itself.
+* **A change to a specification is a typed object.** `ess diff` reports what moved as changes over
+  the compiled models, and `ess impact` reports which conformance results the movement invalidates —
+  with the path that produced each invalidation, and no vocabulary for "still valid".
+* **A specification synthesises the code that was never yours to write.** `ess synthesize` emits a
+  language-neutral plan and a zero-dependency Rust workspace — types, typestate lifecycles,
+  component ports, one transport — with every non-generated capability carried as a named obligation
+  or an explained refusal, never a guess. The committed workspace is regenerated, compiled and held
+  to the committed suite by CI.
 * **A conformance run closes, or refuses to close, a real task.** The run mints its own evidence
   record in the process that executed the suite; a passing run completes the task, a failing one
   leaves it blocked and names the principle that refused.
@@ -88,15 +102,14 @@ the full account, including what the wave did not close.
 
 * **No durable backend.** The only implementation of the contract is in memory, and it forgets
   everything when the process exits.
-* **No generated code.** A specification projects into documentation, contracts and a conformance
-  suite, not yet into a service.
-* **No answer to what a change invalidates.** Everything is derived from a single revision, and
-  conformance evidence fails closed when the model moves — so any edit to a specification, including
-  one to a comment in an unrelated domain, sends every conformance requirement back to owed.
-* **One deliberate fault is caught by no scenario.** An event may be published carrying a value
-  nobody supplied, because nothing in the model relates a command's input to an emitted event's
-  payload. It is recorded as uncaught rather than quietly dropped, and a test asserts it is still
-  uncaught, so closing the hole breaks the row rather than being forgotten.
+* **Generated code is structural, not behavioural.** A specification synthesises types, lifecycles,
+  ports, a plan and one transport; every algorithm is a typed obligation someone still has to
+  implement, and behavioural synthesis is rejected in the roadmap rather than pending.
+* **The diff does not know about generated code.** A change to a specification owes the whole
+  generated workspace, per the fail-closed polarity — narrowing that is wave 7's first slice.
+* **Predicates are compared only for canonical equality.** Entities, commands, views, bindings,
+  conversions and topology are outside the six compared construct families; any difference in them
+  invalidates the whole suite rather than being narrowed.
 * **No federated artifact graphs.** An artifact manifest describes one project; cross-repository
   references are resolved by hand.
 * **No remote conformance runner, on either side.** Proving your own backend means calling the
@@ -112,16 +125,20 @@ the full account, including what the wave did not close.
 ## The next honest milestone
 
 For AEP it is not a feature. It is a team whose work the protocol actually governs, and that has not
-happened yet. For ESS the oracle now exists, so the next milestone is the one it exposed: a
-specification that can say what *changed* and what that change invalidates, instead of invalidating
-everything.
+happened yet. For ESS it is wave 7, closing the loop wave 6 opened: generated artifacts carry the
+digest of the model slice they derive from, so `ess impact` can narrow "the specification moved, the
+whole workspace is owed" to the artifacts whose slice moved — and entities and commands join the
+delta as conservative canonical equality. The wave's two further slices — a second emitter, and
+obligations becoming artifacts and tasks — are deferred by decision.
 
 ---
 
-**Sources.** `README.md` § *Status*; `docs/VISION.md` § *Where this stands*; `AGENTS.md` § *Current
-state*; `Taskfile.yml`; `docs/plan/ess-roadmap.md`; `docs/plan/ess-wave-4-the-oracle.md`. Suite and
-scenario counts read from `suites/generated/README.md` and the two `suite.json` documents beside it;
-the fault count and which of them is caught by nothing from `crates/ess-conformance/src/faulty.rs`,
-where a test asserts the list length. Document and schema counts verified by counting files under
-`protocols/`, `principles/`, `workflows/`, `profiles/`, `artifacts/lifecycles/` and
-`schemas/generated/`.
+**Sources.** `README.md` § *Status*; `docs/VISION.md` § *Where this stands*; `Taskfile.yml` (the
+eight steps of `check`); `docs/plan/ess-roadmap.md`; `docs/plan/ess-wave-4-the-oracle.md`;
+`docs/plan/ess-wave-6-structural-synthesis.md`; `CHANGELOG.md` §§ *0.6.0* and *0.6.1*. Suite and
+test counts from `cargo test --workspace` at the tag (69 suites, 1397 tests, 0 failed); scenario
+counts and the billing plan's 45 = 33 / 8 / 4 from `suites/generated/README.md` and
+`generated/rust/billing/PLAN.md`; the fault count and the closure of the three once-uncaught rows
+from `crates/ess-conformance/src/faulty.rs`, where a test asserts the list length. Document and
+schema counts verified by counting files under `protocols/`, `principles/`, `workflows/`,
+`profiles/`, `artifacts/lifecycles/` and `schemas/generated/`.

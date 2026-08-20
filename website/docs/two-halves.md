@@ -25,8 +25,11 @@ and 5 artifact lifecycles, each validated against the protocol vocabulary in CI.
 
 **ESS** turns a system design into a model a compiler consumes: domains, entities, commands, events,
 views, state machines, components, bindings, topology. From one model it derives documentation,
-OpenAPI, AsyncAPI and JSON Schema today; contract tests, a conformance suite and a service skeleton
-are the next two waves and are [not built yet](./status/where-this-stands.md).
+OpenAPI, AsyncAPI and JSON Schema; a conformance suite that has been seen to catch deliberately
+wrong implementations; a typed answer to what a revision changes and which results the change
+invalidates; and the structural part of an implementation — types, typestate lifecycles, ports, one
+transport — with everything it will not guess carried as a named obligation.
+[Where this stands](./status/where-this-stands.md) keeps the numbers.
 
 The distinction the model is built around: `CreateInvoice` is a **command**, and
 `POST /invoices/commands/create-invoice` is **one way to expose it**. Transports are projections, not
