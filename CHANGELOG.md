@@ -9,7 +9,15 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **[`docs/VISION.md`](docs/VISION.md)** — what this project is for, and how its two halves compose:
+  AEP governs how engineering work is performed, ESS specifies what software must exist, and they
+  meet at evidence.
+- **[`docs/design/ess-implementor-design-v0.1.md`](docs/design/ess-implementor-design-v0.1.md)** —
+  the Executable System Specification design: a system described once as a typed semantic model, from
+  which contracts, documentation, tests, deployment artifacts and structural code are derived.
+  Specified, not built.
 
 ## [0.2.1] — 2026-08-20
 
