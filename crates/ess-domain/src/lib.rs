@@ -35,6 +35,9 @@
 //! | [`domain`] | a bounded context: what belongs to it |
 //! | [`system`] | the system and its domains: what belongs where |
 //! | [`spec`] | the members themselves, assembled from however many files they were written in |
+//! | [`component`] | software decomposition: which component owns which domain |
+//! | [`binding`] | the interaction layer: what happens when an event occurs, and when it fails |
+//! | [`topology`] | semantic runtime requirements, modelled and not deployed |
 //! | [`locate`] | how something outside the specification addresses one declaration inside it |
 //!
 //! # Two stages, and what is exempt
@@ -53,13 +56,16 @@
 //! form, so that the errors accumulate and arrive together instead of one per run.
 
 pub mod actor;
+pub mod binding;
 pub mod command;
+pub mod component;
 pub mod domain;
 pub mod entity;
 pub mod locate;
 pub mod name;
 pub mod spec;
 pub mod system;
+pub mod topology;
 pub mod types;
 pub mod view;
 

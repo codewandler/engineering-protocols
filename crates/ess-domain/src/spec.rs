@@ -76,6 +76,9 @@ pub struct RawSpecFile {
     /// Types declared here.
     #[serde(default)]
     pub types: Vec<crate::types::RawNamedType>,
+    /// Conversions this specification permits, each with the reason it is permitted.
+    #[serde(default)]
+    pub conversions: Vec<crate::types::Conversion>,
     /// Entities declared here.
     #[serde(default)]
     pub entities: Vec<crate::entity::RawEntitySpec>,
@@ -94,6 +97,18 @@ pub struct RawSpecFile {
     /// Actors declared here.
     #[serde(default)]
     pub actors: Vec<crate::actor::RawActorSpec>,
+    /// Components declared here.
+    ///
+    /// Not under a `domain:` — a component owns domains, so it sits above them, and a component
+    /// file is one that names no domain of its own.
+    #[serde(default)]
+    pub components: Vec<crate::component::RawComponentSpec>,
+    /// Bindings declared here.
+    #[serde(default)]
+    pub bindings: Vec<crate::binding::RawBindingSpec>,
+    /// The system's runtime shape.
+    #[serde(default)]
+    pub topology: Option<crate::topology::RawTopology>,
 }
 
 /// Everything a specification declares, indexed by identity.
@@ -113,6 +128,30 @@ pub struct Specification {
     pub views: BTreeMap<QualifiedName, ViewSpec>,
     /// Every actor.
     pub actors: BTreeMap<QualifiedName, ActorSpec>,
+    /// Every component.
+    pub components: BTreeMap<crate::component::ComponentName, crate::component::ComponentSpec>,
+    /// Every binding.
+    pub bindings: BTreeMap<crate::binding::BindingName, crate::binding::BindingSpec>,
+    /// The system's runtime shape, empty when nothing is stated.
+    pub topology: crate::topology::Topology,
+    /// Which type crossings are permitted, and why.
+    pub conversions: crate::types::ConversionRegistry,
+}
+
+impl RawSpecFile {
+    /// Reads one file's text.
+    ///
+    /// Two stages, and the first one is the point: deserialising straight into this type lets
+    /// `serde_yaml` **silently keep the last of two identical mapping keys**, so a document
+    /// declaring `a-service` twice loses the first entry and nothing says so. Going through
+    /// [`serde_yaml::Value`] first refuses it, with the key and the line.
+    ///
+    /// That applies to every mapping in the format, not just one section — which is why the check
+    /// lives here rather than in each module that happens to hold a map.
+    pub fn parse(text: &str) -> Result<Self, serde_yaml::Error> {
+        let document: serde_yaml::Value = serde_yaml::from_str(text)?;
+        serde_yaml::from_value(document)
+    }
 }
 
 impl Specification {
@@ -149,6 +188,10 @@ impl Specification {
             errors: collected.errors,
             views: collected.views,
             actors: collected.actors,
+            components: collected.components,
+            bindings: collected.bindings,
+            topology: collected.topology,
+            conversions: collected.conversions,
         };
 
         errors.extend(specification.validate());
@@ -204,6 +247,36 @@ impl Specification {
         for actor in self.actors.values() {
             errors.extend(actor.validate(&command_names));
         }
+
+        // The three layers above the domains. Each needs the whole specification, because each is
+        // about how the parts fit rather than about any one of them.
+        let domain_names: BTreeSet<QualifiedName> = self
+            .system
+            .domains
+            .iter()
+            .map(|domain| domain.name.clone())
+            .collect();
+        errors.extend(crate::component::validate_components(
+            &self.components,
+            &domain_names,
+            &command_names,
+            &event_names,
+        ));
+
+        errors.extend(crate::binding::validate_bindings(
+            &self.bindings,
+            &self.events,
+            &self.commands,
+            &registry,
+            &self.conversions,
+        ));
+
+        let component_names: BTreeSet<crate::component::ComponentName> =
+            self.components.keys().cloned().collect();
+        errors.extend(crate::topology::validate_topology(
+            &self.topology,
+            &component_names,
+        ));
 
         errors.extend(self.validate_ownership());
         errors
@@ -327,14 +400,16 @@ impl Specification {
 }
 
 /// Records a member, reporting a second declaration of the same name.
-fn insert<T>(
-    into: &mut BTreeMap<QualifiedName, T>,
-    name: QualifiedName,
+fn insert<K, T>(
+    into: &mut BTreeMap<K, T>,
+    name: K,
     value: T,
     source: &Source,
     kind: &str,
     errors: &mut ValidationErrors,
-) {
+) where
+    K: Ord + std::fmt::Display,
+{
     if into.contains_key(&name) {
         errors.push(
             ValidationError::new(
@@ -409,6 +484,13 @@ struct Collected {
     errors: BTreeMap<QualifiedName, ErrorSpec>,
     views: BTreeMap<QualifiedName, ViewSpec>,
     actors: BTreeMap<QualifiedName, ActorSpec>,
+    components: BTreeMap<crate::component::ComponentName, crate::component::ComponentSpec>,
+    conversions: crate::types::ConversionRegistry,
+    bindings: BTreeMap<crate::binding::BindingName, crate::binding::BindingSpec>,
+    /// The runtime shape, from whichever file carries it.
+    topology: crate::topology::Topology,
+    /// Which file carried it, so a second one can be named in the refusal.
+    topology_source: Option<Source>,
     /// The domains the system header says it has, from whichever file carries the header.
     roster: Vec<QualifiedName>,
 }
@@ -537,6 +619,15 @@ impl Collected {
             }
         }
 
+        self.absorb_system_level(
+            source,
+            file.conversions,
+            file.components,
+            file.bindings,
+            file.topology,
+            errors,
+        );
+
         if let Some(name) = file.domain {
             part.domains
                 .push(members.into_domain(name, file.naming.clone(), file.summary.clone()));
@@ -555,6 +646,75 @@ impl Collected {
         }
 
         part
+    }
+
+    /// Takes the declarations that sit above the domains rather than inside one.
+    ///
+    /// A component owns domains and a binding joins two of them, so neither can belong to
+    /// either — which is why these never reach `DomainMembers` and so never make a file that
+    /// holds only components look like a file of orphaned members.
+    fn absorb_system_level(
+        &mut self,
+        source: &Source,
+        conversions: Vec<crate::types::Conversion>,
+        components: Vec<crate::component::RawComponentSpec>,
+        bindings: Vec<crate::binding::RawBindingSpec>,
+        topology: Option<crate::topology::RawTopology>,
+        errors: &mut ValidationErrors,
+    ) {
+        for conversion in conversions {
+            if let Err(error) = self.conversions.insert(conversion) {
+                errors.push(error);
+            }
+        }
+
+        // Components, bindings and topology sit above the domains rather than inside one: a
+        // component owns domains, and a binding joins two of them, so neither can belong to either.
+        for raw in components {
+            match crate::component::ComponentSpec::try_from(raw) {
+                Ok(component) => {
+                    let name = component.name.clone();
+                    insert(
+                        &mut self.components,
+                        name,
+                        component,
+                        source,
+                        "component",
+                        errors,
+                    );
+                }
+                Err(member_errors) => errors.extend(member_errors),
+            }
+        }
+        for raw in bindings {
+            match crate::binding::BindingSpec::try_from(raw) {
+                Ok(binding) => {
+                    let name = binding.name.clone();
+                    insert(&mut self.bindings, name, binding, source, "binding", errors);
+                }
+                Err(member_errors) => errors.extend(member_errors),
+            }
+        }
+        if let Some(raw) = topology {
+            // One topology per system. Merging two would mean silently choosing which replica floor
+            // wins, and a floor chosen by file order is not a decision anyone made.
+            if let Some(first) = &self.topology_source {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::DuplicateDeclaration,
+                        format!("{source}.topology"),
+                        format!("the topology is already declared in {first}"),
+                    )
+                    .with_hint("a system has one runtime shape; put every workload in one file"),
+                );
+            } else {
+                self.topology_source = Some(source.clone());
+                match crate::topology::Topology::try_from(raw) {
+                    Ok(topology) => self.topology = topology,
+                    Err(topology_errors) => errors.extend(topology_errors),
+                }
+            }
+        }
     }
 }
 
@@ -1061,5 +1221,63 @@ actors:
             errors.contains(ValidationCode::DuplicateDeclaration),
             "a grant and a command answering to one name is two answers to `who is this`: {errors}"
         );
+    }
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::RawSpecFile;
+
+    #[test]
+    fn a_key_written_twice_is_refused_with_the_key_and_the_line() {
+        // Deserialising straight into `RawSpecFile` keeps the *last* of two identical keys and says
+        // nothing, so a workload, a type or a whole system could be silently discarded. This is the
+        // one check that catches it for every mapping in the format at once.
+        let text = "\
+topology:
+  workloads:
+    a-service:
+      stateless: true
+    a-service:
+      stateless: false
+";
+        let error = RawSpecFile::parse(text).expect_err("the key is written twice");
+        let rendered = error.to_string();
+        assert!(rendered.contains("a-service"), "{rendered}");
+        assert!(
+            rendered.contains("duplicate"),
+            "the reader has to be told which fault this is: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_top_level_key_written_twice_is_refused_too() {
+        let error = RawSpecFile::parse("system: billing\nsystem: other\n")
+            .expect_err("the key is written twice");
+        assert!(error.to_string().contains("system"), "{error}");
+    }
+
+    #[test]
+    fn the_two_stage_parse_reads_what_the_one_stage_parse_read() {
+        // Going through `serde_yaml::Value` must not change what a valid document means. A type
+        // with a hand-written `Deserialize` is where that would break, so the fixture uses several.
+        let text = "\
+format: ess/1
+system: billing
+version: v3
+domains: [billing.invoice]
+";
+        let staged = RawSpecFile::parse(text).expect("valid");
+        let direct: RawSpecFile = serde_yaml::from_str(text).expect("valid");
+        assert_eq!(
+            staged.system.map(|name| name.to_string()),
+            direct.system.map(|name| name.to_string())
+        );
+        assert_eq!(staged.version, direct.version);
+        assert_eq!(
+            staged.format.map(|f| f.to_string()),
+            direct.format.map(|f| f.to_string())
+        );
+        assert_eq!(staged.domains.len(), direct.domains.len());
     }
 }

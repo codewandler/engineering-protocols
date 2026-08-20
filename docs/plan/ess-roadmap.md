@@ -1,8 +1,20 @@
-# ESS roadmap — waves 1 to 3
+# ESS roadmap — waves 1 to 5
 
-> **Wave 1 delivered; waves 2 and 3 proposed.** Numbering restarts: these are ESS waves, not a
+> **Waves 1 and 2 delivered; 3 to 5 proposed.** Numbering restarts: these are ESS waves, not a
 > continuation of the protocol's. Tags are `0.3.0-ess-wave-1` and so on, keeping the convention that
 > a tag is named after its changelog heading.
+>
+> The five waves are design §32's seven phases, with 3 and 4 merged (both are projections of the same
+> IR, and separating them would mean shipping documentation nothing checks) and 7 left out (behavioural
+> synthesis is not worth attempting before structural synthesis has produced something that builds):
+>
+> | wave | design phase |
+> |---|---|
+> | 1 | 1 — core domain |
+> | 2 | 2 — compiler |
+> | 3 | 3 + 4 — documentation, OpenAPI, AsyncAPI |
+> | 4 | 5 — test synthesis |
+> | 5 | 6 — Rust structural synthesis |
 
 Scope and ordering follow [`ess-review-v0.1.md`](../design/ess-review-v0.1.md): the review's findings
 are folded into the waves that would otherwise have to unlearn them. Rust structural synthesis
@@ -112,42 +124,112 @@ compiler, canonical serialisation, and a CI job that regenerates everything and 
 
 ## ESS wave 3 — projections that pay for themselves
 
-**Goal: one model, four projections, and a conformance suite proven against an implementation that is
-deliberately wrong.**
+**Goal: one model, three projections, and documentation that fails the build when the model outgrows
+it.**
 
-### W3.1 `ess-gen` — one trait, four generators
+Design phases 3 and 4. Documentation first, deliberately: it is the cheapest check on model
+completeness, because a model that cannot be described cannot be compiled. Then the contracts, which
+is where the specification stops being a document about the system and becomes the system's source of
+truth.
 
-Documentation (Markdown plus Mermaid diagrams) first, because it is the cheapest check on model
-completeness: a model that cannot be described cannot be compiled. Then JSON Schema, OpenAPI,
-AsyncAPI. Every artifact carries provenance — spec version, source digest, compiler and generator
-versions (§10).
+### W3.1 `ess-gen` — one trait, three generators
 
 Three crates total, not eleven (F9): `ess-domain`, `ess-compiler`, `ess-gen`.
 
-### W3.2 Two reference implementations, one of them wrong
+| projection | what it proves |
+|---|---|
+| Markdown + Mermaid | the model can be described — every construct has a rendering, or the generator refuses |
+| JSON Schema per command input and event payload | the type system is projectable without loss |
+| OpenAPI + AsyncAPI | the specification is the contract, not a document beside it |
 
-A small hand-written billing implementation, and beside it a deliberately **wrong** one (F10): drops
-the binding, emits the wrong event, lets a paid invoice be cancelled, answers a view before the
-projection catches up. The generated suite must fail the specific check each fault exists to break.
+Every artifact carries provenance (§10): spec version, source digest, compiler version, generator
+version. An artifact that cannot say which specification produced it is an artifact nobody can audit.
 
-This is the lesson wave 3 of the protocol cost us: a generated suite that has never failed is one
-nobody has a reason to trust.
+### W3.2 Generated output is checked, not eyeballed
 
-### W3.3 Conformance, and the loop closed
+The failure mode a generator invites is output that looks right. So:
 
-The §18 scenario format, generated from the model, executed against both implementations. The result
-becomes `EvidenceKind::EssConformance` — the type added in wave 1 — submitted to the protocol engine,
-satisfying a completion predicate on a real task.
+* **OpenAPI and AsyncAPI are validated against their own schemas**, not merely produced.
+* **Regeneration is byte-identical**, and CI fails on a diff — the mechanism F8 asked for, applied to
+  generated artifacts rather than only to the IR.
+* **Every construct in `examples/billing/` appears in every projection that should contain it**,
+  asserted per construct. A projection silently dropping unions is the bug this catches.
 
-**Deliverable:** design §38's success criteria except Rust synthesis, and the vision demonstrated end
-to end: a specification generates its own contracts and its own tests, an implementation is checked
-against them, and the protocol decides whether that is enough.
+**Deliverable:** `ess generate --kind docs|schema|openapi|asyncapi`, output committed and drift-checked,
+and a test per construct per projection.
 
 ---
 
-## What is not in these three waves
+## ESS wave 4 — the specification as verification oracle
 
-Rust structural synthesis, behavioural synthesis, formal verification, topology generation, `ess diff`
-compatibility classification, and every transport beyond the one the billing example needs. Each is a
-wave of its own, and none of them is worth starting before the model has survived being projected
-three different ways.
+**Goal: a generated conformance suite, and proof that it bites — checked against an implementation
+that is deliberately wrong.**
+
+Design phase 5, and the wave where review F10 is load-bearing.
+
+### W4.1 Scenarios generated from the model
+
+The §18 scenario format, derived from the IR: a command's outcomes become cases, `external` outcomes
+become injected faults, a view's consistency decides `expect` against `eventually`, a lifecycle's
+transitions become a state-transition suite, and a binding becomes a flow test with its `delivery` and
+`on_failure` semantics.
+
+### W4.2 Two reference implementations, one of them wrong
+
+A small hand-written billing implementation, and beside it a deliberately **wrong** one: drops the
+binding, emits the wrong event, lets a paid invoice be cancelled, answers a view before the projection
+catches up.
+
+**The suite must fail the specific check each fault exists to break** — not merely fail. This is the
+lesson the protocol's own conformance work cost us: a generated suite that has never failed is a suite
+nobody has a reason to trust, and one that fails for the wrong reason is worse, because it looks like
+evidence.
+
+### W4.3 The loop closed
+
+The run produces `EvidenceKind::EssConformance` — the type wave 1 added — submitted to the protocol
+engine, satisfying a completion predicate on a real task. A specification generates its own tests, an
+implementation is checked against them, and the protocol decides whether that is enough.
+
+**Deliverable:** `ess test --generate`, a conformance runner, both implementations, and a matrix
+asserting which fault breaks which check.
+
+---
+
+## ESS wave 5 — structural synthesis
+
+**Goal: a generated invoice service and email service that compile, and that pass the suite wave 4
+generated.**
+
+Design phase 6, and §38's last success criterion. It is last for a reason: a generator built on a
+model that has not survived three projections and a conformance suite generates confident nonsense,
+and every wave before this one exists to make that claim falsifiable before the code is written.
+
+### W5.1 Domain types, commands, events, views
+
+Rust from the IR: newtypes that stay distinct from their representations, tagged unions as enums,
+lifecycles as state types whose illegal transitions do not compile, commands as traits with an outcome
+type per declared outcome.
+
+### W5.2 Component skeletons and one transport adapter
+
+A component's inner domain generated in full; its outer surface generated as a port, with exactly one
+transport implemented — the one the billing example needs. Every other transport is a later wave, and
+pretending otherwise is how a generator acquires six half-adapters.
+
+### W5.3 The generated code passes the generated tests
+
+The whole point, and the only acceptance criterion that matters: `cargo test` in the generated
+workspace runs wave 4's suite against wave 5's code and passes — with the deliberately-wrong
+implementation still failing the checks it should.
+
+**Deliverable:** `ess synthesize`, a generated buildable workspace, and CI that regenerates it and
+runs the suite.
+
+---
+
+## What is not in these five waves
+
+Behavioural synthesis (§32 phase 7), formal verification, topology generation, `ess diff` compatibility
+classification, and every transport beyond the one the billing example needs. Each is a wave of its
+own. None is worth starting before generated code has compiled and passed a suite it did not write.

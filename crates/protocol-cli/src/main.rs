@@ -25,6 +25,9 @@ use aep_engine::engine::{EvidenceSubmission, ProtocolEngine, TransitionResult};
 use aep_engine::{load_tree_report, Engine, Registry};
 use anyhow::{bail, Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use ess_compiler::diagnostic::Diagnostics;
+use ess_compiler::ir::EssIr;
+use ess_compiler::source::SourceMap;
 
 /// Who the entity surface seeds as.
 ///
@@ -341,6 +344,14 @@ fn run() -> Result<ExitCode> {
         } => validate(&root, artifacts.as_deref(), format),
         Command::Ess { command } => match command {
             EssCommand::Validate { path, format } => ess_validate(&path, format),
+            EssCommand::Compile { path, format } => ess_compile(&path, format),
+            EssCommand::Inspect {
+                path,
+                name,
+                kind,
+                format,
+            } => ess_inspect(&path, &name, kind, format),
+            EssCommand::Graph { path, format } => ess_graph(&path, format),
         },
         Command::Resolve(args) => resolve(&args),
         Command::Inspect {
@@ -503,6 +514,69 @@ enum EssCommand {
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
+    /// Resolve a specification into its IR, or report every diagnostic.
+    ///
+    /// `validate` answers "is each declaration locally consistent"; this answers "does every
+    /// reference in it resolve, and to what". A diagnostic is structured, so `--format json` hands a
+    /// harness the two types and the two document paths as fields rather than as a sentence.
+    Compile {
+        /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// How to render the result. `json` and `yaml` carry the whole IR.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Show what one declaration is, with every reference in it resolved.
+    Inspect {
+        /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// What to look up: `billing.invoice.CreateInvoice`, or an identifier such as
+        /// `notify-on-invoice-created`.
+        name: String,
+        /// Which namespace to look in. Only needed when one name is used in two of them.
+        #[arg(long, value_enum)]
+        kind: Option<EssKind>,
+        /// How to render the result.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Print the event and command graph.
+    ///
+    /// `text` is DOT, for `dot -Tsvg`; `json` and `yaml` are the same graph as nodes and edges, for
+    /// a consumer that would otherwise have to parse DOT to get at it.
+    Graph {
+        /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// How to render the graph.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+}
+
+/// Which namespace a name is looked up in.
+///
+/// A binding identifier and a qualified name are both legal `QualifiedName` spellings, so the
+/// namespaces can collide in principle. `--kind` is how a caller says which one it meant; without it
+/// a name found in two namespaces is refused rather than guessed at.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum EssKind {
+    /// A bounded context.
+    Domain,
+    /// A named type.
+    Type,
+    /// A command.
+    Command,
+    /// An event.
+    Event,
+    /// An error a command may report.
+    Error,
+    /// A binding, by its identifier.
+    Binding,
+    /// A component, by its identifier.
+    Component,
 }
 
 /// Every `.yaml` file that makes up a specification, in a stable order.
@@ -555,8 +629,20 @@ fn ess_files(path: &Path) -> Result<Vec<PathBuf>> {
     Ok(found)
 }
 
-/// `protocol ess validate`
-fn ess_validate(path: &Path, format: Format) -> Result<ExitCode> {
+/// A specification's files, parsed, with each file's text kept beside it.
+struct EssSources {
+    /// How many files were read.
+    files_read: usize,
+    /// What parsed, in the order the walk found it.
+    parsed: Vec<(ess_domain::system::Source, ess_domain::spec::RawSpecFile)>,
+    /// Every file's text, keyed by the label its errors carry.
+    texts: SourceMap,
+    /// Files that did not parse at all.
+    problems: Vec<String>,
+}
+
+/// Reads and parses every file a specification is written in.
+fn ess_sources(path: &Path) -> Result<EssSources> {
     let root = path
         .canonicalize()
         .with_context(|| format!("resolving {}", path.display()))?;
@@ -572,6 +658,7 @@ fn ess_validate(path: &Path, format: Format) -> Result<ExitCode> {
     };
 
     let mut parsed = Vec::new();
+    let mut texts = SourceMap::new();
     let mut problems: Vec<String> = Vec::new();
     for file in &files {
         // The source is the path the author typed, not the absolute one: an error that names
@@ -581,39 +668,123 @@ fn ess_validate(path: &Path, format: Format) -> Result<ExitCode> {
         let source = ess_domain::system::Source::new(relative.display().to_string());
         let text =
             fs::read_to_string(file).with_context(|| format!("reading {}", file.display()))?;
-        match serde_yaml::from_str::<ess_domain::spec::RawSpecFile>(&text) {
+        // Under the same label the errors carry, which is what lets the compiler turn a document
+        // path into a line and column without anything threading a file handle through.
+        texts.insert(source.as_str(), text.as_str());
+        // `RawSpecFile::parse`, not `serde_yaml::from_str`: the latter keeps the last of two
+        // identical mapping keys, so a file declaring one workload twice silently loses one.
+        match ess_domain::spec::RawSpecFile::parse(&text) {
             Ok(raw) => parsed.push((source, raw)),
             Err(error) => problems.push(format!("{}: {error}", source.as_str())),
         }
     }
 
-    let mut summary = EssSummary {
+    Ok(EssSources {
         files_read: files.len(),
-        ..EssSummary::default()
-    };
+        parsed,
+        texts,
+        problems,
+    })
+}
+
+/// A specification that assembled, or every reason it did not.
+enum EssLoaded {
+    /// It assembled and every local rule held.
+    Assembled {
+        /// The specification itself.
+        specification: Box<ess_domain::spec::Specification>,
+        /// The text each part was read from, for diagnostics that want a line number.
+        texts: SourceMap,
+        /// How many files it was written in.
+        files_read: usize,
+    },
+    /// It did not, and these are the reasons.
+    Refused {
+        /// How many files were read before it was refused.
+        files_read: usize,
+        /// Every reason, accumulated.
+        problems: Vec<String>,
+        /// The same reasons with a code, a structured body and a `file:line`.
+        ///
+        /// Empty when the failure was a parse error, which has no document path to locate and whose
+        /// own message already carries a line.
+        diagnostics: Diagnostics,
+    },
+}
+
+/// Reads a specification and validates it, which is the front half of all four `ess` verbs.
+fn ess_load(path: &Path) -> Result<EssLoaded> {
+    let EssSources {
+        files_read,
+        parsed,
+        texts,
+        mut problems,
+    } = ess_sources(path)?;
+    let labels: Vec<String> = parsed
+        .iter()
+        .map(|(source, _)| source.to_string())
+        .collect();
+    let mut diagnostics = Diagnostics::new();
 
     // A file that did not parse cannot be assembled with the rest, and assembling the remainder
     // would report every reference into it as undeclared — noise on top of the real error.
     if problems.is_empty() {
         match ess_domain::spec::Specification::assemble(parsed) {
             Ok(specification) => {
-                summary.system = Some(specification.system.name.to_string());
-                summary.version = Some(specification.system.version.to_string());
-                summary.domains = specification.system.domains.len();
-                summary.entities = specification.entities.len();
-                summary.commands = specification.commands.len();
-                summary.events = specification.events.len();
-                summary.errors = specification.errors.len();
-                summary.views = specification.views.len();
-                summary.actors = specification.actors.len();
+                return Ok(EssLoaded::Assembled {
+                    specification: Box::new(specification),
+                    texts,
+                    files_read,
+                });
             }
             Err(errors) => {
+                // Bridged rather than re-checked: the rule that refused this lives in `ess-domain`
+                // and is tested there. What the compiler adds is design §29's shape — a stable code
+                // and the line the declaration is written on — which a string cannot carry.
+                diagnostics = ess_compiler::resolve::diagnose_locating(&errors, &texts, &labels);
                 problems.extend(errors.as_slice().iter().map(ToString::to_string));
             }
         }
     }
-    summary.problems.clone_from(&problems);
 
+    Ok(EssLoaded::Refused {
+        files_read,
+        problems,
+        diagnostics,
+    })
+}
+
+/// `protocol ess validate`
+fn ess_validate(path: &Path, format: Format) -> Result<ExitCode> {
+    let mut summary = EssSummary::default();
+    match ess_load(path)? {
+        EssLoaded::Assembled {
+            specification,
+            files_read,
+            ..
+        } => {
+            summary.files_read = files_read;
+            summary.system = Some(specification.system.name.to_string());
+            summary.version = Some(specification.system.version.to_string());
+            summary.domains = specification.system.domains.len();
+            summary.entities = specification.entities.len();
+            summary.commands = specification.commands.len();
+            summary.events = specification.events.len();
+            summary.errors = specification.errors.len();
+            summary.views = specification.views.len();
+            summary.actors = specification.actors.len();
+        }
+        EssLoaded::Refused {
+            files_read,
+            problems,
+            diagnostics: _,
+        } => {
+            // `ess validate` keeps reporting plain refusals. Codes and spans are what `ess compile`
+            // adds, and putting them here too would make the two verbs differ only in a header.
+            summary.files_read = files_read;
+            summary.problems = problems;
+        }
+    }
     match format {
         Format::Text => {
             if let Some(system) = &summary.system {
@@ -634,19 +805,29 @@ fn ess_validate(path: &Path, format: Format) -> Result<ExitCode> {
             } else {
                 outln!("{} file(s)", summary.files_read);
             }
-            if problems.is_empty() {
+            if summary.problems.is_empty() {
                 outln!("valid");
-            } else {
-                outln!("{} problem(s):", problems.len());
-                for problem in &problems {
-                    outln!("  - {problem}");
-                }
             }
+            ess_problems(&summary.problems);
         }
         Format::Yaml | Format::Json => print_serialised(&summary, format)?,
     }
 
-    Ok(exit_code(problems.is_empty()))
+    Ok(exit_code(summary.problems.is_empty()))
+}
+
+/// Prints an accumulated list of refusals, and nothing at all when there are none.
+///
+/// Shared by every `ess` verb, so that a specification refused by `validate` reads the same when
+/// `compile` refuses it: the same list, in the same order, under the same heading.
+fn ess_problems(problems: &[String]) {
+    if problems.is_empty() {
+        return;
+    }
+    outln!("{} problem(s):", problems.len());
+    for problem in problems {
+        outln!("  - {problem}");
+    }
 }
 
 /// What `ess validate` reports.
@@ -663,6 +844,815 @@ struct EssSummary {
     views: usize,
     actors: usize,
     problems: Vec<String>,
+}
+
+/// The IR, or the fact that the reason there is none has already been reported.
+enum EssCompiled {
+    /// It compiled.
+    Compiled {
+        /// The IR.
+        ir: Box<EssIr>,
+        /// How many files it was written in.
+        files_read: usize,
+    },
+    /// It did not, and every reason has been printed in the format that was asked for.
+    Reported,
+}
+
+/// Loads, validates and compiles a specification, reporting a failure in the format asked for.
+///
+/// `inspect` and `graph` have nothing to say about a specification that does not compile, and both
+/// have to say so exactly as `compile` does — so the failure path is written once and they share it.
+fn ess_compiled(path: &Path, format: Format) -> Result<EssCompiled> {
+    let (specification, texts, files_read) = match ess_load(path)? {
+        EssLoaded::Assembled {
+            specification,
+            texts,
+            files_read,
+        } => (specification, texts, files_read),
+        EssLoaded::Refused {
+            files_read,
+            problems,
+            diagnostics,
+        } => {
+            // The bridged form, not an empty set: a refusal from `ess-domain` carries the same
+            // code and line as one this pass would have produced, so `ess compile` reports one
+            // shape whichever half noticed the defect.
+            ess_report_refusal(files_read, &problems, &diagnostics, format)?;
+            return Ok(EssCompiled::Reported);
+        }
+    };
+
+    match ess_compiler::compile(&specification, &texts) {
+        Ok(ir) => Ok(EssCompiled::Compiled {
+            ir: Box::new(ir),
+            files_read,
+        }),
+        Err(diagnostics) => {
+            ess_report_refusal(files_read, &[], &diagnostics, format)?;
+            Ok(EssCompiled::Reported)
+        }
+    }
+}
+
+/// Prints why a specification did not compile.
+fn ess_report_refusal(
+    files_read: usize,
+    problems: &[String],
+    diagnostics: &Diagnostics,
+    format: Format,
+) -> Result<()> {
+    match format {
+        Format::Text => {
+            outln!("{files_read} file(s)");
+            ess_problems(problems);
+            if !diagnostics.is_empty() {
+                outln!("{} diagnostic(s):", diagnostics.len());
+                for diagnostic in diagnostics.as_slice() {
+                    outln!("{diagnostic}");
+                }
+            }
+            if problems.is_empty() && diagnostics.is_empty() {
+                // A refusal that says nothing is a compiler bug, and naming it beats exiting 1 in
+                // silence — which is what the caller would otherwise have to interpret.
+                outln!("not compiled, and no reason was reported");
+            }
+        }
+        Format::Yaml | Format::Json => print_serialised(
+            &EssCompilation {
+                compiled: false,
+                files_read,
+                problems,
+                diagnostics,
+                ir: None,
+            },
+            format,
+        )?,
+    }
+    Ok(())
+}
+
+/// What `ess compile` reports.
+///
+/// One shape either way, so a consumer branches on `compiled` rather than on which pass failed.
+/// `problems` are the refusals that happen before the compiler is reached: a specification that does
+/// not assemble has no `Specification` to resolve, so those cannot be `Diagnostic`s — and they are
+/// not dressed up as any, because a code a harness matches on has to mean what it says.
+#[derive(serde::Serialize)]
+struct EssCompilation<'a> {
+    compiled: bool,
+    files_read: usize,
+    problems: &'a [String],
+    diagnostics: &'a Diagnostics,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ir: Option<&'a EssIr>,
+}
+
+/// `protocol ess compile`
+fn ess_compile(path: &Path, format: Format) -> Result<ExitCode> {
+    let (ir, files_read) = match ess_compiled(path, format)? {
+        EssCompiled::Compiled { ir, files_read } => (ir, files_read),
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+
+    match format {
+        Format::Text => {
+            outln!(
+                "{} {} — {files_read} file(s): {} domain(s), {} type(s), {} command(s), {} \
+                 event(s), {} error(s), {} binding(s), {} component(s)",
+                ir.system,
+                ir.version,
+                ir.domains.len(),
+                ir.types.len(),
+                ir.commands.len(),
+                ir.events.len(),
+                ir.errors.len(),
+                ir.bindings.len(),
+                ir.components.len()
+            );
+            outln!("compiled");
+        }
+        Format::Yaml | Format::Json => print_serialised(
+            &EssCompilation {
+                compiled: true,
+                files_read,
+                problems: &[],
+                diagnostics: &Diagnostics::new(),
+                ir: Some(&ir),
+            },
+            format,
+        )?,
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// One declaration, resolved, tagged with the namespace it was found in.
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum EssDeclaration<'a> {
+    /// A bounded context.
+    Domain(&'a ess_compiler::ir::ResolvedDomain),
+    /// A named type.
+    Type(&'a ess_compiler::ir::ResolvedType),
+    /// A command.
+    Command(&'a ess_compiler::ir::ResolvedCommand),
+    /// An event.
+    Event(&'a ess_compiler::ir::ResolvedEvent),
+    /// An error a command may report.
+    Error(&'a ess_compiler::ir::ResolvedError),
+    /// A binding.
+    Binding(&'a ess_compiler::ir::ResolvedBinding),
+    /// A component.
+    Component(&'a ess_compiler::ir::ResolvedComponent),
+}
+
+impl EssDeclaration<'_> {
+    /// Which namespace it came from.
+    fn kind(&self) -> EssKind {
+        match self {
+            Self::Domain(_) => EssKind::Domain,
+            Self::Type(_) => EssKind::Type,
+            Self::Command(_) => EssKind::Command,
+            Self::Event(_) => EssKind::Event,
+            Self::Error(_) => EssKind::Error,
+            Self::Binding(_) => EssKind::Binding,
+            Self::Component(_) => EssKind::Component,
+        }
+    }
+}
+
+impl EssKind {
+    /// The word a reader sees, which is also the value `--kind` takes.
+    fn label(self) -> &'static str {
+        match self {
+            Self::Domain => "domain",
+            Self::Type => "type",
+            Self::Command => "command",
+            Self::Event => "event",
+            Self::Error => "error",
+            Self::Binding => "binding",
+            Self::Component => "component",
+        }
+    }
+}
+
+/// Every declaration this name could mean, in namespace order.
+///
+/// A binding identifier such as `notify-on-invoice-created` is also a legal qualified name, so the
+/// namespaces overlap in principle. Looking in all of them and refusing an ambiguous answer is the
+/// only reading that cannot silently show the wrong declaration.
+fn ess_lookup<'a>(ir: &'a EssIr, name: &str, kind: Option<EssKind>) -> Vec<EssDeclaration<'a>> {
+    let wanted = |candidate: EssKind| kind.is_none_or(|only| only == candidate);
+    let mut found = Vec::new();
+
+    if let Ok(qualified) = ess_domain::name::QualifiedName::new(name) {
+        if wanted(EssKind::Domain) {
+            found.extend(ir.domains.get(&qualified).map(EssDeclaration::Domain));
+        }
+        if wanted(EssKind::Type) {
+            found.extend(ir.types.get(&qualified).map(EssDeclaration::Type));
+        }
+        if wanted(EssKind::Command) {
+            found.extend(ir.commands.get(&qualified).map(EssDeclaration::Command));
+        }
+        if wanted(EssKind::Event) {
+            found.extend(ir.events.get(&qualified).map(EssDeclaration::Event));
+        }
+        if wanted(EssKind::Error) {
+            found.extend(ir.errors.get(&qualified).map(EssDeclaration::Error));
+        }
+    }
+    if wanted(EssKind::Binding) {
+        if let Ok(binding) = ess_domain::binding::BindingName::new(name) {
+            found.extend(ir.bindings.get(&binding).map(EssDeclaration::Binding));
+        }
+    }
+    if wanted(EssKind::Component) {
+        if let Ok(component) = ess_domain::component::ComponentName::new(name) {
+            found.extend(ir.components.get(&component).map(EssDeclaration::Component));
+        }
+    }
+
+    found
+}
+
+/// How many names a "did you mean" list shows before it stops being one.
+const ESS_LISTING_CAP: usize = 8;
+
+/// Names a reader could have meant, capped so the message stays readable.
+fn ess_listing<T: std::fmt::Display>(names: impl Iterator<Item = T>) -> String {
+    let rendered: Vec<String> = names.map(|name| format!("`{name}`")).collect();
+    if rendered.is_empty() {
+        return "none are declared".to_owned();
+    }
+    let shown = rendered
+        .iter()
+        .take(ESS_LISTING_CAP)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if rendered.len() > ESS_LISTING_CAP {
+        format!("{shown}, and {} more", rendered.len() - ESS_LISTING_CAP)
+    } else {
+        shown
+    }
+}
+
+/// The message for a name nothing declares, which says what *is* declared.
+///
+/// A reader who mistyped needs the list more than the refusal, and a coding agent needs it instead
+/// of a second round trip.
+fn ess_undeclared(ir: &EssIr, name: &str, kind: Option<EssKind>) -> String {
+    let wanted = |candidate: EssKind| kind.is_none_or(|only| only == candidate);
+    let mut lines = vec![match kind {
+        Some(kind) => format!(
+            "`{name}` is not a declared {} in {} {}",
+            kind.label(),
+            ir.system,
+            ir.version
+        ),
+        None => format!("`{name}` is not declared in {} {}", ir.system, ir.version),
+    }];
+    if wanted(EssKind::Domain) {
+        lines.push(format!("  domains: {}", ess_listing(ir.domains.keys())));
+    }
+    if wanted(EssKind::Type) {
+        lines.push(format!("  types: {}", ess_listing(ir.types.keys())));
+    }
+    if wanted(EssKind::Command) {
+        lines.push(format!("  commands: {}", ess_listing(ir.commands.keys())));
+    }
+    if wanted(EssKind::Event) {
+        lines.push(format!("  events: {}", ess_listing(ir.events.keys())));
+    }
+    if wanted(EssKind::Error) {
+        lines.push(format!("  errors: {}", ess_listing(ir.errors.keys())));
+    }
+    if wanted(EssKind::Binding) {
+        lines.push(format!("  bindings: {}", ess_listing(ir.bindings.keys())));
+    }
+    if wanted(EssKind::Component) {
+        lines.push(format!(
+            "  components: {}",
+            ess_listing(ir.components.keys())
+        ));
+    }
+    lines.join("\n")
+}
+
+/// `protocol ess inspect`
+fn ess_inspect(path: &Path, name: &str, kind: Option<EssKind>, format: Format) -> Result<ExitCode> {
+    let ir = match ess_compiled(path, format)? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+
+    let found = ess_lookup(&ir, name, kind);
+    let [declaration] = found.as_slice() else {
+        if found.is_empty() {
+            bail!("{}", ess_undeclared(&ir, name, kind));
+        }
+        // One spelling, two namespaces: showing either declaration would be a guess, and the caller
+        // is one flag away from saying which they meant.
+        let kinds: Vec<&str> = found.iter().map(|entry| entry.kind().label()).collect();
+        bail!(
+            "`{name}` is declared as a {} — say which with `--kind {}`",
+            kinds.join(" and as a "),
+            kinds[0]
+        );
+    };
+
+    match format {
+        Format::Text => ess_render_declaration(&ir, declaration),
+        Format::Yaml | Format::Json => print_serialised(declaration, format)?,
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// One labelled line of a declaration, indented and aligned so the values line up.
+fn ess_line_at(indent: usize, label: &str, value: &str) {
+    outln!("{:indent$}{label:<10} {value}", "", indent = indent);
+}
+
+/// One labelled line of a declaration.
+fn ess_line(label: &str, value: &str) {
+    ess_line_at(2, label, value);
+}
+
+/// What is overridden about a name, when anything is.
+fn ess_render_naming(naming: &ess_domain::name::Naming) {
+    if let Some(wire) = &naming.wire {
+        ess_line("wire", wire);
+    }
+    if let Some(display) = &naming.display {
+        ess_line("display", display);
+    }
+    if let Some(summary) = &naming.summary {
+        ess_line("summary", summary);
+    }
+}
+
+/// A declaration in the shape a person reads.
+///
+/// Text is an orientation: what this is, what it refers to, what refers into it. `--format yaml`
+/// hands over the whole declaration, so nothing here has to be exhaustive.
+fn ess_render_declaration(ir: &EssIr, declaration: &EssDeclaration<'_>) {
+    match declaration {
+        EssDeclaration::Domain(domain) => {
+            outln!("domain     {}", domain.name);
+            for handle in &domain.types {
+                ess_line("type", &handle.to_string());
+            }
+            for handle in &domain.commands {
+                ess_line("command", &handle.to_string());
+            }
+            for handle in &domain.events {
+                ess_line("event", &handle.to_string());
+            }
+            for handle in &domain.errors {
+                ess_line("error", &handle.to_string());
+            }
+            ess_render_naming(&domain.naming);
+        }
+        EssDeclaration::Type(declared) => {
+            outln!("type       {}", declared.name);
+            ess_render_body(&declared.body);
+            ess_render_naming(&declared.naming);
+        }
+        EssDeclaration::Command(command) => {
+            outln!("command    {}", command.name);
+            ess_line("domain", &command.domain.to_string());
+            for field in &command.input {
+                ess_line("input", &ess_field(field));
+            }
+            for outcome in &command.outcomes {
+                ess_render_outcome(outcome);
+            }
+            ess_render_naming(&command.naming);
+        }
+        EssDeclaration::Event(event) => {
+            outln!("event      {}", event.name);
+            ess_line("domain", &event.domain.to_string());
+            for field in &event.fields {
+                ess_line("field", &ess_field(field));
+            }
+            // What reacts to it is the question this event is usually being looked up to answer.
+            for binding in ir.bindings.values() {
+                if binding.event.name() == &event.name {
+                    ess_line(
+                        "triggers",
+                        &format!("{} through `{}`", binding.command, binding.name),
+                    );
+                }
+            }
+            ess_render_naming(&event.naming);
+        }
+        EssDeclaration::Error(error) => {
+            outln!("error      {}", error.name);
+            ess_line("domain", &error.domain.to_string());
+            if let Some(summary) = &error.summary {
+                ess_line("summary", summary);
+            }
+            for field in &error.fields {
+                ess_line("field", &ess_field(field));
+            }
+        }
+        EssDeclaration::Binding(binding) => {
+            outln!("binding    {}", binding.name);
+            ess_line("when", &format!("{} occurs", binding.event));
+            ess_line("invoke", &binding.command.to_string());
+            for entry in &binding.mapping {
+                ess_line(
+                    "mapping",
+                    &format!(
+                        "{}: {} = {}",
+                        entry.target,
+                        entry.target_type,
+                        ess_mapping_value(&entry.value)
+                    ),
+                );
+                // The reason a crossing is allowed, where the crossing is: a generator emitting this
+                // mapping has to emit the conversion, and an auditor is looking for exactly this.
+                if let Some(because) = &entry.conversion {
+                    ess_line_at(4, "converted", because);
+                }
+            }
+            ess_line("delivery", ess_delivery_word(binding.delivery));
+            ess_line("on failure", ess_failure_word(binding.failure));
+            ess_render_naming(&binding.naming);
+        }
+        EssDeclaration::Component(component) => {
+            outln!("component  {}", component.name);
+            for domain in &component.owns {
+                ess_line("owns", &domain.to_string());
+            }
+            for command in &component.accepts {
+                ess_line("accepts", &command.to_string());
+            }
+            for event in &component.publishes {
+                ess_line("publishes", &event.to_string());
+            }
+            ess_render_naming(&component.naming);
+        }
+    }
+}
+
+/// A field as `name: Type`, with the wire name when it differs.
+fn ess_field(field: &ess_compiler::ir::ResolvedField) -> String {
+    match &field.naming.wire {
+        Some(wire) if wire != &field.name => {
+            format!("{}: {} (wire `{wire}`)", field.name, field.type_ref)
+        }
+        _ => format!("{}: {}", field.name, field.type_ref),
+    }
+}
+
+/// One outcome, and what reaching it produces.
+fn ess_render_outcome(outcome: &ess_compiler::ir::ResolvedOutcome) {
+    use ess_compiler::ir::ResolvedCondition;
+
+    let condition = match &outcome.condition {
+        ResolvedCondition::When { predicate } => format!("when {predicate}"),
+        ResolvedCondition::Otherwise => "otherwise".to_owned(),
+        ResolvedCondition::External { cause } => format!("external: {cause}"),
+    };
+    ess_line(
+        "outcome",
+        &format!(
+            "{} — {condition} (test: {})",
+            outcome.name, outcome.test_strategy
+        ),
+    );
+    for event in &outcome.emits {
+        ess_line_at(4, "emits", &event.to_string());
+    }
+    if let Some(error) = &outcome.error {
+        ess_line_at(4, "reports", &error.to_string());
+    }
+}
+
+/// What a type is made of.
+fn ess_render_body(body: &ess_compiler::ir::ResolvedBody) {
+    use ess_compiler::ir::ResolvedBody;
+
+    match body {
+        ResolvedBody::Newtype { of, invariants } => {
+            ess_line("kind", &format!("newtype of {of}"));
+            ess_render_invariants(invariants);
+        }
+        ResolvedBody::Struct { fields, invariants } => {
+            ess_line("kind", "struct");
+            for field in fields {
+                ess_line("field", &ess_field(field));
+            }
+            ess_render_invariants(invariants);
+        }
+        ResolvedBody::Enum { variants } => {
+            ess_line("kind", "enum");
+            for variant in variants {
+                ess_line("variant", variant);
+            }
+        }
+        ResolvedBody::Union { tag, variants } => {
+            ess_line("kind", &format!("union tagged `{tag}`"));
+            for (value, type_ref) in variants {
+                ess_line("variant", &format!("{value}: {type_ref}"));
+            }
+        }
+    }
+}
+
+/// The conditions every value of a type satisfies, as the author wrote them.
+fn ess_render_invariants(invariants: &[ess_domain::entity::Invariant]) {
+    for invariant in invariants {
+        ess_line("invariant", &invariant.statement);
+    }
+}
+
+/// Where a mapped value comes from, in one phrase.
+fn ess_mapping_value(value: &ess_compiler::ir::ResolvedMappingValue) -> String {
+    use ess_compiler::ir::ResolvedMappingValue;
+
+    match value {
+        ResolvedMappingValue::EventField { field, type_ref } => {
+            format!("event.{field}: {type_ref}")
+        }
+        // Marked as written rather than checked: nothing in the model says how to read
+        // `invoice-created` as a `TemplateId`, and a reader should see which is which.
+        ResolvedMappingValue::Literal { value } => format!("`{value}` (literal)"),
+    }
+}
+
+/// The word the document used for a delivery guarantee.
+///
+/// Spelled as the author typed it, because that is what they will search their sources for.
+fn ess_delivery_word(delivery: ess_domain::binding::Delivery) -> &'static str {
+    match delivery {
+        ess_domain::binding::Delivery::AtLeastOnce => "at_least_once",
+    }
+}
+
+/// The word the document used for what happens when a binding fails.
+fn ess_failure_word(failure: ess_domain::binding::Failure) -> &'static str {
+    match failure {
+        ess_domain::binding::Failure::Retry => "retry",
+        ess_domain::binding::Failure::Escalate => "escalate",
+        ess_domain::binding::Failure::Drop => "drop",
+    }
+}
+
+/// The graph the interaction layer is about.
+///
+/// Nodes are commands and events; edges are what an outcome emits and what a binding invokes. Two
+/// decisions worth stating. **Components are on the nodes rather than being nodes**: a component
+/// owns domains, and a graph that dropped that would answer "what reacts to this" while hiding who
+/// has to ship the answer — so a component is a cluster the nodes sit inside. **Errors are not
+/// nodes**: nothing reacts to one, so an error would be a leaf that cannot participate in the
+/// causality this graph exists to show. `ess inspect` is where a command's errors are.
+#[derive(serde::Serialize)]
+struct EssGraph<'a> {
+    system: &'a ess_domain::name::QualifiedName,
+    version: String,
+    nodes: Vec<EssGraphNode<'a>>,
+    edges: Vec<EssGraphEdge<'a>>,
+}
+
+/// A command or an event, and who owns it.
+#[derive(serde::Serialize)]
+struct EssGraphNode<'a> {
+    kind: &'static str,
+    name: &'a ess_domain::name::QualifiedName,
+    domain: &'a ess_domain::name::QualifiedName,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    component: Option<&'a ess_domain::component::ComponentName>,
+}
+
+/// A command emitting an event, or an event invoking a command through a binding.
+#[derive(serde::Serialize)]
+struct EssGraphEdge<'a> {
+    kind: &'static str,
+    from: &'a ess_domain::name::QualifiedName,
+    to: &'a ess_domain::name::QualifiedName,
+    /// Which branch emits it — an event emitted only on refusal is not the same edge as one emitted
+    /// on success, and a graph that merged them would say the happy path always produces both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<&'a ess_domain::command::OutcomeName>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    binding: Option<&'a ess_domain::binding::BindingName>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    delivery: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    on_failure: Option<&'static str>,
+}
+
+/// Which component owns which domain.
+///
+/// First owner in component order wins. Two components owning one domain is refused before an IR
+/// exists; if that ever stopped being true, this would still answer the same way twice.
+fn ess_owners(
+    ir: &EssIr,
+) -> std::collections::BTreeMap<
+    &ess_domain::name::QualifiedName,
+    &ess_domain::component::ComponentName,
+> {
+    let mut owners = std::collections::BTreeMap::new();
+    for component in ir.components.values() {
+        for domain in &component.owns {
+            owners.entry(domain.name()).or_insert(&component.name);
+        }
+    }
+    owners
+}
+
+/// Reads the graph out of the IR.
+///
+/// Every iteration here is over a `BTreeMap`, a `BTreeSet` or a declaration-order `Vec`, which is
+/// what makes two runs byte-identical rather than usually byte-identical.
+fn ess_graph_of(ir: &EssIr) -> EssGraph<'_> {
+    let owners = ess_owners(ir);
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    for command in ir.commands.values() {
+        nodes.push(EssGraphNode {
+            kind: "command",
+            name: &command.name,
+            domain: command.domain.name(),
+            component: owners.get(command.domain.name()).copied(),
+        });
+    }
+    for event in ir.events.values() {
+        nodes.push(EssGraphNode {
+            kind: "event",
+            name: &event.name,
+            domain: event.domain.name(),
+            component: owners.get(event.domain.name()).copied(),
+        });
+    }
+
+    for command in ir.commands.values() {
+        for outcome in &command.outcomes {
+            for event in &outcome.emits {
+                edges.push(EssGraphEdge {
+                    kind: "emits",
+                    from: &command.name,
+                    to: event.name(),
+                    outcome: Some(&outcome.name),
+                    binding: None,
+                    delivery: None,
+                    on_failure: None,
+                });
+            }
+        }
+    }
+    // `reactions` rather than the binding map directly: the IR defines this half of the graph, and a
+    // second reading of it here would disagree the first time an event grew a second binding.
+    for (event, bindings) in ir.reactions() {
+        for binding in bindings {
+            edges.push(EssGraphEdge {
+                kind: "invokes",
+                from: event.name(),
+                to: binding.command.name(),
+                outcome: None,
+                binding: Some(&binding.name),
+                delivery: Some(ess_delivery_word(binding.delivery)),
+                on_failure: Some(ess_failure_word(binding.failure)),
+            });
+        }
+    }
+
+    EssGraph {
+        system: &ir.system,
+        version: ir.version.to_string(),
+        nodes,
+        edges,
+    }
+}
+
+/// Escapes what DOT treats specially inside a quoted string.
+///
+/// Nothing in the model can hold a quote or a backslash today. The escaping is here anyway, because
+/// the alternative is a rendering whose correctness depends on a regular expression in another
+/// crate.
+fn dot_escape(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// A DOT identifier or attribute value.
+fn dot_string(value: &str) -> String {
+    format!("\"{}\"", dot_escape(value))
+}
+
+/// A DOT label whose parts are shown on separate lines.
+fn dot_label(lines: &[&str]) -> String {
+    let escaped: Vec<String> = lines.iter().map(|line| dot_escape(line)).collect();
+    format!("\"{}\"", escaped.join("\\n"))
+}
+
+/// The graph as DOT, ready for `dot -Tsvg`.
+fn ess_graph_dot(graph: &EssGraph<'_>) {
+    outln!(
+        "// {} {} — {} node(s), {} edge(s)",
+        graph.system,
+        graph.version,
+        graph.nodes.len(),
+        graph.edges.len()
+    );
+    outln!("digraph {} {{", dot_string(&graph.system.to_string()));
+    outln!("  rankdir=LR;");
+    outln!("  node [fontname=\"sans-serif\"];");
+    outln!("  edge [fontname=\"sans-serif\"];");
+
+    let mut owned: std::collections::BTreeMap<&str, Vec<&EssGraphNode<'_>>> =
+        std::collections::BTreeMap::new();
+    let mut unowned: Vec<&EssGraphNode<'_>> = Vec::new();
+    for node in &graph.nodes {
+        match node.component {
+            Some(component) => owned.entry(component.as_str()).or_default().push(node),
+            None => unowned.push(node),
+        }
+    }
+
+    for (component, nodes) in &owned {
+        outln!(
+            "  subgraph {} {{",
+            dot_string(&format!("cluster_{component}"))
+        );
+        outln!("    label={};", dot_string(component));
+        outln!("    style=rounded;");
+        for node in nodes {
+            ess_graph_dot_node(node, 4);
+        }
+        outln!("  }}");
+    }
+    for node in &unowned {
+        ess_graph_dot_node(node, 2);
+    }
+
+    for edge in &graph.edges {
+        ess_graph_dot_edge(edge);
+    }
+
+    outln!("}}");
+}
+
+/// One node, indented to sit inside its cluster or outside every cluster.
+fn ess_graph_dot_node(node: &EssGraphNode<'_>, indent: usize) {
+    // A command is a box and an event is an ellipse, so every arrow's direction is readable without
+    // following the labels: a box makes ellipses, an ellipse re-enters a box.
+    let shape = if node.kind == "command" {
+        "box"
+    } else {
+        "ellipse"
+    };
+    outln!(
+        "{:indent$}{} [label={}, shape={shape}];",
+        "",
+        dot_string(&node.name.to_string()),
+        dot_label(&[node.name.local(), &node.domain.to_string()]),
+        indent = indent
+    );
+}
+
+/// One edge, labelled with what makes it happen.
+fn ess_graph_dot_edge(edge: &EssGraphEdge<'_>) {
+    let label = match (edge.binding, edge.delivery, edge.on_failure, edge.outcome) {
+        (Some(binding), Some(delivery), Some(failure), _) => {
+            dot_label(&[binding.as_str(), &format!("{delivery} / {failure}")])
+        }
+        (_, _, _, Some(outcome)) => dot_label(&["emits", &outcome.to_string()]),
+        _ => dot_label(&[edge.kind]),
+    };
+    // A binding crosses contexts asynchronously; an emission is part of the command. Dashing the
+    // first is the one visual difference a reader needs in order to see where a queue is.
+    let style = if edge.binding.is_some() {
+        ", style=dashed"
+    } else {
+        ""
+    };
+    outln!(
+        "  {} -> {} [label={label}{style}];",
+        dot_string(&edge.from.to_string()),
+        dot_string(&edge.to.to_string())
+    );
+}
+
+/// `protocol ess graph`
+fn ess_graph(path: &Path, format: Format) -> Result<ExitCode> {
+    let ir = match ess_compiled(path, format)? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+
+    let graph = ess_graph_of(&ir);
+    match format {
+        Format::Text => ess_graph_dot(&graph),
+        Format::Yaml | Format::Json => print_serialised(&graph, format)?,
+    }
+
+    Ok(ExitCode::SUCCESS)
 }
 
 /// `protocol validate`

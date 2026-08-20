@@ -419,3 +419,123 @@ fn the_example_shows_a_filter_a_payload_and_an_overridden_wire_name() {
         "no command in the example overrides its wire or display name"
     );
 }
+
+#[test]
+fn the_example_decomposes_into_components_that_own_the_domains() {
+    let specification = billing();
+
+    assert_eq!(specification.components.len(), 2);
+    let owned: BTreeSet<String> = specification
+        .components
+        .values()
+        .flat_map(|component| component.owns.iter().map(ToString::to_string))
+        .collect();
+    for domain in &specification.system.domains {
+        assert!(
+            owned.contains(&domain.name.to_string()),
+            "`{}` is owned by no component: {owned:?}",
+            domain.name
+        );
+    }
+}
+
+#[test]
+fn the_example_binds_one_context_to_the_other_and_says_what_happens_when_it_fails() {
+    // Review F3: a binding that can fail silently is the difference between specifying a system and
+    // specifying a demo, and the way that difference disappears is a default nobody read. So the
+    // example states both, and this asserts it states them rather than inherits them.
+    use ess_domain::binding::{Delivery, Failure};
+
+    let specification = billing();
+    let binding = specification
+        .bindings
+        .values()
+        .find(|binding| binding.name.as_str() == "notify-on-invoice-created")
+        .expect("the example binds the two contexts");
+
+    assert_eq!(binding.event.to_string(), "billing.invoice.InvoiceCreated");
+    assert_eq!(binding.command.to_string(), "billing.email.SendEmail");
+    assert_eq!(binding.delivery, Delivery::AtLeastOnce);
+    assert_eq!(binding.failure, Failure::Escalate);
+    assert!(
+        binding.mapping.len() >= 2,
+        "the binding fills both of SendEmail's inputs: {:?}",
+        binding.mapping
+    );
+}
+
+#[test]
+fn the_example_shows_a_mapping_that_reads_the_event_and_one_that_does_not() {
+    // The two kinds are kept apart in the model so a reader can tell which mappings the compiler
+    // verified: a field's type is checked against the target, a literal's cannot be.
+    use ess_domain::binding::MappingSource;
+
+    let specification = billing();
+    let binding = specification
+        .bindings
+        .values()
+        .next()
+        .expect("the example declares a binding");
+
+    assert!(
+        binding
+            .mapping
+            .values()
+            .any(|source| matches!(source, MappingSource::EventField { .. })),
+        "no mapping reads the event: {:?}",
+        binding.mapping
+    );
+    assert!(
+        binding
+            .mapping
+            .values()
+            .any(|source| matches!(source, MappingSource::Literal { .. })),
+        "no mapping is a literal, so the unchecked case is unexercised: {:?}",
+        binding.mapping
+    );
+}
+
+#[test]
+fn the_example_declares_the_one_type_crossing_it_needs_and_says_why() {
+    // A conversion with no reason is what this declaration exists to prevent: a silent widening
+    // someone added to make a build pass.
+    let specification = billing();
+
+    assert_eq!(specification.conversions.len(), 1);
+    let conversion = specification
+        .conversions
+        .iter()
+        .next()
+        .expect("the example declares one crossing");
+    assert!(!conversion.because.trim().is_empty());
+
+    let from = &conversion.from;
+    let to = &conversion.to;
+    assert!(
+        specification.conversions.permits(from, to),
+        "the declared crossing is not permitted"
+    );
+    assert!(
+        !specification.conversions.permits(to, from),
+        "a crossing is one-directional; the reverse is usually the unsafe one"
+    );
+}
+
+#[test]
+fn the_example_states_a_runtime_shape_without_deploying_anything() {
+    let specification = billing();
+
+    assert_eq!(specification.topology.workloads.len(), 2);
+    for workload in specification.topology.workloads.values() {
+        assert!(
+            workload.replicas.min >= 2,
+            "`{}` runs a binding's listener; one instance leaves a window with nothing listening",
+            workload.component
+        );
+        assert!(
+            !workload.requires.is_empty(),
+            "`{}` needs nothing, which is not a statement anyone made",
+            workload.component
+        );
+    }
+}

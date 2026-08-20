@@ -11,12 +11,34 @@
         "$ref": "#/definitions/RawActorSpec"
       }
     },
+    "bindings": {
+      "description": "Bindings declared here.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawBindingSpec"
+      }
+    },
     "commands": {
       "description": "Commands declared here.",
       "default": [],
       "type": "array",
       "items": {
         "$ref": "#/definitions/RawCommandSpec"
+      }
+    },
+    "components": {
+      "description": "Components declared here.\n\nNot under a `domain:` — a component owns domains, so it sits above them, and a component file is one that names no domain of its own.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawComponentSpec"
+      }
+    },
+    "conversions": {
+      "description": "Conversions this specification permits, each with the reason it is permitted.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Conversion"
       }
     },
     "domain": {
@@ -74,6 +96,15 @@
         }
       ]
     },
+    "naming": {
+      "description": "What that domain is called on the wire and shown as.\n\nOn the file carrying `domain:`, not on the one carrying `system:` — a domain's wire name belongs to the domain, and putting it in the header would make the header the place every context has to be edited.",
+      "default": {},
+      "allOf": [
+        {
+          "$ref": "#/definitions/Naming"
+        }
+      ]
+    },
     "summary": {
       "description": "What the system is, in one paragraph.",
       "default": null,
@@ -94,9 +125,19 @@
         }
       ]
     },
+    "topology": {
+      "description": "The system's runtime shape.",
+      "anyOf": [
+        {
+          "$ref": "#/definitions/RawTopology"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "types": {
       "description": "Types declared here.",
-      "default": [],
       "type": "array",
       "items": {
         "$ref": "#/definitions/NamedType"
@@ -140,6 +181,76 @@
           "type": "string",
           "enum": [
             "eventual"
+          ]
+        }
+      ]
+    },
+    "Conversion": {
+      "description": "A conversion someone decided to allow.\n\nDesign §20 requires that a mapping's two types \"be compatible, or an explicit conversion must exist\". This is that conversion, and it is a declaration rather than an inference on purpose: `Email` and `VerifiedEmail` are both a `String` underneath, and the entire value of naming them apart is that the model refuses to treat one as the other. Someone has to write down that this particular crossing is intended, so that the next reader can find who decided it.",
+      "type": "object",
+      "required": [
+        "because",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "because": {
+          "description": "Why this crossing is allowed.\n\nRequired. A conversion with no reason is the thing this declaration exists to prevent: a silent widening that someone added to make a build pass.",
+          "type": "string"
+        },
+        "from": {
+          "description": "The type a value has.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TypeRef"
+            }
+          ]
+        },
+        "to": {
+          "description": "The type it may be used as.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TypeRef"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Delivery": {
+      "description": "How many times the command may run.",
+      "oneOf": [
+        {
+          "description": "At least once, so the command must be idempotent.\n\nThe only guarantee this build implements, and it is stated rather than assumed because \"exactly once\" is what everyone believes they have until a retry proves otherwise.",
+          "type": "string",
+          "enum": [
+            "at_least_once"
+          ]
+        }
+      ]
+    },
+    "Failure": {
+      "description": "What happens when the command does not run.",
+      "oneOf": [
+        {
+          "description": "Try again, on whatever schedule the transport provides.",
+          "type": "string",
+          "enum": [
+            "retry"
+          ]
+        },
+        {
+          "description": "Surface it to a person.",
+          "type": "string",
+          "enum": [
+            "escalate"
+          ]
+        },
+        {
+          "description": "Give up silently.\n\nLegal, and never a default: a system that loses work is a decision, and the decision has to be findable in the document that made it.",
+          "type": "string",
+          "enum": [
+            "drop"
           ]
         }
       ]
@@ -527,6 +638,81 @@
       },
       "additionalProperties": false
     },
+    "RawBindingSpec": {
+      "description": "A binding, as a document says it.",
+      "type": "object",
+      "required": [
+        "delivery",
+        "invoke",
+        "name",
+        "on_failure",
+        "when"
+      ],
+      "properties": {
+        "delivery": {
+          "description": "How many times the command may run. Required.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Delivery"
+            }
+          ]
+        },
+        "invoke": {
+          "description": "What it does.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawInvocation"
+            }
+          ]
+        },
+        "mapping": {
+          "description": "How the event's fields become the command's input.",
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "name": {
+          "description": "Its identifier, unique in the system.",
+          "type": "string"
+        },
+        "naming": {
+          "description": "What it is called on the wire and shown as.",
+          "default": {},
+          "allOf": [
+            {
+              "$ref": "#/definitions/Naming"
+            }
+          ]
+        },
+        "on_failure": {
+          "description": "What happens when it does not run. Required.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Failure"
+            }
+          ]
+        },
+        "summary": {
+          "description": "What it is for, in one line.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "when": {
+          "description": "What it reacts to.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawTrigger"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "RawCommandSpec": {
       "description": "A command as written in a document, before validation.",
       "type": "object",
@@ -562,6 +748,99 @@
           "type": "array",
           "items": {
             "$ref": "#/definitions/RawOutcome"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawComponentOwns": {
+      "description": "What a component owns.",
+      "type": "object",
+      "properties": {
+        "domains": {
+          "description": "The domains, by qualified name.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/QualifiedName"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawComponentSpec": {
+      "description": "What a component is made of, as a document says it.",
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "accepts": {
+          "description": "The commands it accepts.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawComponentSurface"
+            }
+          ]
+        },
+        "name": {
+          "description": "Its name — a single segment, like `invoice-service`.",
+          "type": "string"
+        },
+        "naming": {
+          "description": "What it is called on the wire and shown as.",
+          "default": {},
+          "allOf": [
+            {
+              "$ref": "#/definitions/Naming"
+            }
+          ]
+        },
+        "owns": {
+          "description": "The domains it owns.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawComponentOwns"
+            }
+          ]
+        },
+        "publishes": {
+          "description": "The events it publishes.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawComponentSurface"
+            }
+          ]
+        },
+        "summary": {
+          "description": "What it is, in one line.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawComponentSurface": {
+      "description": "The commands a component accepts, or the events it publishes.\n\nOne shape for both because the document spells them the same way (§5) and a second shape would be a second thing to keep in step.",
+      "type": "object",
+      "properties": {
+        "commands": {
+          "description": "Commands, when this is an `accepts:` block.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/QualifiedName"
+          }
+        },
+        "events": {
+          "description": "Events, when this is a `publishes:` block.",
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/QualifiedName"
           }
         }
       },
@@ -692,6 +971,24 @@
       },
       "additionalProperties": false
     },
+    "RawInvocation": {
+      "description": "What a binding does.",
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "description": "The command.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "RawOutcome": {
       "description": "One outcome as written in a document, before validation.\n\n`when` and `external` are the two spellings of a condition; writing neither is the default branch, and writing both is refused.",
       "type": "object",
@@ -753,6 +1050,32 @@
       },
       "additionalProperties": false
     },
+    "RawReplicas": {
+      "description": "A replica range.",
+      "type": "object",
+      "required": [
+        "min"
+      ],
+      "properties": {
+        "max": {
+          "description": "The ceiling, when there is one.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        },
+        "min": {
+          "description": "The floor. Below this the system is not correct, not merely slower.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
     "RawStateMachine": {
       "description": "An entity's lifecycle, as parsed.\n\nTransitions are a sequence rather than §4.7's mapping keyed by name, because a mapping cannot hold two transitions with the same name: a duplicate would be swallowed by the YAML parser instead of reported, and the rule against it would be unenforceable.",
       "type": "object",
@@ -793,6 +1116,38 @@
           "items": {
             "$ref": "#/definitions/Transition"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawTopology": {
+      "description": "The topology, as a document says it.",
+      "type": "object",
+      "properties": {
+        "workloads": {
+          "description": "One entry per component that runs.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawWorkload"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawTrigger": {
+      "description": "What a binding reacts to.",
+      "type": "object",
+      "required": [
+        "event"
+      ],
+      "properties": {
+        "event": {
+          "description": "The event.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -854,6 +1209,42 @@
             {
               "$ref": "#/definitions/QualifiedName"
             }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawWorkload": {
+      "description": "One workload, as a document says it.",
+      "type": "object",
+      "properties": {
+        "replicas": {
+          "description": "How many instances.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RawReplicas"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "requires": {
+          "description": "What it needs in order to run.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "stateless": {
+          "description": "Whether an instance holds state that outlives a request.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
           ]
         }
       },

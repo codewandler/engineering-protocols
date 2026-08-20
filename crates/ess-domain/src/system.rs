@@ -488,95 +488,165 @@ fn build_registry(
         }
     }
 
-    check_cycles(&registry, errors);
+    check_inhabitation(&registry, errors);
 
     registry
 }
 
-/// Every named type this one cannot be built without.
+/// Whether a type reference is inhabited, given what is known to be inhabited so far.
 ///
-/// A reference behind `Optional`, `List` or `Map` is not one of them: an absent value and an empty
-/// list are base cases, so a type that reaches itself only through one of them still has values and
-/// a generator over it still terminates. A cycle of *required* references has neither, which is the
-/// dependency cycle design §20 forbids.
-fn required_dependencies(declared: &NamedType) -> Vec<&QualifiedName> {
-    fn required(reference: &TypeRef) -> Option<&QualifiedName> {
+/// `Optional`, `List` and `Map` are inhabited unconditionally: an absent value and an empty
+/// collection are base cases, so a type that reaches itself only through one of them still has
+/// values and a generator over it still terminates.
+fn reference_inhabited(reference: &TypeRef, inhabited: &BTreeSet<QualifiedName>) -> bool {
+    match reference {
+        TypeRef::Primitive(_) | TypeRef::Optional(_) | TypeRef::List(_) | TypeRef::Map(_, _) => {
+            true
+        }
+        TypeRef::Named(name) => inhabited.contains(name),
+    }
+}
+
+/// Whether a declaration is inhabited, given what is known to be inhabited so far.
+///
+/// The union case is the whole point of this being about inhabitation rather than about cycles: a
+/// union needs **one** variant that can be built, not all of them. `Expr = union {leaf: Integer,
+/// pair: Pair}` with `Pair = struct {left: Expr, right: Expr}` describes a perfectly ordinary
+/// expression tree — every value of it bottoms out in a `leaf` — and a rule that refused every cycle
+/// of names would refuse it.
+fn body_inhabited(declared: &NamedType, inhabited: &BTreeSet<QualifiedName>) -> bool {
+    match &declared.body {
+        TypeBody::Newtype { of, .. } => reference_inhabited(of, inhabited),
+        // Every field has to be buildable; a struct cannot omit one.
+        TypeBody::Struct { fields, .. } => fields
+            .iter()
+            .all(|field| reference_inhabited(&field.type_ref, inhabited)),
+        // A variant is a name, not a reference to another type; an enum with no variants is refused
+        // by `NamedType`'s own conversion, so anything reaching here has at least one.
+        TypeBody::Enum { .. } => true,
+        // One buildable variant is enough.
+        TypeBody::Union { variants, .. } => variants
+            .values()
+            .any(|variant| reference_inhabited(variant, inhabited)),
+    }
+}
+
+/// Reports every type no value can inhabit.
+///
+/// A least-fixpoint rather than a cycle search: start with nothing known to be inhabited, then keep
+/// marking declarations whose requirements are met until nothing new can be marked. Whatever is left
+/// unmarked cannot be built — which is design §20's forbidden dependency cycle, stated as the
+/// property that actually matters instead of as the shape that usually causes it.
+///
+/// Stating it the other way round was a real defect, not a stylistic difference: treating every
+/// union variant as required refused the expression tree above.
+fn check_inhabitation(registry: &TypeRegistry, errors: &mut ValidationErrors) {
+    let mut inhabited: BTreeSet<QualifiedName> = BTreeSet::new();
+    loop {
+        let mut grew = false;
+        for declared in registry.iter() {
+            if !inhabited.contains(&declared.name) && body_inhabited(declared, &inhabited) {
+                inhabited.insert(declared.name.clone());
+                grew = true;
+            }
+        }
+        if !grew {
+            break;
+        }
+    }
+
+    for declared in registry.iter() {
+        if inhabited.contains(&declared.name) {
+            continue;
+        }
+        // An undeclared dependency is already reported as an unresolved reference, and a type that
+        // is uninhabited only because one of its fields names nothing would be a second message
+        // about the same mistake.
+        if names_something_undeclared(declared, registry) {
+            continue;
+        }
+        // Naming what it is waiting for, not just that it is stuck: a fixpoint knows which
+        // requirements were never met, and "requires X, which also cannot be built" is the sentence
+        // an author can act on. Bare "this cannot exist" leaves them to find the other end.
+        let blockers = unmet_requirements(declared, &inhabited);
+        errors.push(
+            ValidationError::new(
+                ValidationCode::SelfReference,
+                format!("types.{}", declared.name),
+                format!(
+                    "no value of `{}` can exist: it requires {}, which cannot be built either",
+                    declared.name,
+                    blockers
+                        .iter()
+                        .map(|name| format!("`{name}`"))
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                ),
+            )
+            .with_hint(
+                "break the requirement, put one step behind `Optional` or `List`, which have a \
+                 base case, or give a union a variant that does not recurse",
+            ),
+        );
+    }
+}
+
+/// The named types a declaration needs and which are themselves uninhabited.
+///
+/// For a struct, the fields that are stuck; for a union, every variant, because a union is only
+/// stuck when all of them are. Sorted and deduplicated so the message is stable.
+fn unmet_requirements(
+    declared: &NamedType,
+    inhabited: &BTreeSet<QualifiedName>,
+) -> Vec<QualifiedName> {
+    let mut blocked: BTreeSet<QualifiedName> = BTreeSet::new();
+    let mut consider = |reference: &TypeRef| {
+        if let TypeRef::Named(name) = reference {
+            if !inhabited.contains(name) {
+                blocked.insert(name.clone());
+            }
+        }
+    };
+
+    match &declared.body {
+        TypeBody::Newtype { of, .. } => consider(of),
+        TypeBody::Struct { fields, .. } => {
+            for field in fields {
+                consider(&field.type_ref);
+            }
+        }
+        TypeBody::Enum { .. } => {}
+        TypeBody::Union { variants, .. } => {
+            for variant in variants.values() {
+                consider(variant);
+            }
+        }
+    }
+
+    blocked.into_iter().collect()
+}
+
+/// Whether a declaration references a name the registry does not hold.
+fn names_something_undeclared(declared: &NamedType, registry: &TypeRegistry) -> bool {
+    fn undeclared(reference: &TypeRef, registry: &TypeRegistry) -> bool {
         match reference {
-            TypeRef::Named(name) => Some(name),
-            _ => None,
+            TypeRef::Named(name) => registry.get(name).is_none(),
+            TypeRef::Optional(inner) | TypeRef::List(inner) => undeclared(inner, registry),
+            TypeRef::Map(_, value) => undeclared(value, registry),
+            TypeRef::Primitive(_) => false,
         }
     }
 
     match &declared.body {
-        TypeBody::Newtype { of, .. } => required(of).into_iter().collect(),
+        TypeBody::Newtype { of, .. } => undeclared(of, registry),
         TypeBody::Struct { fields, .. } => fields
             .iter()
-            .filter_map(|field| required(&field.type_ref))
-            .collect(),
-        TypeBody::Enum { .. } => Vec::new(),
-        TypeBody::Union { variants, .. } => variants.values().filter_map(required).collect(),
+            .any(|field| undeclared(&field.type_ref, registry)),
+        TypeBody::Enum { .. } => false,
+        TypeBody::Union { variants, .. } => variants
+            .values()
+            .any(|variant| undeclared(variant, registry)),
     }
-}
-
-/// Reports every dependency cycle among the declared types.
-fn check_cycles(registry: &TypeRegistry, errors: &mut ValidationErrors) {
-    let mut settled: BTreeSet<&QualifiedName> = BTreeSet::new();
-    for declared in registry.iter() {
-        walk(
-            registry,
-            &declared.name,
-            &mut Vec::new(),
-            &mut settled,
-            errors,
-        );
-    }
-}
-
-/// Depth-first search that reports each back edge once and then stops following it.
-fn walk<'a>(
-    registry: &'a TypeRegistry,
-    name: &'a QualifiedName,
-    path: &mut Vec<&'a QualifiedName>,
-    settled: &mut BTreeSet<&'a QualifiedName>,
-    errors: &mut ValidationErrors,
-) {
-    if settled.contains(name) {
-        return;
-    }
-    if let Some(start) = path.iter().position(|seen| *seen == name) {
-        let mut cycle: Vec<String> = path[start..]
-            .iter()
-            .map(|step| format!("`{step}`"))
-            .collect();
-        cycle.push(format!("`{name}`"));
-        errors.push(
-            ValidationError::new(
-                ValidationCode::SelfReference,
-                format!("types.{name}"),
-                format!(
-                    "`{name}` cannot be built without itself: {}",
-                    cycle.join(" -> ")
-                ),
-            )
-            .with_hint(
-                "a cycle of required references describes no value; break it, or put one step \
-                 behind `Optional` or `List`, which have a base case",
-            ),
-        );
-        return;
-    }
-    // An undeclared dependency is already reported as an unresolved reference; walking into it
-    // would say the same thing again in different words.
-    let Some(declared) = registry.get(name) else {
-        return;
-    };
-
-    path.push(name);
-    for dependency in required_dependencies(declared) {
-        walk(registry, dependency, path, settled, errors);
-    }
-    path.pop();
-    settled.insert(name);
 }
 
 /// Who declared a name, and from where.
@@ -1012,6 +1082,11 @@ mod tests {
     fn system(yaml: &str) -> Result<SystemSpec, ValidationErrors> {
         let raw: RawSystemSpec = serde_yaml::from_str(yaml).expect("document parses");
         SystemSpec::try_from(raw)
+    }
+
+    /// Whatever a document was refused for, or nothing when it was accepted.
+    fn system_errors(yaml: &str) -> ValidationErrors {
+        system(yaml).err().unwrap_or_default()
     }
 
     fn part(source: &str, yaml: &str) -> SpecPart {
@@ -1612,6 +1687,62 @@ types:
             error.message.contains("`billing.Loop`") && error.message.contains("`billing.Loop2`"),
             "the refusal names the way round: {error}"
         );
+    }
+
+    #[test]
+    fn an_expression_tree_is_not_a_forbidden_cycle() {
+        // The defect this rule used to have. `Expr` reaches itself through `Pair`, so a check that
+        // refused every cycle of required names refused it — but every value of `Expr` bottoms out
+        // in a `leaf`, so the type is perfectly ordinary and a generator over it terminates. A union
+        // needs *one* buildable variant, not all of them.
+        let errors = system_errors(
+            r"
+system: billing
+version: v1
+types:
+  - name: billing.Expr
+    kind: union
+    tag: kind
+    variants:
+      leaf: Integer
+      pair: billing.Pair
+  - name: billing.Pair
+    kind: struct
+    fields:
+      - name: left
+        type: billing.Expr
+      - name: right
+        type: billing.Expr
+",
+        );
+        assert!(
+            !errors.contains(ValidationCode::SelfReference),
+            "an expression tree is a legitimate specification: {errors}"
+        );
+    }
+
+    #[test]
+    fn a_union_whose_every_variant_recurses_is_refused() {
+        // The other side of the same rule, so it cannot be loosened into accepting everything.
+        let errors = system_errors(
+            r"
+system: billing
+version: v1
+types:
+  - name: billing.Endless
+    kind: union
+    tag: kind
+    variants:
+      left: billing.Endless
+      right: billing.Pair
+  - name: billing.Pair
+    kind: struct
+    fields:
+      - name: only
+        type: billing.Endless
+",
+        );
+        assert!(errors.contains(ValidationCode::SelfReference), "{errors}");
     }
 
     #[test]

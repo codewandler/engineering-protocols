@@ -11,6 +11,71 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **A system's decomposition, interaction and runtime shape are part of the specification.** Three
+  layers above the domains, each answering something the domains cannot: which component owns which
+  bounded context, what happens when an event occurs, and how many instances the design needs to be
+  correct. A component is not a deployment — whether `invoice-service` ships as a process or a module
+  is the topology's business, and changing that answer changes nothing in `domains/`.
+- **A binding says what happens when it fails.** `delivery:` and `on_failure:` are required words, not
+  defaults. A binding that can fail silently is the difference between specifying a system and
+  specifying a demo, and the way that difference disappears is a default nobody read. `drop` is legal
+  and has to be typed: a system that loses work is a decision, and the decision has to be findable in
+  the document that made it.
+- **A mapping between two bounded contexts is typechecked.** `InvoiceCreated.customer_email` into
+  `SendEmail.recipient` is the one place two independently-written contexts must agree about a type,
+  so it is the one place a rename in one breaks the other silently. Both sides are resolved, and the
+  refusal names both paths, both types, and that no conversion is declared.
+- **A type crossing must be declared, with a reason.** `Email` and `EmailAddress` are both a `String`
+  underneath, and the whole value of naming them apart is that the model refuses to treat one as the
+  other. `conversions:` records the crossings that are intended and requires `because:` — a conversion
+  with no reason is exactly what this declaration prevents: a widening someone added to make a build
+  pass, which the next reader finds and cannot evaluate. Crossings are directional.
+- **`ess-compiler`** — resolution, a normalized IR whose type carries the guarantee that every
+  reference resolves, and diagnostics with a stable code, a `file:line` and a machine-readable body.
+  A `Specification` holds names that *probably* resolve; anything downstream either re-checked them or
+  trusted that someone else had, and both are how a generator emits code for a type that does not
+  exist.
+- **`protocol ess compile`, `ess inspect`, `ess graph`.** `inspect` resolves a name in any of seven
+  namespaces and refuses an ambiguity rather than guessing; `graph` emits DOT with components as
+  clusters, and its output is byte-identical across runs.
+- Generation is reproducible, and there is a test that says so rather than a comment: the same source
+  compiled twice is byte-identical. `BTreeMap`/`BTreeSet` only, no clock and no RNG anywhere in the
+  compiler.
+
+### Fixed
+
+- **A legitimate expression tree was refused.** A type reaching itself through a union was treated as
+  a forbidden dependency cycle, but `Expr = union {leaf: Integer, pair: Pair}` with
+  `Pair = struct {left: Expr, right: Expr}` is perfectly ordinary — every value of it bottoms out in
+  a `leaf`. The rule now asks the question that matters, whether any value of the type can exist,
+  rather than the shape that usually causes the answer to be no. A union needs one buildable variant,
+  not all of them, and the refusal now names which requirement is unmet instead of only that
+  something is.
+- **A key written twice was silently discarded.** `serde_yaml` keeps the last of two identical mapping
+  keys and says nothing, so a document declaring the same workload, type or even `system:` twice lost
+  one of them. Reading now goes through a stage that refuses it, with the key and the line — one check
+  covering every mapping in the format rather than one per section.
+- A binding's mapping could not report an input mapped twice, because the raw form was a map and the
+  duplicate was gone before anything could look.
+
+### Changed
+
+- Two new validation codes distinguish faults that were being reported as each other:
+  `misspelled_reference` for text written where a reference was meant — `evnt.customer_email` parses
+  clean and gets *sent* — and `unsupported_construct` for something this build will implement later, as
+  against `unsupported_format_version` for a document it cannot read at all. "Upgrade the tool" and
+  "write it another way" are different instructions.
+
+### Not built
+
+Projections — OpenAPI, AsyncAPI, documentation, test synthesis — are ESS wave 3. Topology is modelled
+and generates nothing: writing it down now is what makes "the topology names a component nobody
+declared" checkable.
+
+## [0.3.0-ess-wave-1] — 2026-08-20
+
+### Added
+
 - **A system can be specified, and the specification can be refused.** `ess-domain` is the typed
   model for an Executable System Specification: domains, entities with lifecycles, commands with
   outcomes, events, errors, views with declared consistency, actors and a type system with tagged

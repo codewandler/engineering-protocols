@@ -205,6 +205,13 @@ validation_codes! {
     /// told the wrong one goes looking for the wrong upgrade.
     UnsupportedFormatVersion => "unsupported_format_version",
 
+    /// A document uses a construct this build does not implement.
+    ///
+    /// Distinct from [`Self::UnsupportedFormatVersion`], which is about the version a document is
+    /// written in: this one is a legal-looking thing the reader will implement later, and telling
+    /// the two apart is the difference between "upgrade the tool" and "write it another way".
+    UnsupportedConstruct => "unsupported_construct",
+
     /// A profile or task references a capability the protocol does not declare.
     UndeclaredCapability => "undeclared_capability",
 
@@ -275,6 +282,15 @@ validation_codes! {
 
     /// An event caused by a command does not name that command as its cause.
     MissingCausation => "missing_causation",
+
+    /// Something written where a reference belongs is not one, and differs from a recognised form
+    /// by a typo.
+    ///
+    /// Distinct from [`Self::UndeclaredReference`], where the reference is well formed and names
+    /// nothing. Here the text was not read as a reference at all — `evnt.customer_email` becomes a
+    /// literal string and is sent as one — so "not declared" would be a false statement about a
+    /// name nobody looked up.
+    MisspelledReference => "misspelled_reference",
 
     /// A reference names something nothing declares.
     ///

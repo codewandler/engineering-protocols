@@ -16,7 +16,7 @@
 //! variants with the same shape are indistinguishable on the way back. The model therefore carries
 //! the tag field, and an untagged form is not offered rather than being offered with a warning.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use aep_domain::error::{ParseError, ValidationCode, ValidationError, ValidationErrors};
@@ -659,6 +659,104 @@ impl TryFrom<RawNamedType> for NamedType {
         let mut errors = declared.check_shape();
         errors.extend(declared.check_invariants());
         errors.into_result(declared)
+    }
+}
+
+/// A conversion someone decided to allow.
+///
+/// Design §20 requires that a mapping's two types "be compatible, or an explicit conversion must
+/// exist". This is that conversion, and it is a declaration rather than an inference on purpose:
+/// `Email` and `VerifiedEmail` are both a `String` underneath, and the entire value of naming them
+/// apart is that the model refuses to treat one as the other. Someone has to write down that this
+/// particular crossing is intended, so that the next reader can find who decided it.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct Conversion {
+    /// The type a value has.
+    pub from: TypeRef,
+    /// The type it may be used as.
+    pub to: TypeRef,
+    /// Why this crossing is allowed.
+    ///
+    /// Required. A conversion with no reason is the thing this declaration exists to prevent: a
+    /// silent widening that someone added to make a build pass.
+    pub because: String,
+}
+
+/// Every conversion a specification declares.
+///
+/// Directional: declaring `Email → EmailAddress` does not permit the reverse, because the reverse is
+/// usually the unsafe direction and nobody would notice it being granted.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(transparent)]
+pub struct ConversionRegistry {
+    declared: BTreeSet<Conversion>,
+}
+
+impl ConversionRegistry {
+    /// An empty registry: nothing crosses.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Records one, reporting a second declaration of the same crossing.
+    pub fn insert(&mut self, conversion: Conversion) -> Result<(), ValidationError> {
+        if let Some(existing) = self
+            .declared
+            .iter()
+            .find(|candidate| candidate.from == conversion.from && candidate.to == conversion.to)
+        {
+            return Err(ValidationError::new(
+                ValidationCode::DuplicateDeclaration,
+                format!("conversions.{} -> {}", conversion.from, conversion.to),
+                format!(
+                    "this crossing is already declared, because `{}`",
+                    existing.because
+                ),
+            )
+            .with_hint(
+                "one crossing, one reason; two reasons means the decision was not settled",
+            ));
+        }
+        self.declared.insert(conversion);
+        Ok(())
+    }
+
+    /// `true` when a value of `source` may be used where `target` is expected.
+    ///
+    /// Structural compatibility first, then a declared crossing. The order matters only for
+    /// diagnostics: a declared conversion between identical types is redundant, not wrong.
+    pub fn permits(&self, source: &TypeRef, target: &TypeRef) -> bool {
+        is_assignable(source, target)
+            || self
+                .declared
+                .iter()
+                .any(|conversion| &conversion.from == source && &conversion.to == target)
+    }
+
+    /// Every conversion, in a stable order.
+    pub fn iter(&self) -> impl Iterator<Item = &Conversion> {
+        self.declared.iter()
+    }
+
+    /// How many.
+    pub fn len(&self) -> usize {
+        self.declared.len()
+    }
+
+    /// `true` when nothing is declared.
+    pub fn is_empty(&self) -> bool {
+        self.declared.is_empty()
     }
 }
 

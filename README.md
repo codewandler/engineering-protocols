@@ -54,16 +54,17 @@ it implements the contract by running a suite against itself.
 | `aep-conformance` — black-box backend suites | 12% | 100% | 16 suites, 3 levels, a faulty backend that proves they bite |
 | `adp-domain`, `aop-domain` | 5% | 100% | 44 + 49 tests |
 
-### ESS — executable system specifications (~20% of the design)
+### ESS — executable system specifications (~40% of the design)
 
 | Component | Done | State |
 |---|---:|---|
-| `ess-domain` — the typed model | 100% | 10 modules, 169 tests; the billing example parsed from disk |
-| `protocol ess validate` + generated JSON Schema | 100% | one file or a directory; every problem in one run |
+| `ess-domain` — the typed model | 100% | 13 modules; entities, commands, views, actors, components, bindings, topology |
+| `ess-compiler` — resolution, IR, diagnostics | 100% | an unresolved reference is unrepresentable; codes, spans, byte-identical output |
+| `protocol ess validate\|compile\|inspect\|graph` | 100% | one file or a directory; every problem in one run |
 | The join — artifact kind, evidence kind, `ess-conformance` principle | 100% | a task can already be blocked until something proves conformance |
-| Compiler — source to a normalized IR | 0% | ESS wave 2 |
-| Projections — OpenAPI, AsyncAPI, documentation | 0% | ESS wave 3 |
-| Test synthesis, structural code | 0% | ESS wave 3+ |
+| Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 0% | ESS wave 3 |
+| Test synthesis, and an implementation deliberately wrong | 0% | ESS wave 4 |
+| Rust structural synthesis | 0% | ESS wave 5 |
 
 642 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
 the "done" column with `task check`. The ESS roadmap is

@@ -15,13 +15,30 @@ its HTTP layer.
 |---|---|
 | Parse a specification from one file or a directory | `protocol ess validate --path <path>` |
 | Refuse a malformed one, naming every problem at once | same, exit 1 |
+| Resolve every reference into a normalized IR | `protocol ess compile --path <path>` |
+| Look one declaration up, resolved | `protocol ess inspect --path <path> <name>` |
+| See the event/command graph | `protocol ess graph --path <path>` (DOT) |
 | Validate in an editor as you type | [`schemas/generated/ess.schema.json`](../../schemas/generated/ess.schema.json) |
 | Require conformance to one, as a protocol rule | [`principles/verification/ess-conformance.yaml`](../../principles/verification/ess-conformance.yaml) |
 
-**Nothing is generated yet.** There is no compiler, no OpenAPI, no test synthesis — those are ESS
-waves 2 and 3 in [`docs/plan/ess-roadmap.md`](../plan/ess-roadmap.md). What exists is the model and
-the join: a task can already be blocked until something proves an implementation conforms, with a
-human producing that evidence by hand.
+**Nothing is generated from a specification yet** — no OpenAPI, no test synthesis. Those are ESS
+wave 3 in [`docs/plan/ess-roadmap.md`](../plan/ess-roadmap.md). What exists is the model, the
+compiler that resolves it, and the join: a task can already be blocked until something proves an
+implementation conforms, with a human producing that evidence by hand.
+
+### Why compile at all, when validate already refuses a bad specification
+
+`validate` answers "is this document consistent". `compile` answers the question a generator has:
+**what does every reference point at?**
+
+A validated specification holds *names*. `CreateInvoice` emits `billing.invoice.InvoiceCreated`, and
+that is a name which probably resolves. Anything reading it either re-checks every reference or trusts
+that something else did — and both of those are how a generator emits code for a type that does not
+exist. The IR holds resolved handles instead, and compiling is the only way to get one, so a
+projection reading it cannot ask a question the IR cannot answer.
+
+The same source compiled twice is byte-identical, and there is a test that says so rather than a
+comment claiming it.
 
 ## The shortest thing that works
 
@@ -87,6 +104,70 @@ runs on.
 **An illegal move is illegal because nobody wrote it.** `Paid` cannot become `Cancelled` because no
 transition says it can. There is no rule forbidding it, because a rule would be a second place for
 the same truth to live, and two places eventually disagree.
+
+## Three layers above the domains
+
+A domain says what the software *means*. Three further layers say how it is put together, and the
+model keeps them apart on purpose: conflating them is how a domain model turns into a description of
+a deployment.
+
+| layer | says | does not say |
+|---|---|---|
+| **component** | `invoice-service` owns `billing.invoice` | whether it is a process or a module |
+| **binding** | `InvoiceCreated` causes `SendEmail` | which queue carries it |
+| **topology** | the system is not correct with one instance | how many pods to start |
+
+### A binding says what happens when it fails
+
+```yaml
+bindings:
+  - id: notify-on-invoice-created
+    when: {event: billing.invoice.InvoiceCreated}
+    invoke: {command: billing.email.SendEmail}
+    mapping:
+      recipient: event.customer_email
+      template: invoice-created
+    delivery: at_least_once
+    on_failure: escalate          # retry | escalate | drop
+```
+
+`delivery:` and `on_failure:` are **required words, not defaults**. A binding that can fail silently
+is the difference between specifying a system and specifying a demo, and the way that difference
+disappears is a default nobody read. `drop` is legal — a system that loses work is a decision, and
+the decision has to be findable in the document that made it.
+
+`at_least_once` is the only guarantee this build accepts, and stating it is still worth doing:
+"exactly once" is what everyone believes they have until a retry proves otherwise, so the word on the
+page is what tells a generator the command must be idempotent.
+
+### A mapping is where two contexts have to agree
+
+`mapping` is the one place in the model where two independently-written bounded contexts must agree
+about a type — so it is the one place a rename in one of them breaks the other silently. Both sides
+are checked:
+
+```text
+billing.invoice.InvoiceCreated.customer_email  has type `billing.invoice.Email`
+billing.email.SendEmail.recipient              requires  `billing.email.EmailAddress`
+```
+
+Those are two distinct newtypes, both a `String` underneath, and the entire value of naming them
+apart is that the model refuses to treat one as the other. To let this particular crossing through,
+say so — and say why:
+
+```yaml
+conversions:
+  - from: billing.invoice.Email
+    to: billing.email.EmailAddress
+    because: >-
+      An invoice's customer email is a deliverable address; the email context validates it again on
+      the way out, so the invoice context does not have to know how.
+```
+
+`because:` is required. A conversion with no reason is exactly what this declaration exists to
+prevent: a widening someone added to make a build pass, which the next reader finds and cannot
+evaluate. Conversions are **directional** — declaring `Email → EmailAddress` does not grant the
+reverse, and the reverse is usually the unsafe one.
 
 ## What is a name, and what is three names
 

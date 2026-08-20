@@ -9,6 +9,7 @@ members = [
     "crates/aep-conformance",
     "crates/adp-domain",
     "crates/aop-domain",
+    "crates/ess-compiler",
     "crates/ess-domain",
     "crates/protocol-cli",
     "xtask",
@@ -28,6 +29,7 @@ aep-contract = { path = "crates/aep-contract", version = "0.1.0" }
 aep-backend-memory = { path = "crates/aep-backend-memory", version = "0.1.0" }
 aep-engine = { path = "crates/aep-engine", version = "0.1.0" }
 aep-conformance = { path = "crates/aep-conformance", version = "0.1.0" }
+ess-compiler = { path = "crates/ess-compiler", version = "0.1.0" }
 ess-domain = { path = "crates/ess-domain", version = "0.1.0" }
 aep-schema = { path = "crates/aep-schema", version = "0.1.0" }
 adp-domain = { path = "crates/adp-domain", version = "0.1.0" }

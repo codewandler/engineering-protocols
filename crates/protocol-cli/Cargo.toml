@@ -19,6 +19,7 @@ aep-contract.workspace = true
 aep-domain.workspace = true
 aep-engine.workspace = true
 aep-schema.workspace = true
+ess-compiler.workspace = true
 ess-domain.workspace = true
 anyhow.workspace = true
 clap.workspace = true

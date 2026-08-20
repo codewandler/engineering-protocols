@@ -622,3 +622,522 @@ fn ess_validate_output_survives_a_reader_that_stops_reading() {
         "a reader that stopped reading is not a crash: {errors}"
     );
 }
+
+/// Copies a specification tree, so a test can break one line of a working one.
+///
+/// The normative example is the only specification that exercises components and bindings, and a
+/// fixture written from scratch to test one refusal drifts from it the first time the model moves.
+fn copy_tree(from: &Path, into: &Path) {
+    for entry in std::fs::read_dir(from).expect("the specification is readable") {
+        let entry = entry.expect("the specification is readable");
+        let target = into.join(entry.file_name());
+        if entry.path().is_dir() {
+            copy_tree(&entry.path(), &target);
+        } else {
+            let text = std::fs::read_to_string(entry.path()).expect("a readable file");
+            write(&target, &text);
+        }
+    }
+}
+
+/// The normative example, copied into a scratch directory to be broken.
+fn copied_specification(name: &str) -> PathBuf {
+    let directory = scratch(name);
+    copy_tree(&root().join(SPECIFICATION), &directory);
+    directory
+}
+
+#[test]
+fn ess_compile_refuses_a_specification_that_does_not_assemble() {
+    // A specification that fails wave 1 never reaches the compiler, so it has no `Diagnostic` to
+    // report — and the refusal still has to carry the code and the file, because that is what the
+    // reader acts on.
+    let directory = scratch("aep-cli-uncompilable-spec");
+    write(&directory.join("system.yaml"), SYSTEM);
+    write(&directory.join("domains/one.yaml"), DOMAIN);
+    write(&directory.join("domains/two.yaml"), DOMAIN);
+
+    let output = protocol(&["ess", "compile", "--path", printable(&directory)]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("duplicate_declaration"), "{text}");
+    assert!(
+        text.contains("domains/two.yaml"),
+        "a refusal has to say which file to open: {text}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_compile_renders_a_refusal_as_json() {
+    let directory = scratch("aep-cli-uncompilable-json-spec");
+    write(&directory.join("system.yaml"), SYSTEM);
+    write(
+        &directory.join("domains/order.yaml"),
+        &DOMAIN.replace("type: shop.order.OrderId", "type: shop.order.Missing"),
+    );
+
+    let output = protocol(&[
+        "ess",
+        "compile",
+        "--path",
+        printable(&directory),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the compilation report is valid JSON");
+    assert_eq!(parsed["compiled"], false);
+    assert!(
+        parsed["diagnostics"].is_array(),
+        "a consumer branches on `compiled` and reads the same two lists either way: {parsed}"
+    );
+    let problems = parsed["problems"]
+        .as_array()
+        .expect("problems is a list")
+        .iter()
+        .map(|problem| problem.as_str().unwrap_or_default().to_owned())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(problems.contains("undeclared_reference"), "{parsed}");
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_compile_inspect_and_graph_survive_a_reader_that_stops_reading() {
+    // `protocol ess graph | head -5` must produce five lines, not a stack trace: DOT is piped into
+    // `dot` by definition, and `println!` panics the moment that reader exits first.
+    use std::process::Stdio;
+
+    for arguments in [
+        vec!["ess", "compile", "--path", SPECIFICATION],
+        vec![
+            "ess",
+            "inspect",
+            "--path",
+            SPECIFICATION,
+            "billing.invoice.CreateInvoice",
+        ],
+        vec!["ess", "graph", "--path", SPECIFICATION],
+    ] {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_protocol"))
+            .args(&arguments)
+            .current_dir(root())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the protocol binary runs");
+        drop(child.stdout.take().expect("stdout is piped"));
+
+        let output = child.wait_with_output().expect("the child finishes");
+        let errors = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !errors.contains("panicked"),
+            "a reader that stopped reading is not a crash for {arguments:?}: {errors}"
+        );
+    }
+}
+
+#[test]
+fn ess_compile_resolves_the_normative_example() {
+    let output = protocol(&["ess", "compile", "--path", SPECIFICATION]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("billing v3"), "{text}");
+    assert!(text.contains("compiled"), "{text}");
+    assert!(
+        text.contains("binding(s)") && text.contains("component(s)"),
+        "the summary counts what wave 2 added: {text}"
+    );
+}
+
+#[test]
+fn ess_compile_renders_the_ir_as_json() {
+    let output = protocol(&[
+        "ess",
+        "compile",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the compilation report is valid JSON");
+    assert_eq!(parsed["compiled"], true);
+    assert_eq!(parsed["ir"]["system"], "billing");
+    assert_eq!(
+        parsed["ir"]["bindings"]["notify-on-invoice-created"]["delivery"], "at_least_once",
+        "the IR carries the resolved binding, not a summary of it: {parsed}"
+    );
+    assert!(
+        parsed["ir"]["commands"]["billing.invoice.CreateInvoice"]["input"].is_array(),
+        "{parsed}"
+    );
+}
+
+#[test]
+fn ess_compile_reports_a_mapping_the_types_refuse() {
+    // The example's binding maps `Email` onto `EmailAddress`, which is legal only because
+    // `components.yaml` declares the conversion. Cutting the conversion out is design §20's
+    // "mapping between incompatible types".
+    //
+    // It is refused by `ess-domain`, not by the compiler: `Specification::assemble` runs the mapping
+    // check, so the document never reaches `compile` and `ESS-BINDING-002` is not what comes back.
+    // The rendering of a `Diagnostic` is still what `compile` does with one — `ess-compiler`'s own
+    // tests hold that — and this asserts what a user actually sees.
+    let directory = copied_specification("aep-cli-unconvertible-spec");
+    let components = directory.join("components.yaml");
+    let text = std::fs::read_to_string(&components).expect("the example declares components");
+    let declaration = text
+        .find("components:")
+        .expect("the example declares components");
+    write(&components, &text[declaration..]);
+
+    let output = protocol(&["ess", "compile", "--path", printable(&directory)]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(report.contains("type_mismatch"), "{report}");
+    assert!(
+        report.contains("notify-on-invoice-created"),
+        "the binding that cannot be built has to be named: {report}"
+    );
+    assert!(
+        report.contains("billing.invoice.Email") && report.contains("billing.email.EmailAddress"),
+        "and both types, so the repair does not need a second look: {report}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_inspect_shows_one_declaration_resolved() {
+    let command = protocol(&[
+        "ess",
+        "inspect",
+        "--path",
+        SPECIFICATION,
+        "billing.invoice.CreateInvoice",
+    ]);
+    assert_eq!(code(&command), 0, "{}", stderr(&command));
+    let text = stdout(&command);
+    assert!(
+        text.starts_with("command    billing.invoice.CreateInvoice"),
+        "{text}"
+    );
+    assert!(
+        text.contains("billing.invoice.InvoiceCreated"),
+        "what it emits is part of what it is: {text}"
+    );
+
+    let binding = protocol(&[
+        "ess",
+        "inspect",
+        "--path",
+        SPECIFICATION,
+        "notify-on-invoice-created",
+    ]);
+    assert_eq!(code(&binding), 0, "{}", stderr(&binding));
+    let reaction = stdout(&binding);
+    assert!(reaction.contains("at_least_once"), "{reaction}");
+    assert!(
+        reaction.contains("escalate"),
+        "what happens when it fails is not a footnote: {reaction}"
+    );
+}
+
+#[test]
+fn ess_inspect_renders_one_declaration_as_json() {
+    let output = protocol(&[
+        "ess",
+        "inspect",
+        "--path",
+        SPECIFICATION,
+        "billing.invoice.InvoiceCreated",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the declaration is valid JSON");
+    assert_eq!(parsed["kind"], "event");
+    assert_eq!(parsed["name"], "billing.invoice.InvoiceCreated");
+    assert!(parsed["fields"].is_array(), "{parsed}");
+}
+
+#[test]
+fn ess_inspect_lists_what_is_declared_when_the_name_is_not() {
+    let output = protocol(&[
+        "ess",
+        "inspect",
+        "--path",
+        SPECIFICATION,
+        "billing.invoice.Emial",
+    ]);
+    assert_eq!(code(&output), 1, "{}", stdout(&output));
+    let errors = stderr(&output);
+    assert!(errors.contains("is not declared"), "{errors}");
+    assert!(
+        errors.contains("billing.invoice.Email"),
+        "a reader who mistyped needs the list more than the refusal: {errors}"
+    );
+}
+
+#[test]
+fn ess_inspect_refuses_a_name_two_namespaces_declare() {
+    // A binding identifier and a component identifier are spelled the same way, so one name can
+    // legally mean two things. Showing either one would be a guess.
+    let directory = copied_specification("aep-cli-colliding-spec");
+    let components = directory.join("components.yaml");
+    let text = std::fs::read_to_string(&components).expect("the example declares components");
+    write(
+        &components,
+        &text.replace("id: notify-on-invoice-created", "id: email-service"),
+    );
+
+    let ambiguous = protocol(&[
+        "ess",
+        "inspect",
+        "--path",
+        printable(&directory),
+        "email-service",
+    ]);
+    assert_eq!(code(&ambiguous), 1, "{}", stdout(&ambiguous));
+    let errors = stderr(&ambiguous);
+    assert!(errors.contains("binding"), "{errors}");
+    assert!(errors.contains("component"), "{errors}");
+    assert!(
+        errors.contains("--kind"),
+        "the caller is one flag away from saying which: {errors}"
+    );
+
+    let chosen = protocol(&[
+        "ess",
+        "inspect",
+        "--path",
+        printable(&directory),
+        "email-service",
+        "--kind",
+        "binding",
+    ]);
+    assert_eq!(code(&chosen), 0, "{}", stderr(&chosen));
+    assert!(
+        stdout(&chosen).starts_with("binding"),
+        "{}",
+        stdout(&chosen)
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_graph_is_dot_and_two_runs_are_byte_identical() {
+    let first = protocol(&["ess", "graph", "--path", SPECIFICATION]);
+    assert_eq!(code(&first), 0, "{}", stderr(&first));
+    let text = stdout(&first);
+    assert!(text.contains("digraph \"billing\" {"), "{text}");
+    assert!(
+        text.contains("subgraph \"cluster_email-service\""),
+        "a component owns domains, and the graph says so: {text}"
+    );
+    assert!(
+        text.contains("\"billing.invoice.CreateInvoice\" -> \"billing.invoice.InvoiceCreated\""),
+        "a command and the fact it produces: {text}"
+    );
+    assert!(
+        text.contains("\"billing.invoice.InvoiceCreated\" -> \"billing.email.SendEmail\""),
+        "the binding is the edge the interaction layer is about: {text}"
+    );
+
+    // Review F8: determinism asserted is determinism untested.
+    let second = protocol(&["ess", "graph", "--path", SPECIFICATION]);
+    assert_eq!(
+        first.stdout, second.stdout,
+        "two runs over one specification must produce identical bytes"
+    );
+}
+
+#[test]
+fn ess_graph_renders_nodes_and_edges_as_json() {
+    // DOT is for `dot`; a tool that wants the graph should not have to parse it back out.
+    let output = protocol(&["ess", "graph", "--path", SPECIFICATION, "--format", "json"]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the graph is valid JSON");
+    assert_eq!(parsed["system"], "billing");
+
+    let nodes = parsed["nodes"].as_array().expect("nodes is a list");
+    let command = nodes
+        .iter()
+        .find(|node| node["name"] == "billing.invoice.CreateInvoice")
+        .expect("the example declares CreateInvoice");
+    assert_eq!(command["kind"], "command");
+    assert_eq!(
+        command["component"], "invoice-service",
+        "which component owns it is part of the graph: {parsed}"
+    );
+
+    let edges = parsed["edges"].as_array().expect("edges is a list");
+    let reaction = edges
+        .iter()
+        .find(|edge| edge["kind"] == "invokes")
+        .expect("the example declares a binding");
+    assert_eq!(reaction["binding"], "notify-on-invoice-created");
+    assert_eq!(reaction["on_failure"], "escalate");
+}
+
+/// A workload block, which is where one duplicated key silently lost a declaration.
+const WORKLOAD: &str = r"topology:
+  workloads:
+    order-service:
+      replicas:
+        min: 1
+      stateless: true
+      requires:
+        - publish: order-events
+";
+
+#[test]
+fn ess_validate_refuses_a_document_that_declares_one_key_twice() {
+    // `serde_yaml` keeps the last of two identical mapping keys, so this document used to declare
+    // one workload, silently, and the author's other floor was gone.
+    let directory = scratch("aep-cli-duplicate-key-spec");
+    write(&directory.join("system.yaml"), SYSTEM);
+    write(&directory.join("domains/order.yaml"), DOMAIN);
+    write(
+        &directory.join("topology.yaml"),
+        &format!(
+            "{WORKLOAD}    order-service:\n      replicas:\n        min: 2\n      stateless: \
+             true\n      requires:\n        - publish: order-events\n"
+        ),
+    );
+
+    let output = protocol(&["ess", "validate", "--path", printable(&directory)]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(
+        text.contains("order-service"),
+        "a refusal has to name the key that was written twice: {text}"
+    );
+    assert!(
+        text.contains("topology.yaml"),
+        "and the file it is in: {text}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_refuses_a_topology_that_runs_a_component_nobody_declares() {
+    // The reason topology is modelled in a wave that deploys nothing: this rejection becomes
+    // checkable. `compile` has to refuse it too, because it never reaches the compiler.
+    let directory = scratch("aep-cli-phantom-workload-spec");
+    write(&directory.join("system.yaml"), SYSTEM);
+    write(&directory.join("domains/order.yaml"), DOMAIN);
+    write(
+        &directory.join("topology.yaml"),
+        &WORKLOAD.replace("order-service", "ghost-service"),
+    );
+
+    for verb in ["validate", "compile"] {
+        let output = protocol(&["ess", verb, "--path", printable(&directory)]);
+        assert_eq!(code(&output), 1, "{verb}: {}", stderr(&output));
+        let text = stdout(&output);
+        assert!(text.contains("undeclared_reference"), "{verb}: {text}");
+        assert!(
+            text.contains("ghost-service"),
+            "{verb}: the workload that names nothing has to be named: {text}"
+        );
+    }
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_compile_gives_a_refusal_a_code_and_the_line_it_is_written_on() {
+    // The rule that refuses this lives in `ess-domain` and is tested there. What `compile` adds is
+    // design §29's shape: a stable code a harness can match, and a `file:line` a person can open.
+    // Without the bridge this prints a sentence and nothing else, which is what it did before.
+    let directory = scratch("ess-compile-bridged");
+    let example = root().join(SPECIFICATION);
+    let source =
+        std::fs::read_to_string(example.join("components.yaml")).expect("the example is readable");
+    for name in ["system.yaml", "topology.yaml"] {
+        let text = std::fs::read_to_string(example.join(name)).expect("the example is readable");
+        write(&directory.join(name), &text);
+    }
+    for name in ["invoice.yaml", "email.yaml"] {
+        let text = std::fs::read_to_string(example.join("domains").join(name))
+            .expect("the example is readable");
+        write(&directory.join("domains").join(name), &text);
+    }
+    // The declared crossing no longer covers the mapping the binding makes.
+    write(
+        &directory.join("components.yaml"),
+        &source.replace(
+            "  - from: billing.invoice.Email",
+            "  - from: billing.invoice.InvoiceId",
+        ),
+    );
+
+    let output = protocol(&[
+        "ess",
+        "compile",
+        "--path",
+        directory.to_str().expect("a path"),
+    ]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let text = stdout(&output);
+
+    assert!(text.contains("ESS-BINDING-002"), "{text}");
+    assert!(text.contains("billing.email.EmailAddress"), "{text}");
+    assert!(
+        text.contains("components.yaml:"),
+        "a diagnostic without a line is one someone has to search from: {text}"
+    );
+    assert!(
+        text.contains("type_mismatch"),
+        "the `ess-domain` code has to survive the bridge, or a harness matching on it loses it: \
+         {text}"
+    );
+}
+
+#[test]
+fn ess_compile_reports_a_refusal_structurally_in_json() {
+    let directory = scratch("ess-compile-bridged-json");
+    for (name, text) in [
+        ("system.yaml", SYSTEM.to_owned()),
+        // The identity names a type nothing declares.
+        (
+            "orders.yaml",
+            DOMAIN.replace("type: shop.order.OrderId", "type: shop.order.Nonexistent"),
+        ),
+    ] {
+        write(&directory.join(name), &text);
+    }
+
+    let output = protocol(&[
+        "ess",
+        "compile",
+        "--path",
+        directory.to_str().expect("a path"),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 1, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the refusal is valid JSON");
+
+    let diagnostics = parsed["diagnostics"]
+        .as_array()
+        .expect("diagnostics is an array");
+    assert!(!diagnostics.is_empty(), "{parsed}");
+    // Structured, not a sentence: an agent consuming this as a repair instruction reads the fields.
+    let first = &diagnostics[0];
+    assert!(first["code"].is_string(), "{first}");
+    assert_eq!(first["severity"], "error", "{first}");
+    assert!(first["message"].is_string(), "{first}");
+}

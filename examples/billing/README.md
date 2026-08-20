@@ -27,10 +27,10 @@ error carrying a payload and a command with an overridden wire name all appear h
 added to the model without reaching this directory fails the build**, because what the normative
 example leaves out is what nothing checks.
 
-**There are no components and no bindings here.** Deployment topology is not in wave 1's model at
-all — which is the point of specifying a system semantically: `billing.invoice` is a bounded context,
-and whether it ships as its own service or as a module inside one binary is a later decision that
-does not touch this directory.
+**A component is not a deployment.** `invoice-service` owning `billing.invoice` says the invoice
+context is one unit of ownership; whether it ships as its own process or as a module inside one binary
+is `topology.yaml`'s business, and changing that answer changes nothing in `domains/`. That separation
+is the point of specifying a system semantically, and it is why the three layers are three files.
 
 ## What each file is for
 
@@ -39,6 +39,8 @@ does not touch this directory.
 | `system.yaml` | the format version, the system's identity, and which domains it has |
 | `domains/invoice.yaml` | the invoice bounded context: every type kind, an entity with a lifecycle, actors, a refusable command, an event, and both kinds of view |
 | `domains/email.yaml` | the second context, so cross-domain references are exercised rather than assumed, and the command whose failure the input cannot decide |
+| `components.yaml` | who owns which context, the binding between them, and the one type crossing that binding needs |
+| `topology.yaml` | what the system needs in order to run — modelled, and deployed by nothing |
 
 ## Three things worth reading closely
 

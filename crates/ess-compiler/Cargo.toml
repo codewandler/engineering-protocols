@@ -1,6 +1,6 @@
 [package]
-name = "ess-domain"
-description = "Typed model for an Executable System Specification (ESS)."
+name = "ess-compiler"
+description = "Resolution, normalized IR and diagnostics for executable system specifications."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,15 +10,12 @@ authors.workspace = true
 
 [dependencies]
 aep-domain.workspace = true
+ess-domain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-serde_yaml.workspace = true
-schemars.workspace = true
-thiserror.workspace = true
 
-[[test]]
-name = "billing"
-path = "tests/billing.rs"
+[dev-dependencies]
+serde_yaml.workspace = true
 
 [lints]
 workspace = true
