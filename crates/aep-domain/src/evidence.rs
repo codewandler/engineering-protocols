@@ -616,6 +616,13 @@ pub struct ArtifactEvidence {
     /// Which artifact.
     pub artifact: ArtifactRef,
     /// What kind it is.
+    ///
+    /// Spelt `artifact_kind` on the wire. The enclosing [`Evidence`] is internally tagged by `kind`,
+    /// so serde consumes that key as the tag before this field is ever read — a document written
+    /// with `kind: artifact` and a second `kind:` inside it failed with `missing field 'kind'`, and
+    /// no spelling of an artifact evidence record could be written at all. `kind` stays accepted as
+    /// an alias, since a record embedded in Rust rather than parsed from a document was always fine.
+    #[serde(rename = "artifact_kind", alias = "kind")]
     pub kind: ArtifactKind,
     /// What was observed.
     pub observation: ArtifactObservation,
@@ -1694,6 +1701,45 @@ impl EvidenceRecord {
 mod tests {
     use super::*;
     use crate::facts::{FactSource, FactStore};
+
+    #[test]
+    fn an_artifact_evidence_record_can_be_written_in_a_document_at_all() {
+        // `Evidence` is internally tagged by `kind`, and this variant also had a field called
+        // `kind` — so serde ate the tag and then reported the field it had just consumed as
+        // missing. Every artifact evidence document failed with `missing field 'kind'`, which meant
+        // no `development.critical` task could satisfy `design-by-contract` or `preserve-evidence`
+        // through a document at all. The variant existed and was unreachable from the one place a
+        // user writes evidence.
+        let written = r#"
+kind: artifact
+artifact: "design:passkeys-auth"
+artifact_kind: design
+observation: sections_present
+"#;
+        let evidence: Evidence =
+            serde_yaml::from_str(written).expect("an artifact record parses from a document");
+        let Evidence::Artifact(artifact) = &evidence else {
+            panic!("the tag selects the artifact variant: {evidence:?}");
+        };
+        assert_eq!(artifact.kind, ArtifactKind::Design);
+
+        // Inside the enum the old spelling cannot work and never did: two `kind:` keys in one
+        // mapping are a duplicate field, which is the defect itself. The alias earns its place one
+        // level down, where the struct is read on its own and there is no tag to collide with.
+        let alone: ArtifactEvidence = serde_yaml::from_str(
+            "artifact: \"design:passkeys-auth\"\nkind: design\nobservation: sections_present\n",
+        )
+        .expect("the struct alone still accepts the original spelling");
+        assert_eq!(alone.kind, ArtifactKind::Design);
+
+        let duplicated = written.replace("artifact_kind:", "kind:");
+        let error = serde_yaml::from_str::<Evidence>(&duplicated)
+            .expect_err("two `kind:` keys in one mapping is not a record");
+        assert!(
+            error.to_string().contains("duplicate field"),
+            "the refusal should name the collision rather than a missing field: {error}"
+        );
+    }
 
     fn store(evidence: &Evidence) -> FactStore {
         let mut store = FactStore::new();

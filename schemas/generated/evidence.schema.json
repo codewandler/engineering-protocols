@@ -488,6 +488,7 @@
       "type": "object",
       "required": [
         "artifact",
+        "artifact_kind",
         "kind",
         "observation"
       ],
@@ -497,6 +498,14 @@
           "allOf": [
             {
               "$ref": "#/definitions/ArtifactRef"
+            }
+          ]
+        },
+        "artifact_kind": {
+          "description": "What kind it is.\n\nSpelt `artifact_kind` on the wire. The enclosing [`Evidence`] is internally tagged by `kind`, so serde consumes that key as the tag before this field is ever read — a document written with `kind: artifact` and a second `kind:` inside it failed with `missing field 'kind'`, and no spelling of an artifact evidence record could be written at all. `kind` stays accepted as an alias, since a record embedded in Rust rather than parsed from a document was always fine.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ArtifactKind"
             }
           ]
         },
@@ -513,11 +522,9 @@
           "type": "boolean"
         },
         "kind": {
-          "description": "What kind it is.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ArtifactKind"
-            }
+          "type": "string",
+          "enum": [
+            "artifact"
           ]
         },
         "observation": {
