@@ -9,6 +9,127 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+## [0.3.2-ess-wave-3] — 2026-08-20
+
+### Added
+
+- **The specification now produces the documentation and the contracts, and they are in the
+  repository.** [`generated/`](generated/) holds 27 files projected from
+  [`examples/billing/`](examples/billing/): Markdown with Mermaid diagrams, one JSON Schema per
+  command input, event payload, error payload and named type, an OpenAPI 3.1 document per component
+  and an AsyncAPI 3.0 document per component. Committed rather than built on demand, because a
+  contract a consumer cannot read without first installing a toolchain is a contract they copy by
+  hand — and once it is committed it can be checked, so a specification change nobody regenerated
+  fails the build instead of shipping a document that describes last week's system.
+- **Every generated artifact says which specification produced it.** The system and its version, a
+  digest of the resolved model, the compiler version and the generator version — at the top of every
+  file, as a comment a person reads and as data (`x-ess-provenance`) a tool reads. When two checkouts
+  disagree about an OpenAPI document the only question anyone asks is which of the two is stale, and
+  the answer is now in the file rather than in whoever remembers running the generator. The digest is
+  over the resolved model, not the source text, so it does not move when a comment does.
+- **A named type stays a named type in every projection.** `Email` and `EmailAddress` are both a
+  `String` underneath, and a projection rendering both as `{"type": "string"}` throws away the one
+  distinction the model exists to make. Each keeps its own definition, its own reference and its own
+  name in the schemas and in both contracts, so a code generator reading them emits two types. The
+  limit is stated rather than papered over: on the wire both are a bare JSON string, so **an instance
+  with the two values swapped still validates** — JSON Schema constrains structure and cannot carry
+  nominal identity.
+- **Where an OpenAPI path or an AsyncAPI channel comes from is a stated convention, and the generated
+  document states it.** The model has no `exposures:` or `transport:` construct, so nothing in a
+  specification names a method, a path, a status or a topic. Rather than invent one silently, each
+  generator writes its rule into the document it produces. A command is always `POST`, at
+  `/{domain wire name}/commands/{command wire name}` — `/invoices/commands/create-invoice`, with the
+  `commands` segment there to stop the path pretending to be a resource, and the command's qualified
+  name as the `operationId`. An event's channel address is its declared `naming.wire` or else its
+  full qualified name, and every channel carries `x-ess-address-source` so a reader can tell an
+  address somebody chose from one that was derived. Each of those is a rule a reviewer can disagree
+  with, which is why it is written down; when `exposures:` exists it should override the convention
+  rather than replace it.
+- **A status code comes from the outcome, and `external` is not the caller's fault.** An outcome that
+  was taken is `202`, a refusal the input decides is `422`, and a refusal decided outside the request
+  is `502`. Reporting an `external` branch as a `4xx` would tell the caller to go fix the one thing
+  it cannot fix and tell every retry layer in between that retrying is pointless. Outcomes sharing a
+  status stay distinguishable — one response, `oneOf` the outcome schemas, each pinning its own
+  `outcome` — because a status that collapsed two branches would lose the branch. `servers`,
+  `security`, pagination, `201`, `ETag` and the other things an OpenAPI document usually has are
+  absent: no specification backs them, and a plausible default in a contract is a claim nobody made.
+- **A binding's `delivery` and `on_failure` survive the trip into the contracts.** A command some
+  binding invokes with `delivery: at_least_once` gets a **required** `Idempotency-Key` header, because
+  the consequence of at-least-once lands on the receiver and a surface with no way to say "this is the
+  same invocation as the last one" leaves it deduplicating with no key. A command no binding invokes
+  gets no header. On the messaging side both facts reach the subscriber's document, the publisher's
+  document and the prose description — including `on_failure: drop`, where the work being abandoned is
+  the publisher's event, so the publisher's document has to be able to say so.
+- **Regenerating is byte-identical, and CI fails on a diff.** `task generate` writes the tree,
+  `task generate-check` fails when the committed output is not what the specification produces, and it
+  runs both inside `task check` and as a CI job of its own — "Projections up to date" — so a drifted
+  contract is reported as drift rather than surfacing as an unrelated test failure. No clock, no RNG,
+  `BTreeMap`/`BTreeSet` only, and a test per projection that generates twice and compares bytes.
+- **A committed artifact no generator produces any more is reported as an orphan, not quietly kept.**
+  A check that only compares the files a generator emits cannot see the other direction: a schema that
+  was renamed or withdrawn leaves its file behind, and a consumer goes on validating against a
+  contract this repository no longer stands behind. `cargo xtask generate --check` names those files
+  and fails; `cargo xtask generate` removes them.
+- **`protocol ess generate --kind docs|schema|openapi|asyncapi`** — and every projection at once when
+  `--kind` is not given. Read-only unless `--out` is given: without it the artifacts are listed rather
+  than written, because a verb that scatters files over whatever directory you happened to be in is a
+  verb nobody tries twice. `--format json|yaml` carries their contents for a consumer that does not
+  want a directory.
+- **An entity, a view and an actor are on the generated pages.** An entity arrives with its identity
+  by name and not only by type, its fields in declaration order, its invariants as the author wrote
+  them, and its lifecycle as a state diagram that also lists the moves the specification does *not*
+  permit — a page showing only the legal arrows reads as though the others were never considered. A
+  view arrives with the entity it projects, its filter, and what its consistency level obliges a
+  generated test to do: an `eventual` view asserted once races the projection, and the repair everyone
+  reaches for is a sleep. An actor arrives with the commands it may invoke, drawn as edges in the
+  system graph, so design §9's first arrow — somebody asking for something — is on the page instead of
+  apologised for.
+- **Two documents generated from one model cannot disagree about what is valid.** Every projection
+  publishing a schema for a construct publishes the *same* schema for it, and a test compares them
+  fragment by fragment rather than trusting that three copies of one mapping stayed equal. This
+  started as a real divergence: the `AsyncAPI` document accepted an amount that was not a number and
+  extra fields nobody declared, both of which the JSON Schema tree refused — so a service validating
+  against one document and a service validating against the other disagreed about the same bytes. A
+  difference in what a document *accepts* fails the test, and so does a difference in what it *says*
+  about a construct, because a code generator reading two documents needs one answer to "which
+  construct is this".
+- **The published `AsyncAPI` payloads refuse what the model refuses.** They now carry
+  `additionalProperties: false`, the `Decimal` pattern, the `Uuid` pattern, base64 `contentEncoding`
+  for `Bytes`, `propertyNames` for a map with a non-string key, `anyOf [T, null]` for an optional
+  outside a field, and a tagged `oneOf` for a union — so a branch is decidable rather than guessed. If
+  you were validating events against the previous documents, messages that used to pass may now fail:
+  that is the point, and each failure is something the specification never permitted.
+- **An operation says which actors may invoke it** (`x-ess-may-invoke`), and no document invents a
+  security scheme. `may:` states who may ask for something; an `OpenAPI` `securityScheme` states how a
+  caller proves who it is, and the model says nothing about that — so a generated client would have
+  implemented an authentication mechanism no specification backs.
+- **A construct the documentation cannot render is named on the page where a reader went looking for
+  it.** The list is an allowlist rather than a discovery, so a *new* gap fails a test and a closed one
+  is a deleted entry that changes the pages with it. It is currently empty: every construct the
+  specification language has reaches the IR and reaches a page. A page that quietly leaves an entity
+  out reads exactly like a system that has none, which is why the empty list is a test and not a
+  claim.
+- **An entity, a view and an actor survive compilation.** The resolved IR carries an entity's
+  identity field with its name, its fields in order, its invariants and its lifecycle; a view's source
+  entity, filter, exposed fields and consistency; and an actor's grants as references that cannot name
+  a command nobody declared. Before this, a specification could declare all three and everything
+  downstream saw only the set of an entity's state names — so anything derived from the model was
+  derived from a fraction of it.
+
+### Not built
+
+Test synthesis — a generated conformance suite, and an implementation deliberately wrong to prove the
+suite bites — is ESS wave 4; Rust structural synthesis is wave 5. Entities, views and actors reach
+the documentation but no contract projection derives from them yet: a view is a read model an
+`OpenAPI` document could expose and does not, and an actor's grants are authorization rather than
+authentication — the model states who may invoke a command and says nothing about how a caller proves
+who it is, so no document here emits a security scheme. Every schema each document embeds is
+validated against the 2020-12 meta-schema, but the `OpenAPI` and `AsyncAPI` envelopes themselves are
+checked structurally rather than against the `OpenAPI` 3.1 and `AsyncAPI` 3.0 meta-schemas: neither is
+vendored here.
+
+## [0.3.1-ess-wave-2] — 2026-08-20
+
 ### Added
 
 - **A system's decomposition, interaction and runtime shape are part of the specification.** Three
@@ -65,12 +186,6 @@ belongs in the commit message or in `docs/design/`.
   clean and gets *sent* — and `unsupported_construct` for something this build will implement later, as
   against `unsupported_format_version` for a document it cannot read at all. "Upgrade the tool" and
   "write it another way" are different instructions.
-
-### Not built
-
-Projections — OpenAPI, AsyncAPI, documentation, test synthesis — are ESS wave 3. Topology is modelled
-and generates nothing: writing it down now is what makes "the topology names a component nobody
-declared" checkable.
 
 ## [0.3.0-ess-wave-1] — 2026-08-20
 
@@ -362,7 +477,10 @@ No compiler, no OpenAPI, no test synthesis: those are ESS waves 2 and 3 in
 - **`xtask schema [--check]`** — schemas are generated from the Rust types, and CI proves they match.
 - Repository scaffolding: workspace, `Taskfile.yml` gate, Apache-2.0 licence, `AGENTS.md`.
 
-[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.2.1...HEAD
+[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.3.2-ess-wave-3...HEAD
+[0.3.2-ess-wave-3]: https://github.com/codewandler/engineering-protocols/compare/0.3.1-ess-wave-2...0.3.2-ess-wave-3
+[0.3.1-ess-wave-2]: https://github.com/codewandler/engineering-protocols/compare/0.3.0-ess-wave-1...0.3.1-ess-wave-2
+[0.3.0-ess-wave-1]: https://github.com/codewandler/engineering-protocols/compare/0.2.1...0.3.0-ess-wave-1
 [0.2.1]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-3...0.2.1
 [0.2.0-wave-3]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-2...0.2.0-wave-3
 [0.2.0-wave-2]: https://github.com/codewandler/engineering-protocols/compare/0.2.0-wave-1...0.2.0-wave-2

@@ -143,3 +143,26 @@ this becomes a tracked score.
 | 2 | Decide F2's rule owner (delete `check_cycles` vs. move inhabitability into `ess-domain`) | Timo | option 1 — compiler owns it, per its own §20 register |
 | 3 | Fix the wave-1 union false positive and add a `### Fixed` CHANGELOG line | with F2 | done as part of F2 |
 | 4 | Before pushing: `task check` locally — twice-red `main` is the only process failure this review found | everyone | — |
+
+## 5. Resolution — 2026-08-20, after wave 2 landed
+
+Recorded against the snapshot above, not a second review. Evidence is a command's output or a
+`file:line`; nothing here is inferred from the fact that the work happened.
+
+| # | Severity | State | Evidence |
+|---|---|---|---|
+| F1 | high | **resolved** | `cargo xtask schema --check` → "schemas are up to date". CI run on `ea68f18` (the wave-2 commit): `conclusion: success` — the first green `main` since `e30f8f9`. |
+| F2 | high | **resolved, option 2** | `check_cycles` is gone; `check_inhabitation` (`crates/ess-domain/src/system.rs`) owns the rule, so `protocol ess validate` still refuses — with the correct semantics. `crates/ess-domain/src/system.rs:1719` asserts a union with one terminating variant is *not* a `SelfReference`. CHANGELOG `### Fixed` carries the user-facing line ("A legitimate expression tree was refused"). |
+| F3 | low | **resolved** | `crates/ess-domain/src/binding.rs` — `WRAPPER_LIMIT`'s justification now cites `check_inhabitation` as implemented, and keeps the bound as defence in depth. |
+| F4 | info | **moot** | The wave-2 working tree it described is committed and CI-green. |
+| F5 | note | **open by design** | No action was asked for. The unreachable-through-the-file-pipeline duplicate-target check in `crates/ess-domain/src/binding.rs:200` stays; both paths remain tested. |
+| F6 | low | **open, not worth doing** | Documentation score unchanged. The one actionable part — codegate scanning `target/` — only matters if the score becomes tracked, and it is not. |
+
+Action 2 was decided the other way from the review's default: the inhabitability fixpoint moved into
+`ess-domain` rather than the compiler keeping the rule alone. The reason is the one the review named
+as option 2's advantage — `protocol ess validate` is a verb a harness runs, and a validate that
+accepts a type no value can inhabit hands the refusal to a later stage that may never run.
+
+Action 4 (`task check` before every push) is what caught the gate breach that blocked ESS wave 3
+from landing: a `-D warnings` dead-code error in `ess-gen`, invisible to any check narrower than the
+full gate.

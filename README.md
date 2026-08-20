@@ -54,20 +54,21 @@ it implements the contract by running a suite against itself.
 | `aep-conformance` — black-box backend suites | 12% | 100% | 16 suites, 3 levels, a faulty backend that proves they bite |
 | `adp-domain`, `aop-domain` | 5% | 100% | 44 + 49 tests |
 
-### ESS — executable system specifications (~40% of the design)
+### ESS — executable system specifications (~60% of the design)
 
 | Component | Done | State |
 |---|---:|---|
 | `ess-domain` — the typed model | 100% | 13 modules; entities, commands, views, actors, components, bindings, topology |
 | `ess-compiler` — resolution, IR, diagnostics | 100% | an unresolved reference is unrepresentable; codes, spans, byte-identical output |
-| `protocol ess validate\|compile\|inspect\|graph` | 100% | one file or a directory; every problem in one run |
+| `ess-gen` — four projections behind one `Generator` trait | 100% | Markdown + Mermaid, JSON Schema, OpenAPI 3.1, AsyncAPI 3.0; one shared type mapping, agreement asserted; 123 tests |
+| `protocol ess validate\|compile\|inspect\|graph\|generate` | 100% | one file or a directory; every problem in one run |
 | The join — artifact kind, evidence kind, `ess-conformance` principle | 100% | a task can already be blocked until something proves conformance |
-| Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 0% | ESS wave 3 |
+| Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 100% | 27 artifacts plus a generated index, committed under `generated/`, provenance on each, drift-checked in CI |
 | Test synthesis, and an implementation deliberately wrong | 0% | ESS wave 4 |
 | Rust structural synthesis | 0% | ESS wave 5 |
 
-642 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement; verify
-the "done" column with `task check`. The ESS roadmap is
+916 tests, 0 failures, 0 clippy warnings. Weights are an effort estimate, not a measurement;
+verify the "done" column with `task check`. The ESS roadmap is
 [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md).
 
 ### What works today
@@ -116,10 +117,14 @@ injected fault: a replayed command is applied a second time — expected to be c
 ### What does not work yet
 
 No durable backend — the only implementation is in memory. No federated artifact graphs across
-repositories. Nothing is generated from a specification yet: `ess-domain` models one and
-`protocol ess validate` refuses a malformed one, but the compiler, the projections and the test
-synthesis are ESS waves 2 and 3. See [`docs/plan/`](docs/plan/) for what was built and in what order,
-and [`docs/guide/`](docs/guide/) for how to use what exists.
+repositories. A specification projects into documentation and contracts, but not yet into tests or
+code: the generated conformance suite is ESS wave 4 and Rust structural synthesis is wave 5.
+Entities, views and actors are modelled and validated but do not reach the IR, so no projection
+renders them — each generated page that would have shown one names the construct that is missing
+instead. The generated OpenAPI and AsyncAPI documents are checked structurally rather than against
+the OpenAPI 3.1 and AsyncAPI 3.0 meta-schemas, neither of which is vendored here. See
+[`docs/plan/`](docs/plan/) for what was built and in what order, and [`docs/guide/`](docs/guide/) for
+how to use what exists.
 
 ## Design decisions worth knowing
 
@@ -155,13 +160,17 @@ crates/
   aep-conformance/  black-box conformance suites for backends
   adp-domain/       development-specific types (ADP)
   aop-domain/       operations-specific types (AOP)
-  protocol-cli/     reference CLI: validate, resolve, inspect, evaluate, explain, schema
+  ess-domain/       the typed model for an executable system specification
+  ess-compiler/     resolution, normalized IR, diagnostics
+  ess-gen/          deterministic projections: docs, JSON Schema, OpenAPI, AsyncAPI
+  protocol-cli/     reference CLI: validate, resolve, inspect, evaluate, explain, schema, ess
 protocols/          protocol declarations: aep, adp, aop
 principles/         reusable enforceable rules
 workflows/          state machines: development, incidents, releases, migrations
 profiles/           bundles of protocol + workflow + principles + completion
 artifacts/          artifact kinds, relations, lifecycles and templates
 schemas/generated/  generated JSON Schema — do not edit by hand
+generated/          projections of examples/billing/ — do not edit by hand
 conformance/        fixtures, scenarios and expected results
 docs/design/        the design specifications
 xtask/              repository automation
@@ -172,14 +181,15 @@ xtask/              repository automation
 Requires a recent stable Rust and [go-task](https://taskfile.dev).
 
 ```console
-task check          # format check, clippy (warnings are errors), tests, schema check
+task check          # format check, clippy (warnings are errors), tests, schema + projections
 task test
 task schema         # regenerate schemas/generated/
+task generate       # regenerate generated/ — the projections of examples/billing/
 task doc
 ```
 
 Without `task`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
-`cargo test --workspace`, `cargo xtask schema --check`.
+`cargo test --workspace`, `cargo xtask schema --check`, `cargo xtask generate --check`.
 
 ## Documents
 
@@ -187,11 +197,13 @@ Without `task`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-ta
 |---|---|
 | [`docs/VISION.md`](docs/VISION.md) | why this exists, and how its two halves compose |
 | [`docs/design/consolidated-design-v0.2.md`](docs/design/consolidated-design-v0.2.md) | authoritative specification for the protocol (AEP) |
-| [`docs/design/ess-implementor-design-v0.1.md`](docs/design/ess-implementor-design-v0.1.md) | design for the Executable System Specification (ESS) — the model is built; nothing is generated from it yet |
+| [`docs/design/ess-implementor-design-v0.1.md`](docs/design/ess-implementor-design-v0.1.md) | design for the Executable System Specification (ESS) — the model and the compiler are built, and a specification projects into documentation and contracts |
 | [`docs/design/ess-review-v0.1.md`](docs/design/ess-review-v0.1.md) | review of that design, with the findings that change what gets built first |
 | [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) | what is implemented, what v0.2 adds, work order, recorded deviations |
-| [`docs/plan/ess-wave-1-the-model.md`](docs/plan/ess-wave-1-the-model.md) | the wave just delivered, and what its review changed |
-| [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) | ESS waves 1 to 3, and what is deliberately outside them |
+| [`docs/plan/ess-wave-1-the-model.md`](docs/plan/ess-wave-1-the-model.md) | ESS wave 1 — the model, and what its review changed |
+| [`docs/plan/ess-wave-2-the-compiler.md`](docs/plan/ess-wave-2-the-compiler.md) | ESS wave 2 — the IR, and where validation turned out to belong |
+| [`docs/plan/ess-wave-3-projections.md`](docs/plan/ess-wave-3-projections.md) | ESS wave 3 — the projections, and what they refuse to guess |
+| [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) | ESS waves 1 to 5, and what is deliberately outside them |
 | [`docs/plan/wave-1-execution-core.md`](docs/plan/wave-1-execution-core.md) | the protocol's four waves, with their acceptance criteria |
 | [`docs/plan/document-authoring-brief.md`](docs/plan/document-authoring-brief.md) | how to write a valid principle, workflow, profile or lifecycle |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |
