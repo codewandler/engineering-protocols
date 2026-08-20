@@ -103,20 +103,33 @@
 //! publishes is unobservable no matter how good the runner is. That is a fact about the
 //! specification, and [`RefusalCause::InvariantUnobservable`] says so with the paths in hand.
 //!
+//! # A wrong-state refusal is asserted where the command declares one
+//!
+//! §19 asks for two things of an illegal move, and until `wrong_state:` existed the model could
+//! express only one. "Must not reach `Cancelled`" was asserted; "the exact rejection mechanism must
+//! come from the declared command/error semantics" was not, because a command had no way to say what
+//! it answers when its subject is in a state its transitions do not run from. An implementation that
+//! refused with the wrong error, or with an untyped infrastructure failure, passed.
+//!
+//! It can say so now, and it says exactly one thing:
+//! [`OutcomeCondition::WrongState`](ess_domain::command::OutcomeCondition::WrongState) names the
+//! `error:` and nothing else. The **states** stay where they were already declared — a transition's
+//! `from` set — and [`EssIr::wrong_states`] does the subtraction, so no author writes an absence down
+//! and no projection re-derives it. Where a command declares the branch, an illegal-move scenario
+//! requires it *and* the declared error; where it does not,
+//! [`RefusalCause::RefusalUndeclared`] is recorded beside the scenario, which is the same
+//! arrangement as before for the specifications that have not adopted the construct.
+//!
 //! # What the model cannot say yet, and what is therefore not asserted
 //!
-//! Two gaps, and both are reported rather than left to be noticed. They are different in kind, and
-//! the difference is what says whether a later slice edits this crate or the model:
+//! One gap left, reported rather than left to be noticed:
 //!
 //! | gap | what is asserted instead | what would close it |
 //! |---|---|---|
 //! | where a payload field's **value** comes from | the field is present and of its declared type | a construct relating an outcome's emitted event to the command's input, in the shape a binding's `mapping:` already has |
-//! | how a command is refused **in the wrong state** | that nothing the specification declares was published | a construct letting a command declare the outcome and the error for a subject in a state its transitions do not run from — [`RefusalCause::RefusalUndeclared`] |
 //!
-//! The second is §19's own words: "the exact rejection mechanism must come from the declared
-//! command/error semantics", and there is nothing declared to come from. Both are refusals or
-//! recorded matrix rows rather than silences, because a suite quietly holding a thinner check than
-//! the specification requires is the one failure a passing run cannot show.
+//! It is a refusal or a recorded matrix row rather than a silence, because a suite quietly holding a
+//! thinner check than the specification requires is the one failure a passing run cannot show.
 //!
 //! A value object's invariants are the third: `billing.invoice.Money` says `amount >= 0` of every
 //! `Money` in the system, which is a claim about a *type* rather than about an instance at rest, and
@@ -132,9 +145,9 @@ use aep_domain::node::Node;
 use aep_domain::predicate::{Predicate, Truth};
 use ess_compiler::diagnostic::Code;
 use ess_compiler::ir::{
-    Driver, EntityHandle, EssIr, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedEffect,
-    ResolvedFailure, ResolvedInstance, ResolvedMappingValue, ResolvedOutcome, ResolvedSubject,
-    ResolvedTypeRef, ResolvedView,
+    Driver, EntityHandle, EssIr, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedCondition,
+    ResolvedEffect, ResolvedFailure, ResolvedInstance, ResolvedMappingValue, ResolvedOutcome,
+    ResolvedSubject, ResolvedTypeRef, ResolvedView,
 };
 use ess_domain::binding::Delivery;
 use ess_domain::command::{OutcomeName, TestStrategy};
@@ -348,20 +361,24 @@ pub enum RefusalCause {
         /// The state the entity is in when the assertion would run.
         state: StateName,
     },
-    /// §19's rejection mechanism, which the model has no way to declare.
+    /// §19's rejection mechanism, which this command does not declare.
     ///
     /// A command attempted against an instance in a state none of its transitions run from **is**
-    /// refused — that is exactly what makes the combination illegal — and the specification declares
-    /// no outcome and no error for it. So the scenario that exists asserts what it can, that nothing
+    /// refused — that is exactly what makes the combination illegal — and this command declares no
+    /// outcome and no error for it. So the scenario that exists asserts what it can, that nothing
     /// the specification declares was published, and cannot assert what §19 asks for: "the exact
     /// rejection mechanism must come from the declared command/error semantics", and "do not
     /// generate vague *operation fails* tests if the domain declares a specific error".
     ///
+    /// **The model can express it now**, which is what changed: a `wrong_state:` outcome names the
+    /// error the command reports, and the states it answers in stay implied by the transitions it
+    /// does not run from. So this is no longer a gap in the model — it is a specification that has
+    /// not said what its command does, and the repair is one branch in the document.
+    ///
     /// It is a refusal beside a scenario rather than instead of one, exactly as
     /// [`InvariantUnobservable`](Self::InvariantUnobservable) is: the scenario is worth having, and
     /// a reader who cannot see that it asserts less than the section asks for will read a thin check
-    /// as a thick one. Closing it is a model change and not a synthesizer change — see
-    /// [`RefusalCause::hint`].
+    /// as a thick one.
     RefusalUndeclared {
         /// Whose instance.
         entity: EntityRef,
@@ -372,10 +389,14 @@ pub enum RefusalCause {
     },
     /// Two scenarios claimed one id. A drift alarm: `ess-domain` refuses a duplicated declaration.
     DuplicateScenario,
-    /// The outcome's strategy says an input reaches it and its condition declares no guard.
+    /// The outcome's strategy and its condition disagree about how a scenario reaches the branch.
     ///
     /// A drift alarm. [`TestStrategy`] is computed from the condition, so the two cannot disagree
-    /// unless one of them changes without the other.
+    /// unless one of them changes without the other. Two shapes reach it: a
+    /// [`ConstructInput`](TestStrategy::ConstructInput) branch that declares no guard, and an
+    /// [`ArrangeState`](TestStrategy::ArrangeState) branch asked for the input that reaches it —
+    /// nothing reaches that one by choosing an input, and the illegal-move family sends the input
+    /// the *moving* branch would have taken.
     StrategyWithoutGuard {
         /// What the strategy said.
         strategy: TestStrategy,
@@ -447,9 +468,8 @@ impl RefusalCause {
                 }
             }
             Self::RefusalUndeclared { .. } => {
-                "nothing in the model says what a command answers when its subject is in a state \
-                 its transitions do not run from; a construct in `ess-domain`, resolution in the \
-                 compiler and a rendering in the projections would let it declare the error"
+                "give the command a `wrong_state:` outcome naming the error it reports; the states \
+                 it answers in are already declared, as the states its transitions do not run from"
             }
             Self::DuplicateScenario => {
                 "two declarations produced one scenario id; rename one of them"
@@ -507,8 +527,8 @@ impl fmt::Display for RefusalCause {
             } => write!(
                 f,
                 "`{command}` on a `{entity}` in `{state}` is refused and the specification does \
-                 not say how: no outcome and no declared error, so the scenario can only require \
-                 that nothing happened"
+                 not say how: no `wrong_state:` outcome and no declared error, so the scenario can \
+                 only require that nothing happened"
             ),
             Self::DuplicateScenario => f.write_str("a second scenario claimed this id"),
             Self::StrategyWithoutGuard { strategy } => {
@@ -780,6 +800,17 @@ pub fn synthesize(ir: &EssIr) -> Synthesis {
 
     for command in ir.commands.values() {
         for outcome in &command.outcomes {
+            // A wrong-state branch gets no scenario of its own, and this is the one place in the
+            // file where "no scenario" is neither a refusal nor a defect. §10 asks for one scenario
+            // per *reachable* outcome, and the states this branch is reachable in are exactly the
+            // ones the illegal-move family below already enumerates — one scenario each, against an
+            // instance the arrangement really drove there. A ninth `/outcome/` scenario would have
+            // had to pick one of those states arbitrarily and would assert a strict subset of what
+            // the eight already assert. `wrong_state_is_covered_by_the_illegal_move_family` in
+            // `tests/synthesis.rs` is what keeps that a claim rather than a hope.
+            if outcome.condition == ResolvedCondition::WrongState {
+                continue;
+            }
             let Some((id, scenario)) =
                 outcome_scenario(ir, command, outcome, &actors, &mut refusals)
             else {
@@ -1338,6 +1369,12 @@ fn reach(
             .filter_map(when)
             .collect(),
         TestStrategy::InjectFault => Vec::new(),
+        // A wrong-state branch is decided by the subject, not by the input, so nothing asks this
+        // function for the input that reaches it: `refused_here` sends the input that reaches the
+        // *moving* branch and arranges the subject instead. Answering with "no guards" would hand
+        // back an arbitrary candidate presented as the one that reaches the branch, which is the
+        // invention this crate refuses everywhere else — so it is a drift alarm.
+        TestStrategy::ArrangeState => return Err(RefusalCause::StrategyWithoutGuard { strategy }),
     };
     let satisfy = strategy == TestStrategy::ConstructInput;
 
@@ -1738,6 +1775,7 @@ fn purpose(command: &ResolvedCommand, outcome: &ResolvedOutcome) -> ScenarioPurp
         TestStrategy::ConstructInput => "an input that satisfies that branch's guard",
         TestStrategy::DefaultBranch => "an input no other branch's guard claims",
         TestStrategy::InjectFault => "the cause it declares as external, injected",
+        TestStrategy::ArrangeState => "a subject in a state its moves do not start from",
     };
     let text = format!(
         "`{}` answers `{}` for {reached}",
@@ -1792,23 +1830,25 @@ fn lifecycle(
             }
         }
 
-        // The absence of a transition is itself semantics (§19). "Relevant" is read here as: a
-        // command that moves this entity at all, and a state none of its moves may start from.
-        let movers: BTreeSet<&QualifiedName> = drivers
+        // The absence of a transition is itself semantics (§19). Which states those are is not
+        // computed here and not computed twice: `EssIr::wrong_states` subtracts the `from` sets of
+        // the moves a command declares from the states its entity declares, and the documentation
+        // projection reads the same answer to print it on the page.
+        let movers: BTreeMap<&QualifiedName, BTreeSet<&StateName>> = drivers
             .iter()
             .filter(|driver| driver.effect.transition().is_some())
-            .map(|driver| &driver.command.name)
+            .map(|driver| (&driver.command.name, driver.command))
+            .collect::<BTreeMap<_, _>>()
+            .into_iter()
+            .filter_map(|(name, command)| {
+                ir.wrong_states(command)
+                    .remove(handle)
+                    .map(|states| (name, states))
+            })
             .collect();
         for state in &states.states {
-            for command in &movers {
-                let legal = drivers.iter().any(|driver| {
-                    &driver.command.name == *command
-                        && driver
-                            .effect
-                            .transition()
-                            .is_some_and(|transition| transition.from.contains(state))
-                });
-                if legal {
+            for (command, wrong) in &movers {
+                if !wrong.contains(state) {
                     continue;
                 }
                 let id = ScenarioId::Refusal {
@@ -1846,14 +1886,19 @@ fn insert(
 ///
 /// * The input is the one that **would have reached the moving branch**. Sending a value the branch
 ///   would refuse anyway produces a scenario that passes whether or not the state rule holds.
-/// * There is no `ExpectOutcome`. The specification declares no branch for this case — that is
-///   precisely what makes the combination illegal — so asserting one would be inventing the
-///   rejection mechanism §19 says must come from the declared semantics.
+/// * Where the command declares a [`WrongState`](ResolvedCondition::WrongState) branch, that branch
+///   and its `error:` are both required. This is §19's "the exact rejection mechanism must come from
+///   the declared command/error semantics", and it is the whole reason the construct exists: without
+///   it the only honest assertion was a negative one, so an implementation that refused with the
+///   wrong error — or with an untyped infrastructure failure — passed. Where the command declares no
+///   such branch the scenario is still produced and [`RefusalCause::RefusalUndeclared`] is recorded
+///   beside it, because a thin check that looks like a thick one is the silence §36 rules out.
 /// * What is asserted is that **no** event the specification declares was published — not merely
-///   that the move's own events were not. No branch was taken here, and every declared event belongs
-///   to a branch, so an invocation that publishes one has published something no branch of it
-///   licensed. The narrower claim let an unhonoured `CancelInvoice` announce that the invoice was
-///   paid, which is the same hole `not_emitted` closes on the branches that *are* declared.
+///   that the move's own events were not. No branch that emits was taken here, and every declared
+///   event belongs to a branch, so an invocation that publishes one has published something no
+///   branch of it licensed. The narrower claim let an unhonoured `CancelInvoice` announce that the
+///   invoice was paid, which is the same hole `not_emitted` closes on the branches that *are*
+///   declared.
 #[allow(clippy::too_many_arguments)]
 fn refused_here(
     ir: &EssIr,
@@ -1907,12 +1952,6 @@ fn refused_here(
             Some(&arrangement.instance),
         ),
     });
-    let forbidden = not_emitted(ir, &[]);
-    for event in &forbidden {
-        steps.push(ScenarioStep::ExpectNoEvent {
-            event: event.clone(),
-        });
-    }
 
     let mut source = arrangement.source;
     source.insert(command_ref.clone().into());
@@ -1920,23 +1959,61 @@ fn refused_here(
     for driver in &movers {
         source.insert(OutcomeRef::new(command_ref.clone(), driver.outcome.name.clone()).into());
     }
-    source.extend(forbidden.into_iter().map(EssSemanticRef::from));
     if let Some(actor) = actors.get(command) {
         source.insert(actor.clone().into());
     }
 
-    // Beside the scenario, never instead of it: what the scenario asserts is real, and it is less
-    // than §19 asks for, and only one of those two facts is visible in a passing run.
-    refusals.push(Refusal::about(
-        id,
-        RefusalCause::RefusalUndeclared {
-            entity: entity.clone(),
-            state: state.clone(),
-            command: command_ref,
-        },
-    ));
+    let declared = attempt
+        .command
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.condition == ResolvedCondition::WrongState);
+    let reported = if let Some(refusal) = declared {
+        let branch = OutcomeRef::new(command_ref.clone(), refusal.name.clone());
+        steps.push(ScenarioStep::ExpectOutcome {
+            outcome: branch.clone(),
+        });
+        source.insert(branch.into());
+        // The declared error, by name and with no invented payload — the same line `exercise` draws
+        // for every other refusal, and the reason this family stopped being a "something went
+        // wrong" check.
+        refusal.error.as_ref().map(|error| {
+            let named = ErrorRef::from(error);
+            steps.push(ScenarioStep::ExpectError {
+                error: named.clone(),
+                fields: BTreeMap::new(),
+            });
+            source.insert(named.clone().into());
+            named
+        })
+    } else {
+        // Beside the scenario, never instead of it: what the scenario asserts is real, and it is
+        // less than §19 asks for, and only one of those two facts is visible in a passing run.
+        refusals.push(Refusal::about(
+            id,
+            RefusalCause::RefusalUndeclared {
+                entity: entity.clone(),
+                state: state.clone(),
+                command: command_ref,
+            },
+        ));
+        None
+    };
 
-    let text = format!("`{command}` does not move a `{entity}` that is in `{state}`");
+    let forbidden = not_emitted(ir, &[]);
+    for event in &forbidden {
+        steps.push(ScenarioStep::ExpectNoEvent {
+            event: event.clone(),
+        });
+    }
+    source.extend(forbidden.into_iter().map(EssSemanticRef::from));
+
+    let text = match &reported {
+        Some(error) => format!(
+            "`{command}` does not move a `{entity}` that is in `{state}`, and reports `{error}`"
+        ),
+        None => format!("`{command}` does not move a `{entity}` that is in `{state}`"),
+    };
     Some(ConformanceScenario::new(clipped(&text), steps, source))
 }
 

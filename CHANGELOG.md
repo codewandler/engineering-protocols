@@ -47,6 +47,22 @@ belongs in the commit message or in `docs/design/`.
   outcome. Seven are caught by the scenario that exists to catch them — named, not merely "the run
   went red" — and the matrix asserts each fault's blast radius against an allowance, so a suite that
   starts over-reaching fails rather than looking thorough.
+- **A command can say what happens when it is attempted in the wrong state**, and an author writes
+  only the error. `wrong_state: true` with an `error:` is a fourth kind of outcome beside a guarded
+  branch, a default branch and an externally decided one. The *states* are not written down: the
+  lifecycle already says which states each transition may be taken from, so everything else is wrong
+  by construction — add a `from:` to a transition and the branch narrows without anyone editing a
+  second list.
+
+  Until now a generated suite could only check that something went wrong, not that the right thing
+  went wrong. An implementation that refuses with the wrong error passed all twenty-seven scenarios of
+  the normative example; it now fails the scenario that exists to catch it. Omitting `wrong_state:` is
+  still valid — the scenario is still generated, and the suite says plainly that the specification
+  declares no answer for it.
+
+  For anyone generating contracts: the branch surfaces in OpenAPI as `409`, not `422` — the caller's
+  request was well formed, and telling them to fix it would send them looking for a mistake they did
+  not make.
 - **Two of those three faults are now caught.** A command may no longer announce an event belonging to
   a branch it did not take: every event the specification declares and the branch does not emit is
   asserted absent, scoped to that invocation. And a read-your-writes view whose command returned no

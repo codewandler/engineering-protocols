@@ -99,7 +99,7 @@ comment claiming it.
 ```console
 $ cargo build -p protocol-cli
 $ target/debug/protocol ess validate --path examples/billing
-billing v3 — 3 file(s): 2 domain(s), 1 entit(ies), 2 command(s), 2 event(s), 2 error(s), 2 view(s), 2 actor(s)
+billing v3 — 5 file(s): 2 domain(s), 1 entit(ies), 5 command(s), 6 event(s), 3 error(s), 2 view(s), 2 actor(s)
 valid
 ```
 
@@ -121,7 +121,7 @@ $ target/debug/protocol ess validate --path /var/tmp/copy
 Every problem is reported in one run. An author who has to re-run the tool to discover the second
 error is an author running it ten times to learn what one pass already knew.
 
-## Four things the model insists on
+## Five things the model insists on
 
 **A command that can be refused says so.** Not an `emits` list — *outcomes*:
 
@@ -158,6 +158,35 @@ runs on.
 **An illegal move is illegal because nobody wrote it.** `Paid` cannot become `Cancelled` because no
 transition says it can. There is no rule forbidding it, because a rule would be a second place for
 the same truth to live, and two places eventually disagree.
+
+**And a command says what it answers when it is asked anyway.** That is one key and one name — the
+error — because everything else is already written down:
+
+```yaml
+- name: issued
+  moves: billing.invoice.Invoice.issue      # `issue` runs from [Draft]
+  instance: invoice_id
+  emits: [billing.invoice.InvoiceIssued]
+
+- name: wrong-state
+  wrong_state: true
+  error: billing.invoice.InvoiceStateConflict
+```
+
+`wrong_state:` names no state. `issue` already declares it runs from `Draft`, so `Issued`, `Paid` and
+`Cancelled` are the states `IssueInvoice` refuses in — derived, printed on the generated page, and
+never authored, which is the same reason there is no rule forbidding `Paid → Cancelled`. Add a
+`from:` to a transition and the branch narrows with it; nobody has to remember a second list.
+
+The `error:` is required, and it is the whole point. Without it a generated suite could only assert
+that *nothing happened*, which passes against an implementation that refuses for the wrong reason or
+fails with an untyped infrastructure error. With it, the illegal-move scenarios require the branch
+and the error by name. A command that moves nothing has no state to be wrong in, so declaring the
+branch there is refused as `unreachable_branch`; two of them on one command is
+`conflicting_declaration`, because an instance is in one state and both would claim it.
+
+Over HTTP the same branch is a `409`, where an input-decided refusal is a `422`: the caller sent
+nothing wrong, so there is nothing for it to correct.
 
 ## Three layers above the domains
 

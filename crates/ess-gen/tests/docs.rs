@@ -455,6 +455,36 @@ fn a_commands_refusal_branch_is_documented_and_not_only_its_name() {
 }
 
 #[test]
+fn a_wrong_state_branch_is_documented_with_the_states_the_document_never_lists() {
+    // The page has to do the subtraction, because the author is forbidden from doing it: `issue`
+    // declares `from: [Draft]` and nothing anywhere writes down that `Issued`, `Paid` and
+    // `Cancelled` are therefore states `IssueInvoice` refuses in. A reader who cannot see that set
+    // has to hold a lifecycle and a command in their head at once.
+    let invoice = page(&docs(), "docs/domains/billing.invoice.md");
+
+    assert_says(&invoice, "**`wrong-state`**", "the branch has a heading");
+    assert_says(
+        &invoice,
+        "a `billing.invoice.Invoice` in `Cancelled`, `Issued` and `Paid`",
+        "the states are derived and printed; the document lists none of them",
+    );
+    assert_says(
+        &invoice,
+        "It reports `billing.invoice.InvoiceStateConflict`, carrying `state`",
+        "the one thing the author does write, and the reason the branch exists",
+    );
+    assert_says(
+        &invoice,
+        "A test reaches it by driving an instance into one of those states",
+        "a branch whose page does not say how to reach it is a branch nobody tests",
+    );
+    assert!(
+        !invoice.contains("in `Draft`, `Issued`, `Paid` and `Cancelled`"),
+        "the state the move does run from must not be in the set: {invoice}"
+    );
+}
+
+#[test]
 fn an_outcome_that_changes_an_entity_says_which_instance_and_where_the_identity_is_read() {
     // A page that says an invoice moved and not *which* invoice describes a system nobody can call.
     // The two sentences differ because the two surfaces do, and both are on the page: an existing

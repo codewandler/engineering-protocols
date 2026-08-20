@@ -76,15 +76,15 @@ use aep_domain::facts::Number;
 use aep_domain::node::Node;
 
 use crate::reference::{
-    Billing, Oracle, CANCEL_INVOICE, CREATE_INVOICE, INVOICE_CANCELLED, INVOICE_CREATED,
-    INVOICE_ISSUED, INVOICE_PAID, PAY_INVOICE,
+    Billing, Oracle, CANCEL_INVOICE, CREATE_INVOICE, INVALID_AMOUNT, INVOICE_CANCELLED,
+    INVOICE_CREATED, INVOICE_ISSUED, INVOICE_PAID, ISSUE_INVOICE, PAY_INVOICE,
 };
-use crate::scenario::{EventRef, OutcomeRef, ViewRef};
+use crate::scenario::{ErrorRef, EventRef, OutcomeRef, ViewRef};
 use crate::target::{
-    ConformanceTarget, EventObservationRequest, ExternalOutcomeControl, ImplementationIdentity,
-    InvocationObservationRequest, ObservedEvent, ObservedInvocation, RedeliveryRequest,
-    ScenarioContext, SemanticCommandRequest, SemanticCommandResult, SemanticViewRequest,
-    SemanticViewResult, TargetError,
+    ConformanceTarget, DeclaredErrorValue, EventObservationRequest, ExternalOutcomeControl,
+    ImplementationIdentity, InvocationObservationRequest, ObservedEvent, ObservedInvocation,
+    RedeliveryRequest, ScenarioContext, SemanticCommandRequest, SemanticCommandResult,
+    SemanticViewRequest, SemanticViewResult, TargetError,
 };
 
 // ---- the vocabulary --------------------------------------------------------------------------
@@ -157,7 +157,7 @@ macro_rules! faults {
     )*) => {
         /// One way an implementation of a specification can be wrong.
         ///
-        /// Seven are design §25's fault table. Four more were gone looking for, three of which
+        /// Seven are design §25's fault table. Five more were gone looking for, three of which
         /// nothing caught when they were written down — see the [module documentation](self) for
         /// which of those are closed and which one still needs the model to change.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -217,6 +217,17 @@ faults! {
     AllowIllegalTransition => "allow-illegal-transition", System::Billing, Injection::Boundary,
         Caught::By("billing.invoice.Invoice/state/Paid/refuses/billing.invoice.CancelInvoice"),
         "a command moves an entity from a state its transition does not run from";
+
+    /// A wrong-state refusal reports the wrong declared error.
+    ///
+    /// Not one of §25's seven, and it was uncatchable until the model could say what a command
+    /// answers in a state its moves do not start from: nothing moved, nothing was published, and the
+    /// only thing wrong is the name of the error — so every assertion the suite could previously
+    /// make passed. It is the fault that says the `wrong_state:` branch bought a real check rather
+    /// than a tidier document.
+    WrongRefusalError => "wrong-refusal-error", System::Billing, Injection::Boundary,
+        Caught::By("billing.invoice.Invoice/state/Paid/refuses/billing.invoice.IssueInvoice"),
+        "a command refused for the right reason names the wrong declared error";
 
     /// `F-DROPPED-BINDING`: an event reaches nothing.
     DropBinding => "drop-binding", System::Oracle, Injection::Implementation,
@@ -442,18 +453,28 @@ impl<T: ConformanceTarget> ConformanceTarget for Faulty<T> {
                     .push(ObservedEvent::new(event(INVOICE_PAID)).with("invoice_id", identity));
             }
             Fault::AllowIllegalTransition
-                if command == CANCEL_INVOICE && result.outcome.is_none() =>
+                if command == CANCEL_INVOICE && refused_for_state(&result, CANCEL_INVOICE) =>
             {
-                // The reference answers `undeclared` for a move its lifecycle does not run; this
-                // reports that refusal as the success it was not, and publishes what the move would
-                // have published.
+                // The reference answers the declared `wrong-state` branch for a move its lifecycle
+                // does not run; this reports that refusal as the success it was not, drops the error
+                // that named it, and publishes what the move would have published.
                 result.outcome = Some(cancelled());
+                result.error = None;
                 result
                     .direct_events
                     .push(ObservedEvent::new(event(INVOICE_CANCELLED)).with(
                         "invoice_id",
                         input.get("invoice_id").cloned().unwrap_or_default(),
                     ));
+            }
+            Fault::WrongRefusalError
+                if command == ISSUE_INVOICE && refused_for_state(&result, ISSUE_INVOICE) =>
+            {
+                // The branch is right and the error is not. Nothing observable changed — no event
+                // was published and no state moved — so the only thing that distinguishes this from
+                // a correct implementation is the error the refusal names, which is exactly what
+                // `wrong_state:` put into the model.
+                result.error = Some(DeclaredErrorValue::new(declared_error(INVALID_AMOUNT)));
             }
             Fault::DropConsistencyToken => result.consistency = None,
             _ => {}
@@ -528,13 +549,47 @@ fn event(value: &str) -> EventRef {
 ///
 /// It does not, for the reason [`event`] does not.
 fn cancelled() -> OutcomeRef {
+    branch_of(CANCEL_INVOICE, "cancelled")
+}
+
+/// `true` when the reference answered the `wrong_state:` branch of `command_name`.
+///
+/// Read off the branch the result names rather than off "no outcome and no events": a target that
+/// declares the branch reports it, and a fault that keyed on the absence of an outcome would stop
+/// firing the moment a specification adopted the construct.
+fn refused_for_state(result: &SemanticCommandResult, command_name: &str) -> bool {
+    result
+        .outcome
+        .as_ref()
+        .is_some_and(|taken| taken == &branch_of(command_name, WRONG_STATE))
+}
+
+/// The name every `wrong_state:` branch in `examples/billing/` is declared under.
+const WRONG_STATE: &str = "wrong-state";
+
+/// One declared error, by name.
+///
+/// # Panics
+///
+/// It does not, for the reason [`event`] does not.
+fn declared_error(value: &str) -> ErrorRef {
+    value
+        .parse()
+        .unwrap_or_else(|error| panic!("`{value}` is a well-formed error: {error}"))
+}
+
+/// One declared branch of one command.
+///
+/// # Panics
+///
+/// It does not, for the reason [`event`] does not.
+fn branch_of(command_name: &str, name: &str) -> OutcomeRef {
     OutcomeRef::new(
-        CANCEL_INVOICE
+        command_name
             .parse()
-            .unwrap_or_else(|error| panic!("`{CANCEL_INVOICE}` is a well-formed command: {error}")),
-        "cancelled"
-            .parse()
-            .unwrap_or_else(|error| panic!("`cancelled` is a well-formed outcome name: {error}")),
+            .unwrap_or_else(|error| panic!("`{command_name}` is a well-formed command: {error}")),
+        name.parse()
+            .unwrap_or_else(|error| panic!("`{name}` is a well-formed outcome name: {error}")),
     )
 }
 
@@ -586,7 +641,7 @@ mod tests {
         // The list is generated from the same lines as the variants, so what is left to check is
         // that no row was declared empty — a fault with no description is a row in a matrix nobody
         // can read.
-        assert_eq!(Fault::ALL.len(), 11);
+        assert_eq!(Fault::ALL.len(), 12);
         for fault in Fault::ALL {
             assert!(!fault.written().is_empty(), "{fault:?} has no written form");
             assert!(!fault.describe().is_empty(), "{fault:?} describes nothing");

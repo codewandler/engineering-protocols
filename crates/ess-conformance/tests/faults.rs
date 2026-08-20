@@ -33,6 +33,12 @@
 //! the model says where a payload field's value comes from — so there is no check to make that is
 //! not a guess. `partial-event-payload` is the same event with a declared field missing, and that
 //! one is caught, because the type *is* declared. `crates/ess-conformance/src/faulty.rs` argues both.
+//!
+//! `wrong-refusal-error` is the row that arrived the other way round. It was uncatchable and is not
+//! recorded as such, because the repair landed in the same change: a command can now declare what it
+//! answers when its subject is in a state its moves do not start from, so an implementation that
+//! refuses with the wrong error is a defect a named scenario reports rather than a difference no
+//! assertion could see.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -287,12 +293,17 @@ fn a_faults_blast_radius_is_accounted_for() {
     //   PartialEventPayload    2  `PayInvoice/settled` is asserted twice, once as §10's branch and
     //                             once as §19's move, and an event missing a declared field fails
     //                             both.
+    //   WrongRefusalError      3  `issue` runs from `Draft` alone, so `IssueInvoice` answers its
+    //                             `wrong_state:` branch in the other three declared states, and one
+    //                             wrong error name is wrong in all three. Narrower is not available:
+    //                             the injection sees a command and a result, not which invoice.
     let allowance: &[(Fault, usize)] = &[
         (Fault::WrongEvent, 22),
         (Fault::DropConsistencyToken, 8),
         (Fault::DropBinding, 4),
         (Fault::ExtraEvent, 4),
         (Fault::StaleReadYourWrites, 3),
+        (Fault::WrongRefusalError, 3),
         (Fault::AllowIllegalTransition, 2),
         (Fault::IgnoreExternalOutcome, 2),
         (Fault::PartialEventPayload, 2),

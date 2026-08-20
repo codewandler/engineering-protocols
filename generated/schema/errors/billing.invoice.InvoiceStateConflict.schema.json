@@ -1,6 +1,19 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$ref": "#/$defs/billing.invoice.Invoice.State",
+  "title": "InvoiceStateConflict payload",
+  "description": "The invoice is not in a state this command acts from, so nothing moved.",
+  "x-ess-name": "billing.invoice.InvoiceStateConflict",
+  "x-ess-kind": "error-payload",
+  "type": "object",
+  "properties": {
+    "state": {
+      "$ref": "#/$defs/billing.invoice.Invoice.State"
+    }
+  },
+  "required": [
+    "state"
+  ],
+  "additionalProperties": false,
   "x-ess-provenance": {
     "system": "billing",
     "specification_version": "v3",

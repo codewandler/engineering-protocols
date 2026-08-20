@@ -1067,7 +1067,7 @@
       "additionalProperties": false
     },
     "RawOutcome": {
-      "description": "One outcome as written in a document, before validation.\n\n`when` and `external` are the two spellings of a condition; writing neither is the default branch, and writing both is refused.\n\n`creates`, `moves` and `updates` are the three spellings of a [`Subject`], and follow the same shape for the same reason: three keys an author writes at most one of, rather than one key whose value is sometimes a keyword and sometimes a name. Writing none of them says the outcome changes no entity, which is the honest answer for `SendEmail`.",
+      "description": "One outcome as written in a document, before validation.\n\n`when`, `external` and `wrong_state` are the three spellings of a condition; writing none of them is the default branch, and writing two is refused.\n\n`creates`, `moves` and `updates` are the three spellings of a [`Subject`], and follow the same shape for the same reason: three keys an author writes at most one of, rather than one key whose value is sometimes a keyword and sometimes a name. Writing none of them says the outcome changes no entity, which is the honest answer for `SendEmail`.",
       "type": "object",
       "required": [
         "name"
@@ -1163,6 +1163,10 @@
               "type": "null"
             }
           ]
+        },
+        "wrong_state": {
+          "description": "`true` when this is the branch taken because the subject is in a state no move starts from.\n\nA flag and not a list of states: the states are already declared, once, as the `from` sets of this command's transitions. `wrong_state: false` is the same document as leaving the key out, because that is what the word means; what makes the branch a declaration is the `error:` beside it, which is required.",
+          "type": "boolean"
         }
       },
       "additionalProperties": false

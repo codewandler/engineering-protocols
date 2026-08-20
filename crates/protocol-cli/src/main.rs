@@ -1548,6 +1548,7 @@ fn ess_render_outcome(outcome: &ess_compiler::ir::ResolvedOutcome) {
         ResolvedCondition::When { predicate } => format!("when {predicate}"),
         ResolvedCondition::Otherwise => "otherwise".to_owned(),
         ResolvedCondition::External { cause } => format!("external: {cause}"),
+        ResolvedCondition::WrongState => "wrong state".to_owned(),
     };
     ess_line(
         "outcome",

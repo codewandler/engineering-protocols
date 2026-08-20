@@ -16,13 +16,14 @@ use std::path::{Path, PathBuf};
 
 use aep_domain::node::Node;
 use ess_compiler::diagnostic::Code;
-use ess_compiler::ir::EssIr;
+use ess_compiler::ir::{EssIr, ResolvedCondition};
 use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
 use ess_conformance::scenario::{BindingAspect, ScenarioStep, ScenarioValue, ViewExpectation};
 use ess_conformance::synthesize::{synthesize, BindingGap, RefusalCause, Synthesis, Unreachable};
 use ess_conformance::{flatten, when, Decision, ScenarioId};
 use ess_domain::binding::{Delivery, Failure};
+use ess_domain::entity::StateName;
 use ess_domain::name::QualifiedName;
 use ess_domain::spec::{RawSpecFile, Specification};
 use ess_domain::system::Source;
@@ -198,12 +199,18 @@ fn code(number: u16) -> Code {
 // ---- §10: one scenario per reachable declared outcome -------------------------------------------
 
 #[test]
-fn every_declared_outcome_is_either_a_scenario_or_a_named_refusal() {
+fn every_declared_outcome_is_either_a_scenario_or_a_named_refusal_or_asserted_by_the_state_family()
+{
     // §36's rule, made checkable: silently omitting a scenario is the one unacceptable option, so
-    // the two lists together must cover every outcome the specification declares. The fixture
-    // reaches the state where that rule bites — billing declares eight outcomes and only five are
-    // reachable — because a specification whose outcomes are all reachable could not tell a suite
-    // that refuses well from one that drops what it cannot do.
+    // the lists together must cover every outcome the specification declares. The fixture reaches
+    // the state where that rule bites — billing declares eleven outcomes and only eight of them get
+    // a scenario under their own name — because a specification whose outcomes are all covered one
+    // way could not tell a suite that refuses well from one that drops what it cannot do.
+    //
+    // The third bucket is where a `wrong_state:` branch goes, and it is checked by *finding the
+    // assertion*, not by allowing an exception: the branch is required by name in at least one
+    // illegal-move scenario, once per state it answers in. Anything less would have made "covered"
+    // a word this test says rather than a thing it observes.
     let ir = example("billing");
     let synthesis = synthesize(&ir);
 
@@ -217,32 +224,65 @@ fn every_declared_outcome_is_either_a_scenario_or_a_named_refusal() {
                 .map(move |outcome| format!("{}/outcome/{}", command.name, outcome.name))
         })
         .collect();
-    assert_eq!(declared.len(), 8, "the fixture declares eight outcomes");
+    assert_eq!(declared.len(), 11, "the fixture declares eleven outcomes");
+
+    let wrong_state: BTreeSet<String> = ir
+        .commands
+        .values()
+        .flat_map(|command| {
+            command
+                .outcomes
+                .iter()
+                .filter(|outcome| outcome.condition == ResolvedCondition::WrongState)
+                .map(move |outcome| format!("{}/outcome/{}", command.name, outcome.name))
+        })
+        .collect();
+    assert_eq!(
+        wrong_state.len(),
+        3,
+        "the three lifecycle commands each declare what they answer in a state they do not act from"
+    );
+
+    // Every branch required by an `ExpectOutcome` step anywhere in the suite, written as the same
+    // `<command>/outcome/<branch>` string the ids use.
+    let asserted: BTreeSet<String> = synthesis
+        .suite
+        .scenarios
+        .values()
+        .flat_map(|scenario| scenario.steps.iter())
+        .filter_map(|step| match step {
+            ScenarioStep::ExpectOutcome { outcome } => {
+                Some(format!("{}/outcome/{}", outcome.command, outcome.outcome))
+            }
+            _ => None,
+        })
+        .collect();
+    assert!(
+        wrong_state.is_subset(&asserted),
+        "a wrong-state branch with no scenario of its own must be required by one that exists: \
+         {wrong_state:?} against {asserted:?}"
+    );
 
     let covered: BTreeSet<String> = ids(&synthesis)
         .into_iter()
         .chain(refused(&synthesis))
         .filter(|id| id.contains("/outcome/"))
+        .chain(wrong_state.iter().cloned())
         .collect();
 
     assert_eq!(
         covered, declared,
-        "an outcome that is neither in the suite nor in a refusal has disappeared"
+        "an outcome that is neither in the suite, nor in a refusal, nor asserted by the \
+         illegal-move family has disappeared"
     );
     assert_eq!(
-        covered.len(),
-        declared.len(),
-        "and every one of them is now a scenario rather than a refusal: {:?}",
-        refused(&synthesis)
-    );
-    assert!(
         ids(&synthesis)
             .iter()
             .filter(|id| id.contains("/outcome/"))
-            .count()
-            == declared.len(),
-        "the eight outcomes billing declares are eight scenarios: {:?}",
-        ids(&synthesis)
+            .count(),
+        declared.len() - wrong_state.len(),
+        "and every outcome an input can reach is a scenario rather than a refusal: {:?}",
+        refused(&synthesis)
     );
 }
 
@@ -329,14 +369,31 @@ fn a_declared_error_is_asserted_by_name_and_never_by_an_invented_payload() {
         })
         .collect();
 
+    let named: Vec<&str> = errors.iter().map(|(name, _)| name.as_str()).collect();
     assert_eq!(
-        errors,
+        named,
         vec![
-            ("billing.email.Undeliverable".to_owned(), 0),
-            ("billing.invoice.InvalidAmount".to_owned(), 0),
-            ("billing.invoice.InvalidAmount".to_owned(), 0),
+            "billing.email.Undeliverable",
+            "billing.invoice.InvalidAmount",
+            // Eight of these, one per illegal-move scenario: `InvoiceStateConflict` is what the
+            // three lifecycle commands declare they answer with when the invoice is somewhere they
+            // do not act from, and asserting it is the whole point of `wrong_state:`.
+            "billing.invoice.InvoiceStateConflict",
+            "billing.invoice.InvoiceStateConflict",
+            "billing.invoice.InvoiceStateConflict",
+            "billing.invoice.InvoiceStateConflict",
+            "billing.invoice.InvoiceStateConflict",
+            "billing.invoice.InvoiceStateConflict",
+            "billing.invoice.InvoiceStateConflict",
+            "billing.invoice.InvoiceStateConflict",
+            "billing.invoice.InvalidAmount",
         ],
-        "every refusal branch names its declared error, and none claims a field value"
+        "every refusal branch names its declared error"
+    );
+    assert!(
+        errors.iter().all(|(_, fields)| *fields == 0),
+        "and none claims a field value — including the wrong-state ones, whose declared `state` \
+         field the model does not say where to fill from: {errors:?}"
     );
 }
 
@@ -796,19 +853,19 @@ fn a_move_that_is_illegal_in_a_state_is_attempted_with_the_input_that_would_have
     // §19's second class, and the assertion that makes it a check rather than a formality. The
     // input sent is the one that reaches the *moving* branch — send an amount the branch would
     // refuse anyway and the scenario passes whether or not the state rule holds — and what is
-    // required is that the event the move publishes did not happen, because the specification
-    // declares no outcome for this combination and inventing one would be inventing the rejection
-    // mechanism §19 says must come from the declared semantics.
+    // required is the branch the specification declares for this combination, the error it names,
+    // and that the event the move publishes did not happen.
     let synthesis = synthesize(&example("billing"));
     let id = "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.PayInvoice";
 
     assert_eq!(
         asserted(&synthesis, id),
         vec![
-            "execute", "outcome", "capture", "execute", "outcome", "execute", "outcome", "execute"
+            "execute", "outcome", "capture", "execute", "outcome", "execute", "outcome", "execute",
+            "outcome", "error"
         ],
-        "drive the invoice to `Paid`, then pay it again — and assert no outcome, because none is \
-         declared for this"
+        "drive the invoice to `Paid`, then pay it again — and require the declared `wrong-state` \
+         branch and its error, not merely that nothing happened"
     );
     let forbidden = shape(&synthesis, id)
         .into_iter()
@@ -816,8 +873,8 @@ fn a_move_that_is_illegal_in_a_state_is_attempted_with_the_input_that_would_have
         .count();
     assert_eq!(
         forbidden, 6,
-        "and none of the six events billing declares: no branch was taken, so every declared event \
-         belongs to a branch this invocation did not run"
+        "and none of the six events billing declares: the branch that was taken emits nothing, and \
+         every declared event belongs to a branch this invocation did not run"
     );
 
     let amount = sent(&synthesis, id)
@@ -870,21 +927,82 @@ fn a_move_that_is_illegal_in_a_state_is_attempted_with_the_input_that_would_have
 }
 
 #[test]
-fn an_illegal_move_says_that_the_model_cannot_declare_how_it_is_refused() {
-    // §19 asks for two things of this family, and the model can express only one. "Must not reach
-    // `Cancelled`" is asserted; "the exact rejection mechanism must come from the declared
-    // command/error semantics" is not, because a command has no way to declare what it answers when
-    // its subject is in a state its transitions do not run from.
+fn an_illegal_move_requires_the_branch_and_the_declared_error_rather_than_merely_failing() {
+    // §19 asks for two things of this family, and until `wrong_state:` existed the model could
+    // express only one. "Must not reach `Cancelled`" was asserted; "the exact rejection mechanism
+    // must come from the declared command/error semantics" was not, so an implementation that
+    // refused with the wrong error — or with an untyped infrastructure failure — passed.
     //
-    // So the scenario is produced *and* the gap is reported beside it. §36's rule is about silence,
-    // not about absence: a reader of a passing run cannot otherwise tell a scenario that asserts
-    // everything the section asks for from one that asserts what was left.
-    let synthesis = synthesize(&example("billing"));
+    // The fixture is driven to the state where that rule is load-bearing before anything is
+    // asserted about it: `Paid` really is a state `cancel` does not run from, which is what makes
+    // the combination illegal in the first place.
+    let ir = example("billing");
+    let synthesis = synthesize(&ir);
     let id = "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.CancelInvoice";
+
+    let cancel = ir
+        .commands
+        .get(&QualifiedName::new("billing.invoice.CancelInvoice").expect("valid"))
+        .expect("declared");
+    let paid = StateName::new("Paid").expect("a state name");
+    let wrong = ir.wrong_states(cancel);
+    assert!(
+        wrong.values().any(|states| states.contains(&paid)),
+        "the fixture only tests the rule if `Paid` is a state `cancel` cannot start from: {wrong:?}"
+    );
+
+    let branch = steps(&synthesis, id)
+        .iter()
+        .rev()
+        .find_map(|step| match step {
+            ScenarioStep::ExpectOutcome { outcome } => Some(outcome.to_string()),
+            _ => None,
+        })
+        .expect("the scenario requires a branch");
+    assert_eq!(
+        branch, "billing.invoice.CancelInvoice/wrong-state",
+        "the branch required is the one the command declares for a subject it will not act on"
+    );
+
+    let reported: Vec<String> = steps(&synthesis, id)
+        .iter()
+        .filter_map(|step| match step {
+            ScenarioStep::ExpectError { error, .. } => Some(error.to_string()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reported,
+        vec!["billing.invoice.InvoiceStateConflict".to_owned()],
+        "and the error is the declared one, which is what tells a wrong refusal from a right one"
+    );
+
+    assert_eq!(
+        synthesis.refused(code(12)).count(),
+        0,
+        "nothing about this family is refused any more: {:?}",
+        refused(&synthesis)
+    );
+}
+
+#[test]
+fn a_command_that_declares_no_wrong_state_answer_is_refused_by_name_beside_its_scenario() {
+    // The other half, and the reason the refusal stays in the code: a specification that has not
+    // adopted the construct still gets the scenario, and still gets told what its suite is not
+    // checking. §36's rule is about silence, not about absence — a reader of a passing run cannot
+    // otherwise tell a scenario that asserts everything the section asks for from one that asserts
+    // what was left.
+    let synthesis = synthesize(&fixture(NO_DECLARED_REFUSAL));
+    let id = "quiet.orders.Order/state/Shipped/refuses/quiet.orders.ShipOrder";
 
     assert!(
         ids(&synthesis).iter().any(|known| known == id),
-        "the scenario is still produced; what it cannot assert is not a reason to drop it"
+        "the scenario is still produced; what it cannot assert is not a reason to drop it: {:?}",
+        ids(&synthesis)
+    );
+    assert!(
+        !shape(&synthesis, id).contains(&"error"),
+        "and it asserts no error, because the command names none for this"
     );
 
     let refusal = synthesis
@@ -899,30 +1017,21 @@ fn an_illegal_move_says_that_the_model_cannot_declare_how_it_is_refused() {
 
     let rendered = refusal.to_string();
     for required in [
-        "billing.invoice.CancelInvoice",
-        "billing.invoice.Invoice",
-        "Paid",
-        "no outcome and no declared error",
+        "quiet.orders.ShipOrder",
+        "quiet.orders.Order",
+        "Shipped",
+        "no `wrong_state:` outcome and no declared error",
     ] {
         assert!(
             rendered.contains(required),
-            "the refusal names the combination the model cannot describe; {required:?} is missing \
-             from: {rendered}"
+            "the refusal names the combination the document is silent about; {required:?} is \
+             missing from: {rendered}"
         );
     }
     assert!(
-        refusal.hint().contains("ess-domain"),
-        "and says that closing it is a model change rather than a synthesizer change: {}",
+        refusal.hint().contains("wrong_state:"),
+        "and says the repair is one branch in the document, not a change to this crate: {}",
         refusal.hint()
-    );
-
-    assert_eq!(
-        synthesis.refused(code(12)).count(),
-        ids(&synthesis)
-            .iter()
-            .filter(|id| id.contains("/state/"))
-            .count(),
-        "one per illegal-move scenario, because every one of them is missing the same thing"
     );
 }
 
@@ -1648,11 +1757,12 @@ fn each_example_synthesises_the_families_its_specification_declares() {
     // being produced at all, which no test of one scenario's shape can see. Read as a table because
     // that is what it is: what each specification declares, and what it therefore obliges.
     //
-    // The refusal count includes one `ESS-SYNTH-012` per illegal-move scenario: those scenarios are
-    // produced *and* assert less than §19 asks for, because no construct in the model lets a command
-    // declare what it answers when its subject is in the wrong state. Nine for billing is eight of
-    // those plus the one value object whose own invariants are not read off the fields that hold
-    // one; fourteen for the oracle fixture is eight plus its six binding refusals.
+    // The refusal count no longer includes the illegal-move family. Both examples declare a
+    // `wrong_state:` branch on every command that moves an entity, so all sixteen `ESS-SYNTH-012`
+    // refusals became assertions of a declared error. What is left is what the model still cannot
+    // say: one for billing — the value object whose own invariants are not read off the fields that
+    // hold one — and six for the oracle fixture, its five unobservable invariants and its one
+    // `on_failure: drop` binding.
     for (system, expected, refusals) in [
         (
             "billing",
@@ -1663,7 +1773,7 @@ fn each_example_synthesises_the_families_its_specification_declares() {
                 ("/invariant/", 4),
                 ("/binding/", 4),
             ],
-            9,
+            1,
         ),
         (
             "oracle-fixture",
@@ -1674,7 +1784,7 @@ fn each_example_synthesises_the_families_its_specification_declares() {
                 ("/invariant/", 0),
                 ("/binding/", 11),
             ],
-            14,
+            6,
         ),
     ] {
         let synthesis = synthesize(&example(system));
@@ -2151,4 +2261,66 @@ bindings:
       recipient: event.contact
     delivery: at_least_once
     on_failure: retry
+";
+
+/// A specification whose only lifecycle command says nothing about being asked at the wrong time.
+///
+/// `ship` runs from `Placed` alone, so `Shipped` is a state `ShipOrder` answers in and the document
+/// does not say how — which is every specification written before `wrong_state:` existed, and the
+/// shape `ESS-SYNTH-012` has to keep reporting.
+const NO_DECLARED_REFUSAL: &str = r"
+format: ess/1
+system: quiet
+version: v1
+domain: quiet.orders
+
+types:
+  - name: quiet.orders.OrderId
+    kind: newtype
+    of: Uuid
+
+entities:
+  - name: quiet.orders.Order
+    identity:
+      name: order_id
+      type: quiet.orders.OrderId
+    lifecycle:
+      initial: Placed
+      states: [Placed, Shipped]
+      terminal: [Shipped]
+      transitions:
+        - name: ship
+          from: [Placed]
+          to: Shipped
+
+events:
+  - name: quiet.orders.OrderPlaced
+    fields:
+      - name: order_id
+        type: quiet.orders.OrderId
+
+  - name: quiet.orders.OrderShipped
+    fields:
+      - name: order_id
+        type: quiet.orders.OrderId
+
+commands:
+  - name: quiet.orders.PlaceOrder
+    outcomes:
+      - name: accepted
+        creates: quiet.orders.Order
+        instance: order_id
+        emits:
+          - quiet.orders.OrderPlaced
+
+  - name: quiet.orders.ShipOrder
+    input:
+      - name: order_id
+        type: quiet.orders.OrderId
+    outcomes:
+      - name: shipped
+        moves: quiet.orders.Order.ship
+        instance: order_id
+        emits:
+          - quiet.orders.OrderShipped
 ";

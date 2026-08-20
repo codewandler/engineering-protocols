@@ -27,11 +27,14 @@
 //!   word `eventual`, and the first real projection would find that out in production.
 //!   `billing.invoice.OutstandingInvoices` declares `read_your_writes` and *is* immediate, because
 //!   that is what the specification says.
-//! * **A refusal the model does not declare is reported as one.** `IssueInvoice` on a `Paid`
-//!   invoice reaches no declared outcome, so this answers
+//! * **A refusal the model does not declare is reported as one.** `IssueInvoice` on an invoice this
+//!   target has never seen reaches no declared outcome, so it answers
 //!   [`SemanticCommandResult::undeclared`] rather than picking a branch that would make the
-//!   assertion pass. What that costs is on that field: the model has no way to declare the outcome
-//!   of a state violation, and this records the hole instead of papering over it.
+//!   assertion pass. `IssueInvoice` on an invoice that exists and is already `Paid` is a different
+//!   question, and the specification does answer it: the `wrong_state:` branch, reporting
+//!   `billing.invoice.InvoiceStateConflict` and carrying the state the invoice is really in. Both
+//!   halves matter — reporting the second as `undeclared` would have hidden a declared branch, and
+//!   reporting the first as a state conflict would have claimed a subject that does not exist.
 //!
 //! # Where the identifiers come from
 //!
@@ -62,7 +65,7 @@ use crate::target::{
 /// `billing.invoice.CreateInvoice`.
 pub(crate) const CREATE_INVOICE: &str = "billing.invoice.CreateInvoice";
 /// `billing.invoice.IssueInvoice`.
-const ISSUE_INVOICE: &str = "billing.invoice.IssueInvoice";
+pub(crate) const ISSUE_INVOICE: &str = "billing.invoice.IssueInvoice";
 /// `billing.invoice.PayInvoice`.
 pub(crate) const PAY_INVOICE: &str = "billing.invoice.PayInvoice";
 /// `billing.invoice.CancelInvoice`.
@@ -71,7 +74,9 @@ pub(crate) const CANCEL_INVOICE: &str = "billing.invoice.CancelInvoice";
 const SEND_EMAIL: &str = "billing.email.SendEmail";
 
 /// `billing.invoice.InvalidAmount`.
-const INVALID_AMOUNT: &str = "billing.invoice.InvalidAmount";
+pub(crate) const INVALID_AMOUNT: &str = "billing.invoice.InvalidAmount";
+/// `billing.invoice.InvoiceStateConflict`.
+pub(crate) const INVOICE_STATE_CONFLICT: &str = "billing.invoice.InvoiceStateConflict";
 /// `billing.email.Undeliverable`.
 const UNDELIVERABLE: &str = "billing.email.Undeliverable";
 
@@ -235,6 +240,22 @@ enum Lifecycle {
     Issued,
     Paid,
     Cancelled,
+}
+
+impl Lifecycle {
+    /// The state as `examples/billing/domains/invoice.yaml` spells it.
+    ///
+    /// One spelling, because it is the value `billing.invoice.InvoiceStateConflict` carries and the
+    /// value a view publishes; two would be a target that agrees with the specification in one place
+    /// and not the other.
+    fn declared(self) -> &'static str {
+        match self {
+            Self::Draft => "Draft",
+            Self::Issued => "Issued",
+            Self::Paid => "Paid",
+            Self::Cancelled => "Cancelled",
+        }
+    }
 }
 
 /// One event this implementation published, and when it becomes observable.
@@ -511,8 +532,11 @@ fn issue_invoice(
     let Some(id) = instance(request) else {
         return SemanticCommandResult::undeclared();
     };
-    if state.invoices.get(&id).map(|invoice| invoice.state) != Some(Lifecycle::Draft) {
+    let Some(current) = state.invoices.get(&id).map(|invoice| invoice.state) else {
         return SemanticCommandResult::undeclared();
+    };
+    if current != Lifecycle::Draft {
+        return wrong_state(ISSUE_INVOICE, current);
     }
     if let Some(invoice) = state.invoices.get_mut(&id) {
         invoice.state = Lifecycle::Issued;
@@ -538,9 +562,11 @@ fn cancel_invoice(
     let Some(id) = instance(request) else {
         return SemanticCommandResult::undeclared();
     };
-    let current = state.invoices.get(&id).map(|invoice| invoice.state);
-    if !matches!(current, Some(Lifecycle::Draft | Lifecycle::Issued)) {
+    let Some(current) = state.invoices.get(&id).map(|invoice| invoice.state) else {
         return SemanticCommandResult::undeclared();
+    };
+    if !matches!(current, Lifecycle::Draft | Lifecycle::Issued) {
+        return wrong_state(CANCEL_INVOICE, current);
     }
     if let Some(invoice) = state.invoices.get_mut(&id) {
         invoice.state = Lifecycle::Cancelled;
@@ -578,8 +604,11 @@ fn pay_invoice(
     let Some(id) = instance(request) else {
         return SemanticCommandResult::undeclared();
     };
-    if state.invoices.get(&id).map(|invoice| invoice.state) != Some(Lifecycle::Issued) {
+    let Some(current) = state.invoices.get(&id).map(|invoice| invoice.state) else {
         return SemanticCommandResult::undeclared();
+    };
+    if current != Lifecycle::Issued {
+        return wrong_state(PAY_INVOICE, current);
     }
     if let Some(invoice) = state.invoices.get_mut(&id) {
         invoice.state = Lifecycle::Paid;
@@ -611,6 +640,18 @@ fn send_email(state: &mut State, request: &SemanticCommandRequest) -> SemanticCo
         None => SemanticCommandResult::took(outcome(SEND_EMAIL, "failed"))
             .with_error(DeclaredErrorValue::new(declared_error(UNDELIVERABLE))),
     }
+}
+
+/// The branch each lifecycle command declares for an invoice it will not act on.
+///
+/// One function for all three, because the specification declares one error for all three, and the
+/// state it carries is the one the invoice is really in — which is the whole difference between a
+/// caller learning "not now" and learning "it is already paid".
+fn wrong_state(command_name: &str, current: Lifecycle) -> SemanticCommandResult {
+    SemanticCommandResult::took(outcome(command_name, "wrong-state")).with_error(
+        DeclaredErrorValue::new(declared_error(INVOICE_STATE_CONFLICT))
+            .with("state", Node::Text(current.declared().to_owned())),
+    )
 }
 
 /// The invoice a command's `instance:` field names.
@@ -713,6 +754,9 @@ const HANDED_OFF: &str = "oracle.dispatch.HandedOff";
 /// `oracle.dispatch.HandoffEscalated`.
 const HANDOFF_ESCALATED: &str = "oracle.dispatch.HandoffEscalated";
 
+/// `oracle.order.OrderStateConflict`.
+pub(crate) const ORDER_STATE_CONFLICT: &str = "oracle.order.OrderStateConflict";
+
 /// `oracle.order.OpenOrders`, read-your-writes.
 const OPEN_ORDERS: &str = "oracle.order.OpenOrders";
 /// `oracle.order.HeldOrders`, the eventual projection.
@@ -731,8 +775,10 @@ const HELD_ORDERS: &str = "oracle.order.HeldOrders";
 ///
 /// Everything [`Billing`] says about not cheating the suite holds here too: `oracle.order.HeldOrders`
 /// is declared `eventual` and really lags, `oracle.order.OpenOrders` is declared `read_your_writes`
-/// and really is immediate, and a command whose subject is in the wrong state answers
-/// [`SemanticCommandResult::undeclared`] rather than picking a branch that would pass.
+/// and really is immediate, and a command whose subject it has never seen answers
+/// [`SemanticCommandResult::undeclared`] rather than picking a branch that would pass. A subject it
+/// *has* seen, resting in a state the command does not act from, answers the `wrong_state:` branch
+/// the specification now declares — which is a different question with a different answer.
 ///
 /// # Two fault controls live here rather than in a wrapper
 ///
@@ -904,9 +950,15 @@ impl Oracle {
         let Some(id) = order_instance(request) else {
             return SemanticCommandResult::undeclared();
         };
-        let current = state.by_id.get(&id).map(|order| order.state);
-        if !current.is_some_and(|state| moving.from.contains(&state)) {
+        // An order that does not exist is not an order in the wrong state: the specification says
+        // nothing about a subject it has never seen, so that one still answers `undeclared`.
+        let Some(current) = state.by_id.get(&id).map(|order| order.state) else {
             return SemanticCommandResult::undeclared();
+        };
+        if !moving.from.contains(&current) {
+            return SemanticCommandResult::took(outcome(moving.command, "wrong-state")).with_error(
+                DeclaredErrorValue::new(declared_error(ORDER_STATE_CONFLICT)),
+            );
         }
         let contact = state
             .by_id

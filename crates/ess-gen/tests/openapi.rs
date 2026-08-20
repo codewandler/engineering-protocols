@@ -656,6 +656,58 @@ fn a_refusal_the_input_decides_carries_the_declared_error_payload() {
 }
 
 #[test]
+fn a_refusal_the_subjects_state_decides_is_a_conflict_and_not_a_bad_request() {
+    // The status is the projection of a distinction the model could not previously make. `422` says
+    // the caller sent something wrong and resending it is pointless; `409` says the request was
+    // fine and the invoice was not — the same request, issued before the invoice was paid, would
+    // have been accepted. Reading them as one status is what every projection had to do while a
+    // wrong-state refusal was undeclarable.
+    let ir = billing();
+    let document = document(&ir, "invoice-service");
+    let operations = operations(&document);
+    let responses = operations["POST /invoices/commands/pay-invoice"]["responses"]
+        .as_object()
+        .expect("responses");
+
+    assert_eq!(
+        responses.keys().cloned().collect::<Vec<String>>(),
+        vec!["202".to_owned(), "409".to_owned(), "422".to_owned()],
+        "three declared outcomes, three statuses: the move, the wrong state and the bad amount"
+    );
+
+    let conflict = &responses["409"];
+    assert_eq!(
+        conflict["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/billing.invoice.PayInvoice.wrong-state.Response"
+    );
+    let body =
+        &document["components"]["schemas"]["billing.invoice.PayInvoice.wrong-state.Response"];
+    assert_eq!(body["properties"]["outcome"]["const"], "wrong-state");
+    assert_eq!(
+        body["properties"]["error"]["const"],
+        "billing.invoice.InvoiceStateConflict"
+    );
+    assert!(
+        body["description"]
+            .as_str()
+            .expect("a description")
+            .contains("the lifecycle's answer"),
+        "the response says where the states come from, because the document does not list them: {}",
+        body["description"]
+    );
+
+    // `IssueInvoice` declares no input-decided refusal at all, so `409` is the only refusal it has
+    // — which is the shape that would have been lost had this been folded into `422`.
+    let issued = operations["POST /invoices/commands/issue-invoice"]["responses"]
+        .as_object()
+        .expect("responses");
+    assert_eq!(
+        issued.keys().cloned().collect::<Vec<String>>(),
+        vec!["202".to_owned(), "409".to_owned()]
+    );
+}
+
+#[test]
 fn an_outcome_that_emits_says_so_without_claiming_to_return_the_events() {
     let ir = billing();
     let document = document(&ir, "invoice-service");

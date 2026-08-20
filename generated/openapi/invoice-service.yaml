@@ -1,5 +1,5 @@
 # generated from billing v3
-# model digest 660af2b6d97ea480
+# model digest e19d384dac86219a
 # compiler 0.1.0 · generator 0.1.0
 # do not edit: regenerate with `protocol ess generate`
 openapi: 3.1.0
@@ -14,7 +14,7 @@ info:
   x-ess-provenance:
     system: billing
     specification_version: v3
-    source_digest: 660af2b6d97ea480
+    source_digest: e19d384dac86219a
     compiler_version: 0.1.0
     generator_version: 0.1.0
 tags:
@@ -41,6 +41,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/billing.invoice.CancelInvoice.cancelled.Response'
+        '409':
+          description: 'Outcome `wrong-state`: the input was acceptable and the subject is in a state this command does not act from. Resending the same request changes nothing until something else moves it.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.CancelInvoice.wrong-state.Response'
   /invoices/commands/create-invoice:
     post:
       operationId: billing.invoice.CreateInvoice
@@ -89,6 +95,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/billing.invoice.IssueInvoice.issued.Response'
+        '409':
+          description: 'Outcome `wrong-state`: the input was acceptable and the subject is in a state this command does not act from. Resending the same request changes nothing until something else moves it.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.IssueInvoice.wrong-state.Response'
   /invoices/commands/pay-invoice:
     post:
       operationId: billing.invoice.PayInvoice
@@ -109,6 +121,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/billing.invoice.PayInvoice.settled.Response'
+        '409':
+          description: 'Outcome `wrong-state`: the input was acceptable and the subject is in a state this command does not act from. Resending the same request changes nothing until something else moves it.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.PayInvoice.wrong-state.Response'
         '422':
           description: 'Outcome `rejected`: the request was understood and refused on domain grounds. The body names the declared error and carries whatever that error declares.'
           content:
@@ -137,6 +155,24 @@ components:
           description: Which declared outcome the command took.
       required:
       - outcome
+      type: object
+    billing.invoice.CancelInvoice.wrong-state.Response:
+      additionalProperties: false
+      description: The invoice is already Paid or already Cancelled, so nothing was cancelled. Taken when the subject is in a state none of this command's declared moves start from. Which states those are is the lifecycle's answer, not this command's.
+      properties:
+        error:
+          const: billing.invoice.InvoiceStateConflict
+          description: The invoice is not in a state this command acts from, so nothing moved.
+          type: string
+        outcome:
+          const: wrong-state
+          description: Which declared outcome the command took.
+        payload:
+          $ref: '#/components/schemas/billing.invoice.InvoiceStateConflict.Error'
+      required:
+      - outcome
+      - error
+      - payload
       type: object
     billing.invoice.CreateInvoice.Input:
       title: Create invoice input
@@ -197,6 +233,16 @@ components:
       required:
       - submitted
       additionalProperties: false
+    billing.invoice.Invoice.State:
+      title: State
+      x-ess-name: billing.invoice.Invoice.State
+      x-ess-kind: enum
+      type: string
+      enum:
+      - Cancelled
+      - Draft
+      - Issued
+      - Paid
     billing.invoice.InvoiceId:
       title: InvoiceId
       x-ess-name: billing.invoice.InvoiceId
@@ -204,6 +250,18 @@ components:
       type: string
       format: uuid
       pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+    billing.invoice.InvoiceStateConflict.Error:
+      title: InvoiceStateConflict payload
+      description: The invoice is not in a state this command acts from, so nothing moved.
+      x-ess-name: billing.invoice.InvoiceStateConflict
+      x-ess-kind: error-payload
+      type: object
+      properties:
+        state:
+          $ref: '#/components/schemas/billing.invoice.Invoice.State'
+      required:
+      - state
+      additionalProperties: false
     billing.invoice.IssueInvoice.Input:
       title: Issue invoice input
       x-ess-name: billing.invoice.IssueInvoice
@@ -224,6 +282,24 @@ components:
           description: Which declared outcome the command took.
       required:
       - outcome
+      type: object
+    billing.invoice.IssueInvoice.wrong-state.Response:
+      additionalProperties: false
+      description: The invoice is not in Draft, so it was not issued. Taken when the subject is in a state none of this command's declared moves start from. Which states those are is the lifecycle's answer, not this command's.
+      properties:
+        error:
+          const: billing.invoice.InvoiceStateConflict
+          description: The invoice is not in a state this command acts from, so nothing moved.
+          type: string
+        outcome:
+          const: wrong-state
+          description: Which declared outcome the command took.
+        payload:
+          $ref: '#/components/schemas/billing.invoice.InvoiceStateConflict.Error'
+      required:
+      - outcome
+      - error
+      - payload
       type: object
     billing.invoice.Money:
       title: Money
@@ -284,4 +360,22 @@ components:
           description: Which declared outcome the command took.
       required:
       - outcome
+      type: object
+    billing.invoice.PayInvoice.wrong-state.Response:
+      additionalProperties: false
+      description: The invoice is not Issued, so the payment did not settle it. Taken when the subject is in a state none of this command's declared moves start from. Which states those are is the lifecycle's answer, not this command's.
+      properties:
+        error:
+          const: billing.invoice.InvoiceStateConflict
+          description: The invoice is not in a state this command acts from, so nothing moved.
+          type: string
+        outcome:
+          const: wrong-state
+          description: Which declared outcome the command took.
+        payload:
+          $ref: '#/components/schemas/billing.invoice.InvoiceStateConflict.Error'
+      required:
+      - outcome
+      - error
+      - payload
       type: object

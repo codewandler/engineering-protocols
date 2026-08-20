@@ -268,6 +268,33 @@ impl StateMachine {
         self.terminal.contains(state)
     }
 
+    /// The states none of the named moves may start from.
+    ///
+    /// The derivation behind
+    /// [`wrong_state:`](crate::command::OutcomeCondition::WrongState), and the reason that key
+    /// carries no states: a command that takes `issue` and nothing else is wrong in every state but
+    /// `Draft`, and every part of that sentence is already declared. Computing it here rather than
+    /// in each consumer is the same rule [`can_move`](Self::can_move) states — one fact, one place,
+    /// because a second copy is a copy that drifts.
+    ///
+    /// A name that no transition of this lifecycle has contributes nothing rather than widening the
+    /// answer; `validate_lifecycle_causes` refuses such a name under `undeclared_reference`, so
+    /// nothing here has to report it a second time.
+    pub fn wrong_states<'a, 'b: 'a>(
+        &'a self,
+        moves: impl IntoIterator<Item = &'b str>,
+    ) -> BTreeSet<&'a StateName> {
+        let starts: BTreeSet<&StateName> = moves
+            .into_iter()
+            .filter_map(|name| self.transition(name))
+            .flat_map(|transition| &transition.from)
+            .collect();
+        self.states
+            .iter()
+            .filter(|state| !starts.contains(*state))
+            .collect()
+    }
+
     /// States reachable from [`StateMachine::initial`] by following transitions.
     fn reachable(&self) -> BTreeSet<&StateName> {
         let mut seen: BTreeSet<&StateName> = BTreeSet::new();
@@ -901,6 +928,81 @@ pub fn validate_lifecycle_causes(
         }
     }
 
+    for command in commands.values() {
+        errors.extend(validate_wrong_state_is_reachable(entities, command));
+    }
+
+    errors
+}
+
+/// Checks that a `wrong_state:` branch has a state it could be taken in.
+///
+/// The one rule about that branch that a command cannot check alone: `CommandSpec::validate` sees
+/// its own outcomes and not the lifecycles they move, and the answer is a subtraction over both —
+/// the entity's states, less the `from` sets of the transitions this command takes. Two shapes come
+/// out empty, and both mean the same thing to a reader: a command that moves nothing has no state to
+/// be wrong in, and a command whose moves start from every state is never wrong either.
+///
+/// [`UnreachableBranch`](ValidationCode::UnreachableBranch) rather than
+/// [`EmptyDeclaration`](ValidationCode::EmptyDeclaration) or a lifecycle code: the branch is
+/// declared and well formed, and what is wrong with it is that nothing can ever reach it — which is
+/// what that code says everywhere else it is used.
+fn validate_wrong_state_is_reachable(
+    entities: &BTreeMap<QualifiedName, EntitySpec>,
+    command: &crate::command::CommandSpec,
+) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    let Some(outcome) = command
+        .outcomes
+        .iter()
+        .find(|outcome| outcome.is_wrong_state())
+    else {
+        return errors;
+    };
+
+    let mut moved: BTreeMap<&QualifiedName, BTreeSet<&str>> = BTreeMap::new();
+    for other in &command.outcomes {
+        if let Some(subject) = &other.subject {
+            if let Some(transition) = subject.effect.transition() {
+                moved.entry(&subject.entity).or_default().insert(transition);
+            }
+        }
+    }
+
+    let reachable = moved.iter().any(|(name, moves)| {
+        entities
+            .get(*name)
+            .is_some_and(|entity| !entity.states.wrong_states(moves.iter().copied()).is_empty())
+    });
+    if reachable {
+        return errors;
+    }
+
+    errors.push(
+        ValidationError::new(
+            ValidationCode::UnreachableBranch,
+            format!("command.{}.outcomes.{}", command.name, outcome.name),
+            if moved.is_empty() {
+                format!(
+                    "outcome `{}` is taken when the subject is in a state no move starts from, and \
+                     no outcome of `{}` moves an entity at all, so there is no subject and no state \
+                     for it to be about",
+                    outcome.name, command.name
+                )
+            } else {
+                format!(
+                    "outcome `{}` is taken when the subject is in a state no move starts from, and \
+                     the moves `{}` takes start from every state its entity declares, so nothing \
+                     can reach it",
+                    outcome.name, command.name
+                )
+            },
+        )
+        .with_hint(
+            "drop the branch, or give the command a `moves:` whose transitions leave some declared \
+             state out",
+        ),
+    );
     errors
 }
 
@@ -2048,6 +2150,155 @@ lifecycle:
                 .count(),
             3,
             "{errors}"
+        );
+    }
+
+    // ---- the states a command refuses in --------------------------------------------------------
+
+    #[test]
+    fn the_states_a_command_refuses_in_are_the_ones_its_moves_do_not_start_from() {
+        // The subtraction `wrong_state:` rests on, and the reason nobody writes those states down.
+        // `IssueInvoice` runs from `Draft`, so the other three declared states are states it will
+        // not act from — and adding a `from:` to the transition moves the answer without anybody
+        // editing a command.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let wrong = invoice.states.wrong_states(["IssueInvoice"]);
+
+        assert_eq!(
+            wrong
+                .iter()
+                .map(|state| state.as_str())
+                .collect::<Vec<&str>>(),
+            vec!["Cancelled", "Issued", "Paid"],
+            "everything the move does not run from"
+        );
+        assert!(
+            invoice
+                .states
+                .wrong_states(["IssueInvoice", "CancelInvoice"])
+                .iter()
+                .all(|state| state.as_str() != "Issued"),
+            "and a second move that starts in `Issued` takes it out of the answer"
+        );
+        assert!(
+            invoice.states.wrong_states(["Vanish"]).len() == invoice.states.states.len(),
+            "a name no transition declares widens nothing; `validate_lifecycle_causes` is what \
+             refuses it"
+        );
+    }
+
+    #[test]
+    fn a_wrong_state_branch_on_a_command_that_moves_nothing_is_refused_as_unreachable() {
+        // The branch is well formed and nothing can ever take it: with no `moves:` there is no
+        // subject whose state could be wrong. The fixture reaches the state where the rule bites —
+        // the command creates the entity, so it does have a subject, and it is still the wrong kind
+        // of one.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let mut creator = driver(
+            "billing.invoice.Create",
+            "accepted",
+            Some(crate::command::Subject::creates(
+                name("billing.invoice.Invoice"),
+                "invoice_id",
+            )),
+        );
+        creator.outcomes.push(crate::command::Outcome::wrong_state(
+            crate::command::OutcomeName::new("wrong-state").expect("a valid outcome name"),
+            name("billing.invoice.InvalidAmount"),
+        ));
+
+        let errors =
+            validate_lifecycle_causes(&lifecycle(invoice), &commands(vec![creator]), &events());
+
+        let refusal = errors
+            .as_slice()
+            .iter()
+            .find(|error| error.code == ValidationCode::UnreachableBranch)
+            .unwrap_or_else(|| panic!("the branch is refused: {errors}"));
+        assert!(
+            refusal.message.contains("no outcome of")
+                && refusal.message.contains("moves an entity at all"),
+            "the message says which half is missing, because the repair is to add a `moves:` or to \
+             delete the branch: {refusal:?}"
+        );
+    }
+
+    #[test]
+    fn a_wrong_state_branch_whose_moves_start_everywhere_is_refused_as_unreachable() {
+        // The other empty answer, and it is a different mistake with the same consequence: the
+        // command moves an entity, and its transitions start from every state the entity declares,
+        // so no instance can ever be somewhere it will not act from.
+        let entity = entity(
+            "\
+name: billing.invoice.Ticket
+identity:
+  name: invoice_id
+  type: billing.invoice.InvoiceId
+lifecycle:
+  states: [Open, Closed]
+  initial: Open
+  terminal: [Closed]
+  transitions:
+    - name: Touch
+      from: [Open, Closed]
+      to: Closed
+",
+        )
+        .expect("a lifecycle whose one move starts anywhere");
+        let mut mover = driver(
+            "billing.invoice.Touch",
+            "touched",
+            Some(crate::command::Subject::moves(
+                name("billing.invoice.Ticket"),
+                "Touch",
+                "invoice_id",
+            )),
+        );
+        mover.outcomes.push(crate::command::Outcome::wrong_state(
+            crate::command::OutcomeName::new("wrong-state").expect("a valid outcome name"),
+            name("billing.invoice.InvalidAmount"),
+        ));
+
+        let errors =
+            validate_lifecycle_causes(&lifecycle(entity), &commands(vec![mover]), &events());
+
+        let refusal = errors
+            .as_slice()
+            .iter()
+            .find(|error| error.code == ValidationCode::UnreachableBranch)
+            .unwrap_or_else(|| panic!("the branch is refused: {errors}"));
+        assert!(
+            refusal.message.contains("start from every state"),
+            "the message distinguishes it from a command that moves nothing: {refusal:?}"
+        );
+    }
+
+    #[test]
+    fn a_wrong_state_branch_with_a_state_to_be_wrong_in_is_accepted() {
+        // The rule is only worth anything if it lets the normative shape through. `PayInvoice` runs
+        // from `Issued` alone, so three of the four declared states are states it refuses in, and
+        // the branch is reachable.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let mut mover = driver(
+            "billing.invoice.Pay",
+            "settled",
+            Some(crate::command::Subject::moves(
+                name("billing.invoice.Invoice"),
+                "PayInvoice",
+                "invoice_id",
+            )),
+        );
+        mover.outcomes.push(crate::command::Outcome::wrong_state(
+            crate::command::OutcomeName::new("wrong-state").expect("a valid outcome name"),
+            name("billing.invoice.InvalidAmount"),
+        ));
+
+        let errors =
+            validate_lifecycle_causes(&lifecycle(invoice), &commands(vec![mover]), &events());
+
+        assert!(
+            !errors.contains(ValidationCode::UnreachableBranch),
+            "the branch has three states to be taken in: {errors}"
         );
     }
 

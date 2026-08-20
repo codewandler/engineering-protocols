@@ -16,11 +16,43 @@
 //! | [`When`](OutcomeCondition::When) | a predicate over the input holds | construct an input satisfying the predicate |
 //! | [`Otherwise`](OutcomeCondition::Otherwise) | no conditional outcome matched | construct an input that matches no other branch |
 //! | [`External`](OutcomeCondition::External) | something outside the input decided it | inject the fault; no input can produce it |
+//! | [`WrongState`](OutcomeCondition::WrongState) | the subject is resting in a state none of this command's moves start from | drive an instance to such a state, then issue the command |
 //!
 //! The third exists because a provider refusing an address is not a fact about the input. Folding it
 //! into `when: false` says the branch is unreachable, which is a lie a generator acts on: it either
 //! skips the branch silently or emits a test nobody can make pass. [`Outcome::test_strategy`] is the
 //! model's answer to that question, so no generator has to guess it.
+//!
+//! # The wrong state is a branch, and the author writes only the error
+//!
+//! `IssueInvoice` on an invoice that is already `Paid` is refused by every correct implementation,
+//! and until `wrong_state:` existed the specification said nothing about it: the command declared
+//! one outcome, `issued`, so a generated suite could require only that nothing happened. Design §19
+//! asks for more than that — "the exact rejection mechanism must come from the declared
+//! command/error semantics", and "do not generate vague *operation fails* tests if the domain
+//! declares a specific error" — and there was no declaration to come from.
+//!
+//! **The states are not written down, and writing them would be a defect.** A transition already
+//! declares the states it may start from, so the states a command refuses in are `states` minus the
+//! union of its moves' `from` sets — computed, never authored. `StateMachine::can_move` says the
+//! same thing from the other side and explains why there is no `forbids` counterpart: a rule
+//! restating an absence is a second copy of one fact, and nothing keeps the copy honest. So a
+//! `wrong_state:` branch names no state, no transition and no entity; it carries the one thing the
+//! lifecycle cannot imply, which is **which declared error the refusal reports**.
+//!
+//! One error for every wrong state, deliberately. A command refusing because its subject is
+//! `Cancelled` rather than `Paid` is the same refusal with a different reading, and the model does
+//! not yet have a construct for a per-state message. The shape leaves room for one: a second
+//! `wrong_state:` branch narrowed to some states would stand to this one exactly as `when:` stands
+//! to `otherwise:`, and the rule that refuses two of them today
+//! ([`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration)) is what would be relaxed to
+//! admit it. Nothing here has to be unwritten first.
+//!
+//! It is a branch rather than a key on [`CommandSpec`] because everything a suite, a page and an
+//! HTTP response need of it is what they already need of a branch: a name to report, an `error:` to
+//! carry, and a `summary:` to print. A scalar on the command would have been a fourth place a
+//! projection has to look for an error, and a conformance target reporting *which branch it took*
+//! would still have had nothing to name.
 //!
 //! # An outcome says what it changes, and a command does not
 //!
@@ -90,7 +122,10 @@
 //! | an outcome neither emits nor errors | [`EmptyChange`](ValidationCode::EmptyChange) |
 //! | an outcome names an error *and* emits, or names an error *and* declares a subject | [`RefusalMutatedState`](ValidationCode::RefusalMutatedState) |
 //! | an external outcome states no cause | [`UnexplainedDecision`](ValidationCode::UnexplainedDecision) |
-//! | an outcome is both conditional and external, or declares two of `creates`/`moves`/`updates` | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
+//! | a `wrong_state` outcome names no error | [`MissingDeclaration`](ValidationCode::MissingDeclaration) |
+//! | a command declares two `wrong_state` outcomes | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
+//! | a `wrong_state` outcome on a command with no state to be wrong in | [`UnreachableBranch`](ValidationCode::UnreachableBranch) |
+//! | an outcome is both conditional and external, is `wrong_state` and either, or declares two of `creates`/`moves`/`updates` | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
 //! | a `moves:` names no entity, only a bare transition | [`MissingDeclaration`](ValidationCode::MissingDeclaration) |
 //! | an outcome declares a subject and no `instance:`, or an `instance:` and no subject | [`MissingDeclaration`](ValidationCode::MissingDeclaration) |
 //! | an `instance:` names no field of the surface its verb decides | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
@@ -251,6 +286,15 @@ pub enum OutcomeCondition {
         /// author can act on.
         cause: String,
     },
+    /// Taken when the instance the command would move is resting in a state none of this command's
+    /// declared moves start from.
+    ///
+    /// It carries nothing, and that is the whole design. A [`Transition`](crate::entity::Transition)
+    /// already declares its `from` states, so the states this branch answers in are derivable and
+    /// listing them here would be the `forbids` rule the lifecycle deliberately refuses. What the
+    /// author writes is the branch's `error:`, which no lifecycle can imply — see the
+    /// [module documentation](self).
+    WrongState,
 }
 
 impl OutcomeCondition {
@@ -258,7 +302,7 @@ impl OutcomeCondition {
     pub fn predicate(&self) -> Option<&Predicate> {
         match self {
             Self::When(predicate) => Some(predicate),
-            Self::Otherwise | Self::External { .. } => None,
+            Self::Otherwise | Self::External { .. } | Self::WrongState => None,
         }
     }
 
@@ -266,7 +310,7 @@ impl OutcomeCondition {
     pub fn cause(&self) -> Option<&str> {
         match self {
             Self::External { cause } => Some(cause),
-            Self::When(_) | Self::Otherwise => None,
+            Self::When(_) | Self::Otherwise | Self::WrongState => None,
         }
     }
 
@@ -276,6 +320,7 @@ impl OutcomeCondition {
             Self::When(_) => TestStrategy::ConstructInput,
             Self::Otherwise => TestStrategy::DefaultBranch,
             Self::External { .. } => TestStrategy::InjectFault,
+            Self::WrongState => TestStrategy::ArrangeState,
         }
     }
 }
@@ -297,6 +342,13 @@ pub enum TestStrategy {
     DefaultBranch,
     /// Fault-inject the declared cause; no input reaches this branch.
     InjectFault,
+    /// Drive an instance into a state this command's moves do not start from, then issue it.
+    ///
+    /// The fourth strategy, and the one that is neither an input nor an injection: the branch is
+    /// decided by the *subject*, so a scenario reaches it by arranging the world rather than by
+    /// choosing what to send. Which states those are is a question the lifecycle answers, not the
+    /// command — see [`OutcomeCondition::WrongState`].
+    ArrangeState,
 }
 
 impl TestStrategy {
@@ -306,6 +358,7 @@ impl TestStrategy {
             Self::ConstructInput => "construct_input",
             Self::DefaultBranch => "default_branch",
             Self::InjectFault => "inject_fault",
+            Self::ArrangeState => "arrange_state",
         }
     }
 }
@@ -527,6 +580,22 @@ impl Outcome {
         }
     }
 
+    /// The branch a command answers when its subject is in a state none of its moves start from.
+    ///
+    /// Takes the error rather than accepting one later, because a wrong-state branch without one is
+    /// the vague "operation fails" check design §19 refuses: the constructor cannot build the value
+    /// the validator would then have to reject.
+    pub fn wrong_state(name: OutcomeName, error: QualifiedName) -> Self {
+        Self {
+            name,
+            condition: OutcomeCondition::WrongState,
+            subject: None,
+            emits: Vec::new(),
+            error: Some(error),
+            summary: None,
+        }
+    }
+
     /// The same outcome, acting on `subject`.
     #[must_use]
     pub fn acting_on(mut self, subject: Subject) -> Self {
@@ -542,7 +611,7 @@ impl Outcome {
         match &self.condition {
             OutcomeCondition::Otherwise => true,
             OutcomeCondition::When(predicate) => predicate.is_trivially_true(),
-            OutcomeCondition::External { .. } => false,
+            OutcomeCondition::External { .. } | OutcomeCondition::WrongState => false,
         }
     }
 
@@ -557,8 +626,21 @@ impl Outcome {
     }
 
     /// `true` when some input reaches this outcome, so a test can be written by constructing one.
+    ///
+    /// Two strategies say no, for two different reasons: an [`External`](OutcomeCondition::External)
+    /// branch is decided outside the system, and a [`WrongState`](OutcomeCondition::WrongState)
+    /// branch is decided by the subject the command arrives at. Neither is a branch a caller can
+    /// select by choosing what to send, which is what this question is asked for.
     pub fn is_testable_from_input(&self) -> bool {
-        self.test_strategy() != TestStrategy::InjectFault
+        matches!(
+            self.test_strategy(),
+            TestStrategy::ConstructInput | TestStrategy::DefaultBranch
+        )
+    }
+
+    /// `true` when this is the branch taken because the subject is in a state no move starts from.
+    pub fn is_wrong_state(&self) -> bool {
+        self.condition == OutcomeCondition::WrongState
     }
 }
 
@@ -744,6 +826,29 @@ impl CommandSpec {
             }
         }
 
+        // §19: "do not generate vague *operation fails* tests if the domain declares a specific
+        // error". A wrong-state branch exists precisely to name that error, and the states it
+        // answers in are already declared by the transitions it does not run from — so the error is
+        // the one thing the branch carries, and a branch without one carries nothing at all.
+        if outcome.condition == OutcomeCondition::WrongState && outcome.error.is_none() {
+            errors.push(
+                ValidationError::new(
+                    ValidationCode::MissingDeclaration,
+                    format!("{location}.error"),
+                    format!(
+                        "outcome `{}` is the branch taken when the subject is in a state no move \
+                         starts from, and names no error; the states are already declared and the \
+                         error is the only thing this branch can add",
+                        outcome.name
+                    ),
+                )
+                .with_hint(
+                    "give it `error:`, naming what the command reports when it will not act from \
+                     this state",
+                ),
+            );
+        }
+
         if let OutcomeCondition::External { cause } = &outcome.condition {
             if cause.trim().is_empty() {
                 errors.push(
@@ -901,6 +1006,35 @@ impl CommandSpec {
                     ),
                 )
                 .with_hint("declare what it does when nothing goes wrong"),
+            );
+        }
+
+        // One wrong-state branch, because the model has one wrong-state *condition*: two of them
+        // would both be taken by the same instance in the same state, and nothing here says which
+        // wins. Narrowing one of them to a set of states is the extension that would make two
+        // meaningful, and it is not written yet — see the module documentation.
+        let refusing: Vec<&OutcomeName> = self
+            .outcomes
+            .iter()
+            .filter(|outcome| outcome.is_wrong_state())
+            .map(|outcome| &outcome.name)
+            .collect();
+        if refusing.len() > 1 {
+            errors.push(
+                ValidationError::new(
+                    ValidationCode::ConflictingDeclaration,
+                    at("outcomes"),
+                    format!(
+                        "outcomes {} are all `wrong_state`, so `{}` declares more than one answer \
+                         for one situation",
+                        join(refusing.iter()),
+                        self.name
+                    ),
+                )
+                .with_hint(
+                    "keep one, naming the error the command reports whenever its subject is in a \
+                     state it will not act from",
+                ),
             );
         }
 
@@ -1073,8 +1207,8 @@ pub struct RawCommandSpec {
 
 /// One outcome as written in a document, before validation.
 ///
-/// `when` and `external` are the two spellings of a condition; writing neither is the default
-/// branch, and writing both is refused.
+/// `when`, `external` and `wrong_state` are the three spellings of a condition; writing none of them
+/// is the default branch, and writing two is refused.
 ///
 /// `creates`, `moves` and `updates` are the three spellings of a [`Subject`], and follow the same
 /// shape for the same reason: three keys an author writes at most one of, rather than one key whose
@@ -1091,6 +1225,14 @@ pub struct RawOutcome {
     /// What outside the input decides this branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<String>,
+    /// `true` when this is the branch taken because the subject is in a state no move starts from.
+    ///
+    /// A flag and not a list of states: the states are already declared, once, as the `from` sets of
+    /// this command's transitions. `wrong_state: false` is the same document as leaving the key out,
+    /// because that is what the word means; what makes the branch a declaration is the `error:`
+    /// beside it, which is required.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub wrong_state: bool,
     /// The entity a new instance of which this outcome brings into existence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creates: Option<QualifiedName>,
@@ -1155,24 +1297,56 @@ impl TryFrom<RawOutcome> for Outcome {
     type Error = ValidationErrors;
 
     fn try_from(raw: RawOutcome) -> Result<Self, Self::Error> {
-        let condition = match (raw.when, raw.external) {
-            (Some(_), Some(_)) => {
-                return Err(ValidationError::new(
-                    // The nearest protocol code for "two declarations contradict each other".
+        // The nearest protocol code for "two declarations contradict each other", and the location
+        // is the key an author would go and edit rather than the outcome as a whole.
+        let conflict = |key: &str, message: String, hint: &str| {
+            ValidationErrors::from(
+                ValidationError::new(
                     ValidationCode::ConflictingDeclaration,
-                    format!("outcomes.{}.when", raw.name),
+                    format!("outcomes.{}.{key}", raw.name),
+                    message,
+                )
+                .with_hint(hint.to_owned()),
+            )
+        };
+        let condition = match (raw.when, raw.external, raw.wrong_state) {
+            (Some(_), Some(_), _) => {
+                return Err(conflict(
+                    "when",
                     format!(
                         "outcome `{}` declares both a `when` predicate and an `external` cause; a \
                          branch is either decided by the input or it is not",
                         raw.name
                     ),
-                )
-                .with_hint("keep `external` and drop the predicate, or the other way round")
-                .into());
+                    "keep `external` and drop the predicate, or the other way round",
+                ));
             }
-            (Some(predicate), None) => OutcomeCondition::When(predicate),
-            (None, Some(cause)) => OutcomeCondition::External { cause },
-            (None, None) => OutcomeCondition::Otherwise,
+            (Some(_), None, true) => {
+                return Err(conflict(
+                    "when",
+                    format!(
+                        "outcome `{}` declares both a `when` predicate and `wrong_state`; a branch \
+                         the subject's state decides is not one the input decides",
+                        raw.name
+                    ),
+                    "keep `wrong_state` and drop the predicate, or the other way round",
+                ));
+            }
+            (None, Some(_), true) => {
+                return Err(conflict(
+                    "external",
+                    format!(
+                        "outcome `{}` declares both an `external` cause and `wrong_state`; the \
+                         subject's own state is not something outside the system",
+                        raw.name
+                    ),
+                    "keep `wrong_state` and drop `external`, or the other way round",
+                ));
+            }
+            (Some(predicate), None, false) => OutcomeCondition::When(predicate),
+            (None, Some(cause), false) => OutcomeCondition::External { cause },
+            (None, None, true) => OutcomeCondition::WrongState,
+            (None, None, false) => OutcomeCondition::Otherwise,
         };
         let subject = subject_of(&raw.name, raw.creates, raw.moves, raw.updates, raw.instance)?;
         Ok(Self {
@@ -1345,10 +1519,11 @@ impl TryFrom<RawErrorSpec> for ErrorSpec {
 
 impl From<Outcome> for RawOutcome {
     fn from(outcome: Outcome) -> Self {
-        let (when, external) = match outcome.condition {
-            OutcomeCondition::When(predicate) => (Some(predicate), None),
-            OutcomeCondition::Otherwise => (None, None),
-            OutcomeCondition::External { cause } => (None, Some(cause)),
+        let (when, external, wrong_state) = match outcome.condition {
+            OutcomeCondition::When(predicate) => (Some(predicate), None, false),
+            OutcomeCondition::Otherwise => (None, None, false),
+            OutcomeCondition::External { cause } => (None, Some(cause), false),
+            OutcomeCondition::WrongState => (None, None, true),
         };
         let (creates, moves, updates, instance) = match outcome.subject {
             None => (None, None, None, None),
@@ -1372,6 +1547,7 @@ impl From<Outcome> for RawOutcome {
             name: outcome.name,
             when,
             external,
+            wrong_state,
             creates,
             moves,
             updates,
@@ -1755,6 +1931,185 @@ outcomes:
                 .to_string()
                 .contains("either decided by the input or it is not"),
             "{errors}"
+        );
+    }
+
+    #[test]
+    fn a_wrong_state_branch_that_names_no_error_is_refused() {
+        // The one thing a `wrong_state:` branch carries. The states are already declared — a
+        // transition says what it runs `from:` — so a branch without an error adds nothing at all,
+        // and a generated suite would be back to the vague "operation fails" check design §19
+        // refuses in as many words.
+        let errors = refuse(&command_with(vec![
+            Outcome::otherwise(
+                outcome_name("accepted"),
+                vec![name("billing.invoice.InvoiceCreated")],
+            ),
+            Outcome {
+                name: outcome_name("wrong-state"),
+                condition: OutcomeCondition::WrongState,
+                subject: None,
+                emits: Vec::new(),
+                error: None,
+                summary: None,
+            },
+        ]));
+
+        assert!(errors.contains(ValidationCode::MissingDeclaration));
+        let rendered = errors.to_string();
+        assert!(
+            rendered.contains("the error is the only thing this branch can add"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("hint: give it `error:`"),
+            "the repair is one key, and the message has to say which: {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_command_declares_at_most_one_wrong_state_branch() {
+        // Two of them are two answers to one question: an instance is in one state, and both
+        // branches claim it. Narrowing one to a set of states is the extension that would make two
+        // meaningful, and nothing in the model expresses it yet — so this refuses rather than
+        // picking one.
+        let errors = refuse(&command_with(vec![
+            Outcome::otherwise(
+                outcome_name("accepted"),
+                vec![name("billing.invoice.InvoiceCreated")],
+            ),
+            Outcome::wrong_state(
+                outcome_name("too-late"),
+                name("billing.invoice.InvalidAmount"),
+            ),
+            Outcome::wrong_state(
+                outcome_name("too-early"),
+                name("billing.invoice.InvalidAmount"),
+            ),
+        ]));
+
+        assert!(errors.contains(ValidationCode::ConflictingDeclaration));
+        let rendered = errors.to_string();
+        assert!(
+            rendered.contains("`too-early`") && rendered.contains("`too-late`"),
+            "the refusal names both branches, because the repair is to delete one of them: \
+             {rendered}"
+        );
+    }
+
+    #[test]
+    fn a_wrong_state_branch_is_neither_the_catch_all_nor_reachable_by_choosing_an_input() {
+        // The two questions branch coverage asks, answered for the fourth condition. It must not
+        // count as the unconditional branch — an input that matches no `when` has to land somewhere
+        // that is not "the subject was in the wrong state" — and it must not count as a branch a
+        // caller can reach by choosing what to send, or a command with nothing but a `when` and a
+        // `wrong_state:` would look exhaustive.
+        let refusal = Outcome::wrong_state(
+            outcome_name("wrong-state"),
+            name("billing.invoice.InvalidAmount"),
+        );
+        assert!(!refusal.is_unconditional());
+        assert!(!refusal.is_testable_from_input());
+        assert!(refusal.is_wrong_state());
+        assert_eq!(refusal.test_strategy(), TestStrategy::ArrangeState);
+
+        let errors = refuse(&command_with(vec![
+            Outcome::when(
+                outcome_name("accepted"),
+                Predicate::parse_expression("amount.amount > 0").expect("parses"),
+                vec![name("billing.invoice.InvoiceCreated")],
+            ),
+            refusal,
+        ]));
+        assert!(
+            errors.contains(ValidationCode::NonExhaustiveBranches),
+            "a `when` and a `wrong_state:` leave every other input unspecified: {errors}"
+        );
+    }
+
+    #[test]
+    fn an_outcome_cannot_be_both_wrong_state_and_decided_by_the_input() {
+        for (second, expected) in [
+            (
+                "    when: amount.amount > 0",
+                "is not one the input decides",
+            ),
+            (
+                "    external: the provider is down",
+                "not something outside the system",
+            ),
+        ] {
+            let raw: RawCommandSpec = serde_yaml::from_str(&format!(
+                r"
+name: billing.invoice.IssueInvoice
+input:
+  - name: amount
+    type: billing.invoice.Money
+outcomes:
+  - name: wrong-state
+    wrong_state: true
+{second}
+    error: billing.invoice.InvalidAmount
+"
+            ))
+            .expect("parses");
+
+            let errors = CommandSpec::try_from(raw).expect_err("contradictory condition");
+            assert!(errors.contains(ValidationCode::ConflictingDeclaration));
+            assert!(
+                errors.to_string().contains(expected),
+                "the message has to say which two keys collided: {errors}"
+            );
+        }
+    }
+
+    #[test]
+    fn writing_wrong_state_false_is_the_same_document_as_leaving_the_key_out() {
+        // `false` means "this is not the wrong-state branch", which is what an absent key means, so
+        // there is no third state to refuse. Asserted rather than assumed: a `bool` that silently
+        // meant something else in one of its two values would be a trap in the parser.
+        let raw: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.IssueInvoice
+outcomes:
+  - name: accepted
+    wrong_state: false
+    emits:
+      - billing.invoice.InvoiceCreated
+",
+        )
+        .expect("parses");
+
+        let command = CommandSpec::try_from(raw).expect("a valid command");
+        assert_eq!(
+            command.outcomes[0].condition,
+            OutcomeCondition::Otherwise,
+            "an explicit `false` is the default branch, exactly as writing no key at all is"
+        );
+    }
+
+    #[test]
+    fn a_wrong_state_branch_survives_a_trip_through_the_document_form() {
+        let command = command_with(vec![
+            Outcome::otherwise(
+                outcome_name("accepted"),
+                vec![name("billing.invoice.InvoiceCreated")],
+            ),
+            Outcome::wrong_state(
+                outcome_name("wrong-state"),
+                name("billing.invoice.InvalidAmount"),
+            ),
+        ]);
+
+        let rendered = serde_yaml::to_string(&command).expect("serialises");
+        assert!(
+            rendered.contains("wrong_state: true"),
+            "the key has to be written back out, or a round trip loses the branch: {rendered}"
+        );
+        let reparsed: RawCommandSpec = serde_yaml::from_str(&rendered).expect("re-parses");
+        assert_eq!(
+            CommandSpec::try_from(reparsed).expect("still valid"),
+            command
         );
     }
 

@@ -255,26 +255,23 @@ pub struct SemanticCommandRequest {
 pub struct SemanticCommandResult {
     /// The declared branch the command took.
     ///
-    /// # `None` is a finding about the model, not an escape hatch
+    /// # `None` is a finding about the specification, not an escape hatch
     ///
     /// §19 makes the *absence* of a transition semantics: `CancelInvoice` must not move a `Paid`
     /// invoice. It then says "the exact rejection mechanism must come from the declared
-    /// command/error semantics" — and in the normative billing example there is none.
-    /// `billing.invoice.IssueInvoice` declares exactly one outcome, `issued`; there is no branch it
-    /// may report when the invoice is already `Issued`, and reporting `issued` would be a lie while
-    /// reporting `PayInvoice/rejected` for a state violation would misname the reason
-    /// (`InvalidAmount` carries the amount that was submitted).
+    /// command/error semantics", and the model can now supply one: a command declares a
+    /// [`wrong_state:`](ess_domain::command::OutcomeCondition::WrongState) branch naming the error
+    /// it reports when its subject is somewhere none of its moves start from. Both examples do, so
+    /// a target answers that branch rather than nothing, and the illegal-move scenarios require it
+    /// by name.
     ///
-    /// So a target that refuses for a reason the specification does not model answers `None`, and
-    /// the suite's refusal scenarios assert only what the model does say: that the transition's
-    /// event was not published. `None` is not a way past an assertion —
-    /// [`ExpectOutcome`](crate::scenario::ScenarioStep::ExpectOutcome) fails against it, naming that no declared
-    /// outcome was reached — and it is not a [`TargetError`], because a lifecycle refusal is
-    /// correct behaviour rather than an adapter failure.
-    ///
-    /// The repair is in the model: a command needs a way to declare the outcome it takes when its
-    /// subject is in the wrong state. Until it has one, this field records the hole rather than
-    /// hiding it.
+    /// `None` remains, for the refusals **no** declared branch covers — a command issued against an
+    /// instance the target has never seen, which is a different question the specification does not
+    /// ask. A target that refuses for a reason its specification does not model answers `None`, and
+    /// the scenarios assert only what the specification does say. `None` is not a way past an
+    /// assertion — [`ExpectOutcome`](crate::scenario::ScenarioStep::ExpectOutcome) fails against it,
+    /// naming that no declared outcome was reached — and it is not a [`TargetError`], because a
+    /// lifecycle refusal is correct behaviour rather than an adapter failure.
     pub outcome: Option<OutcomeRef>,
     /// The declared error the branch carries, where it declares one.
     pub error: Option<DeclaredErrorValue>,

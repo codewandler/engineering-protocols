@@ -2313,6 +2313,7 @@ fn condition_of(outcome: &Outcome) -> ResolvedCondition {
         OutcomeCondition::External { cause } => ResolvedCondition::External {
             cause: cause.clone(),
         },
+        OutcomeCondition::WrongState => ResolvedCondition::WrongState,
     }
 }
 

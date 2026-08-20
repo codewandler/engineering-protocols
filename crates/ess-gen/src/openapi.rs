@@ -45,6 +45,7 @@
 //! | an outcome with no `error` | `202` | below |
 //! | an outcome whose `error` the input decides | `422` | below |
 //! | an outcome whose `error` is `external` | `502` | below |
+//! | an outcome whose `error` is `wrong_state` | `409` | below |
 //! | several outcomes on one status | one response, `oneOf` the outcome schemas, discriminated by `outcome` | a status that collapsed two branches would lose the branch |
 //! | `Idempotency-Key` | a **required** header, on exactly the commands some binding invokes with `delivery: at_least_once` | below |
 //! | schemas | inline in `components.schemas`; no `$ref` ever leaves the document | below |
@@ -81,6 +82,15 @@
 //! parse, which is decided by the schema and would be true of any endpoint. `amount.amount <= 0` is
 //! a request the server understood and refused on domain grounds, which is what `422` means, and a
 //! client can act on the difference — one means fix the value, the other means fix the serialiser.
+//!
+//! # `wrong_state` is a `409`, and it is a third thing
+//!
+//! A `wrong_state:` branch is refused for a reason the caller did not cause and can fix: the invoice
+//! it asked to issue is already paid. `422` would tell it to correct a request that was correct, and
+//! `502` would blame a dependency that was never involved. `409 Conflict` is the one status that
+//! says what happened — the request conflicts with the state of the thing it names — and until the
+//! model could declare that branch at all, every projection had to collapse it into one of the other
+//! two or into nothing.
 //!
 //! # Idempotency comes from the bindings, not from the verb
 //!
@@ -219,6 +229,15 @@ const REFUSED: &str = "422";
 
 /// Something outside the request refused; the input was acceptable.
 const UPSTREAM: &str = "502";
+
+/// The input was acceptable and the subject was in a state the command does not act from.
+///
+/// A `409` and not a `422`, and the difference is what a caller does next. `422` says the request
+/// was wrong and resending it unchanged is pointless; `409` says the request was fine and the world
+/// was not — the same invoice, issued before it was paid, would have been accepted. That is exactly
+/// what a `wrong_state:` branch declares, and it is the first thing in this model that has ever
+/// distinguished the two.
+const CONFLICT: &str = "409";
 
 /// Who the specification permits to invoke each command, as [`EssIr::grants`] answers it.
 ///
@@ -546,6 +565,7 @@ fn responses(command: &ResolvedCommand) -> BTreeMap<String, Response> {
 fn status(outcome: &ResolvedOutcome) -> &'static str {
     match (&outcome.condition, outcome.error.is_some()) {
         (ResolvedCondition::External { .. }, true) => UPSTREAM,
+        (ResolvedCondition::WrongState, true) => CONFLICT,
         (ResolvedCondition::When { .. } | ResolvedCondition::Otherwise, true) => REFUSED,
         // An external branch that emits rather than errors is still a branch that was taken; what
         // decided it does not change what happened.
@@ -563,6 +583,10 @@ fn meaning(status: &str) -> &'static str {
         UPSTREAM => {
             "something outside the request refused. The input was acceptable, so the caller has \
              nothing to correct and a retry is meaningful."
+        }
+        CONFLICT => {
+            "the input was acceptable and the subject is in a state this command does not act \
+             from. Resending the same request changes nothing until something else moves it."
         }
         _ => {
             "the branch the specification declares for this input. Events this branch emits are \
@@ -671,6 +695,11 @@ fn outcome_description(ir: &EssIr, outcome: &ResolvedOutcome) -> String {
         }
         ResolvedCondition::External { cause } => {
             format!("Decided outside the request: {cause}.")
+        }
+        ResolvedCondition::WrongState => {
+            "Taken when the subject is in a state none of this command's declared moves start \
+             from. Which states those are is the lifecycle's answer, not this command's."
+                .to_owned()
         }
     });
     // What the caller's request did to the system's state, in the response that reports it. A

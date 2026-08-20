@@ -24,6 +24,13 @@ errors:
       - name: submitted
         type: Integer
 
+  # The error every lifecycle command here reports when the order is not somewhere it acts from.
+  # Carries nothing, unlike billing's: a suite asserts an error by name and never by an invented
+  # payload, so the field-less shape has to be exercised somewhere or the projections only ever
+  # render the other one.
+  - name: oracle.order.OrderStateConflict
+    summary: The order is not in a state this command acts from.
+
 entities:
   - name: oracle.order.Order
 
@@ -143,6 +150,11 @@ commands:
           - oracle.order.OrderHeld
         summary: The order is held for review.
 
+      - name: wrong-state
+        wrong_state: true
+        error: oracle.order.OrderStateConflict
+        summary: The order is not Placed, so it was not held.
+
   - name: oracle.order.ShipOrder
 
     naming:
@@ -161,6 +173,11 @@ commands:
           - oracle.order.OrderShipped
         summary: The order leaves the building, and is terminal.
 
+      - name: wrong-state
+        wrong_state: true
+        error: oracle.order.OrderStateConflict
+        summary: The order is not Placed, so it was not shipped.
+
   - name: oracle.order.CancelOrder
 
     naming:
@@ -178,6 +195,13 @@ commands:
         emits:
           - oracle.order.OrderCancelled
         summary: The order is cancelled, from Placed or from Held — never from Shipped.
+
+      # `AmendOrder` above declares no such branch on purpose: it `updates:` rather than `moves:`, so
+      # no state is wrong for it and `unreachable_branch` would refuse the declaration.
+      - name: wrong-state
+        wrong_state: true
+        error: oracle.order.OrderStateConflict
+        summary: The order has shipped or is already cancelled, so nothing was cancelled.
 
 events:
   - name: oracle.order.OrderPlaced

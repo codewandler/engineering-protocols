@@ -653,7 +653,7 @@ fn commands_section(ir: &EssIr, domain: &ResolvedDomain, body: &mut String) {
             outcome_count_sentence(command.outcomes.len(), &command.name)
         );
         for outcome in &command.outcomes {
-            let _ = writeln!(body, "{}\n", outcome_prose(ir, outcome));
+            let _ = writeln!(body, "{}\n", outcome_prose(ir, command, outcome));
         }
     }
 }
@@ -856,12 +856,20 @@ fn type_prose(declared: &ResolvedType) -> String {
 }
 
 /// One outcome, including the two things a name alone loses: what decides it, and what it costs.
-fn outcome_prose(ir: &EssIr, outcome: &ess_compiler::ir::ResolvedOutcome) -> String {
+fn outcome_prose(
+    ir: &EssIr,
+    command: &ResolvedCommand,
+    outcome: &ess_compiler::ir::ResolvedOutcome,
+) -> String {
     let mut out = format!("**`{}`** — ", outcome.name);
     if let Some(summary) = &outcome.summary {
         let _ = write!(out, "{summary} ");
     }
-    let _ = write!(out, "{}", condition_sentence(&outcome.condition));
+    let _ = write!(
+        out,
+        "{}",
+        condition_sentence(ir, command, &outcome.condition)
+    );
     let _ = write!(out, " {}", effect_sentence(ir, outcome.subject.as_ref()));
     if let Some(error) = &outcome.error {
         let reported = ir.error(error);
@@ -942,7 +950,17 @@ fn instance_sentence(ir: &EssIr, subject: &ResolvedSubject) -> String {
 }
 
 /// What decides that an outcome is the one taken.
-fn condition_sentence(condition: &ResolvedCondition) -> String {
+///
+/// [`ResolvedCondition::WrongState`] is the one case that reads the rest of the specification, and
+/// deliberately so: the document does not say which states the branch answers in, because the
+/// transitions already do. A page that printed only "the subject is in the wrong state" would leave
+/// a reader to do that subtraction by hand across a lifecycle and a command, which is exactly the
+/// work [`EssIr::wrong_states`] exists to have already done.
+fn condition_sentence(
+    ir: &EssIr,
+    command: &ResolvedCommand,
+    condition: &ResolvedCondition,
+) -> String {
     match condition {
         ResolvedCondition::When { predicate } => {
             format!("Taken when `{predicate}` holds of the input.")
@@ -955,6 +973,29 @@ fn condition_sentence(condition: &ResolvedCondition) -> String {
              and saying `when: false` instead would have claimed it is unreachable, which is a \
              different and false statement."
         ),
+        ResolvedCondition::WrongState => {
+            let mut text = "Taken when the subject is resting in a state none of this command's \
+                            moves start from"
+                .to_owned();
+            for (handle, states) in ir.wrong_states(command) {
+                let _ = write!(
+                    text,
+                    " — a `{}` in {}",
+                    ir.entity(handle).name,
+                    list(
+                        &states
+                            .iter()
+                            .map(|state| code(&state.to_string()))
+                            .collect()
+                    )
+                );
+            }
+            text.push_str(
+                ", which is what is left of the lifecycle once this command's own moves are taken \
+                 away. The document lists none of it.",
+            );
+            text
+        }
     }
 }
 
@@ -972,6 +1013,10 @@ fn strategy_sentence(strategy: TestStrategy) -> &'static str {
         }
         TestStrategy::InjectFault => {
             "A test reaches it by injecting the declared fault, because no input can."
+        }
+        TestStrategy::ArrangeState => {
+            "A test reaches it by driving an instance into one of those states and then issuing the \
+             command, because no input selects this branch."
         }
     }
 }

@@ -30,11 +30,12 @@
 //! | which commands may this actor invoke? | [`ResolvedActor::may`] |
 //! | which entity does this outcome change, and how? | [`ResolvedOutcome::subject`] |
 //! | which command outcome takes this transition? | [`EssIr::drivers`] |
+//! | in which states does this command refuse to act at all? | [`EssIr::wrong_states`] |
 //! | what does this binding publish when it escalates? | [`ResolvedBinding::escalation`] |
 //!
 //! # A state is a variant, not a handle
 //!
-//! [`StateName`](ess_domain::entity::StateName) stays a name inside [`ResolvedEntity::lifecycle`],
+//! [`StateName`] stays a name inside [`ResolvedEntity::lifecycle`],
 //! and that is not an exception to the rule above. A handle exists because a reference can point
 //! outside the declaration that writes it; a lifecycle's states are declared *by that same
 //! lifecycle*, so [`StateMachine::states`] is the whole answer and it travels in the same struct.
@@ -78,7 +79,7 @@ use aep_domain::predicate::Predicate;
 use ess_domain::binding::{BindingName, Delivery, Failure};
 use ess_domain::command::{OutcomeName, TestStrategy};
 use ess_domain::component::ComponentName;
-use ess_domain::entity::{EntitySpec, Invariant, StateMachine, Transition};
+use ess_domain::entity::{EntitySpec, Invariant, StateMachine, StateName, Transition};
 use ess_domain::name::{Naming, QualifiedName, Version};
 use ess_domain::topology::{Replicas, Resource};
 use ess_domain::types::Primitive;
@@ -465,7 +466,7 @@ pub struct ResolvedConversion {
 /// What decides that an outcome is the one taken.
 ///
 /// A mirror of [`OutcomeCondition`](ess_domain::command::OutcomeCondition), which is deliberately
-/// not serialisable in the domain crate. Same three cases, no extra meaning.
+/// not serialisable in the domain crate. Same four cases, no extra meaning.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResolvedCondition {
@@ -481,6 +482,12 @@ pub enum ResolvedCondition {
         /// What decides it, in one phrase.
         cause: String,
     },
+    /// Taken when the subject is resting in a state none of this command's moves start from.
+    ///
+    /// Carries nothing, like its mirror, and *which* states those are is not a lookup a consumer has
+    /// to perform either: [`EssIr::wrong_states`] answers it once for the whole workspace, from the
+    /// lifecycles the transitions already declare.
+    WrongState,
 }
 
 /// What one outcome does to the entity it acts on, resolved.
@@ -1093,6 +1100,50 @@ impl EssIr {
                         effect: &subject.effect,
                     });
                 }
+            }
+        }
+        out
+    }
+
+    /// The states each entity a command moves may be in for that command to refuse it (§19).
+    ///
+    /// The other half of [`EssIr::drivers`], and the reason
+    /// [`ResolvedCondition::WrongState`] needs no fields: an outcome's `moves:` names a
+    /// [`Transition`], a transition declares the states it may start from, and everything else the
+    /// entity declares is therefore a state this command will not act from. Nobody writes that set
+    /// down and nobody may, because a written copy of an absence is a copy that drifts —
+    /// [`StateMachine::wrong_states`](ess_domain::entity::StateMachine::wrong_states) is the one
+    /// place the subtraction happens.
+    ///
+    /// Here rather than in each consumer for the reason [`EssIr::drivers`] is: the synthesizer needs
+    /// it to know which illegal-move scenarios exist, and the documentation projection needs it to
+    /// say on the page which states a refusal branch answers in. Two of them computing it separately
+    /// is two answers to one question the first time a transition gains a second `from`.
+    ///
+    /// A command that moves nothing is absent from the map, and so is an entity whose every state
+    /// some move of this command starts from. Both are the shapes `validate_lifecycle_causes`
+    /// refuses to let a `wrong_state:` branch be declared against.
+    pub fn wrong_states<'a>(
+        &'a self,
+        command: &'a ResolvedCommand,
+    ) -> BTreeMap<&'a EntityHandle, BTreeSet<&'a StateName>> {
+        let mut moves: BTreeMap<&EntityHandle, BTreeSet<&str>> = BTreeMap::new();
+        for outcome in &command.outcomes {
+            if let Some(subject) = &outcome.subject {
+                if let Some(transition) = subject.effect.transition() {
+                    moves
+                        .entry(&subject.entity)
+                        .or_default()
+                        .insert(transition.name.as_str());
+                }
+            }
+        }
+
+        let mut out: BTreeMap<&EntityHandle, BTreeSet<&StateName>> = BTreeMap::new();
+        for (handle, taken) in moves {
+            let wrong = self.entity(handle).lifecycle.wrong_states(taken);
+            if !wrong.is_empty() {
+                out.insert(handle, wrong);
             }
         }
         out

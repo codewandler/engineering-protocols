@@ -16,7 +16,7 @@
   "x-ess-provenance": {
     "system": "billing",
     "specification_version": "v3",
-    "source_digest": "660af2b6d97ea480",
+    "source_digest": "e19d384dac86219a",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "regenerate": "protocol ess generate"

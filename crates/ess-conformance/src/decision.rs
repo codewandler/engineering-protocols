@@ -11,15 +11,20 @@ use ess_compiler::ir::{ResolvedCondition, ResolvedOutcome};
 
 /// The `when` predicate an outcome is taken by, when its condition is one.
 ///
-/// `None` for the other two conditions, and the two are `None` for different reasons that a caller
-/// must not merge. [`Otherwise`](ResolvedCondition::Otherwise) *is* decided by the input, but only
-/// relative to every other branch of the same command, so deciding it needs the command rather than
-/// one predicate. [`External`](ResolvedCondition::External) is decided outside the input, so no
+/// `None` for the other three conditions, and the three are `None` for different reasons that a
+/// caller must not merge. [`Otherwise`](ResolvedCondition::Otherwise) *is* decided by the input, but
+/// only relative to every other branch of the same command, so deciding it needs the command rather
+/// than one predicate. [`External`](ResolvedCondition::External) is decided outside the input, so no
 /// candidate reaches it and a test has to inject the cause instead.
+/// [`WrongState`](ResolvedCondition::WrongState) is decided by the subject the command arrives at,
+/// so a test reaches it by arranging that subject and sends the input that would otherwise have
+/// worked.
 pub fn when(outcome: &ResolvedOutcome) -> Option<&Predicate> {
     match &outcome.condition {
         ResolvedCondition::When { predicate } => Some(predicate),
-        ResolvedCondition::Otherwise | ResolvedCondition::External { .. } => None,
+        ResolvedCondition::Otherwise
+        | ResolvedCondition::External { .. }
+        | ResolvedCondition::WrongState => None,
     }
 }
 

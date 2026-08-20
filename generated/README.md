@@ -6,12 +6,12 @@
 Every file here is a projection of one model, so two of them disagreeing is a bug in one of them —
 and a file nothing generates any more is a contract this repository no longer stands behind.
 
-Generated from billing v3 (model digest 660af2b6d97ea480).
+Generated from billing v3 (model digest e19d384dac86219a).
 
 | projection | files | describes |
 | --- | --- | --- |
 | `docs` | 6 | Markdown and Mermaid: the cheapest check that every construct can be described |
-| `schema` | 24 | JSON Schema per command input and event payload |
+| `schema` | 25 | JSON Schema per command input and event payload |
 | `openapi` | 2 | an OpenAPI document for every command a component accepts |
 | `asyncapi` | 2 | an AsyncAPI 3.0 document per component, covering what it publishes and what it reacts to |
 
@@ -33,6 +33,7 @@ Generated from billing v3 (model digest 660af2b6d97ea480).
 * [`schema/commands/billing.invoice.PayInvoice.schema.json`](schema/commands/billing.invoice.PayInvoice.schema.json)
 * [`schema/errors/billing.email.Undeliverable.schema.json`](schema/errors/billing.email.Undeliverable.schema.json)
 * [`schema/errors/billing.invoice.InvalidAmount.schema.json`](schema/errors/billing.invoice.InvalidAmount.schema.json)
+* [`schema/errors/billing.invoice.InvoiceStateConflict.schema.json`](schema/errors/billing.invoice.InvoiceStateConflict.schema.json)
 * [`schema/events/billing.email.DeliveryEscalated.schema.json`](schema/events/billing.email.DeliveryEscalated.schema.json)
 * [`schema/events/billing.email.EmailSent.schema.json`](schema/events/billing.email.EmailSent.schema.json)
 * [`schema/events/billing.invoice.InvoiceCancelled.schema.json`](schema/events/billing.invoice.InvoiceCancelled.schema.json)

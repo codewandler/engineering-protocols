@@ -1,6 +1,6 @@
 <!--
 generated from billing v3
-model digest 660af2b6d97ea480
+model digest e19d384dac86219a
 compiler 0.1.0 · generator 0.1.0
 do not edit: regenerate with `protocol ess generate`
 -->
@@ -164,9 +164,11 @@ It takes:
 
 - `invoice_id` — `billing.invoice.InvoiceId`
 
-It has one outcome.
+It has two outcomes.
 
 **`cancelled`** — The invoice is cancelled, from Draft or from Issued. The default branch, taken when no other outcome's condition matched. It moves a `billing.invoice.Invoice` from `Draft` and `Issued` to `Cancelled`, along the declared move `cancel`. The instance is the one named by the input field `invoice_id`. It emits `billing.invoice.InvoiceCancelled`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — The invoice is already Paid or already Cancelled, so nothing was cancelled. Taken when the subject is resting in a state none of this command's moves start from — a `billing.invoice.Invoice` in `Cancelled` and `Paid`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `billing.invoice.InvoiceStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ### `CreateInvoice`
 
@@ -191,9 +193,11 @@ It takes:
 
 - `invoice_id` — `billing.invoice.InvoiceId`
 
-It has one outcome.
+It has two outcomes.
 
 **`issued`** — The invoice leaves Draft and is now Issued. The default branch, taken when no other outcome's condition matched. It moves a `billing.invoice.Invoice` from `Draft` to `Issued`, along the declared move `issue`. The instance is the one named by the input field `invoice_id`. It emits `billing.invoice.InvoiceIssued`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — The invoice is not in Draft, so it was not issued. Taken when the subject is resting in a state none of this command's moves start from — a `billing.invoice.Invoice` in `Cancelled`, `Issued` and `Paid`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `billing.invoice.InvoiceStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ### `PayInvoice`
 
@@ -204,11 +208,13 @@ It takes:
 - `invoice_id` — `billing.invoice.InvoiceId`
 - `amount` — `billing.invoice.Money`
 
-It has two outcomes.
+It has three outcomes.
 
 **`settled`** — The payment is accepted and the invoice becomes Paid. Taken when `amount.amount > 0` holds of the input. It moves a `billing.invoice.Invoice` from `Issued` to `Paid`, along the declared move `settle`. The instance is the one named by the input field `invoice_id`. It emits `billing.invoice.InvoicePaid`. A test reaches it by constructing an input that satisfies that condition.
 
 **`rejected`** — The payment was not positive, so the invoice did not move. The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It reports `billing.invoice.InvalidAmount`, carrying `submitted`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+**`wrong-state`** — The invoice is not Issued, so the payment did not settle it. Taken when the subject is resting in a state none of this command's moves start from — a `billing.invoice.Invoice` in `Cancelled`, `Draft` and `Paid`, which is what is left of the lifecycle once this command's own moves are taken away. The document lists none of it. No entity in this specification changes. It reports `billing.invoice.InvoiceStateConflict`, carrying `state`. It emits nothing. A test reaches it by driving an instance into one of those states and then issuing the command, because no input selects this branch.
 
 ## Events
 
@@ -277,6 +283,20 @@ Reported by `billing.invoice.CreateInvoice` on its `rejected` outcome.
 
 Reported by `billing.invoice.PayInvoice` on its `rejected` outcome.
 
+### `InvoiceStateConflict`
+
+The invoice is not in a state this command acts from, so nothing moved.
+
+It carries:
+
+- `state` — `billing.invoice.Invoice.State`
+
+Reported by `billing.invoice.CancelInvoice` on its `wrong-state` outcome.
+
+Reported by `billing.invoice.IssueInvoice` on its `wrong-state` outcome.
+
+Reported by `billing.invoice.PayInvoice` on its `wrong-state` outcome.
+
 ## Actors
 
 An actor is who may ask this context for something. Every grant below points at a command this specification declares — a grant is a resolved reference, so "may invoke" something nobody wrote is not a permission this model can express, and an authorisation that authorises nothing cannot ship quietly.
@@ -306,4 +326,4 @@ Every crossing in the system is on one page: [Type crossings](../crossings.md).
 
 ---
 
-Generated from billing v3 · model digest `660af2b6d97ea480` · compiler 0.1.0 · generator 0.1.0. Do not edit this file; change the specification and regenerate it with `protocol ess generate`.
+Generated from billing v3 · model digest `e19d384dac86219a` · compiler 0.1.0 · generator 0.1.0. Do not edit this file; change the specification and regenerate it with `protocol ess generate`.

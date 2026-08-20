@@ -132,6 +132,15 @@ errors:
       - name: submitted
         type: billing.invoice.Money
 
+  # What every lifecycle command reports when it is asked to act from a state it does not act from.
+  # It carries the state the invoice is actually in, because "no" without "it is already paid" sends
+  # the caller back to guess.
+  - name: billing.invoice.InvoiceStateConflict
+    summary: The invoice is not in a state this command acts from, so nothing moved.
+    fields:
+      - name: state
+        type: billing.invoice.Invoice.State
+
 commands:
   - name: billing.invoice.CreateInvoice
 
@@ -192,6 +201,17 @@ commands:
           - billing.invoice.InvoiceIssued
         summary: The invoice leaves Draft and is now Issued.
 
+      # What happens when the invoice is not in Draft. `wrong_state` names no state, and writing one
+      # would be the `forbids` rule the lifecycle refuses: `issue` already says it runs `from:
+      # [Draft]`, so every other declared state is a state this command answers in, and a transition
+      # that later gains a `from` moves this branch with it. The error is the one thing the lifecycle
+      # cannot imply, and without it a generated suite could only check that nothing happened —
+      # which passes against an implementation that refuses for the wrong reason.
+      - name: wrong-state
+        wrong_state: true
+        error: billing.invoice.InvoiceStateConflict
+        summary: The invoice is not in Draft, so it was not issued.
+
   # The transition design §19 uses as its worked example: `Issued → Paid`, and the command that
   # makes it happen. Without this link a generated scenario knows the move is legal and has no verb
   # to reach it with.
@@ -226,6 +246,13 @@ commands:
         error: billing.invoice.InvalidAmount
         summary: The payment was not positive, so the invoice did not move.
 
+      # Two refusals, two errors, and the difference is which of them a caller can act on.
+      # `rejected` is about the amount that was sent; this one is about the invoice that was named.
+      - name: wrong-state
+        wrong_state: true
+        error: billing.invoice.InvoiceStateConflict
+        summary: The invoice is not Issued, so the payment did not settle it.
+
   - name: billing.invoice.CancelInvoice
 
     naming:
@@ -243,6 +270,13 @@ commands:
         emits:
           - billing.invoice.InvoiceCancelled
         summary: The invoice is cancelled, from Draft or from Issued.
+
+      # `cancel` runs from two states, so this branch answers in the two that are left — the design's
+      # own worked example, `CancelInvoice` on a `Paid` invoice, which must not reach `Cancelled`.
+      - name: wrong-state
+        wrong_state: true
+        error: billing.invoice.InvoiceStateConflict
+        summary: The invoice is already Paid or already Cancelled, so nothing was cancelled.
 
 events:
   - name: billing.invoice.InvoiceCreated
