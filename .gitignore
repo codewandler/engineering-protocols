@@ -2,3 +2,8 @@
 **/*.rs.bk
 *.pdb
 .DS_Store
+
+# Documentation website (Docusaurus). Sources are tracked; installs and build output are not.
+website/node_modules
+website/build
+website/.docusaurus

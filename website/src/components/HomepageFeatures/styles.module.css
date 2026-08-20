@@ -1,0 +1,27 @@
+.features {
+  display: flex;
+  align-items: stretch;
+  padding: 3rem 0;
+  width: 100%;
+}
+
+.card {
+  height: 100%;
+  padding: 1.5rem;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: var(--ifm-global-radius);
+}
+
+.cardTitle {
+  margin-bottom: 0.25rem;
+}
+
+.cardGoverns {
+  margin-bottom: 0.25rem;
+  color: var(--ifm-color-emphasis-700);
+}
+
+.cardQuestion {
+  font-style: italic;
+  margin-bottom: 1rem;
+}
