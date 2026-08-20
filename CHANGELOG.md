@@ -9,6 +9,8 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+## [0.3.3-ess-wave-3.5] — 2026-08-20
+
 ### Added
 
 - **A command outcome says which entity it acts on, and a transition nobody takes is refused.** An
@@ -548,7 +550,8 @@ No compiler, no OpenAPI, no test synthesis: those are ESS waves 2 and 3 in
 - **`xtask schema [--check]`** — schemas are generated from the Rust types, and CI proves they match.
 - Repository scaffolding: workspace, `Taskfile.yml` gate, Apache-2.0 licence, `AGENTS.md`.
 
-[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.3.2-ess-wave-3...HEAD
+[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.3.3-ess-wave-3.5...HEAD
+[0.3.3-ess-wave-3.5]: https://github.com/codewandler/engineering-protocols/compare/0.3.2-ess-wave-3...0.3.3-ess-wave-3.5
 [0.3.2-ess-wave-3]: https://github.com/codewandler/engineering-protocols/compare/0.3.1-ess-wave-2...0.3.2-ess-wave-3
 [0.3.1-ess-wave-2]: https://github.com/codewandler/engineering-protocols/compare/0.3.0-ess-wave-1...0.3.1-ess-wave-2
 [0.3.0-ess-wave-1]: https://github.com/codewandler/engineering-protocols/compare/0.2.1...0.3.0-ess-wave-1
