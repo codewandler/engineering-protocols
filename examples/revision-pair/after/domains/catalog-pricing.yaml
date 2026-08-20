@@ -51,6 +51,23 @@ commands:
         error: catalog.pricing.PriceListStateConflict
         summary: The price list is not Published, so it was not retired.
 
+  # Written last here and first in the earlier revision, and identical in both. It is what makes the
+  # specification oblige a suite: every other scenario needs an instance to act on, and only a
+  # `creates:` outcome brings one into existence.
+  - name: catalog.pricing.CreatePriceList
+
+    input:
+      - name: headline
+        type: catalog.pricing.Headline
+
+    outcomes:
+      - name: created
+        creates: catalog.pricing.PriceList
+        instance: price_list_id
+        emits:
+          - catalog.pricing.PriceListCreated
+        summary: The price list is created in Draft, at the headline price it was given.
+
 # CHANGE 3 and CHANGE 4. The authority to retire a price list moves from the auditor to the pricing
 # manager: one grant added and one grant removed, which are the only two ways this slice can say a
 # revision widened or narrowed what the system permits without proving anything.
@@ -59,6 +76,7 @@ actors:
     may:
       - catalog.pricing.PublishPriceList
       - catalog.pricing.RetirePriceList
+      - catalog.pricing.CreatePriceList
     naming:
       display: Pricing manager
 
@@ -69,6 +87,11 @@ actors:
 
 events:
   - name: catalog.pricing.PriceListPublished
+    fields:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
+  - name: catalog.pricing.PriceListCreated
     fields:
       - name: price_list_id
         type: catalog.pricing.PriceListId
@@ -106,6 +129,13 @@ types:
     kind: newtype
     of: Uuid
 
+  # A wrapper over a struct, written last here and first in the earlier revision, and identical in
+  # both. It is the one place in this repository's examples where a declared type wraps another
+  # declared type.
+  - name: catalog.pricing.Headline
+    kind: newtype
+    of: catalog.pricing.Money
+
 entities:
   - name: catalog.pricing.PriceList
 
@@ -115,7 +145,7 @@ entities:
 
     fields:
       - name: headline
-        type: catalog.pricing.Money
+        type: catalog.pricing.Headline
 
     lifecycle:
       initial: Draft

@@ -1,6 +1,6 @@
 # A revision pair
 
-Two revisions of one specification, for `protocol ess diff`.
+Two revisions of one specification, for `protocol ess diff` and `protocol ess impact`.
 
 ```console
 protocol ess diff --from examples/revision-pair/before --to examples/revision-pair/after
@@ -28,9 +28,9 @@ difference alone.
 
 ## The rest of the diff is a lie, and that is the point
 
-A text diff between the two directories reports **159 changed lines** across three files, one of which
-it cannot even pair up because it was renamed. The semantic delta reports **four changes**. None of
-the rest is a change to the system, and all of it is there deliberately:
+A text diff between the two directories reports most of three files, one of which it cannot even pair
+up because it was renamed. The semantic delta reports **four changes**. None of the rest is a change
+to the system, and all of it is there deliberately:
 
 | what moved in the text | why the delta says nothing |
 |---|---|
@@ -40,13 +40,34 @@ the rest is a change to the system, and all of it is there deliberately:
 | `display: Auditor` written out on one side, left out on the other | the model falls back to the declaration's own last segment, so both spellings are the same display name |
 
 `crates/ess-diff/tests/revision_pair.rs` asserts the delta's contents change by change, and asserts by
-name that none of the four rows above reaches it.
+name that none of the four rows above reaches it. `crates/ess-diff/tests/impact.rs` asserts which of
+the nine scenarios each change puts back to owed, and the exact path that explains one of them.
 
 ## What is in the fixture and why
 
-One domain, one entity, two commands, two events, one error, two actors, one component: the smallest
-specification that carries one of each construct the first slice of the semantic diff compares —
-system, types, events, errors, actors, components — and nothing it does not.
+One domain, one entity, three commands, three events, one error, two actors, one component: the
+smallest specification that carries one of each construct the first slice of the semantic diff
+compares — system, types, events, errors, actors, components — and nothing it does not.
+
+Two parts of it are there for the **impact** closure rather than for the delta, and both are
+byte-for-byte identical in meaning across the two revisions, so neither reaches the delta:
+
+| what | why it is here |
+|---|---|
+| `CreatePriceList`, the one outcome that `creates:` a price list | without it the specification obliges **no conformance suite at all** — every other scenario needs an instance to act on, and the synthesiser refuses each one for want of one. With it, the pair obliges nine scenarios, which is what makes "which scenarios does this change invalidate" a question with an answer |
+| `Headline`, a newtype wrapping the `Money` struct | it puts `Currency` three declarations away from the entity that ends up holding it, so a scenario that never mentions `Currency` is reached transitively — and the path, not the answer, is what a reader checks |
+
+```console
+protocol ess conform synthesize --path examples/revision-pair/before --out /tmp/catalog
+protocol ess impact --from examples/revision-pair/before --to examples/revision-pair/after \
+  --suite /tmp/catalog/suite.json
+```
+
+All nine are owed again, and the counts per change are not the same: the two `Currency` changes reach
+every scenario, through the entity every one of them creates or moves, while each grant change
+reaches only the four or five that act as *that* actor. That asymmetry is the fixture's second job —
+a closure that reported nine for all four changes would be indistinguishable from one that reported
+nothing at all.
 
 Nothing generates from this directory. `cargo xtask generate` is pinned to `examples/billing`, and
 `cargo xtask suite` to `examples/billing` and `examples/oracle-fixture`, so a construct added here

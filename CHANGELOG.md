@@ -11,6 +11,21 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`protocol ess impact --from <dir> --to <dir> --suite <file>`** — which scenarios a change
+  invalidates, and *why*. Every impact carries the path that produced it, one hop per line — `type
+  Money has a field of type type Currency` → `type Headline wraps type Money` → `entity PriceList has
+  a field of type type Headline` — because an impact nobody can explain is an impact nobody acts on.
+
+  It narrows what has to be re-established and can never widen what survives. Marking something still
+  valid is not a thing the code can express: there is no such verdict in the vocabulary, the only
+  combinator is a join whose top element is "invalidate the whole thing", a change to the system
+  header invalidates everything, and a dependency the graph does not recognise invalidates everything.
+  A suite whose digest does not match the earlier revision is refused rather than narrowed.
+
+  On the normative example, moving an actor's grant narrows 27 owed scenarios to 7. Changing an enum
+  variant narrows 27 to 23, and that is worth knowing rather than hiding: nearly every scenario acts
+  on an entity, so a type most entities reach is genuinely reached by most scenarios. Authority
+  changes are where the narrowing pays; type changes are where it barely does.
 - **`protocol ess diff --from <dir> --to <dir>`** — what actually moved between two revisions of a
   specification, as typed changes rather than as text. On the worked fixture pair, 159 changed lines
   across three files, one of them renamed, reduce to **four** semantic changes: renaming a file,

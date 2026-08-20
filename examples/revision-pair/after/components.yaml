@@ -9,9 +9,11 @@ components:
         - catalog.pricing
     accepts:
       commands:
+        - catalog.pricing.CreatePriceList
         - catalog.pricing.PublishPriceList
         - catalog.pricing.RetirePriceList
     publishes:
       events:
+        - catalog.pricing.PriceListCreated
         - catalog.pricing.PriceListPublished
         - catalog.pricing.PriceListRetired

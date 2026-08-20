@@ -17,6 +17,13 @@ types:
     kind: enum
     variants: [EUR, USD, GBP]
 
+  # A wrapper over a struct, not an alias for one. It is here because it is the only shape in this
+  # repository's examples where a declared type wraps another declared type, which is what puts
+  # `Currency` three hops away from the entity that ends up holding it.
+  - name: catalog.pricing.Headline
+    kind: newtype
+    of: catalog.pricing.Money
+
   - name: catalog.pricing.Money
     kind: struct
     fields:
@@ -36,7 +43,7 @@ entities:
 
     fields:
       - name: headline
-        type: catalog.pricing.Money
+        type: catalog.pricing.Headline
 
     lifecycle:
       initial: Draft
@@ -58,6 +65,24 @@ errors:
         type: catalog.pricing.PriceList.State
 
 commands:
+  # The command that brings a price list into existence. Nothing about it differs between the two
+  # revisions — it is here so the specification obliges a conformance suite at all: every other
+  # scenario needs an instance to act on, and without a `creates:` outcome the synthesiser refuses
+  # each one for want of one.
+  - name: catalog.pricing.CreatePriceList
+
+    input:
+      - name: headline
+        type: catalog.pricing.Headline
+
+    outcomes:
+      - name: created
+        creates: catalog.pricing.PriceList
+        instance: price_list_id
+        emits:
+          - catalog.pricing.PriceListCreated
+        summary: The price list is created in Draft, at the headline price it was given.
+
   - name: catalog.pricing.PublishPriceList
 
     input:
@@ -97,6 +122,11 @@ commands:
         summary: The price list is not Published, so it was not retired.
 
 events:
+  - name: catalog.pricing.PriceListCreated
+    fields:
+      - name: price_list_id
+        type: catalog.pricing.PriceListId
+
   - name: catalog.pricing.PriceListPublished
     fields:
       - name: price_list_id
@@ -112,6 +142,7 @@ actors:
   # first, which is one widening and one narrowing.
   - name: catalog.pricing.PricingManager
     may:
+      - catalog.pricing.CreatePriceList
       - catalog.pricing.PublishPriceList
     naming:
       display: Pricing manager

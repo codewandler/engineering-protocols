@@ -114,7 +114,7 @@ impl GraphFormat {
     }
 }
 
-/// How to render a semantic delta.
+/// How to render a semantic delta, or the impact of one.
 ///
 /// Its own enum rather than the shared [`Format`], on the same reasoning [`GraphFormat`] is: a value
 /// a verb cannot honour is worse than one it does not offer. What is missing here is `yaml`, and it
@@ -124,11 +124,14 @@ impl GraphFormat {
 /// renderings of one delta can differ in bytes without differing in meaning, which is exactly what a
 /// byte comparison cannot tolerate. Offering `yaml` would publish a second machine form with no
 /// format contract behind it and nothing that reads it.
+///
+/// Shared by `ess diff` and `ess impact` because the choice is the same choice, and the document
+/// each writes is named by the verb rather than by the flag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum DiffFormat {
     /// Human-readable lines: what moved, and which of it widens or narrows the system.
     Text,
-    /// The `ess-diff/1` document, canonical and byte-stable.
+    /// The canonical document: `ess-diff/1` from `diff`, `ess-impact/1` from `impact`.
     Json,
 }
 
@@ -443,6 +446,12 @@ fn run() -> Result<ExitCode> {
             } => ess_generate(&path, kind, out.as_deref(), format),
             EssCommand::Graph { path, format } => ess_graph(&path, format),
             EssCommand::Diff { from, to, format } => ess_diff(&from, &to, format),
+            EssCommand::Impact {
+                from,
+                to,
+                suite,
+                format,
+            } => ess_impact(&from, &to, &suite, format),
             EssCommand::Conform { command } => match command {
                 EssConformCommand::Synthesize { path, out, format } => {
                     ess_conform_synthesize(&path, out.as_deref(), format)
@@ -728,6 +737,52 @@ enum EssCommand {
         #[arg(long)]
         to: PathBuf,
         /// How to render the delta. `json` is the `ess-diff/1` document itself.
+        #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
+        format: DiffFormat,
+    },
+    /// Say what moving between two revisions puts back to owed in a committed conformance suite.
+    ///
+    /// # Why this is a verb and not a flag on `diff`
+    ///
+    /// It takes a **third input**. `diff` is a function of two specifications and writes one
+    /// document, `ess-diff/1`; this reads a suite as well and writes a different document,
+    /// `ess-impact/1`. A `--suite` flag on `diff` would make `--format json` mean one of two
+    /// documents depending on another flag, which is the shape `ess conform`'s two verbs were
+    /// already split apart to avoid.
+    ///
+    /// The counter-argument is design §24's, and it is a real one: a diff nobody can act on is the
+    /// thing §24 complains about, so impact wants to be the default view rather than a second
+    /// command. That is answered by what this prints — the delta **first**, in full, and then what
+    /// it invalidates. Nobody has to run both verbs to see both answers; `diff` remains the one
+    /// that writes the delta document.
+    ///
+    /// # What it answers
+    ///
+    /// A suite records, per scenario, the set of constructs that scenario's result depends on. This
+    /// builds a dependency graph over both revisions' models, walks it backwards from each change,
+    /// and reports every scenario resting on anything the walk reached — with the path that
+    /// explains it, because an impact nobody can explain is an impact nobody will act on.
+    ///
+    /// # It narrows; it never says a result still holds
+    ///
+    /// Gate G19 puts every conformance requirement back to owed when the specification digest
+    /// moves. This refines that and cannot replace it: a scenario absent from the output was not
+    /// reached by this analysis, which is **not** a claim that its evidence still stands. A change
+    /// the graph cannot follow — one to the specification itself — owes the whole suite.
+    ///
+    /// Exits 1 when either side does not compile, when the two name different systems, or when the
+    /// suite was not produced from the `--from` revision.
+    Impact {
+        /// The specification the suite's results were produced against: a directory, or one file.
+        #[arg(long)]
+        from: PathBuf,
+        /// The specification being moved to: a directory, or one file.
+        #[arg(long)]
+        to: PathBuf,
+        /// The committed suite, as `protocol ess conform synthesize --out` writes it.
+        #[arg(long)]
+        suite: PathBuf,
+        /// How to render the report. `json` is the `ess-impact/1` document itself.
         #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
         format: DiffFormat,
     },
@@ -2477,6 +2532,48 @@ fn ess_diff(from: &Path, to: &Path, format: DiffFormat) -> Result<ExitCode> {
         // second place for a change to be put into words.
         DiffFormat::Text => out!("{}", ess_diff::render::text(&delta)),
         DiffFormat::Json => out!("{}", delta.to_canonical_json()),
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol ess impact`
+///
+/// Two compilations, one suite read from disk, and one closure. The comparison itself is run by
+/// `ess_diff::impact` rather than here, from the same two models the graph is built from — so this
+/// function cannot hand the analysis a delta about one pair and a graph about another.
+///
+/// A refusal is rendered rather than returned as an `Err`, exactly as `ess diff` renders one: "this
+/// suite belongs to another revision" is an answer about the input, not a failure of this program.
+fn ess_impact(from: &Path, to: &Path, suite_file: &Path, format: DiffFormat) -> Result<ExitCode> {
+    let before = match ess_compiled(from, format.diagnostics())? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+    let after = match ess_compiled(to, format.diagnostics())? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+
+    let text = fs::read_to_string(suite_file)
+        .with_context(|| format!("reading the suite {}", suite_file.display()))?;
+    let suite = ess_conformance::ConformanceSuite::from_json(&text)
+        .with_context(|| format!("reading the suite {}", suite_file.display()))?;
+
+    let report = match ess_diff::impact(&before, &after, &suite) {
+        Ok(report) => report,
+        Err(refusal) => {
+            match format {
+                DiffFormat::Text => outln!("refused: {refusal}"),
+                DiffFormat::Json => print_serialised(&refusal, Format::Json)?,
+            }
+            return Ok(exit_code(false));
+        }
+    };
+
+    match format {
+        DiffFormat::Text => out!("{}", ess_diff::render::impact(&report)),
+        DiffFormat::Json => out!("{}", report.to_canonical_json()),
     }
 
     Ok(ExitCode::SUCCESS)

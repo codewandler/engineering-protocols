@@ -23,6 +23,7 @@ its HTTP layer.
 | Run that suite against an implementation | `protocol ess conform run --path <path> --target <name>` |
 | Turn that run into AEP evidence | `protocol ess conform evidence --path <path> --target <name>` |
 | Say what moved between two revisions of one specification | `protocol ess diff --from <path> --to <path> --format text\|json` |
+| Say what that move puts back to owed in a committed suite | `protocol ess impact --from <path> --to <path> --suite <suite.json>` |
 | Complete a task only once that evidence exists | [`examples/billing-conformance/`](../../examples/billing-conformance/) |
 | Read the suites this repository commits | [`suites/generated/`](../../suites/generated/) |
 | Validate in an editor as you type | [`schemas/generated/ess.schema.json`](../../schemas/generated/ess.schema.json) |
@@ -155,8 +156,8 @@ that removes a currency reports one narrowing.
 ```console
 $ protocol ess diff --from examples/revision-pair/before --to examples/revision-pair/after
 catalog v2 → v2
-  before  3c500d7cf1e4d59d
-  after   ffd3570ade7b7447
+  before  bc6f70b3dc81a99d
+  after   3e5ba8c16baf2d7d
 
 4 change(s): 2 widening, 2 narrowing, 0 other
 
@@ -198,6 +199,73 @@ There is one refusal: two specifications that name different systems. Comparing 
 `--format json` writes the `ess-diff/1` document: canonical, byte-identical for the same pair, with
 each change carrying an id derived from its own content, so a review comment or a later tool can quote
 one and still mean the same change after a sibling is inserted.
+
+### What that invalidates, and why
+
+A delta says what moved. `protocol ess impact` says what **stood on** what moved — and the first
+thing that does is a conformance suite, because every scenario in one records the set of constructs
+its result depends on.
+
+```console
+$ protocol ess impact --from examples/billing --to billing-with-one-grant-moved/ \
+    --suite suites/generated/billing/suite.json
+billing v3 → v3
+  before  e19d384dac86219a
+  after   fd52355634fd35e7
+
+2 change(s): 1 widening, 1 narrowing, 0 other
+
+  widens   actor billing.invoice.Auditor: may invoke `billing.invoice.CreateInvoice`
+           actor/billing.invoice.Auditor/grant-added/billing.invoice.CreateInvoice
+  narrows  actor billing.invoice.Customer: may no longer invoke `billing.invoice.CreateInvoice`
+           actor/billing.invoice.Customer/grant-removed/billing.invoice.CreateInvoice
+
+suite billing v3 (e19d384dac86219a): 7 of 27 scenario(s) owed again
+2 construct(s) reached: 2 changed, 0 depend on one directly, 0 through another
+
+  billing.invoice.CreateInvoice/outcome/accepted
+    directly-changed actor billing.invoice.Customer — actor/…/grant-removed/…CreateInvoice
+  …
+```
+
+Without this, moving one grant means re-running all twenty-seven: gate G19 binds conformance
+evidence to the specification digest it was produced against, so the moment the model moves, every
+requirement it satisfied goes back to owed. That is correct and it is blunt. Seven is the same
+answer, proportionate.
+
+**Every impact carries the path that explains it.** Not "these eleven things are affected" but
+*this is affected because it references that, which references the thing you changed*:
+
+```text
+  catalog.pricing.PublishPriceList/outcome/published
+    transitively-impacted entity catalog.pricing.PriceList — type/…/variant-removed/GBP
+      -> type catalog.pricing.Money has a field of type type catalog.pricing.Currency
+      -> type catalog.pricing.Headline wraps type catalog.pricing.Money
+      -> entity catalog.pricing.PriceList has a field of type type catalog.pricing.Headline
+```
+
+The scenario never mentions `Currency`. It is reached three declarations away, and the three lines
+are what make that checkable rather than assertable. An impact nobody can explain is an impact
+nobody will act on.
+
+**It narrows; it never says a result still holds.** A scenario absent from the output was not
+reached by this analysis — which is *not* a claim that its evidence still stands. Impact analysis
+refines G19 and cannot replace it, because the two errors are not comparable: failing closed costs a
+re-run that was not needed, and failing open costs a task closing on evidence produced against a
+specification that has since moved. So the report has no vocabulary for a survival, and three things
+put the **whole** suite back to owed rather than narrowing it:
+
+| what happened | why nothing can be narrowed away |
+|---|---|
+| a change to the specification itself — its version, its summary | no scenario names the system as a dependency, so no closure can start there |
+| the suite depends on a construct the dependency graph has no node for | a closure could never reach it, and leaving it out of every answer is the one way a narrowing is wrong and looks right |
+| the suite was produced from another revision, or another system | **refused** rather than answered: prior results were produced against the model the suite records, and narrowing against any other one answers a question about a specification nobody has |
+
+**Why a verb and not `ess diff --suite`.** It takes a third input and writes a different document —
+`ess-impact/1` rather than `ess-diff/1` — and a `--format json` that means one of two documents
+depending on another flag is the shape `ess conform`'s two verbs were split apart to avoid. The
+counter-argument is that a diff nobody can act on is not much of a diff; that is answered by
+printing the delta first and in full, so nobody has to run both commands to see both halves.
 
 ### Why compile at all, when validate already refuses a bad specification
 

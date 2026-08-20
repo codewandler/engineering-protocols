@@ -83,6 +83,19 @@
 //! read for rather than trusted: `tests/canonical.rs` scans this crate's sources for the accessor
 //! names and fails if one appears.
 //!
+//! # And then what it invalidates
+//!
+//! A delta says what moved; [`impact()`] says what stands on what moved. It builds a
+//! [`SemanticDependencyGraph`] over both revisions' IRs, runs a closure backwards from each change,
+//! and intersects the result with what a wave-4 [`ConformanceSuite`](ess_conformance::ConformanceSuite)
+//! records each of its scenarios as depending on. Every impact carries the path that explains it —
+//! design §24's requirement, because an impact nobody can explain is an impact nobody will act on.
+//!
+//! **It fails closed.** A closure may narrow what has to be re-established and may never say a
+//! scenario survived: [`Invalidation`] has no vocabulary for a survival, its only combinator is a
+//! join whose top is "the whole suite", and a change the graph cannot seed a closure at owes
+//! everything. [`mod@crate::impact`] lists the five mechanisms and what each one forecloses.
+//!
 //! # Determinism
 //!
 //! Design §59. Same pair in, byte-identical bytes out: [`BTreeMap`](std::collections::BTreeMap) and
@@ -95,6 +108,8 @@
 pub mod change;
 pub mod delta;
 pub mod diff;
+pub mod graph;
+pub mod impact;
 pub mod raw;
 pub mod render;
 
@@ -104,4 +119,9 @@ pub use change::{
 };
 pub use delta::{DeltaFormat, EssDelta, EssRevisionRef, SUPPORTED_DELTA_FORMATS};
 pub use diff::{diff, DiffRefusal};
+pub use graph::{DependencyEdge, DependencyRelation, ImpactClass, Reach, SemanticDependencyGraph};
+pub use impact::{
+    impact, Churn, EssImpact, ImpactPath, ImpactRefusal, Invalidation, ScenarioImpact, WholeSuite,
+    IMPACT_FORMAT,
+};
 pub use raw::RawEssDelta;

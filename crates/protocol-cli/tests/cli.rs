@@ -2207,7 +2207,7 @@ fn ess_diff_names_the_four_changes_and_which_way_each_one_goes() {
         "every change carries the id a review comment quotes: {text}"
     );
     assert!(
-        text.contains("3c500d7cf1e4d59d"),
+        text.contains("bc6f70b3dc81a99d"),
         "and the digest that says which resolution was compared, because `catalog/v2` is a label \
          two resolutions can share: {text}"
     );
@@ -2416,4 +2416,327 @@ fn ess_diff_offers_no_format_it_cannot_honour() {
         "and it says which value was not accepted: {}",
         stderr(&output)
     );
+}
+
+// ---- `protocol ess impact` ---------------------------------------------------------------------
+
+/// The suite the `before` half of the revision pair obliges, written to a scratch file.
+fn catalog_suite(name: &str) -> PathBuf {
+    let directory = scratch(name);
+    let output = protocol(&[
+        "ess",
+        "conform",
+        "synthesize",
+        "--path",
+        REVISION_BEFORE,
+        "--out",
+        printable(&directory),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    directory.join("suite.json")
+}
+
+#[test]
+fn ess_impact_says_what_changed_before_it_says_what_that_invalidates() {
+    // Design §24's complaint is about a report that names something as affected without saying by
+    // what, so the delta is printed in full first and the closure reads as a continuation of it.
+    // That is also the argument for `impact` being a verb rather than a flag: nobody has to run two
+    // commands to get both halves.
+    let suite = catalog_suite("ess-impact-shape");
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--suite",
+        printable(&suite),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+
+    let delta_line = text
+        .find("4 change(s): 2 widening, 2 narrowing, 0 other")
+        .expect("the delta comes first");
+    let suite_line = text
+        .find("scenario(s) owed again")
+        .expect("and then what it invalidates");
+    assert!(
+        delta_line < suite_line,
+        "what changed has to be readable before what it invalidates:\n{text}"
+    );
+    assert!(
+        text.contains("9 of 9 scenario(s) owed again"),
+        "the size of the answer arrives before the list: {text}"
+    );
+}
+
+#[test]
+fn ess_impact_explains_every_scenario_it_names() {
+    // The whole point of the verb. A scenario id on its own is `email-component risk = high`, which
+    // is the report design §24 was written against — so each one carries the change that reached it
+    // and, where the change is not about something the scenario names outright, the edges in
+    // between.
+    let suite = catalog_suite("ess-impact-paths");
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--suite",
+        printable(&suite),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+
+    assert!(
+        text.contains("catalog.pricing.PublishPriceList/outcome/published"),
+        "the scenario is named: {text}"
+    );
+    for hop in [
+        "-> type catalog.pricing.Money has a field of type type catalog.pricing.Currency",
+        "-> type catalog.pricing.Headline wraps type catalog.pricing.Money",
+        "-> entity catalog.pricing.PriceList has a field of type type catalog.pricing.Headline",
+    ] {
+        assert!(text.contains(hop), "missing `{hop}` in:\n{text}");
+    }
+    assert!(
+        text.contains("transitively-impacted") && text.contains("directly-changed"),
+        "and each reason says how far away it is: {text}"
+    );
+}
+
+#[test]
+fn ess_impact_produces_the_same_bytes_twice_in_both_formats() {
+    let suite = catalog_suite("ess-impact-determinism");
+    for format in ["text", "json"] {
+        let arguments = [
+            "ess",
+            "impact",
+            "--from",
+            REVISION_BEFORE,
+            "--to",
+            REVISION_AFTER,
+            "--suite",
+            printable(&suite),
+            "--format",
+            format,
+        ];
+        let first = protocol(&arguments);
+        let second = protocol(&arguments);
+        assert_eq!(code(&first), 0, "{}", stderr(&first));
+        assert_eq!(
+            first.stdout, second.stdout,
+            "`--format {format}` over one pair and one suite must produce identical bytes"
+        );
+    }
+}
+
+#[test]
+fn ess_impact_writes_a_document_carrying_the_delta_the_suite_and_the_counts() {
+    let suite = catalog_suite("ess-impact-document");
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--suite",
+        printable(&suite),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let document: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the report is JSON");
+
+    assert_eq!(document["format"], "ess-impact/1");
+    assert_eq!(document["delta"]["format"], "ess-diff/1");
+    assert_eq!(document["suite"]["system"], "catalog");
+    assert_eq!(document["churn"]["conformance_scenarios_total"], 9);
+    assert_eq!(document["churn"]["conformance_scenarios_invalidated"], 9);
+    assert_eq!(document["churn"]["actor_grants_changed"], 2);
+    assert_eq!(document["invalidation"]["invalidates"], "narrowed");
+
+    // Every impact carries the class its own path length derives, so a consumer in another language
+    // does not have to reimplement the classification to read the report.
+    let impacts = document["impacts"].as_array().expect("a list of impacts");
+    assert!(!impacts.is_empty());
+    for impact in impacts {
+        let edges = impact["edges"].as_array().expect("a list of edges");
+        let expected = match edges.len() {
+            0 => "directly-changed",
+            1 => "directly-dependent",
+            _ => "transitively-impacted",
+        };
+        assert_eq!(impact["class"], expected, "{impact}");
+    }
+}
+
+#[test]
+fn ess_impact_refuses_a_suite_that_checks_another_system() {
+    // The state the rule is load-bearing in: the committed billing suite is a real, current suite —
+    // narrowing against it would run and produce a plausible, empty list.
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--suite",
+        COMMITTED_SUITE,
+    ]);
+
+    assert_eq!(code(&output), 1, "a refusal is exit 1: {}", stderr(&output));
+    let text = stdout(&output);
+    assert!(
+        text.contains("refused:") && text.contains("billing") && text.contains("catalog"),
+        "the refusal names both systems: {text}"
+    );
+}
+
+#[test]
+fn ess_impact_refuses_the_suite_belonging_to_the_revision_being_moved_to() {
+    // The mistake this catches most often, and the one whose wrong answer is least visible: the
+    // suite is for the right system and is perfectly valid, and the results it stands for were
+    // produced against the *other* model.
+    let directory = scratch("ess-impact-later-suite");
+    let synthesized = protocol(&[
+        "ess",
+        "conform",
+        "synthesize",
+        "--path",
+        REVISION_AFTER,
+        "--out",
+        printable(&directory),
+    ]);
+    assert_eq!(code(&synthesized), 0, "{}", stderr(&synthesized));
+
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--suite",
+        printable(&directory.join("suite.json")),
+    ]);
+
+    assert_eq!(code(&output), 1, "a refusal is exit 1: {}", stderr(&output));
+    assert!(
+        stdout(&output).contains("`--to`"),
+        "the refusal names the mistake, not just the mismatch: {}",
+        stdout(&output)
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_impact_owes_the_whole_suite_when_the_specification_itself_moved() {
+    // Fail-closed, end to end. A version bump is a change no construct names, so no closure can be
+    // seeded at it — and the only two available answers are "everything" and "nothing". A delta
+    // engine that answered "nothing" would let a task close on evidence produced against a
+    // specification that has since moved.
+    let suite = catalog_suite("ess-impact-whole-suite");
+    let directory = scratch("ess-impact-version-bump");
+    copy_tree(&root().join(REVISION_BEFORE), &directory);
+    let header = directory.join("system.yaml");
+    let bumped = std::fs::read_to_string(&header)
+        .expect("the fixture header is readable")
+        .replace("version: v2", "version: v3");
+    write(&header, &bumped);
+
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        printable(&directory),
+        "--suite",
+        printable(&suite),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+
+    assert!(
+        text.contains("9 of 9 scenario(s) owed again"),
+        "every scenario, and not the zero a closure would have reached: {text}"
+    );
+    assert!(
+        text.contains("every scenario in the suite is owed again, because"),
+        "and it says so as an answer rather than by listing nine identical lines: {text}"
+    );
+    assert!(
+        text.contains("system/catalog/version-changed"),
+        "naming the change that could not be followed: {text}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_impact_narrows_the_committed_billing_suite_when_only_one_grant_moved() {
+    // The claim the wave is for, against the suite this repository actually commits. Gate G19's
+    // answer to any change is all twenty-seven scenarios; moving one grant is seven of them, and
+    // the twenty that never act as that actor are not reached.
+    let directory = copied_specification("ess-impact-billing-grant");
+    let domain = directory.join("domains/invoice.yaml");
+    let source = std::fs::read_to_string(&domain).expect("the example is readable");
+    let moved = source
+        .replace(
+            "  - name: billing.invoice.Customer\n    may:\n      - billing.invoice.CreateInvoice\n",
+            "  - name: billing.invoice.Customer\n",
+        )
+        .replace(
+            "  - name: billing.invoice.Auditor\n",
+            "  - name: billing.invoice.Auditor\n    may:\n      - billing.invoice.CreateInvoice\n",
+        );
+    assert_ne!(
+        moved, source,
+        "the fixture edit has to land, or this test measures the empty delta"
+    );
+    write(&domain, &moved);
+
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        SPECIFICATION,
+        "--to",
+        printable(&directory),
+        "--suite",
+        COMMITTED_SUITE,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let document: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the report is JSON");
+
+    assert_eq!(document["churn"]["conformance_scenarios_total"], 27);
+    assert_eq!(
+        document["churn"]["conformance_scenarios_invalidated"], 7,
+        "moving one grant is seven scenarios, where G19 alone is twenty-seven"
+    );
+    let owed = document["invalidation"]["scenarios"]
+        .as_object()
+        .expect("the narrowed scenarios");
+    assert!(
+        owed.contains_key("billing.invoice.CreateInvoice/outcome/accepted"),
+        "the scenarios that act as the customer are owed: {owed:?}"
+    );
+    assert!(
+        !owed.contains_key("billing.email.SendEmail/outcome/sent"),
+        "and sending an email does not act as one: {owed:?}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
 }

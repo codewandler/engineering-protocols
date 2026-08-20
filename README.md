@@ -69,7 +69,7 @@ it implements the contract by running a suite against itself.
 | `ess-compiler` — resolution, IR, diagnostics | 100% | an unresolved reference is unrepresentable; codes, spans, byte-identical output |
 | `ess-gen` — four projections behind one `Generator` trait | 100% | Markdown + Mermaid, JSON Schema, OpenAPI 3.1, AsyncAPI 3.0; one shared type mapping, agreement asserted; 131 tests |
 | `ess-conformance` — the specification as an oracle | 100% | synthesis, a runner that owns its clock and id source, evidence, and twelve deliberately wrong implementations; 147 tests |
-| `ess-diff` — what moved between two revisions | 20% | six construct families compared field by field, 65 typed changes, four relations; 159 changed text lines of the fixture pair reduce to 4 semantic changes; 58 tests |
+| `ess-diff` — what moved, and what that invalidates | 45% | six construct families compared field by field, 65 typed changes; 159 changed text lines reduce to 4 semantic changes; impact closure over 21 typed relations, with the path recoverable and invalidation that can only narrow; 89 tests |
 | `protocol ess validate\|compile\|inspect\|graph\|generate\|conform` | 100% | one file or a directory; every problem in one run |
 | The join — artifact kind, evidence kind, `ess-conformance` principle | 100% | a task can already be blocked until something proves conformance |
 | Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 100% | 27 artifacts plus a generated index, committed under `generated/`, provenance on each, drift-checked in CI |
