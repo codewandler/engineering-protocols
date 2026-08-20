@@ -89,7 +89,8 @@ pub use entity::{
 pub use error::{ParseError, ValidationCode, ValidationError, ValidationErrors};
 pub use event::{EventEnvelope, ProtocolEvent};
 pub use evidence::{
-    Evidence, EvidenceEnvelope, EvidenceKind, EvidenceRecord, Producer, Provenance, TestSuite,
+    EssConformanceResult, Evidence, EvidenceEnvelope, EvidenceKind, EvidenceRecord, Producer,
+    Provenance, TestSuite,
 };
 pub use facts::{FactPath, FactPattern, FactSource, FactStore, FactValue, Number, Scales};
 pub use ids::{

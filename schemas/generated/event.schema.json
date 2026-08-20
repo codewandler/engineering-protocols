@@ -837,6 +837,13 @@
           "enum": [
             "specification"
           ]
+        },
+        {
+          "description": "An implementation checked against an executable system specification.",
+          "type": "string",
+          "enum": [
+            "ess_conformance"
+          ]
         }
       ]
     },
@@ -1057,7 +1064,8 @@
         "policy-engine",
         "human-approval",
         "human-review",
-        "artifact-validator"
+        "artifact-validator",
+        "conformance-runner"
       ],
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"

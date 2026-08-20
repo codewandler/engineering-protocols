@@ -50,6 +50,8 @@ pub enum Verifier {
     HumanReview,
     /// A validator for artifact structure and relationships.
     ArtifactValidator,
+    /// A runner that checks an implementation against a specification's own conformance suite.
+    ConformanceRunner,
     /// Anything else, named by tool.
     ExternalTool(ToolRef),
 }
@@ -68,6 +70,7 @@ impl Verifier {
         Self::HumanApproval,
         Self::HumanReview,
         Self::ArtifactValidator,
+        Self::ConformanceRunner,
     ];
 
     /// The verifier as written in documents.
@@ -84,6 +87,7 @@ impl Verifier {
             Self::HumanApproval => "human-approval",
             Self::HumanReview => "human-review",
             Self::ArtifactValidator => "artifact-validator",
+            Self::ConformanceRunner => "conformance-runner",
             Self::ExternalTool(tool) => tool.as_str(),
         }
     }

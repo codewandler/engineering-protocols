@@ -656,6 +656,45 @@ pub struct SpecificationRecord {
     pub unsatisfied: Vec<String>,
 }
 
+/// What a conformance run found when it checked an implementation against a specification.
+///
+/// This is the join between the two halves of the project: a specification generates its own
+/// conformance suite, an implementation is checked against it, and the result becomes a fact the
+/// protocol can decide on. The versions are all recorded because a passing result means nothing
+/// without them — "conformant" is a claim about one implementation against one specification,
+/// checked by one suite, and each of those moves independently.
+///
+/// Facts: `ess_conformance.{status,passed,spec_version}`,
+/// `ess_conformance.scenarios.{total,failed}`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EssConformanceResult {
+    /// Which specification, at which version, such as `billing/v3`.
+    pub specification: String,
+    /// Which implementation was checked.
+    pub implementation: String,
+    /// The outcome.
+    pub status: VerificationStatus,
+    /// How many scenarios the suite ran.
+    #[serde(default)]
+    pub scenarios_total: usize,
+    /// How many did not hold.
+    #[serde(default)]
+    pub scenarios_failed: usize,
+    /// The version of the suite that ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suite_version: Option<String>,
+    /// The compiler that produced the suite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compiler_version: Option<String>,
+    /// The generator that produced it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generator_version: Option<String>,
+    /// Which scenarios failed, so a failure names something actionable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub failed_scenarios: Vec<String>,
+}
+
 /// What produced a piece of evidence.
 #[derive(
     Debug,
@@ -803,6 +842,9 @@ pub enum EvidenceKind {
     /// Specification satisfaction.
     #[serde(alias = "specification_record")]
     Specification,
+    /// An implementation checked against an executable system specification.
+    #[serde(alias = "ess_conformance_result")]
+    EssConformance,
 }
 
 impl EvidenceKind {
@@ -821,6 +863,7 @@ impl EvidenceKind {
         Self::Review,
         Self::Verification,
         Self::Specification,
+        Self::EssConformance,
     ];
 
     /// The kind as written in documents and fact paths.
@@ -839,6 +882,7 @@ impl EvidenceKind {
             Self::Review => "review",
             Self::Verification => "verification",
             Self::Specification => "specification",
+            Self::EssConformance => "ess_conformance",
         }
     }
 
@@ -854,6 +898,7 @@ impl EvidenceKind {
             "review_result" => Ok(Self::Review),
             "verification_record" => Ok(Self::Verification),
             "specification_record" => Ok(Self::Specification),
+            "ess_conformance_result" => Ok(Self::EssConformance),
             other => Err(ParseError::identifier(
                 "evidence kind",
                 other,
@@ -888,6 +933,7 @@ impl EvidenceKind {
             Self::Review => &[Verifier::HumanReview],
             Self::Verification => &[Verifier::PolicyEngine, Verifier::ModelChecker],
             Self::Specification => &[Verifier::TestRunner, Verifier::HumanReview],
+            Self::EssConformance => &[Verifier::ConformanceRunner],
         }
     }
 }
@@ -941,6 +987,8 @@ pub enum Evidence {
     Verification(VerificationRecord),
     /// Specification satisfaction.
     Specification(SpecificationRecord),
+    /// An implementation checked against an executable system specification.
+    EssConformance(EssConformanceResult),
 }
 
 impl Evidence {
@@ -960,6 +1008,7 @@ impl Evidence {
             Self::Review(_) => EvidenceKind::Review,
             Self::Verification(_) => EvidenceKind::Verification,
             Self::Specification(_) => EvidenceKind::Specification,
+            Self::EssConformance(_) => EvidenceKind::EssConformance,
         }
     }
 
@@ -1018,6 +1067,14 @@ impl Evidence {
                     record.claim, record.verifier, record.status
                 )
             }
+            Self::EssConformance(result) => format!(
+                "{} against {}: {} ({}/{} scenarios failed)",
+                result.implementation,
+                result.specification,
+                result.status,
+                result.scenarios_failed,
+                result.scenarios_total
+            ),
             Self::Specification(record) => format!(
                 "specification satisfied: {}{}",
                 record.satisfied,
@@ -1288,6 +1345,26 @@ impl Evidence {
                     FactValue::count(record.unsatisfied.len()),
                 ));
             }
+            Self::EssConformance(result) => {
+                let base = path(&["ess_conformance"]);
+                facts.push((base.child("status"), FactValue::text(result.status.as_str())));
+                facts.push((
+                    base.child("passed"),
+                    FactValue::bool(result.status.is_pass() && result.scenarios_failed == 0),
+                ));
+                facts.push((
+                    base.child("spec_version"),
+                    FactValue::text(result.specification.clone()),
+                ));
+                facts.push((
+                    base.child("scenarios").child("total"),
+                    FactValue::count(result.scenarios_total),
+                ));
+                facts.push((
+                    base.child("scenarios").child("failed"),
+                    FactValue::count(result.scenarios_failed),
+                ));
+            }
         }
 
         facts
@@ -1498,6 +1575,70 @@ mod tests {
             value(&facts, "review.design.approved"),
             Some(FactValue::bool(true)),
             "an architecture design review is also a design review"
+        );
+    }
+
+    #[test]
+    fn a_conformance_result_projects_a_fact_a_completion_condition_can_read() {
+        let evidence = Evidence::EssConformance(EssConformanceResult {
+            specification: "billing/v3".to_owned(),
+            implementation: "invoice-service@rev-4711".to_owned(),
+            status: VerificationStatus::Passed,
+            scenarios_total: 24,
+            scenarios_failed: 0,
+            suite_version: Some("1".to_owned()),
+            compiler_version: Some("0.3.0".to_owned()),
+            generator_version: Some("0.3.0".to_owned()),
+            failed_scenarios: Vec::new(),
+        });
+        let facts = store(&evidence);
+
+        assert_eq!(value(&facts, "ess_conformance.passed"), Some(FactValue::bool(true)));
+        assert_eq!(
+            value(&facts, "ess_conformance.spec_version"),
+            Some(FactValue::text("billing/v3"))
+        );
+        assert_eq!(
+            value(&facts, "ess_conformance.scenarios.total"),
+            Some(FactValue::count(24))
+        );
+    }
+
+    #[test]
+    fn a_conformance_run_with_failures_does_not_pass_however_it_reports_its_status() {
+        // A runner that returned `passed` alongside failing scenarios is contradicting itself, and
+        // the fact a completion condition reads must not take the optimistic half of that.
+        let evidence = Evidence::EssConformance(EssConformanceResult {
+            specification: "billing/v3".to_owned(),
+            implementation: "invoice-service@rev-4711".to_owned(),
+            status: VerificationStatus::Passed,
+            scenarios_total: 24,
+            scenarios_failed: 2,
+            suite_version: None,
+            compiler_version: None,
+            generator_version: None,
+            failed_scenarios: vec!["invoice-creation".to_owned(), "cancel-paid".to_owned()],
+        });
+        let facts = store(&evidence);
+
+        assert_eq!(
+            value(&facts, "ess_conformance.passed"),
+            Some(FactValue::bool(false)),
+            "two failing scenarios is not conformance, whatever the status field says"
+        );
+        assert_eq!(
+            value(&facts, "ess_conformance.scenarios.failed"),
+            Some(FactValue::count(2))
+        );
+        assert!(evidence.summary().contains("2/24"), "{}", evidence.summary());
+    }
+
+    #[test]
+    fn only_a_conformance_runner_establishes_conformance() {
+        assert_eq!(
+            EvidenceKind::EssConformance.default_verifiers(),
+            &[Verifier::ConformanceRunner],
+            "an agent reporting that its own implementation conforms is not a conformance run"
         );
     }
 

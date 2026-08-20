@@ -13,8 +13,22 @@ phases:
   - verification-setup
   - adversarial-verification
 
+# What a development task may reason about beyond the base protocol.
+evidence_kinds:
+  # An implementation checked against the specification that generated its contracts and its tests.
+  # Development-specific because a specification is a development artifact: operations work is
+  # governed by what production is doing, not by what a compiler derived.
+  - ess_conformance
+
+verifiers:
+  - conformance-runner
+
+artifact_kinds:
+  - executable-system-specification
+
 # Development-specific fact families, on top of the base protocol's.
 observables:
+  - 'ess_conformance.**'
   - 'mutation.**'
   - 'differential.**'
   - 'invariant.**'

@@ -242,6 +242,115 @@ fn a_conditional_requirement_that_does_not_apply_is_not_counted_as_missing() {
 }
 
 #[test]
+fn a_specification_governed_task_is_not_finished_until_something_else_says_it_conforms() {
+    // The loop the vision describes, exercised end to end before any of ESS exists: a task whose
+    // artifact graph holds an executable system specification owes conformance evidence, and the
+    // protocol refuses to call it complete without a run by something other than the agent.
+    use aep_domain::artifact::{Artifact, ArtifactId, ArtifactKind, ArtifactLocation, ArtifactStatus};
+
+    let engine = engine();
+    let mut graph = artifacts();
+    graph.insert(Artifact::new(
+        ArtifactId::new("ess:billing").expect("id"),
+        ArtifactKind::ExecutableSystemSpecification,
+        ArtifactStatus::Approved,
+        ArtifactLocation::Inline,
+    ));
+
+    let mut execution = engine
+        .initialize_with_artifacts(task(Some("development.critical")), graph)
+        .expect("initialises");
+
+    let outstanding = |execution: &aep_engine::Execution| {
+        engine
+            .explain_completion(execution)
+            .outstanding()
+            .map(|item| item.requirement.clone())
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        outstanding(&execution)
+            .iter()
+            .any(|item| item.contains("ess_conformance")),
+        "with a specification in the graph, conformance to it is owed: {:?}",
+        outstanding(&execution)
+    );
+
+    // An agent's own report that it conforms is not a conformance run.
+    engine
+        .submit_evidence(
+            &mut execution,
+            by_agent(Evidence::EssConformance(
+                aep_domain::evidence::EssConformanceResult {
+                    specification: "billing/v3".to_owned(),
+                    implementation: "invoice-service".to_owned(),
+                    status: VerificationStatus::Passed,
+                    scenarios_total: 24,
+                    scenarios_failed: 0,
+                    suite_version: None,
+                    compiler_version: None,
+                    generator_version: None,
+                    failed_scenarios: Vec::new(),
+                },
+            )),
+        )
+        .expect("recorded");
+    assert!(
+        outstanding(&execution)
+            .iter()
+            .any(|item| item.contains("evidence ess_conformance")),
+        "an agent asserting its own conformance leaves the requirement owed: {:?}",
+        outstanding(&execution)
+    );
+
+    // A conformance runner's report satisfies it.
+    engine
+        .submit_evidence(
+            &mut execution,
+            by_verifier(
+                Evidence::EssConformance(aep_domain::evidence::EssConformanceResult {
+                    specification: "billing/v3".to_owned(),
+                    implementation: "invoice-service".to_owned(),
+                    status: VerificationStatus::Passed,
+                    scenarios_total: 24,
+                    scenarios_failed: 0,
+                    suite_version: Some("1".to_owned()),
+                    compiler_version: Some("0.3.0".to_owned()),
+                    generator_version: Some("0.3.0".to_owned()),
+                    failed_scenarios: Vec::new(),
+                }),
+                Verifier::ConformanceRunner,
+            ),
+        )
+        .expect("recorded");
+    assert!(
+        !outstanding(&execution)
+            .iter()
+            .any(|item| item.contains("ess_conformance")),
+        "a conformance run by a runner closes it: {:?}",
+        outstanding(&execution)
+    );
+}
+
+#[test]
+fn a_task_without_a_specification_owes_no_conformance() {
+    let engine = engine();
+    let execution = engine
+        .initialize_with_artifacts(task(Some("development.critical")), artifacts())
+        .expect("initialises");
+
+    let outstanding: Vec<String> = engine
+        .explain_completion(&execution)
+        .outstanding()
+        .map(|item| item.requirement.clone())
+        .collect();
+    assert!(
+        !outstanding.iter().any(|item| item.contains("ess_conformance")),
+        "a rule that does not apply must not be owed: {outstanding:?}"
+    );
+}
+
+#[test]
 fn the_example_documents_are_valid_and_resolve() {
     let plan = aep_engine::resolve(&task(None), &registry()).expect("the example task resolves");
     assert_eq!(plan.profile.id.as_str(), "development.standard");

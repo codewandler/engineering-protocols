@@ -706,6 +706,82 @@
           }
         }
       }
+    },
+    {
+      "description": "An implementation checked against an executable system specification.",
+      "type": "object",
+      "required": [
+        "implementation",
+        "kind",
+        "specification",
+        "status"
+      ],
+      "properties": {
+        "compiler_version": {
+          "description": "The compiler that produced the suite.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failed_scenarios": {
+          "description": "Which scenarios failed, so a failure names something actionable.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "generator_version": {
+          "description": "The generator that produced it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "implementation": {
+          "description": "Which implementation was checked.",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ess_conformance"
+          ]
+        },
+        "scenarios_failed": {
+          "description": "How many did not hold.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "scenarios_total": {
+          "description": "How many scenarios the suite ran.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "specification": {
+          "description": "Which specification, at which version, such as `billing/v3`.",
+          "type": "string"
+        },
+        "status": {
+          "description": "The outcome.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/VerificationStatus"
+            }
+          ]
+        },
+        "suite_version": {
+          "description": "The version of the suite that ran.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     }
   ],
   "definitions": {
@@ -760,7 +836,8 @@
         "migration-plan",
         "runbook",
         "incident-report",
-        "postmortem"
+        "postmortem",
+        "executable-system-specification"
       ],
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$"
@@ -1353,7 +1430,8 @@
         "policy-engine",
         "human-approval",
         "human-review",
-        "artifact-validator"
+        "artifact-validator",
+        "conformance-runner"
       ],
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"

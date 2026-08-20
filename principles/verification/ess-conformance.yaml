@@ -1,0 +1,43 @@
+# The rule that closes the loop between the two halves of this project.
+#
+# A specification generates the contracts an implementation is built against and the suite it is
+# checked by. This principle is what makes the second half non-optional: where a task has an
+# executable system specification, the work is not finished until something other than the agent has
+# run that specification's own suite against what was built.
+#
+# The consequence for a person: nobody has to read a diff and judge whether it matches the spec.
+# The spec judges it, and the protocol refuses to call the task done until it has.
+id: ess-conformance
+version: 1
+title: Conformance to the specification
+summary: >-
+  Where an executable system specification governs the work, the implementation must be checked
+  against that specification's own generated suite, by something other than the agent that wrote the
+  implementation.
+
+requires:
+  before_completion:
+    conditional:
+      # Only where a specification exists. A task with no ESS owes nothing here — and the condition
+      # is checked against the artifact graph at evaluation time, not guessed at resolution time,
+      # so adding a specification to a project turns the rule on without editing this document.
+      - when: artifact.executable-system-specification.exists
+        require:
+          predicates:
+            # Not `status == passed`: a run that reported success alongside failing scenarios is
+            # contradicting itself, and this fact takes the pessimistic half of that.
+            - ess_conformance.passed
+            - ess_conformance.scenarios.failed == 0
+          evidence:
+            - kind: ess_conformance
+              # The whole point. An agent's report that its own implementation conforms is not a
+              # conformance run, and the requirement says so mechanically rather than in a comment.
+              independent: true
+              verifier: conformance-runner
+          artifacts:
+            - kind: executable-system-specification
+
+verification:
+  - verifier: conformance-runner
+
+on_failure: block

@@ -68,7 +68,8 @@
         "migration-plan",
         "runbook",
         "incident-report",
-        "postmortem"
+        "postmortem",
+        "executable-system-specification"
       ],
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*$"

@@ -376,6 +376,13 @@ pub enum ArtifactKind {
     IncidentReport,
     /// What was learned from an incident.
     Postmortem,
+    /// A typed, technology-independent specification of a software system.
+    ///
+    /// Distinct from a [`Specification`](ArtifactKind::Specification), which states what an
+    /// implementation must satisfy in prose a person reads. An executable system specification is
+    /// compiled: contracts, tests and structural code are derived from it, and an implementation is
+    /// checked against the same document that generated them.
+    ExecutableSystemSpecification,
     /// A kind this vocabulary does not name.
     Other(String),
 }
@@ -408,6 +415,7 @@ impl ArtifactKind {
         Self::Runbook,
         Self::IncidentReport,
         Self::Postmortem,
+        Self::ExecutableSystemSpecification,
     ];
 
     /// The kind as written in documents, in kebab-case.
@@ -438,6 +446,7 @@ impl ArtifactKind {
             Self::Runbook => "runbook",
             Self::IncidentReport => "incident-report",
             Self::Postmortem => "postmortem",
+            Self::ExecutableSystemSpecification => "executable-system-specification",
             Self::Other(name) => name,
         }
     }
@@ -449,6 +458,7 @@ impl ArtifactKind {
         }
         Ok(match value {
             "adr" => Self::ArchitectureDecisionRecord,
+            "ess" => Self::ExecutableSystemSpecification,
             "prd" => Self::ProductRequirements,
             "spec" => Self::Specification,
             "review" => Self::ReviewResult,

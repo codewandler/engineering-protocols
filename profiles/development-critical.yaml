@@ -14,6 +14,10 @@ protocol: adp/1
 extends: development.standard
 
 principles:
+  # Where a specification exists, it judges the implementation — nobody has to read a diff and decide
+  # whether it matches. The rule is conditional, so a critical task with no specification owes
+  # nothing extra.
+  - ess-conformance
   - mutation-testing
   - differential-testing
   - invariant-checking
