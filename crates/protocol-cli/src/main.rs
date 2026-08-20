@@ -4,7 +4,14 @@
 //! renders results. It decides nothing, which is the point — if `protocol evaluate` says a transition
 //! is blocked, a harness calling the same engine gets the same answer.
 //!
-//! Exit codes: `0` success, `1` the documents or the execution say no, `2` bad usage.
+//! Exit codes: `0` success, `1` the documents or the execution say no, `2` bad usage, `3` nobody
+//! found out.
+//!
+//! The fourth is only produced by [`ess conform run`](EssConformCommand::Run), and it exists because
+//! collapsing it into `1` would tell a harness that an implementation contradicted its specification
+//! when what actually happened is that the run could not be carried out. Those call for different
+//! reactions — one is a defect to fix, the other is a target to go and reach — so they are different
+//! codes rather than one code and a log line.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -249,7 +256,17 @@ enum Command {
         /// Which schema, by file stem, such as `workflow`. Omitted lists them all.
         name: Option<String>,
     },
-    /// Run the conformance suites against a backend.
+    /// Check a storage backend against the AEP contract suites.
+    ///
+    /// The question is whether a **backend** implements `aep-contract` — commands, queries, audit,
+    /// idempotency, consistency — and the answer is about storage, not about any system you have
+    /// specified.
+    ///
+    /// The other conformance verb answers a different question. `protocol ess conform` asks whether
+    /// an **implementation** satisfies an executable system specification: whether `CreateInvoice`
+    /// with a negative amount is refused, whether a paid invoice can still be cancelled. Design §42
+    /// calls this one contract conformance and that one semantic conformance; neither subsumes the
+    /// other, and a backend passing here says nothing about a system passing there.
     ///
     /// Runs against the in-memory reference backend. `--inject` deliberately breaks one property, to
     /// show that the suite responsible for it actually fails — a suite that passes everything tells
@@ -397,6 +414,26 @@ fn run() -> Result<ExitCode> {
                 format,
             } => ess_generate(&path, kind, out.as_deref(), format),
             EssCommand::Graph { path, format } => ess_graph(&path, format),
+            EssCommand::Conform { command } => match command {
+                EssConformCommand::Synthesize { path, out, format } => {
+                    ess_conform_synthesize(&path, out.as_deref(), format)
+                }
+                EssConformCommand::Run {
+                    path,
+                    suite,
+                    target,
+                    inject,
+                    untraced,
+                    format,
+                } => ess_conform_run(
+                    &path,
+                    suite.as_deref(),
+                    target,
+                    inject.as_deref(),
+                    untraced,
+                    format,
+                ),
+            },
         },
         Command::Resolve(args) => resolve(&args),
         Command::Inspect {
@@ -622,6 +659,130 @@ enum EssCommand {
         #[arg(long, value_enum, default_value_t = GraphFormat::Dot)]
         format: GraphFormat,
     },
+    /// Check an implementation against the suite a specification obliges.
+    ///
+    /// Not `protocol conformance`. That one asks whether a storage **backend** implements the AEP
+    /// contract; this one asks whether an **implementation** satisfies an executable system
+    /// specification — design §42's contract conformance against its semantic conformance. The two
+    /// share a word and nothing else, so they are spelled apart: `protocol conformance` is the
+    /// backend, `protocol ess conform` is the system you wrote a specification for.
+    Conform {
+        /// Synthesise a suite, or run one.
+        #[command(subcommand)]
+        command: EssConformCommand,
+    },
+}
+
+/// The two halves of closing the loop: deriving the suite, and running it.
+///
+/// Two verbs rather than one, because they take different things and produce different things — a
+/// specification in and a suite out, against a suite plus an implementation in and a report out. A
+/// single verb switched by a flag would have to accept `--out` and `--target` together and refuse
+/// most of the combinations, which is a worse way of saying the same thing.
+#[derive(Debug, Subcommand)]
+enum EssConformCommand {
+    /// Derive the conformance suite a specification obliges, and write it or print it.
+    ///
+    /// The suite is one JSON document per specification, keyed by scenario id, carrying no handle
+    /// into any particular compilation — so a runner in another language can read it, and a fault
+    /// matrix can refer to a scenario by a name that does not move when a sibling is added.
+    ///
+    /// Read-only unless `--out` is given, exactly as `protocol ess generate` is, and for the same
+    /// reason: a verb that scatters files over a working tree the first time someone tries it is a
+    /// verb nobody tries twice. `--format json` carries the document's bytes for a consumer that
+    /// wants them without a directory, which is what `cargo xtask suite --check` reads.
+    ///
+    /// A construct the specification does not say enough about to test appears as a **refusal**
+    /// rather than as a silently thinner suite: which construct, why, and what would have to change.
+    /// A suite quietly holding fewer checks than the specification requires is the one failure a
+    /// passing run cannot show.
+    Synthesize {
+        /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// Where to write `suite.json`. Without it nothing is written and the suite is summarised.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// How to render the result. `json` and `yaml` carry the suite document itself.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Run a suite against an implementation and report what it found.
+    ///
+    /// # What this build can run, and what it cannot
+    ///
+    /// It can run the two reference implementations that ship inside `ess-conformance`:
+    /// `--target billing` is `examples/billing/` written by hand and in memory, and
+    /// `--target oracle-fixture` is `examples/oracle-fixture/`. They are here so a person can watch
+    /// the loop close — specification, suite, implementation, verdict — in one command.
+    ///
+    /// **It cannot run yours.** A `ConformanceTarget` is a Rust trait, and this binary can only
+    /// reach an implementation it was compiled with; nothing in this build speaks to a target over a
+    /// socket, and design §41 keeps transport out of the model deliberately. To hold your own system
+    /// to a specification today: depend on `ess-conformance`, implement `ConformanceTarget` for it,
+    /// read the committed `suites/generated/<system>/suite.json` with `ConformanceSuite::from_json`
+    /// and call `Runner::for_suite(&suite).run(&suite, &target)`. That is the whole adapter — the
+    /// suite this verb writes is the same document either way.
+    ///
+    /// # Exit codes
+    ///
+    /// `0` every scenario passed. `1` the implementation contradicted the specification, or a
+    /// scenario the specification requires is one the target cannot expose — §28 makes that a
+    /// failure and not a skip. `3` nothing contradicted the specification and at least one scenario
+    /// could not be executed, which is a target to go and reach rather than a defect to fix.
+    Run {
+        /// The specification to synthesise the suite from.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// A written suite to run instead, such as `suites/generated/billing/suite.json`.
+        #[arg(long, conflicts_with = "path")]
+        suite: Option<PathBuf>,
+        /// Which built-in reference implementation to run against.
+        #[arg(long, value_enum)]
+        target: EssTarget,
+        /// Break one property on purpose, to see which scenario catches it.
+        #[arg(long)]
+        inject: Option<String>,
+        /// Hide the one observation §16 refuses to require of every implementation.
+        ///
+        /// The same implementation, unable to say which command a binding invoked. It is not a
+        /// fault — a system that answers every semantic question and cannot trace its own
+        /// invocations is a legitimate thing to build — and the run still fails, with
+        /// `<binding>/binding/mapping` reported `unsupported` rather than passed. That is §28's
+        /// fourth word doing the only job it has: a check the target cannot make is not a check
+        /// that passed.
+        #[arg(long)]
+        untraced: bool,
+        /// How to render the report.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+}
+
+/// The implementations this build carries.
+///
+/// Named after the example directory each one implements, so `--target billing` and
+/// `--path examples/billing` visibly belong together and a mismatch is readable rather than
+/// mysterious. A mismatch is *permitted*, and that is deliberate: running the oracle's suite against
+/// the billing implementation is how a reader sees `error` — nobody found out — as something other
+/// than `failed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum EssTarget {
+    /// `examples/billing/`, implemented by hand and in memory.
+    Billing,
+    /// `examples/oracle-fixture/`, the fixture with three bindings and all three failure policies.
+    #[value(name = "oracle-fixture")]
+    OracleFixture,
+}
+
+impl EssTarget {
+    /// Which specification it implements, in the vocabulary the fault matrix uses.
+    fn system(self) -> ess_conformance::System {
+        match self {
+            Self::Billing => ess_conformance::System::Billing,
+            Self::OracleFixture => ess_conformance::System::Oracle,
+        }
+    }
 }
 
 /// Which namespace a name is looked up in.
@@ -1216,6 +1377,390 @@ fn ess_generate(
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// The file a suite is written as, under `--out` and under `suites/generated/<system>/`.
+///
+/// One document per specification, not one per component: a binding scenario starts with a command
+/// one component accepts and ends with an event another publishes, so a per-component filing has no
+/// drawer for it.
+const SUITE_FILE: &str = "suite.json";
+
+/// One construct the specification does not say enough about to test.
+///
+/// Flattened out of `ess_conformance::Refusal`, which carries no `Serialize`, into the four fields
+/// §36 asks a refusal to answer: a stable code, the element it is about, why, and what would have to
+/// change. Rendered rather than borrowed, because `--format json` is read by a coding agent as
+/// repair instructions and a nested cause type would make it guess at the shape.
+#[derive(serde::Serialize)]
+struct EssRefusalReport {
+    /// The stable code, such as `ESS-CF-011`.
+    code: String,
+    /// The ESS element that has no scenario.
+    subject: String,
+    /// The scenario that would have existed, where the refusal is about one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scenario: Option<String>,
+    /// Why, in the refusal's own words.
+    because: String,
+    /// What would have to change for this construct to become testable.
+    help: &'static str,
+}
+
+impl EssRefusalReport {
+    /// Reads a refusal.
+    fn of(refusal: &ess_conformance::Refusal) -> Self {
+        Self {
+            code: refusal.code().to_string(),
+            subject: refusal.subject.to_string(),
+            scenario: refusal.scenario.as_ref().map(ToString::to_string),
+            because: refusal.cause.to_string(),
+            help: refusal.hint(),
+        }
+    }
+}
+
+/// The suite document, as an artifact with its bytes beside it.
+///
+/// The same `{ path, contents }` shape `ess generate` reports, and for the same reason: it is what
+/// lets `cargo xtask suite --check` compare a committed tree against what this command produces
+/// without anything having to write a file first. One answer to "what should be committed", not two.
+#[derive(serde::Serialize)]
+struct EssSuiteArtifact {
+    /// Where it goes, relative to `--out`.
+    path: &'static str,
+    /// Its bytes, canonical and newline-terminated.
+    contents: String,
+}
+
+/// What `ess conform synthesize` reports.
+#[derive(serde::Serialize)]
+struct EssSynthesis<'a> {
+    /// Which specification, resolved and synthesised by which builds.
+    provenance: &'a ess_conformance::SuiteProvenance,
+    /// Where the suite was written, when it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    written_to: Option<String>,
+    /// How many scenarios the suite holds.
+    scenarios: usize,
+    /// Whether every construct of the specification produced one.
+    complete: bool,
+    /// Every construct that did not, in the order the model declares them.
+    refusals: Vec<EssRefusalReport>,
+    /// The suite document itself.
+    artifacts: Vec<EssSuiteArtifact>,
+}
+
+/// `protocol ess conform synthesize`
+///
+/// Printed and written bytes are the same bytes, from one call into `ess-conformance`. The drift
+/// guard in `cargo xtask suite --check` compares the committed suites against what this prints, and
+/// that comparison means nothing unless there is one answer to compare with.
+fn ess_conform_synthesize(path: &Path, out: Option<&Path>, format: Format) -> Result<ExitCode> {
+    let ir = match ess_compiled(path, format)? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+
+    let synthesis = ess_conformance::synthesize(&ir);
+    let contents = synthesis.suite.to_canonical_json();
+
+    // Written, and nothing else. `--out` may be any directory a caller names, and a command that
+    // deletes what it did not write is a command nobody points at a working tree; `cargo xtask
+    // suite` owns the committed tree, and owns removing from it.
+    if let Some(directory) = out {
+        fs::create_dir_all(directory)
+            .with_context(|| format!("creating {}", directory.display()))?;
+        let target = directory.join(SUITE_FILE);
+        fs::write(&target, &contents).with_context(|| format!("writing {}", target.display()))?;
+    }
+
+    let report = EssSynthesis {
+        provenance: &synthesis.suite.provenance,
+        written_to: out.map(|directory| directory.display().to_string()),
+        scenarios: synthesis.suite.len(),
+        complete: synthesis.is_complete(),
+        refusals: synthesis
+            .refusals
+            .iter()
+            .map(EssRefusalReport::of)
+            .collect(),
+        artifacts: vec![EssSuiteArtifact {
+            path: SUITE_FILE,
+            contents,
+        }],
+    };
+
+    match format {
+        Format::Text => {
+            let provenance = report.provenance;
+            outln!(
+                "{} {} — {} scenario(s), {} refusal(s), model digest {}",
+                provenance.system,
+                provenance.specification_version,
+                report.scenarios,
+                report.refusals.len(),
+                provenance.spec_digest
+            );
+            for id in synthesis.suite.scenarios.keys() {
+                outln!("  {id}");
+            }
+            // Said out loud and in full, never as a count. A construct with no scenario is the one
+            // defect a green run cannot show, so it is printed beside the scenarios that exist
+            // rather than left for whoever thinks to ask for JSON.
+            if !synthesis.refusals.is_empty() {
+                outln!("{} refusal(s):", synthesis.refusals.len());
+                for refusal in &synthesis.refusals {
+                    outln!("{refusal}");
+                }
+            }
+            match &report.written_to {
+                Some(directory) => outln!("written to {directory}/{SUITE_FILE}"),
+                None => outln!(
+                    "nothing written: pass --out to write {SUITE_FILE}, or --format json for its \
+                     contents"
+                ),
+            }
+        }
+        Format::Yaml | Format::Json => print_serialised(&report, format)?,
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// What `ess conform run` reports.
+///
+/// The report is wrapped rather than printed bare, so that the two facts a verdict is worthless
+/// without travel with it: which implementation was deliberately broken, and how many constructs of
+/// the specification the suite could not check at all. A bare `ConformanceReport` says neither, and
+/// a run that passed 24 of the 27 checks a specification obliges is not the same claim as a run that
+/// passed all of them.
+#[derive(serde::Serialize)]
+struct EssConformance<'a> {
+    /// Which built-in implementation answered.
+    target: &'a str,
+    /// Whether it was asked to hide the invocations its bindings made (§16).
+    untraced: bool,
+    /// The fault injected into it, where one was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    injected: Option<&'a str>,
+    /// Where the suite came from.
+    suite_source: String,
+    /// How many constructs got no scenario, when the suite was synthesised here.
+    ///
+    /// Absent for `--suite`, because a written suite carries scenarios and not the refusals that
+    /// were recorded when it was made — and reporting `0` would be a claim nobody checked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    refusals: Option<usize>,
+    /// The verdict, scenario by scenario.
+    report: &'a ess_conformance::ConformanceReport,
+}
+
+/// `protocol ess conform run`
+fn ess_conform_run(
+    path: &Path,
+    suite_file: Option<&Path>,
+    target: EssTarget,
+    inject: Option<&str>,
+    untraced: bool,
+    format: Format,
+) -> Result<ExitCode> {
+    let fault = match inject {
+        None => None,
+        Some(name) => Some(ess_fault(name, target)?),
+    };
+
+    // A written suite reports no refusals, and that is not the same as reporting none: the document
+    // holds the scenarios that were synthesised and never the constructs that were not, so `None`
+    // says nobody asked rather than claiming zero.
+    let (suite, refusals, suite_source) = if let Some(file) = suite_file {
+        let text = fs::read_to_string(file)
+            .with_context(|| format!("reading the suite {}", file.display()))?;
+        let suite = ess_conformance::ConformanceSuite::from_json(&text)
+            .with_context(|| format!("reading the suite {}", file.display()))?;
+        (suite, None, file.display().to_string())
+    } else {
+        let ir = match ess_compiled(path, format)? {
+            EssCompiled::Compiled { ir, .. } => ir,
+            EssCompiled::Reported => return Ok(exit_code(false)),
+        };
+        let synthesis = ess_conformance::synthesize(&ir);
+        (
+            synthesis.suite,
+            Some(synthesis.refusals.len()),
+            path.display().to_string(),
+        )
+    };
+
+    // Four arms rather than a boxed target, because `Faulty<Billing>` and `Faulty<Oracle>` are
+    // different types and the wrapper is generic — the alternative is a trait object for the sake of
+    // saving two lines.
+    let report = match (target, fault) {
+        (EssTarget::Billing, None) => {
+            ess_conform_execute(&suite, ess_conformance::reference::Billing::new(), untraced)
+        }
+        (EssTarget::Billing, Some(fault)) => {
+            ess_conform_execute(&suite, ess_conformance::faulty::billing(fault), untraced)
+        }
+        (EssTarget::OracleFixture, None) => {
+            ess_conform_execute(&suite, ess_conformance::reference::Oracle::new(), untraced)
+        }
+        (EssTarget::OracleFixture, Some(fault)) => {
+            ess_conform_execute(&suite, ess_conformance::faulty::oracle(fault), untraced)
+        }
+    };
+
+    let rendered = EssConformance {
+        target: ess_target_name(target),
+        untraced,
+        injected: fault.map(ess_conformance::Fault::written),
+        suite_source,
+        refusals,
+        report: &report,
+    };
+
+    match format {
+        Format::Text => {
+            out!("{report}");
+            if let Some(count) = refusals.filter(|count| *count > 0) {
+                outln!(
+                    "  {count} construct(s) of the specification got no scenario — run `protocol \
+                     ess conform synthesize` to see which"
+                );
+            }
+            if let Some(fault) = fault {
+                match fault.caught() {
+                    ess_conformance::Caught::By(scenario) => outln!(
+                        "injected fault: {} — expected to be caught by `{scenario}`",
+                        fault.describe()
+                    ),
+                    // The row worth reading. A fault the suite does not catch is a statement about
+                    // what the model can express, and printing it as though it were caught would
+                    // make a green run look like evidence.
+                    ess_conformance::Caught::Nothing(why) => outln!(
+                        "injected fault: {} — caught by nothing, because {why}",
+                        fault.describe()
+                    ),
+                }
+            }
+            // The four scenario words are already in the count line above; what a reader still needs
+            // is what the verdict *means*, because `unsupported` and `failed` are different findings
+            // that come to the same exit code, and `error` is neither.
+            outln!("{}", ess_conform_verdict(&report));
+        }
+        Format::Yaml | Format::Json => print_serialised(&rendered, format)?,
+    }
+
+    Ok(ess_conform_exit(report.status))
+}
+
+/// Runs a suite against one target, under a runner seeded from the suite itself.
+///
+/// Nothing here reaches for a clock or a random device: two runs of one suite against a
+/// deterministic target produce byte-identical reports, which is what makes `--format json` output
+/// worth storing.
+///
+/// `untraced` is applied here rather than at each call site so that the wrapper cannot be forgotten
+/// for one of the four target/fault combinations — which would report a run as though the target had
+/// answered a question it was never asked.
+fn ess_conform_execute<T: ess_conformance::ConformanceTarget>(
+    suite: &ess_conformance::ConformanceSuite,
+    target: T,
+    untraced: bool,
+) -> ess_conformance::ConformanceReport {
+    if untraced {
+        let target = ess_conformance::reference::Untraced(target);
+        ess_conformance::Runner::for_suite(suite).run(suite, &target)
+    } else {
+        ess_conformance::Runner::for_suite(suite).run(suite, &target)
+    }
+}
+
+/// What `--target` calls one of the built-in implementations.
+fn ess_target_name(target: EssTarget) -> &'static str {
+    match target {
+        EssTarget::Billing => "billing",
+        EssTarget::OracleFixture => "oracle-fixture",
+    }
+}
+
+/// The sentence that says what the verdict means and which exit code it produced.
+fn ess_conform_verdict(report: &ess_conformance::ConformanceReport) -> String {
+    let unsupported = report
+        .scenarios
+        .iter()
+        .filter(|result| result.status == ess_conformance::Status::Unsupported)
+        .count();
+    match report.status {
+        ess_conformance::ConformanceStatus::Passed => {
+            "conformant: every scenario the specification obliges passed (exit 0)".to_owned()
+        }
+        ess_conformance::ConformanceStatus::Failed if unsupported > 0 => format!(
+            "not conformant: the implementation contradicted the specification, or could not \
+             expose what {unsupported} required scenario(s) check — an unsupported required \
+             scenario is a failure and not a skip (exit 1)"
+        ),
+        ess_conformance::ConformanceStatus::Failed => {
+            "not conformant: the implementation contradicted the specification (exit 1)".to_owned()
+        }
+        // Deliberately not exit 1. Nothing contradicted the specification here; the run did not
+        // happen, and a harness that treats the two the same will open a defect against a system
+        // nobody managed to ask a question of.
+        ess_conformance::ConformanceStatus::Error => {
+            "undecided: nothing contradicted the specification and at least one scenario could not \
+             be executed — the target could not answer, so there is no verdict about it (exit 3)"
+                .to_owned()
+        }
+    }
+}
+
+/// `0` conformant, `1` contradicted, `3` nobody found out.
+fn ess_conform_exit(status: ess_conformance::ConformanceStatus) -> ExitCode {
+    match status {
+        ess_conformance::ConformanceStatus::Passed => ExitCode::SUCCESS,
+        ess_conformance::ConformanceStatus::Failed => ExitCode::from(1),
+        ess_conformance::ConformanceStatus::Error => ExitCode::from(3),
+    }
+}
+
+/// Parses an ESS fault name and checks it belongs to the target it is being injected into.
+///
+/// The second half is not politeness. `ess_conformance::faulty::billing` panics on a fault of the
+/// other specification, because injecting one would produce a green run that proves nothing — so the
+/// refusal has to happen here, with a message, rather than as a backtrace.
+fn ess_fault(name: &str, target: EssTarget) -> Result<ess_conformance::Fault> {
+    // `wrong-event`, `wrong_event` and `WrongEvent` all name the same fault; separators are a
+    // spelling choice, not part of the name.
+    let normalised = name.replace(['-', '_'], "").to_ascii_lowercase();
+    let fault = ess_conformance::Fault::ALL
+        .iter()
+        .copied()
+        .find(|fault| fault.written().replace('-', "") == normalised)
+        .with_context(|| {
+            format!(
+                "`{name}` is not a fault; known faults are {}",
+                ess_conformance::Fault::ALL
+                    .iter()
+                    .map(|fault| format!(
+                        "{} (--target {})",
+                        fault.written(),
+                        fault.system().directory()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })?;
+
+    if fault.system() != target.system() {
+        bail!(
+            "`{}` is a fault of `{}`, not of `{}`: injecting it into the wrong implementation \
+             produces a green run that proves nothing",
+            fault.written(),
+            fault.system().directory(),
+            ess_target_name(target)
+        );
+    }
+    Ok(fault)
 }
 
 /// One declaration, resolved, tagged with the namespace it was found in.

@@ -83,6 +83,21 @@ belongs in the commit message or in `docs/design/`.
   token gets a weaker read instead of a reported failure. Each is recorded as an uncaught fault with
   the reason, and the test asserts it is *still* uncaught — so closing one of these holes breaks the
   row rather than being quietly forgotten.
+- **`protocol ess conform`** — `synthesize` writes a suite from a specification, `run` executes one
+  against an implementation. It can run the two reference implementations this repository ships, and
+  its help says outright that it cannot run yours, with the four-line adapter recipe rather than an
+  implication that more is there. Exit codes distinguish the three answers that matter: `0` conformant,
+  `1` the implementation contradicted the specification or could not expose something required, `3` the
+  run could not be carried out at all — because telling a harness the system is wrong when nobody found
+  out is its own kind of lie.
+- **The generated suites are committed and drift-checked**, under `suites/generated/`, as a seventh
+  step of the gate and a CI job of its own. They sit beside the projections rather than inside them,
+  because that tree has one owner and an orphan scan that deletes what its owner did not produce — two
+  writers there would each delete the other's committed contract.
+
+  The committed index also lists every construct that got **no** scenario, with the reason. A suite
+  quietly holding fewer checks than it used to is the one failure a passing run cannot show you, and
+  now it is a line in a diff.
 - **A generated suite runs against an implementation.** A `ConformanceTarget` offers nine methods,
   each traceable to something the specification declares — execute a command, query a view, observe
   events, configure an externally decided outcome, redeliver an event, isolate a scenario. There is no

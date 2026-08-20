@@ -47,17 +47,12 @@ use ess_compiler::ir::EssIr;
 use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
 use ess_conformance::faulty::{self, Caught, Fault, Injection, System};
-use ess_conformance::reference::{Billing, Oracle};
+use ess_conformance::reference::{Billing, Oracle, Untraced};
 use ess_conformance::report::{CheckCode, ConformanceReport, ConformanceStatus, Status};
 use ess_conformance::runner::Runner;
 use ess_conformance::scenario::ConformanceSuite;
 use ess_conformance::synthesize::synthesize;
-use ess_conformance::target::{
-    ConformanceTarget, EventObservationRequest, ExternalOutcomeControl, ImplementationIdentity,
-    InvocationObservationRequest, ObservedEvent, ObservedInvocation, RedeliveryRequest,
-    ScenarioContext, SemanticCommandRequest, SemanticCommandResult, SemanticViewRequest,
-    SemanticViewResult, TargetError,
-};
+use ess_conformance::target::{ConformanceTarget, ImplementationIdentity};
 use ess_domain::spec::{RawSpecFile, Specification};
 use ess_domain::system::Source;
 
@@ -547,66 +542,4 @@ fn every_fault_that_could_be_a_boundary_perturbation_is_one() {
         "`oracle.dispatch.HandedOff` is one event name for three bindings, so a wrapper filtering \
          it out of `observe_events` would have silenced this one too"
     );
-}
-
-// ---- fixtures --------------------------------------------------------------------------------------
-
-/// A target that answers every semantic question and cannot show its own invocations.
-///
-/// Not a fault: §16 says command tracing "should not become a requirement for every implementation",
-/// so this is a legitimate target — which is exactly what makes it interesting to put a wrong
-/// mapping behind.
-struct Untraced<T>(T);
-
-impl<T: ConformanceTarget> ConformanceTarget for Untraced<T> {
-    fn identity(&self) -> Result<ImplementationIdentity, TargetError> {
-        self.0.identity()
-    }
-
-    fn begin_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
-        self.0.begin_scenario(scenario)
-    }
-
-    fn execute_command(
-        &self,
-        request: SemanticCommandRequest,
-    ) -> Result<SemanticCommandResult, TargetError> {
-        self.0.execute_command(request)
-    }
-
-    fn query_view(&self, request: SemanticViewRequest) -> Result<SemanticViewResult, TargetError> {
-        self.0.query_view(request)
-    }
-
-    fn observe_events(
-        &self,
-        request: EventObservationRequest,
-    ) -> Result<Vec<ObservedEvent>, TargetError> {
-        self.0.observe_events(request)
-    }
-
-    fn configure_external_outcome(
-        &self,
-        request: ExternalOutcomeControl,
-    ) -> Result<(), TargetError> {
-        self.0.configure_external_outcome(request)
-    }
-
-    fn redeliver_event(&self, request: RedeliveryRequest) -> Result<(), TargetError> {
-        self.0.redeliver_event(request)
-    }
-
-    fn observe_invocations(
-        &self,
-        _request: InvocationObservationRequest,
-    ) -> Result<Vec<ObservedInvocation>, TargetError> {
-        Err(TargetError::unsupported(
-            "the commands a binding invoked",
-            "this target does not expose the commands its bindings invoke",
-        ))
-    }
-
-    fn end_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
-        self.0.end_scenario(scenario)
-    }
 }

@@ -20,6 +20,12 @@ aep-domain.workspace = true
 aep-engine.workspace = true
 aep-schema.workspace = true
 ess-compiler.workspace = true
+
+# `protocol ess conform`. The suite a specification obliges, the runner that executes one, and the
+# two reference implementations a person can watch the loop close against — the CLI holds none of
+# that itself, which is the point: the command line is a shell over the library, so a harness calling
+# `Runner::for_suite(&suite).run(&suite, &target)` gets the same verdict.
+ess-conformance.workspace = true
 ess-domain.workspace = true
 ess-gen.workspace = true
 anyhow.workspace = true

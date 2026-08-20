@@ -64,6 +64,12 @@ const TASK: &str = "examples/development-passkeys/task.yaml";
 const ARTIFACTS: &str = "examples/development-passkeys/artifacts.yaml";
 const SPECIFICATION: &str = "examples/billing";
 
+/// The second specification, the one built for the checks billing cannot make fail.
+const ORACLE: &str = "examples/oracle-fixture";
+
+/// The committed suite the drift check keeps in step with `examples/billing/`.
+const COMMITTED_SUITE: &str = "suites/generated/billing/suite.json";
+
 /// The header of a one-domain specification, as `system.yaml` carries it.
 const SYSTEM: &str = "format: ess/1\nsystem: shop\nversion: v1\ndomains:\n  - shop.order\n";
 
@@ -746,6 +752,16 @@ fn every_ess_verb_survives_a_reader_that_stops_reading() {
             "billing.invoice.CreateInvoice",
         ],
         vec!["ess", "graph", "--path", SPECIFICATION],
+        vec!["ess", "conform", "synthesize", "--path", SPECIFICATION],
+        vec![
+            "ess",
+            "conform",
+            "run",
+            "--path",
+            SPECIFICATION,
+            "--target",
+            "billing",
+        ],
     ] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_protocol"))
             .args(&arguments)
@@ -1525,6 +1541,341 @@ fn ess_generate_produces_the_same_bytes_twice() {
     let second = protocol(&[
         "ess",
         "generate",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(
+        first.stdout, second.stdout,
+        "two runs over one specification must produce identical bytes"
+    );
+}
+// ---- ess conform ----------------------------------------------------------------------------------
+
+#[test]
+fn ess_conform_synthesize_derives_the_suite_the_normative_example_obliges() {
+    let output = protocol(&["ess", "conform", "synthesize", "--path", SPECIFICATION]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("billing v3 — 27 scenario(s)"), "{text}");
+    // A scenario id, because the ids are the contract: a fault matrix and a stored report both key
+    // on them, and a run of this command is where a reader first sees one.
+    assert!(
+        text.contains("billing.invoice.CreateInvoice/outcome/rejected"),
+        "{text}"
+    );
+    assert!(
+        text.contains("nothing written"),
+        "a verb that looks read-only has to say it wrote nothing: {text}"
+    );
+}
+
+#[test]
+fn ess_conform_synthesize_names_a_construct_it_cannot_test_rather_than_omitting_it() {
+    // §36, and the only failure a passing run cannot show. A suite quietly holding fewer checks than
+    // the specification requires looks exactly like a suite that holds them all.
+    let output = protocol(&["ess", "conform", "synthesize", "--path", SPECIFICATION]);
+    let text = stdout(&output);
+    assert!(text.contains("1 refusal(s)"), "{text}");
+    assert!(
+        text.contains("billing.invoice.Money"),
+        "a refusal names the construct it is about: {text}"
+    );
+    assert!(
+        text.contains("help:"),
+        "and what would have to change: {text}"
+    );
+
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&protocol(&[
+        "ess",
+        "conform",
+        "synthesize",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ])))
+    .expect("the synthesis report is valid JSON");
+    assert_eq!(parsed["complete"], false);
+    let refusals = parsed["refusals"].as_array().expect("refusals is a list");
+    assert_eq!(refusals.len(), 1, "{parsed}");
+    for refusal in refusals {
+        // Fields, not a sentence: this output is read by a coding agent as repair instructions.
+        for field in ["code", "subject", "because", "help"] {
+            assert!(refusal[field].is_string(), "{field} is missing: {refusal}");
+        }
+    }
+}
+
+#[test]
+fn ess_conform_synthesize_writes_the_bytes_it_prints() {
+    // The property the drift check rests on. `cargo xtask suite --check` compares a committed tree
+    // against what `--format json` carries, and that comparison means nothing unless the file this
+    // command writes holds the same bytes.
+    let directory = scratch("ess-conform-synthesize-out");
+    let written = protocol(&[
+        "ess",
+        "conform",
+        "synthesize",
+        "--path",
+        SPECIFICATION,
+        "--out",
+        printable(&directory),
+    ]);
+    assert_eq!(code(&written), 0, "{}", stderr(&written));
+
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&protocol(&[
+        "ess",
+        "conform",
+        "synthesize",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ])))
+    .expect("the synthesis report is valid JSON");
+    let artifacts = parsed["artifacts"].as_array().expect("artifacts is a list");
+    assert_eq!(
+        artifacts.len(),
+        1,
+        "one document per specification: {parsed}"
+    );
+    assert_eq!(artifacts[0]["path"], "suite.json");
+
+    let on_disk =
+        std::fs::read_to_string(directory.join("suite.json")).expect("the suite was written");
+    assert_eq!(
+        artifacts[0]["contents"].as_str(),
+        Some(on_disk.as_str()),
+        "what it prints and what it writes have to be one answer"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_conform_run_closes_the_loop_against_both_reference_implementations() {
+    // The whole point of shipping the references: a person can watch a specification become a suite
+    // and a suite become a verdict, in one command, against something that is known to be right.
+    for (specification, target, scenarios) in [
+        (SPECIFICATION, "billing", "27 scenarios"),
+        (ORACLE, "oracle-fixture", "31 scenarios"),
+    ] {
+        let output = protocol(&[
+            "ess",
+            "conform",
+            "run",
+            "--path",
+            specification,
+            "--target",
+            target,
+        ]);
+        assert_eq!(code(&output), 0, "{target}: {}", stderr(&output));
+        let text = stdout(&output);
+        assert!(text.contains(scenarios), "{target}: {text}");
+        assert!(text.contains("conformant:"), "{target}: {text}");
+    }
+}
+
+#[test]
+fn ess_conform_run_reads_the_committed_suite_rather_than_only_a_freshly_derived_one() {
+    // §22's promise: a written suite is a document a runner reads, not a value one process happened
+    // to hold. If this ever stops working, the committed artifact is decoration.
+    let output = protocol(&[
+        "ess",
+        "conform",
+        "run",
+        "--suite",
+        COMMITTED_SUITE,
+        "--target",
+        "billing",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(text.contains("27 scenarios: 27 passed"), "{text}");
+    assert!(
+        !text.contains("got no scenario"),
+        "a written suite carries scenarios and not the refusals recorded when it was made, so \
+         reporting a count would be claiming something nobody checked: {text}"
+    );
+}
+
+#[test]
+fn ess_conform_run_fails_and_names_the_scenario_that_caught_a_deliberately_wrong_implementation() {
+    let output = protocol(&[
+        "ess",
+        "conform",
+        "run",
+        "--path",
+        SPECIFICATION,
+        "--target",
+        "billing",
+        "--inject",
+        "accept-invalid-amount",
+    ]);
+    assert_eq!(code(&output), 1, "a contradicted specification is exit 1");
+    let text = stdout(&output);
+    assert!(
+        text.contains("failed billing.invoice.CreateInvoice/outcome/rejected"),
+        "the named scenario has to be the one that fails, not merely something: {text}"
+    );
+    assert!(text.contains("not conformant:"), "{text}");
+}
+
+#[test]
+fn a_run_that_could_not_be_carried_out_is_not_reported_as_a_contradiction() {
+    // The distinction §28 exists for, and the one an exit code has to keep: `failed` says the
+    // implementation is wrong, `error` says nobody found out. A harness that collapses them opens a
+    // defect against a system it never managed to ask a question of.
+    let output = protocol(&[
+        "ess", "conform", "run", "--path", ORACLE, "--target", "billing",
+    ]);
+    assert_eq!(code(&output), 3, "an unanswered run is its own exit code");
+    let text = stdout(&output);
+    assert!(
+        text.contains("31 scenarios: 0 passed, 0 failed, 31 error"),
+        "{text}"
+    );
+    assert!(text.contains("undecided:"), "{text}");
+}
+
+#[test]
+fn an_observation_the_target_cannot_expose_is_unsupported_rather_than_skipped() {
+    // §16 lets an implementation decline to trace the commands its bindings invoke, and §28 refuses
+    // to let that pass as a check. Both halves are asserted: the scenario is `unsupported` and not
+    // `passed`, and the run still fails.
+    let output = protocol(&[
+        "ess",
+        "conform",
+        "run",
+        "--path",
+        SPECIFICATION,
+        "--target",
+        "billing",
+        "--untraced",
+    ]);
+    assert_eq!(
+        code(&output),
+        1,
+        "an unsupported required scenario fails the run"
+    );
+    let text = stdout(&output);
+    assert!(
+        text.contains("unsupported notify-on-invoice-created/binding/mapping"),
+        "{text}"
+    );
+    assert!(
+        text.contains("26 passed, 0 failed, 0 error, 1 unsupported"),
+        "the four words stay four words; flattening them loses the finding: {text}"
+    );
+}
+
+#[test]
+fn ess_conform_refuses_a_fault_belonging_to_the_other_specification() {
+    // `ess_conformance::faulty::billing` panics on this rather than returning, because injecting an
+    // oracle fault into billing produces a green run that proves nothing. A backtrace is a worse way
+    // to say so than a sentence.
+    let output = protocol(&[
+        "ess",
+        "conform",
+        "run",
+        "--path",
+        SPECIFICATION,
+        "--target",
+        "billing",
+        "--inject",
+        "drop-binding",
+    ]);
+    assert_eq!(code(&output), 1);
+    let reason = stderr(&output);
+    assert!(
+        reason.contains("is a fault of `oracle-fixture`"),
+        "{reason}"
+    );
+
+    let unknown = protocol(&[
+        "ess",
+        "conform",
+        "run",
+        "--path",
+        SPECIFICATION,
+        "--target",
+        "billing",
+        "--inject",
+        "nonsense",
+    ]);
+    assert_eq!(code(&unknown), 1);
+    assert!(
+        stderr(&unknown).contains("is not a fault"),
+        "{}",
+        stderr(&unknown)
+    );
+}
+
+#[test]
+fn the_two_conformance_verbs_each_say_which_question_they_answer() {
+    // `protocol conformance` and `protocol ess conform` are one word apart and answer different
+    // questions. A reader must not have to guess which is which, so each help text names the other.
+    let backend = stdout(&protocol(&["conformance", "--help"]));
+    assert!(
+        backend.contains("protocol ess conform"),
+        "the backend verb has to point at the semantic one: {backend}"
+    );
+    assert!(
+        backend.contains("backend"),
+        "and say what it is about: {backend}"
+    );
+
+    let semantic = stdout(&protocol(&["ess", "conform", "--help"]));
+    assert!(
+        semantic.contains("protocol conformance"),
+        "and the other way round: {semantic}"
+    );
+
+    // The top-level listing is where a reader meets both, and a one-line summary that does not name
+    // what is being checked is the whole problem.
+    let root = stdout(&protocol(&["--help"]));
+    assert!(
+        root.contains("Check a storage backend against the AEP contract suites"),
+        "{root}"
+    );
+}
+
+#[test]
+fn ess_conform_run_says_plainly_that_it_cannot_run_somebody_elses_implementation() {
+    // The honest half. A `ConformanceTarget` is a Rust trait; this binary reaches only what it was
+    // compiled with. Implying otherwise costs a reader an afternoon looking for the flag.
+    let help = stdout(&protocol(&["ess", "conform", "run", "--help"]));
+    assert!(help.contains("It cannot run yours"), "{help}");
+    assert!(
+        help.contains("ConformanceTarget"),
+        "and say what implementing one would take: {help}"
+    );
+    assert!(
+        help.contains("suites/generated"),
+        "and where the suite to run against it already is: {help}"
+    );
+}
+
+#[test]
+fn ess_conform_synthesize_is_deterministic() {
+    // §37. The committed suite is drift-checked, so a second run producing different bytes would
+    // make the check fail for no reason anybody could act on.
+    let first = protocol(&[
+        "ess",
+        "conform",
+        "synthesize",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&first), 0, "{}", stderr(&first));
+    let second = protocol(&[
+        "ess",
+        "conform",
+        "synthesize",
         "--path",
         SPECIFICATION,
         "--format",

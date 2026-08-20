@@ -96,6 +96,26 @@ jobs:
       - name: Check generated projections
         run: cargo xtask generate --check
 
+  # Its own job for the same reason again, and it is the reason that matters most here: a conformance
+  # suite is a contract an implementation is built against, and a stale one holds fewer checks than
+  # the specification requires — which no passing run can show. The failing check's name says that
+  # `suites/generated/` no longer matches what `examples/` obliges, and the fix is `cargo xtask
+  # suite`. Beside `projections` rather than inside it because `generated/` has one owner; see
+  # `xtask/src/main.rs`.
+  suites:
+    name: Conformance suites up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check generated conformance suites
+        run: cargo xtask suite --check
+
   # Its own job because it is its own toolchain, which a step in `gate` cannot be. `rust-version =
   # "1.85"` in Cargo.toml is a promise to anyone who depends on these crates, and until this job
   # existed nothing in the repository would have noticed it breaking.

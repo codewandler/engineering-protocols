@@ -1400,3 +1400,73 @@ fn non_negative(weight: &Node) -> bool {
         _ => false,
     }
 }
+
+// ---- a legitimately limited target ---------------------------------------------------------------
+
+/// Any target, with the one observation §16 refuses to require of every implementation removed.
+///
+/// **Not a fault.** [`Fault`](crate::faulty::Fault) is a way of being *wrong*; this is a way of being
+/// *limited*, and the difference is the whole point of §28's fourth word. §16 says command tracing
+/// "should not become a requirement for every implementation", so a system that answers every
+/// semantic question and cannot say which command a binding invoked is a perfectly conformant thing
+/// to build — and the suite still must not pass it silently.
+///
+/// What a run against one shows is exactly that: `<binding>/binding/mapping` comes back
+/// [`Unsupported`](crate::report::Status::Unsupported) rather than passing, and the run still fails
+/// (§28), because a suite quietly holding fewer checks than the specification demands is the one
+/// failure a passing run cannot show. Everything else the target *can* answer still answers.
+///
+/// It works by not implementing
+/// [`observe_invocations`](ConformanceTarget::observe_invocations) — the trait's own default body is
+/// the refusal — so this type is nothing but the eight forwarding methods, and it cannot drift from
+/// what the default says.
+#[derive(Debug)]
+pub struct Untraced<T>(pub T);
+
+impl<T: ConformanceTarget> ConformanceTarget for Untraced<T> {
+    /// The target underneath, named as it names itself.
+    ///
+    /// Unlike [`Faulty`](crate::faulty::Faulty), which renames what it wraps: a faulty target is a
+    /// different implementation and must not be reported as the reference, where this one is the
+    /// same implementation asked one fewer question.
+    fn identity(&self) -> Result<ImplementationIdentity, TargetError> {
+        self.0.identity()
+    }
+
+    fn begin_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
+        self.0.begin_scenario(scenario)
+    }
+
+    fn execute_command(
+        &self,
+        request: SemanticCommandRequest,
+    ) -> Result<SemanticCommandResult, TargetError> {
+        self.0.execute_command(request)
+    }
+
+    fn query_view(&self, request: SemanticViewRequest) -> Result<SemanticViewResult, TargetError> {
+        self.0.query_view(request)
+    }
+
+    fn observe_events(
+        &self,
+        request: EventObservationRequest,
+    ) -> Result<Vec<ObservedEvent>, TargetError> {
+        self.0.observe_events(request)
+    }
+
+    fn configure_external_outcome(
+        &self,
+        request: ExternalOutcomeControl,
+    ) -> Result<(), TargetError> {
+        self.0.configure_external_outcome(request)
+    }
+
+    fn redeliver_event(&self, request: RedeliveryRequest) -> Result<(), TargetError> {
+        self.0.redeliver_event(request)
+    }
+
+    fn end_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
+        self.0.end_scenario(scenario)
+    }
+}

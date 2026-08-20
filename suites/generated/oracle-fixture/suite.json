@@ -1,0 +1,4961 @@
+{
+  "provenance": {
+    "suite_version": "ess-conformance/1",
+    "system": "oracle",
+    "specification_version": "v1",
+    "spec_digest": "4288d50a003fa7d5",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "synthesizer_version": "0.1.0"
+  },
+  "scenarios": {
+    "handoff-on-held/binding/delivery": {
+      "purpose": "`oracle.order.OrderHeld` delivered twice still leaves `oracle.dispatch.HandedOff` observable, and no count is required",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderHeld",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "redeliver_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "eventually_event",
+          "event": "oracle.dispatch.HandedOff",
+          "shape": {
+            "handoff_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.HandoffId"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-held"
+        },
+        {
+          "kind": "component",
+          "name": "dispatch-service"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-held/binding/flow": {
+      "purpose": "`oracle.order.OrderHeld` invokes `oracle.dispatch.Handoff`, which publishes `oracle.dispatch.HandedOff`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderHeld",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "eventually_event",
+          "event": "oracle.dispatch.HandedOff",
+          "shape": {
+            "handoff_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.HandoffId"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-held"
+        },
+        {
+          "kind": "component",
+          "name": "dispatch-service"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-held/binding/mapping": {
+      "purpose": "`handoff-on-held` fills `oracle.dispatch.Handoff` from `oracle.order.OrderHeld` as it is mapped",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderHeld",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_invocation",
+          "binding": "handoff-on-held",
+          "command": "oracle.dispatch.Handoff",
+          "input": {
+            "label": {
+              "kind": "literal",
+              "value": "held"
+            },
+            "recipient": {
+              "kind": "observed",
+              "event": "oracle.order.OrderHeld",
+              "field": "contact"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Label"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-held"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-held/binding/on-failure": {
+      "purpose": "a failed `oracle.dispatch.Handoff` makes `handoff-on-held` escalate into `oracle.dispatch.HandoffEscalated`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "configure_external_outcome",
+          "force": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "refused"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderHeld",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "eventually_event",
+          "event": "oracle.dispatch.HandoffEscalated",
+          "shape": {
+            "label": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "refused"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-held"
+        },
+        {
+          "kind": "component",
+          "name": "dispatch-service"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-placed/binding/delivery": {
+      "purpose": "`oracle.order.OrderPlaced` delivered twice still leaves `oracle.dispatch.HandedOff` observable, and no count is required",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderPlaced",
+          "shape": {
+            "alternate_contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "redeliver_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "eventually_event",
+          "event": "oracle.dispatch.HandedOff",
+          "shape": {
+            "handoff_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.HandoffId"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-placed"
+        },
+        {
+          "kind": "component",
+          "name": "dispatch-service"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-placed/binding/flow": {
+      "purpose": "`oracle.order.OrderPlaced` invokes `oracle.dispatch.Handoff`, which publishes `oracle.dispatch.HandedOff`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderPlaced",
+          "shape": {
+            "alternate_contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "eventually_event",
+          "event": "oracle.dispatch.HandedOff",
+          "shape": {
+            "handoff_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.HandoffId"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-placed"
+        },
+        {
+          "kind": "component",
+          "name": "dispatch-service"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-placed/binding/mapping": {
+      "purpose": "`handoff-on-placed` fills `oracle.dispatch.Handoff` from `oracle.order.OrderPlaced` as it is mapped",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderPlaced",
+          "shape": {
+            "alternate_contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_invocation",
+          "binding": "handoff-on-placed",
+          "command": "oracle.dispatch.Handoff",
+          "input": {
+            "label": {
+              "kind": "literal",
+              "value": "placed"
+            },
+            "recipient": {
+              "kind": "observed",
+              "event": "oracle.order.OrderPlaced",
+              "field": "contact"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Label"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-placed"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-placed/binding/on-failure": {
+      "purpose": "`handoff-on-placed` retries a failed `oracle.dispatch.Handoff` until `oracle.dispatch.HandedOff` is published",
+      "steps": [
+        {
+          "step": "configure_external_outcome",
+          "force": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "refused"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderPlaced",
+          "shape": {
+            "alternate_contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "eventually_event",
+          "event": "oracle.dispatch.HandedOff",
+          "shape": {
+            "handoff_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.HandoffId"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "refused"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-placed"
+        },
+        {
+          "kind": "component",
+          "name": "dispatch-service"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-shipped/binding/delivery": {
+      "purpose": "`oracle.order.OrderShipped` delivered twice still leaves `oracle.dispatch.HandedOff` observable, and no count is required",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderShipped",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "redeliver_event",
+          "event": "oracle.order.OrderShipped"
+        },
+        {
+          "step": "eventually_event",
+          "event": "oracle.dispatch.HandedOff",
+          "shape": {
+            "handoff_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.HandoffId"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-shipped"
+        },
+        {
+          "kind": "component",
+          "name": "dispatch-service"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-shipped/binding/flow": {
+      "purpose": "`oracle.order.OrderShipped` invokes `oracle.dispatch.Handoff`, which publishes `oracle.dispatch.HandedOff`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderShipped",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "eventually_event",
+          "event": "oracle.dispatch.HandedOff",
+          "shape": {
+            "handoff_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.HandoffId"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-shipped"
+        },
+        {
+          "kind": "component",
+          "name": "dispatch-service"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "handoff-on-shipped/binding/mapping": {
+      "purpose": "`handoff-on-shipped` fills `oracle.dispatch.Handoff` from `oracle.order.OrderShipped` as it is mapped",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderShipped",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_invocation",
+          "binding": "handoff-on-shipped",
+          "command": "oracle.dispatch.Handoff",
+          "input": {
+            "label": {
+              "kind": "literal",
+              "value": "shipped"
+            },
+            "recipient": {
+              "kind": "observed",
+              "event": "oracle.order.OrderShipped",
+              "field": "contact"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Label"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "binding",
+          "name": "handoff-on-shipped"
+        },
+        {
+          "kind": "component",
+          "name": "order-service"
+        }
+      ]
+    },
+    "oracle.dispatch.Handoff/outcome/accepted": {
+      "purpose": "`oracle.dispatch.Handoff` answers `accepted` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.dispatch.Handoff",
+          "input": {
+            "label": {
+              "kind": "literal",
+              "value": "label"
+            },
+            "recipient": {
+              "kind": "literal",
+              "value": "recipient"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.dispatch.HandedOff",
+          "shape": {
+            "handoff_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.HandoffId"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Label"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        }
+      ]
+    },
+    "oracle.dispatch.Handoff/outcome/refused": {
+      "purpose": "`oracle.dispatch.Handoff` answers `refused` for the cause it declares as external, injected",
+      "steps": [
+        {
+          "step": "configure_external_outcome",
+          "force": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "refused"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.dispatch.Handoff",
+          "input": {
+            "label": {
+              "kind": "literal",
+              "value": "label"
+            },
+            "recipient": {
+              "kind": "literal",
+              "value": "recipient"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "refused"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.dispatch.NoCapacity"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Label"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.dispatch.Recipient"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.dispatch.Handoff"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.dispatch.Handoff",
+            "outcome": "refused"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.dispatch.NoCapacity"
+        }
+      ]
+    },
+    "oracle.order.AmendOrder/outcome/amended": {
+      "purpose": "`oracle.order.AmendOrder` answers `amended` for an input that satisfies that branch's guard",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.AmendOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.AmendOrder",
+            "outcome": "amended"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderAmended",
+          "shape": {
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "weight_grams": {
+              "holds": "primitive",
+              "kind": "integer"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        },
+        {
+          "step": "eventually_view",
+          "view": "oracle.order.HeldOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "oracle.order.OpenOrders"
+        },
+        {
+          "step": "expect_view",
+          "view": "oracle.order.OpenOrders",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.AmendOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.AmendOrder",
+            "outcome": "amended"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.HeldOrders"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.OpenOrders"
+        }
+      ]
+    },
+    "oracle.order.AmendOrder/outcome/rejected": {
+      "purpose": "`oracle.order.AmendOrder` answers `rejected` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.AmendOrder",
+          "input": {
+            "order_id": {
+              "kind": "literal",
+              "value": "00000000-0000-4000-8000-8985aa168165"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": -1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.AmendOrder",
+            "outcome": "rejected"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.WeightOutOfRange"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.AmendOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.AmendOrder",
+            "outcome": "rejected"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.WeightOutOfRange"
+        }
+      ]
+    },
+    "oracle.order.CancelOrder/outcome/cancelled": {
+      "purpose": "`oracle.order.CancelOrder` answers `cancelled` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.CancelOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderCancelled",
+          "shape": {
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        },
+        {
+          "step": "eventually_view",
+          "view": "oracle.order.HeldOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "oracle.order.OpenOrders"
+        },
+        {
+          "step": "expect_view",
+          "view": "oracle.order.OpenOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.CancelOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.HeldOrders"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.OpenOrders"
+        }
+      ]
+    },
+    "oracle.order.HoldOrder/outcome/held": {
+      "purpose": "`oracle.order.HoldOrder` answers `held` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderHeld",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        },
+        {
+          "step": "eventually_view",
+          "view": "oracle.order.HeldOrders",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "oracle.order.OpenOrders"
+        },
+        {
+          "step": "expect_view",
+          "view": "oracle.order.OpenOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.HeldOrders"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.OpenOrders"
+        }
+      ]
+    },
+    "oracle.order.Order/state/Cancelled/refuses/oracle.order.CancelOrder": {
+      "purpose": "`oracle.order.CancelOrder` does not move a `oracle.order.Order` that is in `Cancelled`, and reports `oracle.order.OrderStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.CancelOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.CancelOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.OrderStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.CancelOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.OrderStateConflict"
+        }
+      ]
+    },
+    "oracle.order.Order/state/Cancelled/refuses/oracle.order.HoldOrder": {
+      "purpose": "`oracle.order.HoldOrder` does not move a `oracle.order.Order` that is in `Cancelled`, and reports `oracle.order.OrderStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.CancelOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.OrderStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.CancelOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.OrderStateConflict"
+        }
+      ]
+    },
+    "oracle.order.Order/state/Cancelled/refuses/oracle.order.ShipOrder": {
+      "purpose": "`oracle.order.ShipOrder` does not move a `oracle.order.Order` that is in `Cancelled`, and reports `oracle.order.OrderStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.CancelOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.OrderStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.CancelOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.OrderStateConflict"
+        }
+      ]
+    },
+    "oracle.order.Order/state/Held/refuses/oracle.order.HoldOrder": {
+      "purpose": "`oracle.order.HoldOrder` does not move a `oracle.order.Order` that is in `Held`, and reports `oracle.order.OrderStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.OrderStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.OrderStateConflict"
+        }
+      ]
+    },
+    "oracle.order.Order/state/Held/refuses/oracle.order.ShipOrder": {
+      "purpose": "`oracle.order.ShipOrder` does not move a `oracle.order.Order` that is in `Held`, and reports `oracle.order.OrderStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.OrderStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.OrderStateConflict"
+        }
+      ]
+    },
+    "oracle.order.Order/state/Shipped/refuses/oracle.order.CancelOrder": {
+      "purpose": "`oracle.order.CancelOrder` does not move a `oracle.order.Order` that is in `Shipped`, and reports `oracle.order.OrderStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.CancelOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.OrderStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.CancelOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.OrderStateConflict"
+        }
+      ]
+    },
+    "oracle.order.Order/state/Shipped/refuses/oracle.order.HoldOrder": {
+      "purpose": "`oracle.order.HoldOrder` does not move a `oracle.order.Order` that is in `Shipped`, and reports `oracle.order.OrderStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.OrderStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.OrderStateConflict"
+        }
+      ]
+    },
+    "oracle.order.Order/state/Shipped/refuses/oracle.order.ShipOrder": {
+      "purpose": "`oracle.order.ShipOrder` does not move a `oracle.order.Order` that is in `Shipped`, and reports `oracle.order.OrderStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.OrderStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.OrderStateConflict"
+        }
+      ]
+    },
+    "oracle.order.Order/transition/cancel/by/oracle.order.CancelOrder/cancelled": {
+      "purpose": "`oracle.order.CancelOrder` on `cancelled` moves a `oracle.order.Order` to `Cancelled` along `cancel`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.CancelOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderCancelled",
+          "shape": {
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        },
+        {
+          "step": "eventually_view",
+          "view": "oracle.order.HeldOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "oracle.order.OpenOrders"
+        },
+        {
+          "step": "expect_view",
+          "view": "oracle.order.OpenOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.CancelOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.CancelOrder",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.HeldOrders"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.OpenOrders"
+        }
+      ]
+    },
+    "oracle.order.Order/transition/hold/by/oracle.order.HoldOrder/held": {
+      "purpose": "`oracle.order.HoldOrder` on `held` moves a `oracle.order.Order` to `Held` along `hold`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.HoldOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderHeld",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        },
+        {
+          "step": "eventually_view",
+          "view": "oracle.order.HeldOrders",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "oracle.order.OpenOrders"
+        },
+        {
+          "step": "expect_view",
+          "view": "oracle.order.OpenOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.HoldOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.HoldOrder",
+            "outcome": "held"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.HeldOrders"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.OpenOrders"
+        }
+      ]
+    },
+    "oracle.order.Order/transition/ship/by/oracle.order.ShipOrder/shipped": {
+      "purpose": "`oracle.order.ShipOrder` on `shipped` moves a `oracle.order.Order` to `Shipped` along `ship`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderShipped",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "eventually_view",
+          "view": "oracle.order.HeldOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "oracle.order.OpenOrders"
+        },
+        {
+          "step": "expect_view",
+          "view": "oracle.order.OpenOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.HeldOrders"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.OpenOrders"
+        }
+      ]
+    },
+    "oracle.order.PlaceOrder/outcome/accepted": {
+      "purpose": "`oracle.order.PlaceOrder` answers `accepted` for an input that satisfies that branch's guard",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderPlaced",
+          "shape": {
+            "alternate_contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        },
+        {
+          "step": "eventually_view",
+          "view": "oracle.order.HeldOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "observed",
+                "event": "oracle.order.OrderPlaced",
+                "field": "order_id"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "oracle.order.OpenOrders"
+        },
+        {
+          "step": "expect_view",
+          "view": "oracle.order.OpenOrders",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "order_id": {
+                "kind": "observed",
+                "event": "oracle.order.OrderPlaced",
+                "field": "order_id"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.HeldOrders"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.OpenOrders"
+        }
+      ]
+    },
+    "oracle.order.PlaceOrder/outcome/rejected": {
+      "purpose": "`oracle.order.PlaceOrder` answers `rejected` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": -1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "rejected"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "oracle.order.WeightOutOfRange"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderShipped"
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "rejected"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "error",
+          "name": "oracle.order.WeightOutOfRange"
+        }
+      ]
+    },
+    "oracle.order.ShipOrder/outcome/shipped": {
+      "purpose": "`oracle.order.ShipOrder` answers `shipped` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "oracle.order.PlaceOrder",
+          "input": {
+            "alternate_contact": {
+              "kind": "literal",
+              "value": "alternate_contact"
+            },
+            "contact": {
+              "kind": "literal",
+              "value": "contact"
+            },
+            "weight_grams": {
+              "kind": "literal",
+              "value": 1.0
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "order",
+          "entity": "oracle.order.Order",
+          "event": "oracle.order.OrderPlaced",
+          "field": "order_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "oracle.order.ShipOrder",
+          "input": {
+            "order_id": {
+              "kind": "instance",
+              "instance": "order"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "oracle.order.OrderShipped",
+          "shape": {
+            "contact": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "order_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandedOff"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderAmended"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderHeld"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "oracle.order.OrderPlaced"
+        },
+        {
+          "step": "eventually_view",
+          "view": "oracle.order.HeldOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "oracle.order.OpenOrders"
+        },
+        {
+          "step": "expect_view",
+          "view": "oracle.order.OpenOrders",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "order_id": {
+                "kind": "instance",
+                "instance": "order"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "oracle.order.Email"
+        },
+        {
+          "kind": "type",
+          "name": "oracle.order.OrderId"
+        },
+        {
+          "kind": "entity",
+          "name": "oracle.order.Order"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.PlaceOrder"
+        },
+        {
+          "kind": "command",
+          "name": "oracle.order.ShipOrder"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.PlaceOrder",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "oracle.order.ShipOrder",
+            "outcome": "shipped"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandedOff"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.dispatch.HandoffEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderAmended"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderHeld"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderPlaced"
+        },
+        {
+          "kind": "event",
+          "name": "oracle.order.OrderShipped"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.HeldOrders"
+        },
+        {
+          "kind": "view",
+          "name": "oracle.order.OpenOrders"
+        }
+      ]
+    }
+  }
+}

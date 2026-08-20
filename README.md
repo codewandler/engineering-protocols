@@ -176,6 +176,7 @@ profiles/           bundles of protocol + workflow + principles + completion
 artifacts/          artifact kinds, relations, lifecycles and templates
 schemas/generated/  generated JSON Schema — do not edit by hand
 generated/          projections of examples/billing/ — do not edit by hand
+suites/generated/   conformance suites, generated from the specifications — do not edit by hand
 conformance/        fixtures, scenarios and expected results
 docs/design/        the design specifications
 xtask/              repository automation

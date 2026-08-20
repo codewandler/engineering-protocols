@@ -7,7 +7,9 @@ tasks:
     deps: [check]
 
   check:
-    desc: Format check, lint, test, doc check, schema check and projection check — everything CI runs.
+    desc: >-
+      Format check, lint, test, doc check, schema check, projection check and suite check —
+      everything CI runs.
     cmds:
       - task: fmt-check
       - task: clippy
@@ -15,6 +17,7 @@ tasks:
       - task: doc-check
       - task: schema-check
       - task: generate-check
+      - task: suite-check
 
   fmt:
     desc: Format the workspace.
@@ -45,6 +48,19 @@ tasks:
     desc: Fail if the committed projections differ from what the specification produces.
     cmds:
       - cargo xtask generate --check
+
+  # Beside `generate` rather than part of it: `generated/` has one owner and a recursive orphan scan,
+  # so a second task writing into it would delete the first task's output. `xtask/src/main.rs` argues
+  # it at length. The suites also cover two specifications where `generated/` covers one.
+  suite:
+    desc: Regenerate suites/generated/ — the conformance suites examples/ oblige.
+    cmds:
+      - cargo xtask suite
+
+  suite-check:
+    desc: Fail if the committed conformance suites differ from what the specifications oblige.
+    cmds:
+      - cargo xtask suite --check
 
   schema:
     desc: Regenerate schemas/generated/ from the Rust types.

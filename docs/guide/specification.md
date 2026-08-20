@@ -19,14 +19,17 @@ its HTTP layer.
 | Look one declaration up, resolved | `protocol ess inspect --path <path> <name>` |
 | See the actor/command/event graph | `protocol ess graph --path <path> --format dot\|mermaid\|json\|yaml` |
 | Derive documentation, schemas and contracts | `protocol ess generate --kind docs\|schema\|openapi\|asyncapi` |
+| Derive the conformance suite it obliges | `protocol ess conform synthesize --path <path>` |
+| Run that suite against an implementation | `protocol ess conform run --path <path> --target <name>` |
+| Read the suites this repository commits | [`suites/generated/`](../../suites/generated/) |
 | Validate in an editor as you type | [`schemas/generated/ess.schema.json`](../../schemas/generated/ess.schema.json) |
 | Require conformance to one, as a protocol rule | [`principles/verification/ess-conformance.yaml`](../../principles/verification/ess-conformance.yaml) |
 
-**No tests are generated yet** — that is ESS wave 4 in
-[`docs/plan/ess-roadmap.md`](../plan/ess-roadmap.md), along with the deliberately-wrong
-implementation that proves a generated suite bites. What exists is the model, the compiler that
-resolves it, four projections derived from it, and the join: a task can already be blocked until
-something proves an implementation conforms, with a human producing that evidence by hand.
+**A suite runs against the implementations this repository ships, and not yet against yours.** A
+`ConformanceTarget` is a Rust trait, so `protocol ess conform run` reaches only what it was compiled
+with: the two hand-written references inside `ess-conformance`. Holding your own system to a
+specification means writing that adapter in Rust today — the suite is the same document either way.
+Turning a report into AEP evidence is also still by hand.
 
 ### The graph, without generating a documentation tree
 
@@ -79,6 +82,66 @@ identity. That is a real limit, stated rather than papered over.
 is one way to expose it. The model has no `exposures:` construct yet (design §6 sketches one), so that
 path is a *convention the generator chose*, written down in the generated document's own description.
 When `exposures:` lands it should override the convention, not replace it.
+
+### Closing the loop: the suite a specification obliges
+
+`generate` derives what an implementation is built *from*. `conform` derives what it is held *to*.
+
+```console
+protocol ess conform synthesize --path examples/billing
+protocol ess conform run --path examples/billing --target billing
+```
+
+The first walks the IR and writes one scenario per thing the specification obliges: each declared
+outcome, each lifecycle move, each move that must **not** be honoured, what must still hold of an
+entity afterwards, and each of the four claims a binding makes. 27 of them for `examples/billing/`.
+The second executes them against an implementation and reports scenario by scenario.
+
+**A construct the specification does not say enough about to test is refused, not omitted.** Billing
+has one — a value object's own invariants are declared over a type rather than over an instance, and
+synthesising them is a later slice. It is printed beside the scenarios that exist, because a suite
+quietly holding fewer checks than the specification requires is the one failure a passing run cannot
+show.
+
+| exit | what it means |
+|---|---|
+| `0` | every scenario passed |
+| `1` | the implementation contradicted the specification, or could not expose what a required scenario checks |
+| `3` | nothing contradicted the specification and at least one scenario could not be executed |
+
+The third one is the distinction worth having: `1` says the system is wrong, `3` says nobody found
+out. `protocol ess conform run --path examples/oracle-fixture --target billing` is `3`, because the
+billing implementation has never heard of `oracle.order.PlaceOrder`.
+
+`--untraced` shows the fourth word. §16 refuses to require every implementation to trace the commands
+its bindings invoke, so a target that cannot is legitimate — and the one scenario that needs it comes
+back `unsupported` rather than passing, and the run still fails. A check the target could not make is
+not a check that passed.
+
+`--inject <fault>` breaks one property on purpose and names the scenario that exists to catch it,
+which is how a reader checks in one command that the suite bites:
+
+```console
+protocol ess conform run --path examples/billing --target billing --inject accept-invalid-amount
+```
+
+`cargo xtask suite --check` fails when the committed suites under
+[`suites/generated/`](../../suites/generated/) differ from what the specifications oblige — the same
+guard `generated/` has, in its own CI job, because a suite is a contract too. It lives beside
+`generated/` rather than inside it: each committed tree has exactly one generator, and both orphan
+scans delete what their own task did not produce.
+
+### Not `protocol conformance`
+
+Two verbs, one word apart, two questions:
+
+| command | asks |
+|---|---|
+| `protocol conformance` | does a storage **backend** implement the AEP contract — commands, queries, audit, idempotency, consistency? |
+| `protocol ess conform` | does an **implementation** satisfy this specification — is a negative amount refused, can a paid invoice still be cancelled? |
+
+Design §42 calls the first contract conformance and the second semantic conformance. Neither implies
+the other, and each command's `--help` names the other one.
 
 ### Why compile at all, when validate already refuses a bad specification
 
@@ -292,8 +355,10 @@ principles:
   - ess-conformance
 ```
 
-Until a compiler exists, a person produces that evidence by hand. The point is that the *shape* is
-already right: when the runner arrives, nothing about the protocol side changes.
+The runner exists now — `protocol ess conform run` produces the report those claims are about — but
+nothing yet turns a report into an AEP evidence record, so a person still writes that step by hand.
+The point is that the *shape* was already right: the protocol side did not change when the runner
+arrived.
 
 ## Writing one
 

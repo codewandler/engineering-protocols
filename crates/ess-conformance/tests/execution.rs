@@ -22,7 +22,7 @@ use ess_compiler::ir::EssIr;
 use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
 use ess_conformance::faulty::{self, Fault};
-use ess_conformance::reference::Billing;
+use ess_conformance::reference::{Billing, Untraced};
 use ess_conformance::report::{CheckCode, ConformanceStatus, Status};
 use ess_conformance::runner::{AdvancingClock, Ids, Runner, RunnerConfig};
 use ess_conformance::scenario::{ConformanceSuite, ScenarioId, ScenarioStep, ScenarioValue};
@@ -714,55 +714,5 @@ impl ConformanceTarget for Perturbed {
 
     fn end_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
         self.inner.end_scenario(scenario)
-    }
-}
-
-/// The reference implementation, minus the one observation §16 refuses to require of anybody.
-///
-/// Not a faulty implementation: it answers every semantic question correctly and cannot answer one
-/// question about its own internals, which is exactly the target §16 has in mind when it says
-/// command tracing "should not become a requirement for every implementation".
-struct Untraced(Billing);
-
-impl ConformanceTarget for Untraced {
-    fn identity(&self) -> Result<ImplementationIdentity, TargetError> {
-        self.0.identity()
-    }
-
-    fn begin_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
-        self.0.begin_scenario(scenario)
-    }
-
-    fn execute_command(
-        &self,
-        request: SemanticCommandRequest,
-    ) -> Result<SemanticCommandResult, TargetError> {
-        self.0.execute_command(request)
-    }
-
-    fn query_view(&self, request: SemanticViewRequest) -> Result<SemanticViewResult, TargetError> {
-        self.0.query_view(request)
-    }
-
-    fn observe_events(
-        &self,
-        request: EventObservationRequest,
-    ) -> Result<Vec<ObservedEvent>, TargetError> {
-        self.0.observe_events(request)
-    }
-
-    fn configure_external_outcome(
-        &self,
-        request: ExternalOutcomeControl,
-    ) -> Result<(), TargetError> {
-        self.0.configure_external_outcome(request)
-    }
-
-    fn redeliver_event(&self, request: RedeliveryRequest) -> Result<(), TargetError> {
-        self.0.redeliver_event(request)
-    }
-
-    fn end_scenario(&self, scenario: &ScenarioContext) -> Result<(), TargetError> {
-        self.0.end_scenario(scenario)
     }
 }

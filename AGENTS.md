@@ -158,7 +158,7 @@ is honest. Do not write an enforcement here that you cannot point at.
 task check
 ```
 
-Six steps, all six of which CI also runs, in this order:
+Seven steps, all seven of which CI also runs, in this order:
 
 1. `fmt-check` — `cargo fmt --all -- --check`.
 2. `clippy` — `--workspace --all-targets -D warnings`, which is also what turns `missing_docs` and
@@ -169,8 +169,11 @@ Six steps, all six of which CI also runs, in this order:
 5. `schema-check` — `cargo xtask schema --check`.
 6. `generate-check` — `cargo xtask generate --check`, which fails if the committed projections under
    `generated/` differ from what the specification produces.
+7. `suite-check` — `cargo xtask suite --check`, which fails if the committed conformance suites under
+   `suites/generated/` differ from what the specifications produce. A suite is a contract an
+   implementation is checked against, so a stale one certifies the wrong thing.
 
-Land nothing that does not pass all six. There is no release process yet; when there is, releases
+Land nothing that does not pass all seven. There is no release process yet; when there is, releases
 require a green full suite, not component gates.
 
 ## Conventions

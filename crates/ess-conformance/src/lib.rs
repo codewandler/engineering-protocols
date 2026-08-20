@@ -86,7 +86,11 @@
 //!
 //! [`mod@reference`] holds the targets that prove the suite means anything: `examples/billing/` and
 //! `examples/oracle-fixture/`, each implemented by hand and in memory, passing all 27 and all 31
-//! scenarios their own specifications oblige.
+//! scenarios their own specifications oblige. Beside them,
+//! [`Untraced`](reference::Untraced) is the *limited* target rather than a wrong one — §16 says
+//! command tracing must not become a requirement of every implementation, so a system that cannot
+//! answer it is legitimate, and what a run against one shows is `unsupported` on exactly the one
+//! scenario that needs it and a run that still fails.
 //!
 //! # Falsification: does the suite catch a wrong implementation?
 //!

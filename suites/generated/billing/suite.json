@@ -1,0 +1,4176 @@
+{
+  "provenance": {
+    "suite_version": "ess-conformance/1",
+    "system": "billing",
+    "specification_version": "v3",
+    "spec_digest": "e19d384dac86219a",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0",
+    "synthesizer_version": "0.1.0"
+  },
+  "scenarios": {
+    "billing.email.SendEmail/outcome/failed": {
+      "purpose": "`billing.email.SendEmail` answers `failed` for the cause it declares as external, injected",
+      "steps": [
+        {
+          "step": "configure_external_outcome",
+          "force": {
+            "command": "billing.email.SendEmail",
+            "outcome": "failed"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.email.SendEmail",
+          "input": {
+            "recipient": {
+              "kind": "literal",
+              "value": "recipient"
+            },
+            "template": {
+              "kind": "literal",
+              "value": "template"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.email.SendEmail",
+            "outcome": "failed"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.email.Undeliverable"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.email.EmailAddress"
+        },
+        {
+          "kind": "type",
+          "name": "billing.email.TemplateId"
+        },
+        {
+          "kind": "command",
+          "name": "billing.email.SendEmail"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.email.SendEmail",
+            "outcome": "failed"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.email.Undeliverable"
+        }
+      ]
+    },
+    "billing.email.SendEmail/outcome/sent": {
+      "purpose": "`billing.email.SendEmail` answers `sent` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.email.SendEmail",
+          "input": {
+            "recipient": {
+              "kind": "literal",
+              "value": "recipient"
+            },
+            "template": {
+              "kind": "literal",
+              "value": "template"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.email.SendEmail",
+            "outcome": "sent"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.email.EmailSent",
+          "shape": {
+            "message_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.email.EmailAddress"
+        },
+        {
+          "kind": "type",
+          "name": "billing.email.MessageId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.email.TemplateId"
+        },
+        {
+          "kind": "command",
+          "name": "billing.email.SendEmail"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.email.SendEmail",
+            "outcome": "sent"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        }
+      ]
+    },
+    "billing.invoice.CancelInvoice/outcome/cancelled": {
+      "purpose": "`billing.invoice.CancelInvoice` answers `cancelled` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CancelInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceCancelled",
+          "shape": {
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.OutstandingInvoices",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CancelInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.OutstandingInvoices"
+        }
+      ]
+    },
+    "billing.invoice.CreateInvoice/outcome/accepted": {
+      "purpose": "`billing.invoice.CreateInvoice` answers `accepted` for an input that satisfies that branch's guard",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceCreated",
+          "shape": {
+            "amount.amount": {
+              "holds": "primitive",
+              "kind": "decimal"
+            },
+            "amount.currency": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "customer_email": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "observed",
+                "event": "billing.invoice.InvoiceCreated",
+                "field": "invoice_id"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.OutstandingInvoices",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "invoice_id": {
+                "kind": "observed",
+                "event": "billing.invoice.InvoiceCreated",
+                "field": "invoice_id"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.Email"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "kind": "actor",
+          "name": "billing.invoice.Customer"
+        }
+      ]
+    },
+    "billing.invoice.CreateInvoice/outcome/rejected": {
+      "purpose": "`billing.invoice.CreateInvoice` answers `rejected` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 0.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "rejected"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvalidAmount"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.Email"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "rejected"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvalidAmount"
+        },
+        {
+          "kind": "actor",
+          "name": "billing.invoice.Customer"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/invariant/after/billing.invoice.CancelInvoice/cancelled": {
+      "purpose": "a `billing.invoice.Invoice` still satisfies what it declares after `billing.invoice.CancelInvoice` on `cancelled`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CancelInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "satisfies",
+            "predicate": "total.amount >= 0"
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CancelInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/invariant/after/billing.invoice.CreateInvoice/accepted": {
+      "purpose": "a `billing.invoice.Invoice` still satisfies what it declares after `billing.invoice.CreateInvoice` on `accepted`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "satisfies",
+            "predicate": "total.amount >= 0"
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.Email"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "actor",
+          "name": "billing.invoice.Customer"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/invariant/after/billing.invoice.IssueInvoice/issued": {
+      "purpose": "a `billing.invoice.Invoice` still satisfies what it declares after `billing.invoice.IssueInvoice` on `issued`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "satisfies",
+            "predicate": "total.amount >= 0"
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.OutstandingInvoices",
+          "expectation": {
+            "expect": "satisfies",
+            "predicate": "total.amount >= 0"
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.OutstandingInvoices"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/invariant/after/billing.invoice.PayInvoice/settled": {
+      "purpose": "a `billing.invoice.Invoice` still satisfies what it declares after `billing.invoice.PayInvoice` on `settled`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "satisfies",
+            "predicate": "total.amount >= 0"
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/state/Cancelled/refuses/billing.invoice.CancelInvoice": {
+      "purpose": "`billing.invoice.CancelInvoice` does not move a `billing.invoice.Invoice` that is in `Cancelled`, and reports `billing.invoice.InvoiceStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CancelInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CancelInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvoiceStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CancelInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvoiceStateConflict"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/state/Cancelled/refuses/billing.invoice.IssueInvoice": {
+      "purpose": "`billing.invoice.IssueInvoice` does not move a `billing.invoice.Invoice` that is in `Cancelled`, and reports `billing.invoice.InvoiceStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CancelInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvoiceStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CancelInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvoiceStateConflict"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/state/Cancelled/refuses/billing.invoice.PayInvoice": {
+      "purpose": "`billing.invoice.PayInvoice` does not move a `billing.invoice.Invoice` that is in `Cancelled`, and reports `billing.invoice.InvoiceStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CancelInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvoiceStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CancelInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvoiceStateConflict"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/state/Draft/refuses/billing.invoice.PayInvoice": {
+      "purpose": "`billing.invoice.PayInvoice` does not move a `billing.invoice.Invoice` that is in `Draft`, and reports `billing.invoice.InvoiceStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvoiceStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvoiceStateConflict"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/state/Issued/refuses/billing.invoice.IssueInvoice": {
+      "purpose": "`billing.invoice.IssueInvoice` does not move a `billing.invoice.Invoice` that is in `Issued`, and reports `billing.invoice.InvoiceStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvoiceStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvoiceStateConflict"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.CancelInvoice": {
+      "purpose": "`billing.invoice.CancelInvoice` does not move a `billing.invoice.Invoice` that is in `Paid`, and reports `billing.invoice.InvoiceStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CancelInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvoiceStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CancelInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvoiceStateConflict"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.IssueInvoice": {
+      "purpose": "`billing.invoice.IssueInvoice` does not move a `billing.invoice.Invoice` that is in `Paid`, and reports `billing.invoice.InvoiceStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvoiceStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvoiceStateConflict"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/state/Paid/refuses/billing.invoice.PayInvoice": {
+      "purpose": "`billing.invoice.PayInvoice` does not move a `billing.invoice.Invoice` that is in `Paid`, and reports `billing.invoice.InvoiceStateConflict`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvoiceStateConflict"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "wrong-state"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvoiceStateConflict"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/transition/cancel/by/billing.invoice.CancelInvoice/cancelled": {
+      "purpose": "`billing.invoice.CancelInvoice` on `cancelled` moves a `billing.invoice.Invoice` to `Cancelled` along `cancel`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CancelInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceCancelled",
+          "shape": {
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.OutstandingInvoices",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CancelInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CancelInvoice",
+            "outcome": "cancelled"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.OutstandingInvoices"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/transition/issue/by/billing.invoice.IssueInvoice/issued": {
+      "purpose": "`billing.invoice.IssueInvoice` on `issued` moves a `billing.invoice.Invoice` to `Issued` along `issue`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceIssued",
+          "shape": {
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.OutstandingInvoices",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.OutstandingInvoices"
+        }
+      ]
+    },
+    "billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled": {
+      "purpose": "`billing.invoice.PayInvoice` on `settled` moves a `billing.invoice.Invoice` to `Paid` along `settle`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoicePaid",
+          "shape": {
+            "amount.amount": {
+              "holds": "primitive",
+              "kind": "decimal"
+            },
+            "amount.currency": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.OutstandingInvoices",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.OutstandingInvoices"
+        }
+      ]
+    },
+    "billing.invoice.IssueInvoice/outcome/issued": {
+      "purpose": "`billing.invoice.IssueInvoice` answers `issued` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceIssued",
+          "shape": {
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.OutstandingInvoices",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.OutstandingInvoices"
+        }
+      ]
+    },
+    "billing.invoice.PayInvoice/outcome/rejected": {
+      "purpose": "`billing.invoice.PayInvoice` answers `rejected` for an input no other branch's guard claims",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 0.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "literal",
+              "value": "00000000-0000-4000-8000-0858a72c3c28"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "rejected"
+          }
+        },
+        {
+          "step": "expect_error",
+          "error": "billing.invoice.InvalidAmount"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoicePaid"
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "rejected"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "error",
+          "name": "billing.invoice.InvalidAmount"
+        }
+      ]
+    },
+    "billing.invoice.PayInvoice/outcome/settled": {
+      "purpose": "`billing.invoice.PayInvoice` answers `settled` for an input that satisfies that branch's guard",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "capture_instance",
+          "instance": "invoice",
+          "entity": "billing.invoice.Invoice",
+          "event": "billing.invoice.InvoiceCreated",
+          "field": "invoice_id"
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.IssueInvoice",
+          "input": {
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.PayInvoice",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "invoice_id": {
+              "kind": "instance",
+              "instance": "invoice"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoicePaid",
+          "shape": {
+            "amount.amount": {
+              "holds": "primitive",
+              "kind": "decimal"
+            },
+            "amount.currency": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.DeliveryEscalated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.email.EmailSent"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "expect_no_event",
+          "event": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "step": "eventually_view",
+          "view": "billing.invoice.InvoiceById",
+          "expectation": {
+            "expect": "contains",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        },
+        {
+          "step": "query_view",
+          "view": "billing.invoice.OutstandingInvoices"
+        },
+        {
+          "step": "expect_view",
+          "view": "billing.invoice.OutstandingInvoices",
+          "expectation": {
+            "expect": "excludes",
+            "fields": {
+              "invoice_id": {
+                "kind": "instance",
+                "instance": "invoice"
+              }
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.InvoiceId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.IssueInvoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.PayInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.IssueInvoice",
+            "outcome": "issued"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.PayInvoice",
+            "outcome": "settled"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCancelled"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceIssued"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoicePaid"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.InvoiceById"
+        },
+        {
+          "kind": "view",
+          "name": "billing.invoice.OutstandingInvoices"
+        }
+      ]
+    },
+    "notify-on-invoice-created/binding/delivery": {
+      "purpose": "`billing.invoice.InvoiceCreated` delivered twice still leaves `billing.email.EmailSent` observable, and no count is required",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceCreated",
+          "shape": {
+            "amount.amount": {
+              "holds": "primitive",
+              "kind": "decimal"
+            },
+            "amount.currency": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "customer_email": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "redeliver_event",
+          "event": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "step": "eventually_event",
+          "event": "billing.email.EmailSent",
+          "shape": {
+            "message_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.email.EmailAddress"
+        },
+        {
+          "kind": "type",
+          "name": "billing.email.MessageId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Email"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.email.SendEmail"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.email.SendEmail",
+            "outcome": "sent"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "actor",
+          "name": "billing.invoice.Customer"
+        },
+        {
+          "kind": "binding",
+          "name": "notify-on-invoice-created"
+        },
+        {
+          "kind": "component",
+          "name": "email-service"
+        },
+        {
+          "kind": "component",
+          "name": "invoice-service"
+        }
+      ]
+    },
+    "notify-on-invoice-created/binding/flow": {
+      "purpose": "`billing.invoice.InvoiceCreated` invokes `billing.email.SendEmail`, which publishes `billing.email.EmailSent`",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceCreated",
+          "shape": {
+            "amount.amount": {
+              "holds": "primitive",
+              "kind": "decimal"
+            },
+            "amount.currency": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "customer_email": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "eventually_event",
+          "event": "billing.email.EmailSent",
+          "shape": {
+            "message_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            },
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.email.EmailAddress"
+        },
+        {
+          "kind": "type",
+          "name": "billing.email.MessageId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Email"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.email.SendEmail"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.email.SendEmail",
+            "outcome": "sent"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.EmailSent"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "actor",
+          "name": "billing.invoice.Customer"
+        },
+        {
+          "kind": "binding",
+          "name": "notify-on-invoice-created"
+        },
+        {
+          "kind": "component",
+          "name": "email-service"
+        },
+        {
+          "kind": "component",
+          "name": "invoice-service"
+        }
+      ]
+    },
+    "notify-on-invoice-created/binding/mapping": {
+      "purpose": "`notify-on-invoice-created` fills `billing.email.SendEmail` from `billing.invoice.InvoiceCreated` as it is mapped",
+      "steps": [
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceCreated",
+          "shape": {
+            "amount.amount": {
+              "holds": "primitive",
+              "kind": "decimal"
+            },
+            "amount.currency": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "customer_email": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "expect_invocation",
+          "binding": "notify-on-invoice-created",
+          "command": "billing.email.SendEmail",
+          "input": {
+            "recipient": {
+              "kind": "observed",
+              "event": "billing.invoice.InvoiceCreated",
+              "field": "customer_email"
+            },
+            "template": {
+              "kind": "literal",
+              "value": "invoice-created"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.email.EmailAddress"
+        },
+        {
+          "kind": "type",
+          "name": "billing.email.TemplateId"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Email"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.email.SendEmail"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "actor",
+          "name": "billing.invoice.Customer"
+        },
+        {
+          "kind": "binding",
+          "name": "notify-on-invoice-created"
+        },
+        {
+          "kind": "component",
+          "name": "invoice-service"
+        }
+      ]
+    },
+    "notify-on-invoice-created/binding/on-failure": {
+      "purpose": "a failed `billing.email.SendEmail` makes `notify-on-invoice-created` escalate into `billing.email.DeliveryEscalated`",
+      "steps": [
+        {
+          "step": "configure_external_outcome",
+          "force": {
+            "command": "billing.email.SendEmail",
+            "outcome": "failed"
+          }
+        },
+        {
+          "step": "execute_command",
+          "command": "billing.invoice.CreateInvoice",
+          "actor": "billing.invoice.Customer",
+          "input": {
+            "amount": {
+              "kind": "literal",
+              "value": {
+                "amount": 1.0,
+                "currency": "amount.currency"
+              }
+            },
+            "customer_email": {
+              "kind": "literal",
+              "value": "customer_email"
+            }
+          }
+        },
+        {
+          "step": "expect_outcome",
+          "outcome": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "step": "expect_event",
+          "event": "billing.invoice.InvoiceCreated",
+          "shape": {
+            "amount.amount": {
+              "holds": "primitive",
+              "kind": "decimal"
+            },
+            "amount.currency": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "customer_email": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "invoice_id": {
+              "holds": "primitive",
+              "kind": "uuid"
+            }
+          }
+        },
+        {
+          "step": "eventually_event",
+          "event": "billing.email.DeliveryEscalated",
+          "shape": {
+            "recipient": {
+              "holds": "primitive",
+              "kind": "string"
+            },
+            "template": {
+              "holds": "primitive",
+              "kind": "string"
+            }
+          }
+        }
+      ],
+      "source": [
+        {
+          "kind": "type",
+          "name": "billing.invoice.Email"
+        },
+        {
+          "kind": "type",
+          "name": "billing.invoice.Money"
+        },
+        {
+          "kind": "entity",
+          "name": "billing.invoice.Invoice"
+        },
+        {
+          "kind": "command",
+          "name": "billing.email.SendEmail"
+        },
+        {
+          "kind": "command",
+          "name": "billing.invoice.CreateInvoice"
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.email.SendEmail",
+            "outcome": "failed"
+          }
+        },
+        {
+          "kind": "outcome",
+          "name": {
+            "command": "billing.invoice.CreateInvoice",
+            "outcome": "accepted"
+          }
+        },
+        {
+          "kind": "event",
+          "name": "billing.email.DeliveryEscalated"
+        },
+        {
+          "kind": "event",
+          "name": "billing.invoice.InvoiceCreated"
+        },
+        {
+          "kind": "actor",
+          "name": "billing.invoice.Customer"
+        },
+        {
+          "kind": "binding",
+          "name": "notify-on-invoice-created"
+        },
+        {
+          "kind": "component",
+          "name": "email-service"
+        },
+        {
+          "kind": "component",
+          "name": "invoice-service"
+        }
+      ]
+    }
+  }
+}

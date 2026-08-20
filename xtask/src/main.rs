@@ -1,10 +1,25 @@
 //! Repository automation.
 //!
 //! `cargo xtask schema` regenerates the published JSON Schemas from the Rust types;
-//! `cargo xtask generate` regenerates the committed projections of the normative specification.
-//! Both take `--check`, which verifies the committed files still match instead of writing them, and
-//! that is what CI runs. Both directories are outputs: editing one by hand is always wrong, because
-//! the next regeneration silently reverts it.
+//! `cargo xtask generate` regenerates the committed projections of the normative specification;
+//! `cargo xtask suite` regenerates the committed conformance suites the example specifications
+//! oblige. All three take `--check`, which verifies the committed files still match instead of
+//! writing them, and that is what CI runs — one job each, so a stale artifact reads as a stale
+//! artifact rather than as "the gate failed". All three directories are outputs: editing one by hand
+//! is always wrong, because the next regeneration silently reverts it.
+//!
+//! # One owner per tree
+//!
+//! Each task owns a directory root and nothing else, and that is why the suites are committed beside
+//! `generated/` rather than inside it as design §38 sketched. The orphan scan below is what forces
+//! it: it is recursive, and it deletes every committed file the task does not itself produce. Two
+//! tasks writing into one tree therefore means each one calling the other's output a file nothing
+//! generates — and in write mode, deleting it. An exclusion list would work until somebody adds a
+//! third task, and the failure it fails at is silently removing a committed contract.
+//!
+//! `suites/generated/` also holds suites for **two** specifications, where `generated/` is defined as
+//! the projections of the normative example alone: the fault matrix names scenario ids from
+//! `examples/oracle-fixture/` as well as from `examples/billing/`, so both have to be stable.
 //!
 //! A `--check` that only compares what is generated cannot see the other direction — a committed
 //! file nothing generates any more. That is a contract this repository no longer stands behind and a
@@ -35,6 +50,22 @@ const NORMATIVE_EXAMPLE: &str = "examples/billing";
 /// scan and the index are properties of the whole tree.
 const PROJECTIONS: &str = "generated";
 
+/// The specifications a conformance suite is committed for.
+///
+/// Two, not one. `examples/billing/` is the normative example, and the suite for it is what design
+/// §38 asks to be committed. `examples/oracle-fixture/` is here because `ess-conformance`'s fault
+/// matrix names scenario ids from it — `handoff-on-placed/binding/flow` and its siblings — and an id
+/// a matrix refers to has to be an id that cannot change by accident.
+const SUITE_SPECIFICATIONS: &[&str] = &["examples/billing", "examples/oracle-fixture"];
+
+/// Where those suites are committed.
+///
+/// Beside `generated/` rather than inside it, for the reason the [module documentation](self) gives:
+/// one owner per tree, because the orphan scan deletes what its own task does not produce. The
+/// nesting mirrors `schemas/generated/`, which is this repository's existing shape for a committed
+/// output tree with a drift check and a CI job of its own.
+const SUITES: &str = "suites/generated";
+
 /// Repository automation for engineering-protocols.
 #[derive(Debug, Parser)]
 #[command(name = "xtask", about, version)]
@@ -59,6 +90,12 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate the committed conformance suites the example specifications oblige.
+    Suite {
+        /// Verify the committed tree matches instead of writing it.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -72,6 +109,14 @@ fn main() -> Result<()> {
                 &root.join(PROJECTIONS),
                 check,
             )
+        }
+        Command::Suite { check } => {
+            let root = workspace_root();
+            let specifications: Vec<PathBuf> = SUITE_SPECIFICATIONS
+                .iter()
+                .map(|specification| root.join(specification))
+                .collect();
+            suite(&specifications, &root.join(SUITES), check)
         }
     }
 }
@@ -241,11 +286,39 @@ fn generate(spec: &Path, out: &Path, check: bool) -> Result<()> {
     let mut expected = generated.artifacts.clone();
     expected.insert(INDEX.to_owned(), projection_index(&generated));
 
+    sync(
+        out,
+        &expected,
+        check,
+        "projections",
+        "the specification",
+        "cargo xtask generate",
+    )
+}
+
+/// Writes or checks a committed output tree against what a generator produced.
+///
+/// Shared by [`generate`] and [`suite`], because the rule is one rule: write only the files whose
+/// content differs, delete the ones nothing generates any more, prune the directories that leaves
+/// empty, and name the command that fixes it. A second copy of this would be a second answer to "is
+/// the tree clean", which is the drift these tasks exist to catch, one level up.
+///
+/// `noun`, `against` and `fix` are the only things that differ, and they are words in a message
+/// rather than behaviour: a reader who runs the wrong task needs to be told which one to run, and
+/// "the gate failed" is not that.
+fn sync(
+    out: &Path,
+    expected: &BTreeMap<String, String>,
+    check: bool,
+    noun: &str,
+    against: &str,
+    fix: &str,
+) -> Result<()> {
     let mut differing = Vec::new();
     let mut written = 0_usize;
     let mut removed = 0_usize;
 
-    for (path, contents) in &expected {
+    for (path, contents) in expected {
         let target = out.join(path);
         // A file that is not there is a file that differs, rather than an error. The first run of
         // `--check` on a tree nobody has written yet is the case that matters, and "no such file" is
@@ -265,9 +338,9 @@ fn generate(spec: &Path, out: &Path, check: bool) -> Result<()> {
         written += 1;
     }
 
-    // The other direction: a committed artifact no projection produces any more. It is a contract
-    // this repository has stopped standing behind, and a consumer validating against it goes on
-    // passing — which a check that only compares what *is* generated will never notice.
+    // The other direction: a committed artifact nothing produces any more. It is a contract this
+    // repository has stopped standing behind, and a consumer validating against it goes on passing —
+    // which a check that only compares what *is* generated will never notice.
     let mut orphaned = Vec::new();
     for path in committed_files(out)? {
         if expected.contains_key(&path) {
@@ -284,14 +357,14 @@ fn generate(spec: &Path, out: &Path, check: bool) -> Result<()> {
 
     if check {
         if differing.is_empty() && orphaned.is_empty() {
-            println!("projections are up to date");
+            println!("{noun} are up to date");
             return Ok(());
         }
         let mut detail = String::new();
         if !differing.is_empty() {
             let _ = writeln!(
                 detail,
-                "{} file(s) differ from the specification: {}",
+                "{} file(s) differ from {against}: {}",
                 differing.len(),
                 differing.join(", ")
             );
@@ -304,11 +377,15 @@ fn generate(spec: &Path, out: &Path, check: bool) -> Result<()> {
                 orphaned.join(", ")
             );
         }
-        bail!("{detail}run `cargo xtask generate` and commit the result");
+        bail!("{detail}run `{fix}` and commit the result");
     }
 
-    prune_empty_directories(out)?;
-    println!("projections written: {written} changed, {removed} no longer generated");
+    // Only if the tree exists: a write that produced nothing at all has no directories to prune, and
+    // reading a directory that is not there is a different failure from a tree that is clean.
+    if out.is_dir() {
+        prune_empty_directories(out)?;
+    }
+    println!("{noun} written: {written} changed, {removed} no longer generated");
     Ok(())
 }
 
@@ -319,40 +396,11 @@ fn generate(spec: &Path, out: &Path, check: bool) -> Result<()> {
 /// answer. Two answers is the drift this task exists to catch, one level up — the check would pass
 /// while the command a person runs wrote something else.
 fn projections(spec: &Path) -> Result<Generated> {
-    // `CARGO` is set by the cargo that invoked this task, so the projections are generated by the
-    // toolchain the caller is already on rather than by whichever cargo comes first on their PATH.
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let output = std::process::Command::new(&cargo)
-        .args([
-            "run",
-            "--quiet",
-            "--package",
-            "protocol-cli",
-            "--",
-            "ess",
-            "generate",
-            "--format",
-            "json",
-            "--path",
-        ])
-        .arg(spec)
-        // The binary is built from this checkout, always: the output tree is a parameter, the
-        // workspace it is generated by is not.
-        .current_dir(workspace_root())
-        .output()
-        .with_context(|| format!("running {cargo:?} to generate the projections"))?;
-
-    if !output.status.success() {
-        bail!(
-            "`protocol ess generate` refused {}:\n{}{}",
-            spec.display(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let report: serde_json::Value =
-        serde_json::from_slice(&output.stdout).context("reading the report of `ess generate`")?;
+    let report = protocol_json(
+        &["ess", "generate", "--format", "json", "--path"],
+        spec,
+        "generating the projections",
+    )?;
 
     let mut projections = Vec::new();
     for projection in array(&report, "projections")? {
@@ -381,12 +429,273 @@ fn projections(spec: &Path) -> Result<Generated> {
     })
 }
 
+/// Runs `protocol` over a specification with `--format json` and reads what it printed.
+///
+/// The one place this file starts a process, for the reason [`projections`] gives: what gets
+/// committed has to be what the command a person runs produces, so both tasks go through the command
+/// line rather than linking the library a second time.
+fn protocol_json(args: &[&str], spec: &Path, doing: &str) -> Result<serde_json::Value> {
+    // `CARGO` is set by the cargo that invoked this task, so the artifacts are produced by the
+    // toolchain the caller is already on rather than by whichever cargo comes first on their PATH.
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = std::process::Command::new(&cargo)
+        .args(["run", "--quiet", "--package", "protocol-cli", "--"])
+        .args(args)
+        .arg(spec)
+        // The binary is built from this checkout, always: the output tree is a parameter, the
+        // workspace it is generated by is not.
+        .current_dir(workspace_root())
+        .output()
+        .with_context(|| format!("running {cargo:?} for {doing}"))?;
+
+    if !output.status.success() {
+        bail!(
+            "`protocol {}` refused {}:\n{}{}",
+            args.join(" "),
+            spec.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    serde_json::from_slice(&output.stdout)
+        .with_context(|| format!("reading what `protocol {}` printed", args.join(" ")))
+}
+
+// ---- the conformance suites --------------------------------------------------------------------
+
+/// One specification's suite, as `protocol ess conform synthesize` reports it.
+struct Suite {
+    /// The directory under `examples/` it was synthesised from, which is also where it is filed.
+    directory: String,
+    /// The system and version the suite checks, and the digest of the model it was derived from.
+    provenance: String,
+    /// How many scenarios it holds.
+    scenarios: u64,
+    /// Every construct of the specification that got no scenario.
+    refusals: Vec<Refused>,
+    /// Its files, keyed by path relative to the suite's own directory.
+    artifacts: BTreeMap<String, String>,
+}
+
+/// One construct the specification does not say enough about to test.
+struct Refused {
+    /// The stable code, such as `ESS-SYNTH-006`.
+    code: String,
+    /// The ESS element that has no scenario.
+    subject: String,
+    /// The scenario that would have existed, where the refusal is about one.
+    scenario: Option<String>,
+    /// What would have to change for it to become testable.
+    help: String,
+}
+
+/// Writes or checks `suites/generated/`.
+///
+/// The specifications and the output tree are separate arguments for the reason [`generate`] gives:
+/// a test has to be able to point the output somewhere harmless without also pointing the input at a
+/// copy of the specification, because a copy is a second specification that drifts.
+fn suite(specifications: &[PathBuf], out: &Path, check: bool) -> Result<()> {
+    let mut suites = Vec::new();
+    for specification in specifications {
+        suites.push(suite_of(specification)?);
+    }
+
+    // Filed under the example directory rather than under the system name inside the specification.
+    // Both are stable, and this one is the half a reader already knows: `suites/generated/billing/`
+    // sits opposite `examples/billing/`, and finding one from the other takes no lookup.
+    let mut expected = BTreeMap::new();
+    for suite in &suites {
+        for (path, contents) in &suite.artifacts {
+            expected.insert(format!("{}/{path}", suite.directory), contents.clone());
+        }
+    }
+    // Written from the same reports as the tree, so a suite cannot land undocumented — and, being
+    // generated, it is not an orphan either.
+    expected.insert(INDEX.to_owned(), suite_index(&suites));
+
+    sync(
+        out,
+        &expected,
+        check,
+        "suites",
+        "the specifications",
+        "cargo xtask suite",
+    )
+}
+
+/// Runs `protocol ess conform synthesize` over one specification and reads its report.
+fn suite_of(spec: &Path) -> Result<Suite> {
+    let report = protocol_json(
+        &["ess", "conform", "synthesize", "--format", "json", "--path"],
+        spec,
+        "synthesising the conformance suite",
+    )?;
+
+    let mut artifacts = BTreeMap::new();
+    for artifact in array(&report, "artifacts")? {
+        artifacts.insert(text(artifact, "path")?, text(artifact, "contents")?);
+    }
+
+    let mut refusals = Vec::new();
+    for refusal in array(&report, "refusals")? {
+        refusals.push(Refused {
+            code: text(refusal, "code")?,
+            subject: text(refusal, "subject")?,
+            // Absent for a refusal that is about no single scenario — a binding has four aspects,
+            // and a refusal can be about the construct rather than about one of them.
+            scenario: refusal["scenario"].as_str().map(ToOwned::to_owned),
+            help: text(refusal, "help")?,
+        });
+    }
+
+    let provenance = &report["provenance"];
+    Ok(Suite {
+        directory: spec
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .with_context(|| {
+                format!(
+                    "{} has no directory name to file its suite under",
+                    spec.display()
+                )
+            })?,
+        provenance: format!(
+            "{} {} (model digest {})",
+            text(provenance, "system")?,
+            text(provenance, "specification_version")?,
+            text(provenance, "spec_digest")?
+        ),
+        scenarios: number(&report, "scenarios")?,
+        refusals,
+        artifacts,
+    })
+}
+
+/// What `suites/generated/README.md` opens with, one line per line.
+///
+/// A list rather than one long literal with escaped line breaks, because this file is Markdown a
+/// person reads: where a line ends is a decision, and a `\`-continued literal hides it behind the
+/// Rust source's own wrapping.
+const SUITE_INDEX_PREAMBLE: &[&str] = &[
+    "# Generated conformance suites",
+    "",
+    "**Do not edit these files.** They are generated from the specifications under",
+    "[`examples/`](../../examples) by `cargo xtask suite`, and CI fails if they differ from what",
+    "those specifications oblige.",
+    "",
+    "A suite is the other half of a specification: every check an implementation has to pass for",
+    "the word *conformant* to mean anything about it. One JSON document per specification, keyed by",
+    "scenario id, holding no handle into any particular compilation — so a runner in another",
+    "language can read it, and a fault matrix can name a scenario by an id that does not move when",
+    "a sibling is added.",
+    "",
+    "```console",
+    "protocol ess conform run --suite suites/generated/billing/suite.json --target billing",
+    "```",
+    "",
+    "| suite | checks | scenarios | no scenario | generated from |",
+    "| --- | --- | --- | --- | --- |",
+];
+
+/// The heading the refusal tables sit under.
+const SUITE_INDEX_REFUSALS: &[&str] = &[
+    "",
+    "## What no scenario covers",
+    "",
+    "A construct the specification does not say enough about to test is refused rather than quietly",
+    "omitted (design §36). A refusal is a fact about the specification, not a gap in this file — and",
+    "it is listed here rather than left in a command's output because a suite holding fewer checks",
+    "than the specification requires is the one failure a passing run cannot show. Here it is a line",
+    "in a diff instead.",
+];
+
+/// The index of `suites/generated/`.
+///
+/// It lists the refusals as well as the scenarios, and that is the part worth having. A construct a
+/// specification stops saying enough about does not remove a scenario noisily — the suite simply
+/// holds one fewer check, which no passing run can show. Written into the index, it becomes a line
+/// in a diff that somebody has to approve.
+fn suite_index(suites: &[Suite]) -> String {
+    let mut out = String::new();
+    for line in SUITE_INDEX_PREAMBLE {
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    for suite in suites {
+        for path in suite.artifacts.keys() {
+            let _ = writeln!(
+                out,
+                "| [`{directory}/{path}`]({directory}/{path}) | {} | {} | {} | \
+                 [`examples/{directory}`](../../examples/{directory}) |",
+                suite.provenance,
+                suite.scenarios,
+                suite.refusals.len(),
+                directory = suite.directory,
+            );
+        }
+    }
+
+    for line in SUITE_INDEX_REFUSALS {
+        out.push_str(line);
+        out.push('\n');
+    }
+
+    for suite in suites {
+        let _ = write!(out, "\n### `{}`\n\n", suite.directory);
+        if suite.refusals.is_empty() {
+            // Said out loud: a heading with nothing under it reads as a rendering fault rather than
+            // as a specification every construct of which produced a check.
+            let _ = writeln!(
+                out,
+                "Every construct produced a scenario, and nothing is refused."
+            );
+            continue;
+        }
+        let _ = writeln!(out, "| code | element | the scenario that is missing |");
+        let _ = writeln!(out, "| --- | --- | --- |");
+        for refusal in &suite.refusals {
+            // The scenario id, because it is the only thing that tells two refusals about one
+            // element apart: an entity with five invariants no view publishes produces five rows
+            // that are otherwise the same line five times.
+            let _ = writeln!(
+                out,
+                "| `{}` | `{}` | {} |",
+                refusal.code,
+                refusal.subject,
+                refusal
+                    .scenario
+                    .as_deref()
+                    .map_or_else(|| "—".to_owned(), |id| format!("`{id}`"))
+            );
+        }
+        let mut hints: BTreeSet<&str> = BTreeSet::new();
+        for refusal in &suite.refusals {
+            hints.insert(refusal.help.as_str());
+        }
+        let _ = writeln!(out, "\nWhat would close them:\n");
+        for hint in hints {
+            let _ = writeln!(out, "* {hint}");
+        }
+    }
+
+    out
+}
+
 /// One string field of a report, or a message naming what was not there.
 fn text(value: &serde_json::Value, field: &str) -> Result<String> {
     value[field]
         .as_str()
         .map(ToOwned::to_owned)
-        .with_context(|| format!("the report of `ess generate` has no string `{field}`"))
+        .with_context(|| format!("the report has no string `{field}`"))
+}
+
+/// One numeric field of a report, or a message naming what was not there.
+fn number(value: &serde_json::Value, field: &str) -> Result<u64> {
+    value[field]
+        .as_u64()
+        .with_context(|| format!("the report has no whole number `{field}`"))
 }
 
 /// One list field of a report, or a message naming what was not there.
@@ -394,7 +703,7 @@ fn array<'a>(value: &'a serde_json::Value, field: &str) -> Result<&'a [serde_jso
     value[field]
         .as_array()
         .map(Vec::as_slice)
-        .with_context(|| format!("the report of `ess generate` has no list `{field}`"))
+        .with_context(|| format!("the report has no list `{field}`"))
 }
 
 /// Every file under `directory`, as `/`-separated paths relative to it.
@@ -511,7 +820,10 @@ fn files_of<'a>(
 mod tests {
     use std::path::PathBuf;
 
-    use super::{generate, schema, workspace_root, INDEX, NORMATIVE_EXAMPLE};
+    use super::{
+        generate, schema, suite, workspace_root, INDEX, NORMATIVE_EXAMPLE, PROJECTIONS, SUITES,
+        SUITE_SPECIFICATIONS,
+    };
 
     /// A scratch tree with a freshly generated `schemas/generated/` in it.
     fn generated(name: &str) -> PathBuf {
@@ -672,5 +984,154 @@ mod tests {
         }
 
         std::fs::remove_dir_all(&out).ok();
+    }
+    // ---- the committed conformance suites --------------------------------------------------------
+
+    /// The example specifications, read where they live.
+    ///
+    /// Never a copy, for the reason [`specification`] gives: a copy is a second specification, and it
+    /// drifts. Only the *output* tree is redirected below.
+    fn specifications() -> Vec<PathBuf> {
+        SUITE_SPECIFICATIONS
+            .iter()
+            .map(|specification| workspace_root().join(specification))
+            .collect()
+    }
+
+    /// A scratch tree holding freshly written suites.
+    fn suited(name: &str) -> PathBuf {
+        let out = std::env::temp_dir().join(name);
+        std::fs::remove_dir_all(&out).ok();
+        suite(&specifications(), &out, false).expect("the suites are written");
+        out
+    }
+
+    #[test]
+    fn the_suite_check_passes_on_a_freshly_written_tree() {
+        let out = suited("xtask-suites-fresh");
+        suite(&specifications(), &out, true).expect("a freshly written tree is up to date");
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn every_specification_lands_as_its_own_suite_under_the_directory_it_was_written_in() {
+        // The filing rule, asserted rather than described: `suites/generated/billing/suite.json`
+        // opposite `examples/billing/`. A suite filed under the *system* name instead would put the
+        // oracle fixture's suite in `oracle/`, and finding one from the other would take a lookup.
+        let out = suited("xtask-suites-layout");
+        for specification in SUITE_SPECIFICATIONS {
+            let directory = specification
+                .rsplit('/')
+                .next()
+                .expect("an example directory name");
+            let written = out.join(directory).join("suite.json");
+            assert!(
+                written.is_file(),
+                "`{specification}` produced no suite at {}",
+                written.display()
+            );
+        }
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn the_suite_check_refuses_a_suite_somebody_edited() {
+        // The whole point of the task, and it bites harder here than it does for a projection: a
+        // hand-edited suite is a check somebody removed from a contract, which no run of that suite
+        // can ever report, because the check is simply not in it any more.
+        let out = suited("xtask-suites-edited");
+        let edited = out.join("billing/suite.json");
+        let mut committed = std::fs::read_to_string(&edited).expect("the suite is readable");
+        committed = committed.replace("\"scenarios\": {", "\"scenarios\": {\n    \"x\": null,");
+        std::fs::write(&edited, committed).expect("the fixture is writable");
+
+        let refusal = suite(&specifications(), &out, true)
+            .expect_err("an edited suite differs from what the specification obliges");
+        let reason = format!("{refusal:#}");
+        assert!(reason.contains("billing/suite.json"), "{reason}");
+        assert!(
+            reason.contains("cargo xtask suite"),
+            "a refusal has to name what fixes it: {reason}"
+        );
+
+        suite(&specifications(), &out, false).expect("the suites are rewritten");
+        suite(&specifications(), &out, true).expect("the check passes once they are");
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn the_suite_check_refuses_a_suite_that_nothing_generates_any_more() {
+        // Drift the other direction: a specification that was withdrawn leaves its suite behind, and
+        // an implementation goes on being held to a contract this repository no longer publishes —
+        // which comparing only what *is* generated will never notice.
+        let out = suited("xtask-suites-orphaned");
+        let orphan = out.join("withdrawn/suite.json");
+        std::fs::create_dir_all(orphan.parent().expect("a parent"))
+            .expect("the fixture is writable");
+        std::fs::write(&orphan, "{}\n").expect("the fixture is writable");
+
+        let refusal =
+            suite(&specifications(), &out, true).expect_err("a file nobody generates is drift");
+        let reason = format!("{refusal:#}");
+        assert!(reason.contains("withdrawn/suite.json"), "{reason}");
+
+        suite(&specifications(), &out, false).expect("the suites are rewritten");
+        assert!(
+            !orphan.exists(),
+            "what the check refuses, writing the suites has to fix"
+        );
+        assert!(
+            !orphan.parent().expect("a parent").exists(),
+            "and an empty directory left behind still reads as a specification that obliges nothing"
+        );
+        suite(&specifications(), &out, true).expect("the check passes once the orphan is gone");
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn the_suite_index_is_generated_rather_than_orphaned_and_names_what_no_scenario_covers() {
+        // Two claims in one fixture. The index is written by this task, so the orphan scan must not
+        // report the very file it just wrote — and it has to carry the refusals, because a construct
+        // the specification stops saying enough about removes a check silently otherwise.
+        let out = suited("xtask-suites-index");
+        let index = std::fs::read_to_string(out.join(INDEX)).expect("the index is written");
+        assert!(
+            index.contains("cargo xtask suite"),
+            "the index has to say what regenerates the tree: {index}"
+        );
+        assert!(
+            index.contains("What no scenario covers"),
+            "a refusal is a fact about the specification and belongs in the diff: {index}"
+        );
+        assert!(
+            index.contains("ESS-SYNTH-"),
+            "the refusals themselves, with their codes, not just a heading: {index}"
+        );
+        suite(&specifications(), &out, true).expect("a freshly written tree is up to date");
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn no_two_tasks_own_one_committed_tree() {
+        // The reason the suites are beside `generated/` rather than in it. Both orphan scans are
+        // recursive and both delete what their own task did not produce, so a tree with two owners
+        // is a tree where each task removes the other's committed contract. Nesting one inside the
+        // other is the way that happens by accident, and this is the line that refuses it.
+        let roots = ["schemas/generated", PROJECTIONS, SUITES];
+        for (index, one) in roots.iter().enumerate() {
+            for other in roots.iter().skip(index + 1) {
+                assert!(
+                    !one.starts_with(&format!("{other}/"))
+                        && !other.starts_with(&format!("{one}/")),
+                    "`{one}` and `{other}` are one tree with two owners, and each task's orphan \
+                     scan deletes the other's output"
+                );
+            }
+        }
     }
 }

@@ -864,6 +864,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ess-compiler",
+ "ess-conformance",
  "ess-domain",
  "ess-gen",
  "serde",
