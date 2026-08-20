@@ -339,9 +339,18 @@ byte-identical output on a second run. The generator must live in `tests/` or it
 justification comment of the standard set by `crates/ess-gen/Cargo.toml:20`.
 
 **Phase 2, witness synthesis for wave 4.** Gated on G16, which is where the optimism goes. Generate-and-
-filter is the right shape — keep candidates whose `Predicate::evaluate` returns `True`, discard `False`
-*and* `Unknown`, no constraint solver — but the precondition is a flattener from a candidate input to a
-`FactSource`, and that does not exist yet. Add `proptest`'s shrinking to it and a failing witness arrives
+filter is the right shape — keep candidates whose `Predicate::evaluate` returns `True` and discard
+`False`, no constraint solver — but the precondition is a flattener from a candidate input to a
+`FactSource`, and that does not exist yet.
+
+**Corrected after wave 4's synthesizer landed:** an earlier draft of this paragraph said to discard
+`False` *and* `Unknown`, which reads as treating them alike — both meaning "try another candidate".
+That is wrong, and it is the collapse invariant 5 forbids. `False` means this value does not satisfy
+the guard, so another value might. `Unknown` means the guard cannot be decided at all — no scale
+orders those two texts, or the path names nothing — and no candidate repairs that, so it **refuses**,
+naming the predicate and the missing path. Retrying on `Unknown` would spend the whole budget on a
+specification defect and then report it as a flaky test. The design says refuse; the implementation
+refuses; this page was the only place that said otherwise. Add `proptest`'s shrinking to it and a failing witness arrives
 minimal, which is the difference between a counterexample a person acts on and one they re-derive.
 
 Two hazards specific to this codebase, both from the sweep: a handle from one `EssIr` used against another
