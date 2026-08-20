@@ -164,8 +164,15 @@ bindings:
       recipient: event.customer_email
       template: invoice-created
     delivery: at_least_once
-    on_failure: escalate          # retry | escalate | drop
+    on_failure:                   # retry | drop | escalate
+      escalate:
+        emits: billing.email.DeliveryEscalated
 ```
+
+`retry` and `drop` are single words. `escalate` is not: it has to say which declared event the
+escalation emits, because "surface it to a person" is not something a generated test can observe.
+A binding that escalates without naming an event is refused — the failure policy would otherwise be a
+promise nothing can be asked to keep.
 
 `delivery:` and `on_failure:` are **required words, not defaults**. A binding that can fail silently
 is the difference between specifying a system and specifying a demo, and the way that difference

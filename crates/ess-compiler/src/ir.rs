@@ -28,6 +28,9 @@
 //! | which states can this entity move between, and by which named move? | [`ResolvedEntity::lifecycle`] |
 //! | does a generated scenario assert this view with `expect` or `eventually`? | [`ResolvedView::assertion_style`] |
 //! | which commands may this actor invoke? | [`ResolvedActor::may`] |
+//! | which entity does this outcome change, and how? | [`ResolvedOutcome::subject`] |
+//! | which command outcome takes this transition? | [`EssIr::drivers`] |
+//! | what does this binding publish when it escalates? | [`ResolvedBinding::escalation`] |
 //!
 //! # A state is a variant, not a handle
 //!
@@ -44,10 +47,10 @@
 //! # A predicate travels parsed, not resolved
 //!
 //! [`ResolvedView::filter`] and [`ResolvedEntity::invariants`] carry
-//! [`Predicate`](aep_domain::predicate::Predicate) trees — the same shape
+//! [`Predicate`] trees — the same shape
 //! [`ResolvedCondition::When`] and [`ResolvedBody::Struct`] already carry, and the same one
 //! `ess-domain` parsed. So nothing downstream re-parses a filter, and
-//! [`Invariant`](ess_domain::entity::Invariant) keeps the author's own spelling beside the tree for a
+//! [`Invariant`] keeps the author's own spelling beside the tree for a
 //! diagnostic to quote.
 //!
 //! What a predicate does *not* carry is a handle per leaf. `state == Issued` reads the fact path
@@ -75,7 +78,7 @@ use aep_domain::predicate::Predicate;
 use ess_domain::binding::{BindingName, Delivery, Failure};
 use ess_domain::command::{OutcomeName, TestStrategy};
 use ess_domain::component::ComponentName;
-use ess_domain::entity::{EntitySpec, Invariant, StateMachine};
+use ess_domain::entity::{EntitySpec, Invariant, StateMachine, Transition};
 use ess_domain::name::{Naming, QualifiedName, Version};
 use ess_domain::topology::{Replicas, Resource};
 use ess_domain::types::Primitive;
@@ -177,6 +180,17 @@ handles! {
 /// would have to re-parse the text this crate had already parsed, and a second parser is a second
 /// place for `Map<String, Money>` to mean something slightly different. [`Display`](fmt::Display)
 /// still produces exactly that text, so nothing that wanted the rendering lost it.
+///
+/// # Depth
+///
+/// At most [`MAX_TYPE_DEPTH`](ess_domain::types::MAX_TYPE_DEPTH). The only way to obtain one is
+/// `Resolver::type_ref`, which maps one [`TypeRef`](ess_domain::types::TypeRef) constructor to one
+/// of these and so preserves depth exactly, and `spec_type_ref` maps it back the same way; a
+/// `TypeRef` in turn can only come from a parser that refuses past 32. That is what lets
+/// [`Self::declared`], [`Self::named_leaves`], [`Self::required`], [`Display`](fmt::Display) and the
+/// projection walkers in `ess-gen` recurse without counting. Bounding them again would put a second
+/// number beside the first with nothing keeping the two in step, and a limit that can only ever fire
+/// on a value this crate built itself is a limit that can only ever be wrong.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ResolvedTypeRef {
@@ -469,6 +483,66 @@ pub enum ResolvedCondition {
     },
 }
 
+/// What one outcome does to the entity it acts on, resolved.
+///
+/// A mirror of [`Effect`](ess_domain::command::Effect) with one difference, and the difference is
+/// the point: [`Moves`](ResolvedEffect::Moves) carries the [`Transition`] **itself** rather than its
+/// name. That follows this module's own rule — *a question a projection will ask must have an answer
+/// in here*, and where the answer would have been a lookup, the field is a handle or the field is
+/// not a name at all. A transition is declared inside an entity's lifecycle and has no map on
+/// [`EssIr`] to be keyed in, so there is no handle to mint for one; resolving it to the value is the
+/// same guarantee reached the other way, and a projection asking "which states does this move go
+/// between" has `from` and `to` in hand rather than an `Option`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "effect", rename_all = "snake_case")]
+pub enum ResolvedEffect {
+    /// A new instance comes into existence, at its lifecycle's initial state.
+    ///
+    /// Which state that is comes from [`ResolvedEntity::lifecycle`], not from a copy here: the
+    /// lifecycle already declares it, and a second copy is a second thing to keep in step.
+    Creates,
+    /// An existing instance moves along this declared transition.
+    Moves {
+        /// The move, as the entity's lifecycle declares it.
+        transition: Transition,
+    },
+    /// An existing instance changes without moving along its lifecycle.
+    Updates,
+}
+
+impl ResolvedEffect {
+    /// The transition this effect takes, when it takes one.
+    pub fn transition(&self) -> Option<&Transition> {
+        match self {
+            Self::Moves { transition } => Some(transition),
+            Self::Creates | Self::Updates => None,
+        }
+    }
+
+    /// How it reads in a sentence: `creates`, `moves`, `updates`.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Self::Creates => "creates",
+            Self::Moves { .. } => "moves",
+            Self::Updates => "updates",
+        }
+    }
+}
+
+/// The entity an outcome acts on, and what it does to it.
+///
+/// Design §19's "subject and verb", resolved: the subject is an [`EntityHandle`], so
+/// [`EssIr::entity`] answers *whose* invariants a §20 scenario evaluates after this branch, and the
+/// verb is a [`ResolvedEffect`], so a §19 scenario knows which states to move between.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedSubject {
+    /// The entity this outcome acts on.
+    pub entity: EntityHandle,
+    /// What it does to it.
+    #[serde(flatten)]
+    pub effect: ResolvedEffect,
+}
+
 /// One thing a command can result in.
 ///
 /// The skeleton flattened every outcome's events into one `emits` list on the command. That answers
@@ -481,6 +555,14 @@ pub struct ResolvedOutcome {
     pub name: OutcomeName,
     /// What decides that this is the outcome taken.
     pub condition: ResolvedCondition,
+    /// The entity this outcome acts on, and what it does to it.
+    ///
+    /// `None` when the branch changes no entity — `billing.email.SendEmail` does not, and neither
+    /// does any refusal. The other direction is total: a transition no outcome takes is refused by
+    /// `ess-domain`, so every arrow in a lifecycle diagram has at least one outcome here that draws
+    /// it. [`EssIr::drivers`] is that relation, from the entity's side.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<ResolvedSubject>,
     /// How a generated test reaches this branch.
     ///
     /// Computed once here, from the domain's own answer, so two projections cannot disagree about
@@ -718,8 +800,73 @@ pub struct ResolvedBinding {
     pub delivery: Delivery,
     /// What happens when it does not.
     pub failure: Failure,
+    /// The event an escalation publishes, resolved.
+    ///
+    /// `Some` exactly when [`Self::failure`] is [`Failure::Escalate`] — `ess-domain` refuses either
+    /// half without the other — so a projection reading `escalate` off the word always has an event
+    /// to name, and never has to write "the specification does not say".
+    ///
+    /// A handle, like every other reference in here, because that is the guarantee: a binding
+    /// cannot escalate into an event nobody declares, so [`EssIr::event`] answers what a scenario
+    /// asserts and what shape the assertion has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub escalation: Option<EventHandle>,
     /// What it is called on the wire, and shown as.
     pub naming: Naming,
+}
+
+/// What happens when a binding's command does not run, with whatever that publishes.
+///
+/// [`ResolvedBinding::failure`] is the word and [`ResolvedBinding::escalation`] is the event, in
+/// that shape because the word is what a document writes and what every projection prints. This
+/// pairs the two, and it exists so that a projection *rendering* an escalation cannot forget to
+/// name the event: there is no `Option` to unwrap and no arm to leave out. `ess-gen`'s
+/// documentation projection matches it with no wildcard arm, so a fourth policy stops that file
+/// compiling rather than being silently dropped from a page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedFailure<'a> {
+    /// Try again, on whatever schedule the transport provides.
+    ///
+    /// Publishes nothing, and needs to publish nothing: a retry is another invocation of the
+    /// command, which [`Delivery::AtLeastOnce`] already obliges the handler to survive.
+    Retry,
+    /// Surface it to a person, and publish this event to say so.
+    Escalate {
+        /// The event the escalation emits.
+        emits: &'a EventHandle,
+    },
+    /// Give up silently.
+    ///
+    /// Publishes nothing, deliberately: an event here would make it a notification, which is a
+    /// different decision with a different word.
+    Drop,
+}
+
+impl ResolvedBinding {
+    /// What happens when the command does not run, paired with what it publishes.
+    ///
+    /// Total. An `escalate` that names no event is refused by `ess-domain`, and
+    /// [`compile`](crate::resolve::compile) keeps a binding whose escalation did not resolve out of
+    /// the IR rather than building one that says it escalates and cannot say into what — so the one
+    /// way to reach the panic is to assemble a [`ResolvedBinding`] by hand out of step with itself,
+    /// which is a programming mistake and not a specification's problem. The same reasoning, and
+    /// the same wording, as the handle accessors above.
+    pub fn on_failure(&self) -> ResolvedFailure<'_> {
+        match self.failure {
+            Failure::Retry => ResolvedFailure::Retry,
+            Failure::Drop => ResolvedFailure::Drop,
+            Failure::Escalate => {
+                let Some(emits) = &self.escalation else {
+                    panic!(
+                        "binding `{}` escalates and names no event: `ess-domain` refuses that, so \
+                         this `ResolvedBinding` did not come from `compile`",
+                        self.name
+                    )
+                };
+                ResolvedFailure::Escalate { emits }
+            }
+        }
+    }
 }
 
 /// A component: one unit of ownership, with its surface resolved.
@@ -787,6 +934,29 @@ pub struct ResolvedDomain {
     pub actors: BTreeSet<ActorHandle>,
 }
 
+/// One command outcome that changes an entity, seen from the entity's side.
+///
+/// What [`EssIr::drivers`] hands back. Borrowed rather than owned because every part of it is
+/// already in the IR: this is an index, not a second copy of the model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Driver<'a> {
+    /// The command whose outcome this is.
+    pub command: &'a ResolvedCommand,
+    /// The branch that does it. `None` of a command's other branches need do the same thing.
+    pub outcome: &'a ResolvedOutcome,
+    /// What it does to the entity.
+    pub effect: &'a ResolvedEffect,
+}
+
+impl Driver<'_> {
+    /// `true` when this driver takes the transition named `transition`.
+    pub fn takes(&self, transition: &str) -> bool {
+        self.effect
+            .transition()
+            .is_some_and(|declared| declared.name == transition)
+    }
+}
+
 /// The whole specification, resolved.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct EssIr {
@@ -851,6 +1021,32 @@ impl EssIr {
         out
     }
 
+    /// Every command outcome that changes each entity, by the entity it changes.
+    ///
+    /// The link written the way a *reader of a lifecycle* asks about it. An outcome names the entity
+    /// it acts on, which is the direction an author writes and a scenario generator executes; a
+    /// state diagram needs the reverse — for this arrow, which command draws it — and computing that
+    /// per projection is how two of them would come to disagree about who issues an invoice.
+    ///
+    /// Every declared transition appears in some [`Driver`] here, because `ess-domain` refuses a
+    /// transition no outcome takes. An entity that nothing changes at all is simply absent from the
+    /// map.
+    pub fn drivers(&self) -> BTreeMap<&EntityHandle, Vec<Driver<'_>>> {
+        let mut out: BTreeMap<&EntityHandle, Vec<Driver<'_>>> = BTreeMap::new();
+        for command in self.commands.values() {
+            for outcome in &command.outcomes {
+                if let Some(subject) = &outcome.subject {
+                    out.entry(&subject.entity).or_default().push(Driver {
+                        command,
+                        outcome,
+                        effect: &subject.effect,
+                    });
+                }
+            }
+        }
+        out
+    }
+
     /// Every actor that may invoke each command, by command.
     ///
     /// The map an interface generator needs to emit a security requirement per operation, which is
@@ -873,8 +1069,18 @@ impl EssIr {
     /// because a file without one is a file that shows up as modified in the next diff. This is the
     /// artifact review F8 asks be compared byte-for-byte, and `tests/billing.rs` compares it.
     ///
-    /// Serialisation cannot fail: every map key here serialises as a string and no float is
-    /// involved.
+    /// Serialisation cannot fail. `serde_json` has exactly one error of its own — a map key that is
+    /// not a string — and every map in this tree is keyed by [`QualifiedName`], [`BindingName`] or
+    /// [`ComponentName`], each of which serialises as one. A float is *not* the second: the earlier
+    /// claim that none is involved was wrong — `{amount: {any_of: [1.5]}}` in a guard reaches here
+    /// as a number — but `serde_json` writes a float rather than refusing one.
+    ///
+    /// What it does refuse to write faithfully is a non-finite float, which it emits as `null`
+    /// instead. `1e400` in a predicate literal parses to `+inf`
+    /// ([`FactValue::parse_literal`](aep_domain::facts::FactValue::parse_literal) rejects only NaN),
+    /// so that guard is published as `any_of: [null]`. That is a defect in what the model accepts,
+    /// not in this function, and it is filed as such: the fix belongs in `aep-domain`'s `Number`,
+    /// which promises a total order it does not enforce on input.
     pub fn to_canonical_json(&self) -> String {
         let mut json = serde_json::to_string_pretty(self)
             .unwrap_or_else(|error| panic!("the IR serialises: {error}"));

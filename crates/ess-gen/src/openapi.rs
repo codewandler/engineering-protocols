@@ -102,11 +102,11 @@
 //! breaks the moment either directory changes, and produces a document that cannot be pasted into a
 //! validator without its siblings.
 //!
-//! What is *in* the document comes from [`types`](crate::schema::types), which is this crate's one
+//! What is *in* the document comes from `schema::types`, which is this crate's one
 //! answer to "what is a valid `billing.invoice.Money`". `OpenAPI` 3.1's schema dialect **is** JSON
 //! Schema 2020-12, so there is nothing to translate: the fragment this file embeds is the fragment
 //! the `schema` projection writes, keyword for keyword, with its pointers retargeted at
-//! `components.schemas` by [`under_components`]. This file used to carry a copy of that mapping and
+//! `components.schemas` by `under_components`. This file used to carry a copy of that mapping and
 //! `asyncapi.rs` a second one; both drifted from it and from each other, and the drift was published
 //! as contradictory contracts for one event. `tests/agreement.rs` is what holds the three documents
 //! to one answer now, so the way to change what a `Decimal` looks like here is to change
@@ -172,7 +172,7 @@
 //!
 //! # Determinism
 //!
-//! No clock, no RNG, and every collection a [`BTreeMap`], a [`BTreeSet`] or a [`Vec`] built from
+//! No clock, no RNG, and every collection a [`BTreeMap`], a [`BTreeSet`](std::collections::BTreeSet) or a [`Vec`] built from
 //! one. `tests/openapi.rs` generates twice and compares bytes, because that is the only form of this
 //! claim that is worth anything (review F8).
 
@@ -180,7 +180,7 @@ use std::collections::BTreeMap;
 
 use ess_compiler::ir::{
     CommandHandle, EssIr, ResolvedActor, ResolvedCommand, ResolvedComponent, ResolvedCondition,
-    ResolvedError, ResolvedOutcome, TypeHandle,
+    ResolvedEffect, ResolvedError, ResolvedOutcome, TypeHandle,
 };
 use ess_domain::binding::Delivery;
 use serde_json::{json, Map, Value};
@@ -673,6 +673,26 @@ fn outcome_description(ir: &EssIr, outcome: &ResolvedOutcome) -> String {
             format!("Decided outside the request: {cause}.")
         }
     });
+    // What the caller's request did to the system's state, in the response that reports it. A
+    // caller reading `202` learns that a branch was taken; without this it does not learn that an
+    // invoice now exists, and the specification does say so.
+    if let Some(subject) = &outcome.subject {
+        let entity = ir.entity(&subject.entity);
+        parts.push(match &subject.effect {
+            ResolvedEffect::Creates => format!(
+                "A `{}` now exists, in `{}`.",
+                entity.name, entity.lifecycle.initial
+            ),
+            ResolvedEffect::Moves { transition } => format!(
+                "A `{}` has moved to `{}`, along `{}`.",
+                entity.name, transition.to, transition.name
+            ),
+            ResolvedEffect::Updates => format!(
+                "A `{}` has changed, and its state is unchanged.",
+                entity.name
+            ),
+        });
+    }
     if !outcome.emits.is_empty() {
         let events: Vec<String> = outcome
             .emits
@@ -741,6 +761,12 @@ pub(crate) fn under_components(node: &Node, prefix: &str) -> Fragment {
 }
 
 /// The same fragment with every `$ref` pointing into `components.schemas`.
+///
+/// Recurses as deep as the fragment nests and does not count. The fragment is a [`Node`] this crate
+/// built, so its depth is a small multiple of the type reference it describes — an `Optional` costs
+/// an `anyOf`, a `List` an `items` — and a type reference is at most
+/// [`MAX_TYPE_DEPTH`](ess_domain::types::MAX_TYPE_DEPTH) deep, refused there rather than here. A
+/// named type is a `$ref` into a flat table, not an inlined subtree, so nothing compounds.
 fn retargeted(fragment: Fragment, prefix: &str) -> Fragment {
     match fragment {
         Fragment::Mapping(entries) => Fragment::Mapping(

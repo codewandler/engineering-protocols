@@ -495,8 +495,15 @@ fn a_command_is_exposed_at_its_wire_name_under_its_domains() {
             .keys()
             .cloned()
             .collect::<Vec<String>>(),
-        vec!["POST /invoices/commands/create-invoice".to_owned()],
-        "`invoices` is the domain's wire name and `create-invoice` is the command's"
+        vec![
+            "POST /invoices/commands/cancel-invoice".to_owned(),
+            "POST /invoices/commands/create-invoice".to_owned(),
+            "POST /invoices/commands/issue-invoice".to_owned(),
+            "POST /invoices/commands/pay-invoice".to_owned(),
+        ],
+        "`invoices` is the domain's wire name and each command's own wire name follows it; every \
+         command the component accepts gets a path, and one that did not would be a command with \
+         no way to invoke it"
     );
 }
 

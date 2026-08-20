@@ -415,6 +415,12 @@ fn a_bindings_delivery_and_failure_reach_the_receiving_operation() {
         reaction.get("on_failure").and_then(Value::as_str),
         Some("escalate")
     );
+    assert_eq!(
+        reaction.get("escalates_with").and_then(Value::as_str),
+        Some("billing.email.DeliveryEscalated"),
+        "escalation hands the failure to a person, which happens outside the system; the event is \
+         what the handler owes the rest of it, so the handler's own document has to name it"
+    );
     assert!(
         reaction
             .get("delivery_means")
@@ -479,6 +485,11 @@ fn the_publisher_of_an_event_sees_who_reacts_to_it_and_under_what_failure_policy
         Some("escalate"),
         "and under what failure policy, without opening the other document"
     );
+    assert_eq!(
+        consumers[0].get("escalates_with").and_then(Value::as_str),
+        Some("billing.email.DeliveryEscalated"),
+        "and which event will carry the escalation, so a subscriber can wait for it"
+    );
 }
 
 #[test]
@@ -506,6 +517,11 @@ fn a_binding_no_component_handles_still_states_its_failure_policy() {
     assert_eq!(
         consumers[0].get("on_failure").and_then(Value::as_str),
         Some("retry")
+    );
+    assert!(
+        consumers[0].get("escalates_with").is_none(),
+        "absent, not null: a retry publishes nothing, because it is already observable as another \
+         invocation of the command"
     );
 }
 

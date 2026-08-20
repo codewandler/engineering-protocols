@@ -45,11 +45,11 @@
 //! Everything here follows the same discipline as the protocol half: documents parse into `Raw*`
 //! types and become validated ones through `TryFrom`, and validated types do not implement
 //! [`Deserialize`](serde::Deserialize). That is what stops a rule from being skippable — a
-//! [`NamedType`](types::NamedType) whose invariant reads a field it does not have cannot be
+//! [`NamedType`] whose invariant reads a field it does not have cannot be
 //! constructed, because the only route in runs the check.
 //!
-//! The exemptions are scalars that validate themselves: [`QualifiedName`](name::QualifiedName),
-//! [`Version`](name::Version), [`StateName`](entity::StateName), [`Field`](types::Field) and their
+//! The exemptions are scalars that validate themselves: [`QualifiedName`],
+//! [`Version`], [`StateName`], [`Field`] and their
 //! kind. Their entire validity is a question about their own spelling, answerable with nothing else
 //! in hand, so a hand-written `Deserialize` *is* the conversion rather than a way around it. The
 //! line is whether validating needs to look at anything else: if it does, the type gets a `Raw*`

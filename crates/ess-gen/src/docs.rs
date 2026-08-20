@@ -15,7 +15,7 @@
 //!
 //! | the gap | how it becomes loud |
 //! |---|---|
-//! | a new variant of something this module renders | it stops compiling — no `match` on an enum here has a wildcard arm, so a new `Delivery`, `Failure`, `ResolvedBody`, `ResolvedCondition`, `ResolvedMappingValue`, `TestStrategy`, `Consistency` or `AssertionStyle` is a build failure in this file |
+//! | a new variant of something this module renders | it stops compiling — no `match` on an enum here has a wildcard arm, so a new `Delivery`, `ResolvedBody`, `ResolvedCondition`, `ResolvedEffect`, `ResolvedFailure`, `ResolvedMappingValue`, `TestStrategy`, `Consistency` or `AssertionStyle` is a build failure in this file |
 //! | a construct the IR holds that no page mentions | `tests/docs.rs` fails, asserted per construct |
 //! | a construct the IR does not hold at all | [`Docs::known_gaps`], printed on the page where the reader went looking and counted in the index |
 //!
@@ -38,12 +38,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use ess_compiler::ir::{
-    EssIr, ResolvedActor, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedComponent,
-    ResolvedCondition, ResolvedConversion, ResolvedDomain, ResolvedEntity, ResolvedError,
-    ResolvedEvent, ResolvedField, ResolvedMapping, ResolvedMappingValue, ResolvedType,
-    ResolvedView, ResolvedWorkload, TypeHandle,
+    Driver, EssIr, ResolvedActor, ResolvedBinding, ResolvedBody, ResolvedCommand,
+    ResolvedComponent, ResolvedCondition, ResolvedConversion, ResolvedDomain, ResolvedEffect,
+    ResolvedEntity, ResolvedError, ResolvedEvent, ResolvedFailure, ResolvedField, ResolvedMapping,
+    ResolvedMappingValue, ResolvedSubject, ResolvedType, ResolvedView, ResolvedWorkload,
+    TypeHandle,
 };
-use ess_domain::binding::{Delivery, Failure};
+use ess_domain::binding::Delivery;
 use ess_domain::command::TestStrategy;
 use ess_domain::entity::{Invariant, StateMachine, StateName};
 use ess_domain::name::{Naming, QualifiedName};
@@ -516,12 +517,15 @@ fn entities_section(ir: &EssIr, domain: &ResolvedDomain, body: &mut String) {
         return;
     }
     let projections = ir.projections();
+    let drivers = ir.drivers();
     let _ = writeln!(body, "## Entities\n");
     let _ = writeln!(
         body,
         "An entity is what this context is about: something with an identity that outlives any one \
          request, a shape, and a lifecycle. The lifecycle is exhaustive — a move that is not drawn \
-         below is a move this specification does not permit, and that is the only way it says so.\n"
+         below is a move this specification does not permit, and that is the only way it says so. \
+         Every move is labelled with the command that takes it, because a move nothing can trigger \
+         is refused rather than drawn.\n"
     );
     for handle in &domain.entities {
         let entity = ir.entity(handle);
@@ -543,8 +547,10 @@ fn entities_section(ir: &EssIr, domain: &ResolvedDomain, body: &mut String) {
         let _ = writeln!(body, "{}\n", entity_invariants_sentence(entity));
         let _ = writeln!(body, "{}\n", state_type_sentence(entity));
         let _ = writeln!(body, "{}\n", resting_sentence(&entity.lifecycle));
-        body.push_str(&state_diagram(&entity.lifecycle));
+        let driven = drivers.get(handle).map_or(&[][..], Vec::as_slice);
+        body.push_str(&state_diagram(&entity.lifecycle, driven));
         body.push('\n');
+        let _ = writeln!(body, "{}\n", driven_sentence(&entity.lifecycle, driven));
         let _ = writeln!(body, "{}", legality_note(&entity.lifecycle).trim_end());
         body.push('\n');
         let _ = writeln!(
@@ -781,7 +787,7 @@ fn binding_section(ir: &EssIr, binding: &ResolvedBinding, body: &mut String) {
     body.push('\n');
 
     let _ = writeln!(body, "{}\n", delivery_sentence(binding.delivery, command));
-    let _ = writeln!(body, "{}\n", failure_sentence(binding.failure));
+    let _ = writeln!(body, "{}\n", failure_sentence(ir, binding));
 
     if binding.mapping.is_empty() {
         let _ = writeln!(
@@ -855,6 +861,7 @@ fn outcome_prose(ir: &EssIr, outcome: &ess_compiler::ir::ResolvedOutcome) -> Str
         let _ = write!(out, "{summary} ");
     }
     let _ = write!(out, "{}", condition_sentence(&outcome.condition));
+    let _ = write!(out, " {}", effect_sentence(ir, outcome.subject.as_ref()));
     if let Some(error) = &outcome.error {
         let reported = ir.error(error);
         let _ = write!(out, " It reports `{}`", reported.name);
@@ -874,6 +881,41 @@ fn outcome_prose(ir: &EssIr, outcome: &ess_compiler::ir::ResolvedOutcome) -> Str
     }
     let _ = write!(out, " {}", strategy_sentence(outcome.test_strategy));
     out
+}
+
+/// What this branch does to an entity, including the case where it does nothing.
+///
+/// Written for every outcome and not only for the ones with a subject, because silence is the one
+/// answer a reader cannot interpret: "this branch changes no entity" and "the projection dropped the
+/// field" look identical on a page, and the first is a fact about the system.
+fn effect_sentence(ir: &EssIr, subject: Option<&ResolvedSubject>) -> String {
+    let Some(subject) = subject else {
+        return "No entity in this specification changes.".to_owned();
+    };
+    let entity = ir.entity(&subject.entity);
+    match &subject.effect {
+        ResolvedEffect::Creates => format!(
+            "It creates a `{}`, which starts in `{}`.",
+            entity.name, entity.lifecycle.initial
+        ),
+        ResolvedEffect::Moves { transition } => format!(
+            "It moves a `{}` from {} to `{}`, along the declared move `{}`.",
+            entity.name,
+            list(
+                &transition
+                    .from
+                    .iter()
+                    .map(|state| code(&state.to_string()))
+                    .collect()
+            ),
+            transition.to,
+            transition.name
+        ),
+        ResolvedEffect::Updates => format!(
+            "It changes a `{}` without moving it along its lifecycle.",
+            entity.name
+        ),
+    }
 }
 
 /// What decides that an outcome is the one taken.
@@ -923,20 +965,33 @@ fn delivery_sentence(delivery: Delivery, command: &ResolvedCommand) -> String {
     }
 }
 
-/// What happens when the command does not run.
-fn failure_sentence(failure: Failure) -> &'static str {
-    match failure {
-        Failure::Retry => {
+/// What happens when the command does not run, and how a reader could tell that it did.
+///
+/// The escalation's event is named rather than left as "surfaced to a person somehow", because the
+/// page is what a conformance target is written against: a sentence that names no observable
+/// describes a requirement nobody can be asked to prove.
+fn failure_sentence(ir: &EssIr, binding: &ResolvedBinding) -> String {
+    match binding.on_failure() {
+        ResolvedFailure::Retry => {
             "When it fails it is **retried**, on whatever schedule the transport provides. Nothing \
-             here says how many times, so nothing here says when it stops."
+             here says how many times, so nothing here says when it stops. A retry publishes \
+             nothing of its own, because it is already observable: it is another invocation of the \
+             command."
+                .to_owned()
         }
-        Failure::Escalate => {
+        ResolvedFailure::Escalate { emits } => format!(
             "When it fails it is **escalated** — surfaced to a person, who decides what happens \
-             next."
-        }
-        Failure::Drop => {
+             next — and the system publishes `{}` to say so. Surfacing something to a person \
+             happens outside the system, so that event is the only way a reader, a test or a \
+             conformance target can tell that the escalation happened at all.",
+            ir.event(emits).name
+        ),
+        ResolvedFailure::Drop => {
             "When it fails the work is **dropped**. The system loses it, silently, and that is a \
-             decision someone made deliberately: `drop` is never a default, so this word was typed."
+             decision someone made deliberately: `drop` is never a default, so this word was \
+             typed. Nothing is published, on purpose — an event here would make this a \
+             notification, which is a different decision."
+                .to_owned()
         }
     }
 }
@@ -1319,9 +1374,24 @@ fn field_bullet(field: &ResolvedField) -> String {
     out
 }
 
-/// Which command and branch causes an event.
+/// Which command and branch — or which binding's escalation — causes an event.
+///
+/// A binding is the second way an event happens. Leaving it out would print "no command in this
+/// system emits it, so something outside the specification does" on the page of an event this
+/// specification is the only possible source of, which is the reverse of the truth.
 fn emitters(ir: &EssIr, event: &ResolvedEvent) -> Vec<String> {
     let mut out = Vec::new();
+    for binding in ir.bindings.values() {
+        if let ResolvedFailure::Escalate { emits } = binding.on_failure() {
+            if emits.name() == &event.name {
+                out.push(format!(
+                    "Emitted when binding `{}` escalates: `{}` failed and a person was told.",
+                    binding.name,
+                    ir.command(&binding.command).name
+                ));
+            }
+        }
+    }
     for command in ir.commands.values() {
         let branches: Vec<_> = command
             .outcomes
@@ -1400,12 +1470,23 @@ fn outcome_count_sentence(count: usize, name: &QualifiedName) -> String {
 ///
 /// Every state appears whether or not a transition touches it: a state with no arrows is a fact
 /// about the model, and dropping it would hide exactly the sort of dead end the compiler refuses.
-fn state_diagram(lifecycle: &StateMachine) -> String {
+///
+/// Each arrow carries the command that takes it, which is the whole of gate G14 as a reader meets
+/// it: a lifecycle whose moves have no verbs is a diagram of what may happen with no way to make any
+/// of it happen. The commands come from [`EssIr::drivers`] rather than from a name that looks like
+/// the transition's — the spelling of a move says nothing about who performs it.
+fn state_diagram(lifecycle: &StateMachine, drivers: &[Driver<'_>]) -> String {
     let mut out = String::from("```mermaid\nstateDiagram-v2\n");
     let _ = writeln!(out, "    [*] --> {}", lifecycle.initial);
     for transition in &lifecycle.transitions {
+        let label = match takers(drivers, &transition.name).as_slice() {
+            // Unreachable for a validated specification — `missing_causation` refuses it — so this
+            // draws the arrow rather than hiding it, exactly as an untouched state is drawn.
+            [] => transition.name.clone(),
+            takers => format!("{} ({})", transition.name, takers.join(", ")),
+        };
         for from in &transition.from {
-            let _ = writeln!(out, "    {from} --> {}: {}", transition.to, transition.name);
+            let _ = writeln!(out, "    {from} --> {}: {label}", transition.to);
         }
     }
     for state in &lifecycle.states {
@@ -1419,6 +1500,80 @@ fn state_diagram(lifecycle: &StateMachine) -> String {
         }
     }
     out.push_str("```\n");
+    out
+}
+
+/// The local names of the commands that take one transition, in the order the IR holds them.
+///
+/// Local rather than qualified because this goes inside a Mermaid arrow label, where the context is
+/// already the entity's own page and a fully qualified name would push the label past the arrow.
+fn takers(drivers: &[Driver<'_>], transition: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for driver in drivers {
+        if driver.takes(transition) {
+            let local = driver.command.name.local().to_owned();
+            if !out.contains(&local) {
+                out.push(local);
+            }
+        }
+    }
+    out
+}
+
+/// Which command and branch takes each declared move, spelt out beneath the diagram.
+///
+/// The diagram's labels say *which command*; this says which of its branches, which is the unit a
+/// generated scenario is built per. It also states the rule that makes the list exhaustive, so a
+/// reader knows an unlisted move is impossible rather than merely undocumented.
+fn driven_sentence(lifecycle: &StateMachine, drivers: &[Driver<'_>]) -> String {
+    if lifecycle.transitions.is_empty() {
+        return "It declares no moves, so nothing changes its state once it exists.".to_owned();
+    }
+    let mut out = String::from(
+        "Each move is taken by a declared command outcome, and a move nothing takes is refused as \
+         `missing_causation` rather than left as a state change nobody can trigger:\n\n",
+    );
+    for transition in &lifecycle.transitions {
+        let taken: Vec<String> = drivers
+            .iter()
+            .filter(|driver| driver.takes(&transition.name))
+            .map(|driver| {
+                format!(
+                    "`{}` on its `{}` outcome",
+                    driver.command.name, driver.outcome.name
+                )
+            })
+            .collect();
+        let by = if taken.is_empty() {
+            "nothing in this specification".to_owned()
+        } else {
+            list(&taken)
+        };
+        let _ = writeln!(out, "- `{}` — taken by {by}", transition.name);
+    }
+    let creators: Vec<String> = drivers
+        .iter()
+        .filter(|driver| matches!(driver.effect, ResolvedEffect::Creates))
+        .map(|driver| {
+            format!(
+                "`{}` on its `{}` outcome",
+                driver.command.name, driver.outcome.name
+            )
+        })
+        .collect();
+    let _ = write!(
+        out,
+        "\n{}",
+        if creators.is_empty() {
+            "No command here creates one, so an instance arrives from outside this specification."
+                .to_owned()
+        } else {
+            format!(
+                "An instance is brought into existence by {}.",
+                list(&creators)
+            )
+        }
+    );
     out
 }
 
@@ -1488,6 +1643,7 @@ fn binding_flow(ir: &EssIr, binding: &ResolvedBinding) -> String {
         "    event -->|\"{}\"| command",
         label(binding.name.as_str())
     );
+    let mut reached_failure = false;
     for (index, outcome) in command.outcomes.iter().enumerate() {
         let _ = writeln!(
             out,
@@ -1509,20 +1665,34 @@ fn binding_flow(ir: &EssIr, binding: &ResolvedBinding) -> String {
             let _ = writeln!(
                 out,
                 "    error{index} --> failure[\"{}\"]",
-                label(failure_label(binding.failure))
+                label(&failure_label(ir, binding))
             );
+            reached_failure = true;
         }
+    }
+    // The edge the whole diagram is for. `escalate` is a hand-off out of this system, and the event
+    // is the only mark it leaves inside it — so a reader who cannot see the event on the page cannot
+    // tell an escalation from nothing happening.
+    if let (true, ResolvedFailure::Escalate { emits }) = (reached_failure, binding.on_failure()) {
+        let _ = writeln!(
+            out,
+            "    escalation[\"{}\"]",
+            label(&ir.event(emits).name.to_string())
+        );
+        let _ = writeln!(out, "    failure --> escalation");
     }
     out.push_str("```\n");
     out
 }
 
-/// Where a failed binding's work goes, in three words for a diagram node.
-fn failure_label(failure: Failure) -> &'static str {
-    match failure {
-        Failure::Retry => "retried by the transport",
-        Failure::Escalate => "escalated to a person",
-        Failure::Drop => "dropped: the work is lost",
+/// Where a failed binding's work goes, in a few words for a diagram node.
+fn failure_label(ir: &EssIr, binding: &ResolvedBinding) -> String {
+    match binding.on_failure() {
+        ResolvedFailure::Retry => "retried by the transport".to_owned(),
+        ResolvedFailure::Escalate { emits } => {
+            format!("escalated to a person, emitting {}", ir.event(emits).name)
+        }
+        ResolvedFailure::Drop => "dropped: the work is lost".to_owned(),
     }
 }
 
@@ -1991,7 +2161,7 @@ mod tests {
 
     #[test]
     fn a_lifecycle_renders_as_a_state_diagram_with_its_initial_and_terminal_states_marked() {
-        let diagram = state_diagram(&invoice_lifecycle());
+        let diagram = state_diagram(&invoice_lifecycle(), &[]);
 
         assert!(
             diagram.starts_with("```mermaid\nstateDiagram-v2\n"),
@@ -2020,7 +2190,7 @@ mod tests {
 
     #[test]
     fn a_transition_from_two_states_draws_one_arrow_from_each() {
-        let diagram = state_diagram(&invoice_lifecycle());
+        let diagram = state_diagram(&invoice_lifecycle(), &[]);
 
         assert_eq!(
             diagram.matches("cancel").count(),
@@ -2037,7 +2207,7 @@ mod tests {
         // the artifact somebody looks at when asking why the refusal happened.
         let stranded = machine("Draft", &["Draft", "Void"], &[], Vec::new());
 
-        let diagram = state_diagram(&stranded);
+        let diagram = state_diagram(&stranded, &[]);
 
         assert!(diagram.contains("    [*] --> Draft\n"), "{diagram}");
         assert!(diagram.contains("    Void\n"), "{diagram}");

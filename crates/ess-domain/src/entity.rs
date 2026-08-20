@@ -2,7 +2,7 @@
 //!
 //! An entity has stable identity inside the domain (§4.3): two invoices with the same fields are
 //! still two invoices. A **value object** has none — it is its fields — so it is not modelled here
-//! at all but as a [`TypeBody::Struct`](crate::types::TypeBody::Struct) in [`crate::types`], which
+//! at all but as a [`TypeBody::Struct`] in [`crate::types`], which
 //! already carries fields and invariants. One concept, one place.
 //!
 //! # An invariant is a predicate, not a sentence
@@ -143,9 +143,12 @@ impl schemars::JsonSchema for StateName {
 
 /// A named move between states.
 ///
-/// The name is the transition's own, unqualified: the entity's namespace plus this name is the
-/// qualified name a command of the same name resolves against, so `IssueInvoice` on
-/// `billing.invoice.Invoice` is `billing.invoice.IssueInvoice`.
+/// The name is the transition's own, unqualified, and it is a name *inside the entity*: the entity's
+/// own name plus this one is what an outcome writes to say it takes this move, so `settle` on
+/// `billing.invoice.Invoice` is written `moves: billing.invoice.Invoice.settle`. It is not a command
+/// name, and no command is found by matching one — inferring the driving command from a transition's
+/// spelling is exactly the invention the conformance design §19 refuses, which is why the link is
+/// declared on the outcome ([`Subject`](crate::command::Subject)) rather than guessed here.
 ///
 /// `from` is a set because one move can start in several states — §4.7's `CancelInvoice` leaves
 /// both `Draft` and `Issued` — and `to` is one state because a move with two destinations is two
@@ -518,7 +521,7 @@ impl serde::Serialize for Invariant {
 /// Well-formedness is settled here — an unparsable predicate is a [`ParseError`] reported by serde
 /// with document context — so that by the time [`EntitySpec::validate`] runs, the only question
 /// left is whether the fields it reads exist. A value object's invariants
-/// ([`TypeBody`](crate::types::TypeBody)) are read through this same type, because one language for
+/// ([`TypeBody`]) are read through this same type, because one language for
 /// invariants is the point of writing them as predicates at all.
 #[derive(Debug, Clone)]
 pub struct RawInvariant(Invariant);
@@ -764,6 +767,148 @@ fn check_nested(
             return;
         };
         current = next.type_ref.required().clone();
+    }
+}
+
+/// Checks the link between a command's outcomes and the lifecycles they drive, in both directions.
+///
+/// One pass, because it is one relation. From the command's side it resolves the reference: an
+/// outcome that acts on an entity nothing declares, or takes a transition its subject's lifecycle
+/// does not declare, is [`UndeclaredReference`](ValidationCode::UndeclaredReference) — the code every
+/// other well-formed name pointing at nothing already gets. From the entity's side it checks the
+/// relation is total: **a declared transition no outcome performs is
+/// [`MissingCausation`](ValidationCode::MissingCausation)**.
+///
+/// # Why the transition side is required and the outcome side is not
+///
+/// `billing.email.SendEmail` changes no entity, and a model that made it name one would be a model
+/// that made an author invent a subject. So an outcome may say nothing.
+///
+/// A transition may not. `Issued → Paid` is a state change the specification promises the system can
+/// make; if nothing can trigger it, the promise is unkeepable, and the reason it stays unkeepable is
+/// that nothing looks. That is exactly the shape the inhabitation check in
+/// [`crate::system`] refuses on the type graph — a
+/// declaration no value can reach — read on the lifecycle instead, and it is what design §19 needs
+/// in order to be total: every transition it must prove legal has a command that takes it.
+///
+/// The symmetric rule for *creation* is deliberately not here. An entity no outcome creates is a
+/// real gap for scenario synthesis, and refusing it would also refuse a specification whose entities
+/// arrive from a migration or from a system outside this document — a wider claim than G14 makes,
+/// and one worth arguing on its own rather than smuggling in beside this one.
+///
+/// # A refusal's subject is not a cause
+///
+/// An outcome that names an error and declares a subject is already refused by
+/// [`CommandSpec::validate`](crate::command::CommandSpec::validate) as [`RefusalMutatedState`](ValidationCode::RefusalMutatedState), and it
+/// is *not* counted here as performing its transition. So an author whose only mover is a refusal
+/// learns both facts in one run rather than one per run: the refusal must lose its subject, and the
+/// transition still needs a cause.
+pub fn validate_lifecycle_causes(
+    entities: &BTreeMap<QualifiedName, EntitySpec>,
+    commands: &BTreeMap<QualifiedName, crate::command::CommandSpec>,
+) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    let mut performed: BTreeSet<(&QualifiedName, &str)> = BTreeSet::new();
+
+    for command in commands.values() {
+        for outcome in &command.outcomes {
+            let Some(subject) = &outcome.subject else {
+                continue;
+            };
+            let at = format!(
+                "command.{}.outcomes.{}.{}",
+                command.name,
+                outcome.name,
+                subject.effect.verb()
+            );
+            let Some(entity) = entities.get(&subject.entity) else {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::UndeclaredReference,
+                        at,
+                        format!(
+                            "outcome `{}` of `{}` {} `{}`, which is not a declared entity",
+                            outcome.name,
+                            command.name,
+                            subject.effect.verb(),
+                            subject.entity
+                        ),
+                    )
+                    .with_hint(format!(
+                        "declared entities: {}",
+                        names(entities.keys().map(ToString::to_string))
+                    )),
+                );
+                continue;
+            };
+            let Some(transition) = subject.effect.transition() else {
+                continue;
+            };
+            if entity.states.transition(transition).is_none() {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::UndeclaredReference,
+                        at,
+                        format!(
+                            "outcome `{}` of `{}` takes `{}`, which `{}` does not declare as a \
+                             transition",
+                            outcome.name, command.name, transition, subject.entity
+                        ),
+                    )
+                    .with_hint(format!(
+                        "`{}` declares: {}",
+                        subject.entity,
+                        names(
+                            entity
+                                .states
+                                .transitions
+                                .iter()
+                                .map(|declared| declared.name.clone())
+                        )
+                    )),
+                );
+                continue;
+            }
+            if outcome.is_refusal() {
+                continue;
+            }
+            performed.insert((&subject.entity, transition));
+        }
+    }
+
+    for entity in entities.values() {
+        for (index, transition) in entity.states.transitions.iter().enumerate() {
+            if performed.contains(&(&entity.name, transition.name.as_str())) {
+                continue;
+            }
+            errors.push(
+                ValidationError::new(
+                    ValidationCode::MissingCausation,
+                    format!("entity {}.transitions[{index}]", entity.name),
+                    format!(
+                        "`{}` moves `{}` to `{}`, and no command outcome takes it, so nothing in \
+                         this specification can make that state change happen",
+                        transition.name, entity.name, transition.to
+                    ),
+                )
+                .with_hint(format!(
+                    "give some outcome `moves: {}`, or delete the transition",
+                    entity.name.child(&transition.name)
+                )),
+            );
+        }
+    }
+
+    errors
+}
+
+/// Renders a list of names for a diagnostic hint, saying so when the list is empty.
+fn names(items: impl Iterator<Item = String>) -> String {
+    let rendered: Vec<String> = items.collect();
+    if rendered.is_empty() {
+        "none are declared".to_owned()
+    } else {
+        rendered.join(", ")
     }
 }
 
@@ -1515,5 +1660,266 @@ lifecycle:
         let error = serde_yaml::from_str::<RawEntitySpec>(&format!("{INVOICE}stats: [Draft]\n"))
             .expect_err("`stats` is nothing");
         assert!(error.to_string().contains("stats"), "{error}");
+    }
+    // ---- the link between a command's outcomes and the moves they take ------------------------
+
+    /// A command whose one outcome does `effect` to `entity`, and emits nothing.
+    ///
+    /// Deliberately built field by field rather than parsed: these tests are about
+    /// [`validate_lifecycle_causes`], and routing them through a document would also exercise every
+    /// other rule a command has to satisfy.
+    fn driver(
+        command: &str,
+        outcome: &str,
+        subject: Option<crate::command::Subject>,
+    ) -> crate::command::CommandSpec {
+        crate::command::CommandSpec {
+            name: name(command),
+            input: Vec::new(),
+            outcomes: vec![crate::command::Outcome {
+                name: crate::command::OutcomeName::new(outcome).expect("a valid outcome name"),
+                condition: crate::command::OutcomeCondition::Otherwise,
+                subject,
+                emits: vec![name("billing.invoice.Moved")],
+                error: None,
+                summary: None,
+            }],
+            naming: Naming::default(),
+        }
+    }
+
+    /// A refusal that also claims a subject, which is the one thing a refusal may not do.
+    fn refusing_driver(
+        command: &str,
+        subject: crate::command::Subject,
+    ) -> crate::command::CommandSpec {
+        let mut spec = driver(command, "rejected", Some(subject));
+        spec.outcomes[0].emits.clear();
+        spec.outcomes[0].error = Some(name("billing.invoice.InvalidAmount"));
+        spec
+    }
+
+    fn lifecycle(entity: EntitySpec) -> BTreeMap<QualifiedName, EntitySpec> {
+        [(entity.name.clone(), entity)].into_iter().collect()
+    }
+
+    fn commands(
+        specs: Vec<crate::command::CommandSpec>,
+    ) -> BTreeMap<QualifiedName, crate::command::CommandSpec> {
+        specs
+            .into_iter()
+            .map(|spec| (spec.name.clone(), spec))
+            .collect()
+    }
+
+    #[test]
+    fn a_transition_no_command_outcome_takes_is_refused_as_uncaused() {
+        // The rule gate G14 exists for: `Issued -> Paid` is a state change the specification
+        // promises, and a promise nothing can keep is the lifecycle's version of a type no value
+        // can inhabit. Two of the three moves are driven here, so the message must name the third
+        // and only the third.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let errors = validate_lifecycle_causes(
+            &lifecycle(invoice),
+            &commands(vec![
+                driver(
+                    "billing.invoice.Issue",
+                    "issued",
+                    Some(crate::command::Subject::moves(
+                        name("billing.invoice.Invoice"),
+                        "IssueInvoice",
+                    )),
+                ),
+                driver(
+                    "billing.invoice.Cancel",
+                    "cancelled",
+                    Some(crate::command::Subject::moves(
+                        name("billing.invoice.Invoice"),
+                        "CancelInvoice",
+                    )),
+                ),
+            ]),
+        );
+
+        let uncaused: Vec<&ValidationError> = errors
+            .as_slice()
+            .iter()
+            .filter(|error| error.code == ValidationCode::MissingCausation)
+            .collect();
+        assert_eq!(uncaused.len(), 1, "{errors}");
+        assert!(
+            uncaused[0].message.contains("PayInvoice"),
+            "the uncaused move is named, not merely counted: {errors}"
+        );
+        assert_eq!(
+            uncaused[0].location, "entity billing.invoice.Invoice.transitions[1]",
+            "a refusal points at the declaration to edit: {errors}"
+        );
+    }
+
+    #[test]
+    fn every_transition_with_a_command_that_takes_it_is_accepted() {
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let errors = validate_lifecycle_causes(
+            &lifecycle(invoice),
+            &commands(vec![
+                driver(
+                    "billing.invoice.Issue",
+                    "issued",
+                    Some(crate::command::Subject::moves(
+                        name("billing.invoice.Invoice"),
+                        "IssueInvoice",
+                    )),
+                ),
+                driver(
+                    "billing.invoice.Pay",
+                    "settled",
+                    Some(crate::command::Subject::moves(
+                        name("billing.invoice.Invoice"),
+                        "PayInvoice",
+                    )),
+                ),
+                driver(
+                    "billing.invoice.Cancel",
+                    "cancelled",
+                    Some(crate::command::Subject::moves(
+                        name("billing.invoice.Invoice"),
+                        "CancelInvoice",
+                    )),
+                ),
+            ]),
+        );
+        assert!(errors.is_empty(), "{errors}");
+    }
+
+    #[test]
+    fn an_outcome_that_moves_an_entity_nobody_declares_is_refused_as_a_dangling_reference() {
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let errors = validate_lifecycle_causes(
+            &lifecycle(invoice),
+            &commands(vec![driver(
+                "billing.invoice.Issue",
+                "issued",
+                Some(crate::command::Subject::moves(
+                    name("billing.invoice.Receipt"),
+                    "IssueInvoice",
+                )),
+            )]),
+        );
+        let dangling = errors
+            .as_slice()
+            .iter()
+            .find(|error| error.code == ValidationCode::UndeclaredReference)
+            .unwrap_or_else(|| panic!("an entity nothing declares: {errors}"));
+        assert!(
+            dangling.message.contains("billing.invoice.Receipt"),
+            "{errors}"
+        );
+        assert_eq!(
+            dangling.location,
+            "command.billing.invoice.Issue.outcomes.issued.moves"
+        );
+    }
+
+    #[test]
+    fn an_outcome_that_takes_a_move_the_entity_does_not_declare_is_refused() {
+        // The typo case, and the reason the transition side of the link is resolved rather than
+        // trusted: `settle` is not `PayInvoice`, and a specification that let it through would
+        // generate a scenario for a move nothing in the lifecycle draws.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let errors = validate_lifecycle_causes(
+            &lifecycle(invoice),
+            &commands(vec![driver(
+                "billing.invoice.Pay",
+                "settled",
+                Some(crate::command::Subject::moves(
+                    name("billing.invoice.Invoice"),
+                    "settle",
+                )),
+            )]),
+        );
+        let misspelt = errors
+            .as_slice()
+            .iter()
+            .find(|error| error.code == ValidationCode::UndeclaredReference)
+            .unwrap_or_else(|| panic!("a move the lifecycle does not declare: {errors}"));
+        assert!(
+            misspelt
+                .hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("PayInvoice")),
+            "the hint lists what the entity does declare: {errors}"
+        );
+    }
+
+    #[test]
+    fn a_refusals_subject_does_not_count_as_taking_the_move_it_claims() {
+        // Both facts in one run: the refusal must lose its subject, and the move it claimed still
+        // has nothing that takes it. Counting it would have hidden the second until the first was
+        // fixed.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let errors = validate_lifecycle_causes(
+            &lifecycle(invoice),
+            &commands(vec![refusing_driver(
+                "billing.invoice.Pay",
+                crate::command::Subject::moves(name("billing.invoice.Invoice"), "PayInvoice"),
+            )]),
+        );
+        assert!(
+            errors
+                .as_slice()
+                .iter()
+                .any(|error| error.code == ValidationCode::MissingCausation
+                    && error.message.contains("PayInvoice")),
+            "a refusal is not a cause: {errors}"
+        );
+    }
+
+    #[test]
+    fn a_creation_is_not_read_as_taking_any_move() {
+        // `creates` has no transition, so it satisfies no transition's need for a cause: an entity
+        // whose only command creates it still has three uncaused moves.
+        let invoice = entity(INVOICE).expect("§4.7's Invoice");
+        let errors = validate_lifecycle_causes(
+            &lifecycle(invoice),
+            &commands(vec![driver(
+                "billing.invoice.Create",
+                "accepted",
+                Some(crate::command::Subject::creates(name(
+                    "billing.invoice.Invoice",
+                ))),
+            )]),
+        );
+        assert_eq!(
+            errors
+                .as_slice()
+                .iter()
+                .filter(|error| error.code == ValidationCode::MissingCausation)
+                .count(),
+            3,
+            "{errors}"
+        );
+    }
+
+    #[test]
+    fn an_entity_with_no_transitions_needs_no_command_at_all() {
+        // The other half of "required on the transition side, optional on the outcome side": an
+        // entity that never moves is not asked to name a mover, so a specification of pure
+        // reference data is not refused for being small.
+        let settled = entity(
+            "\
+name: billing.invoice.Ledger
+identity:
+  name: ledger_id
+  type: billing.invoice.InvoiceId
+lifecycle:
+  states: [Open]
+  initial: Open
+  terminal: [Open]
+",
+        )
+        .expect("a one-state entity");
+        let errors = validate_lifecycle_causes(&lifecycle(settled), &BTreeMap::new());
+        assert!(errors.is_empty(), "{errors}");
     }
 }

@@ -6,12 +6,12 @@
 Every file here is a projection of one model, so two of them disagreeing is a bug in one of them —
 and a file nothing generates any more is a contract this repository no longer stands behind.
 
-Generated from billing v3 (model digest 120640924b8bdbf5).
+Generated from billing v3 (model digest 2940fd167bf4c4cc).
 
 | projection | files | describes |
 | --- | --- | --- |
 | `docs` | 6 | Markdown and Mermaid: the cheapest check that every construct can be described |
-| `schema` | 17 | JSON Schema per command input and event payload |
+| `schema` | 24 | JSON Schema per command input and event payload |
 | `openapi` | 2 | an OpenAPI document for every command a component accepts |
 | `asyncapi` | 2 | an AsyncAPI 3.0 document per component, covering what it publishes and what it reacts to |
 
@@ -27,11 +27,18 @@ Generated from billing v3 (model digest 120640924b8bdbf5).
 ## `schema`
 
 * [`schema/commands/billing.email.SendEmail.schema.json`](schema/commands/billing.email.SendEmail.schema.json)
+* [`schema/commands/billing.invoice.CancelInvoice.schema.json`](schema/commands/billing.invoice.CancelInvoice.schema.json)
 * [`schema/commands/billing.invoice.CreateInvoice.schema.json`](schema/commands/billing.invoice.CreateInvoice.schema.json)
+* [`schema/commands/billing.invoice.IssueInvoice.schema.json`](schema/commands/billing.invoice.IssueInvoice.schema.json)
+* [`schema/commands/billing.invoice.PayInvoice.schema.json`](schema/commands/billing.invoice.PayInvoice.schema.json)
 * [`schema/errors/billing.email.Undeliverable.schema.json`](schema/errors/billing.email.Undeliverable.schema.json)
 * [`schema/errors/billing.invoice.InvalidAmount.schema.json`](schema/errors/billing.invoice.InvalidAmount.schema.json)
+* [`schema/events/billing.email.DeliveryEscalated.schema.json`](schema/events/billing.email.DeliveryEscalated.schema.json)
 * [`schema/events/billing.email.EmailSent.schema.json`](schema/events/billing.email.EmailSent.schema.json)
+* [`schema/events/billing.invoice.InvoiceCancelled.schema.json`](schema/events/billing.invoice.InvoiceCancelled.schema.json)
 * [`schema/events/billing.invoice.InvoiceCreated.schema.json`](schema/events/billing.invoice.InvoiceCreated.schema.json)
+* [`schema/events/billing.invoice.InvoiceIssued.schema.json`](schema/events/billing.invoice.InvoiceIssued.schema.json)
+* [`schema/events/billing.invoice.InvoicePaid.schema.json`](schema/events/billing.invoice.InvoicePaid.schema.json)
 * [`schema/types/billing.email.EmailAddress.schema.json`](schema/types/billing.email.EmailAddress.schema.json)
 * [`schema/types/billing.email.MessageId.schema.json`](schema/types/billing.email.MessageId.schema.json)
 * [`schema/types/billing.email.TemplateId.schema.json`](schema/types/billing.email.TemplateId.schema.json)

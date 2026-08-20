@@ -1,8 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "SendEmail input",
-  "x-ess-name": "billing.email.SendEmail",
-  "x-ess-kind": "command-input",
+  "title": "Delivery escalated payload",
+  "description": "Sending was given up on and handed to a person.",
+  "x-ess-name": "billing.email.DeliveryEscalated",
+  "x-ess-kind": "event-payload",
   "type": "object",
   "properties": {
     "recipient": {

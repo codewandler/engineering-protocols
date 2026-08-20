@@ -1,5 +1,5 @@
 # generated from billing v3
-# model digest 120640924b8bdbf5
+# model digest 2940fd167bf4c4cc
 # compiler 0.1.0 · generator 0.1.0
 # do not edit: regenerate with `protocol ess generate`
 openapi: 3.1.0
@@ -14,7 +14,7 @@ info:
   x-ess-provenance:
     system: billing
     specification_version: v3
-    source_digest: 120640924b8bdbf5
+    source_digest: 2940fd167bf4c4cc
     compiler_version: 0.1.0
     generator_version: 0.1.0
 tags:

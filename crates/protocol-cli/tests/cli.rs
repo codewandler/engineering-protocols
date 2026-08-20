@@ -86,6 +86,15 @@ entities:
         - name: Place
           from: [Draft]
           to: Placed
+commands:
+  - name: shop.order.PlaceOrder
+    outcomes:
+      - name: placed
+        moves: shop.order.Order.Place
+        emits: [shop.order.OrderPlaced]
+events:
+  - name: shop.order.OrderPlaced
+    fields: []
 ";
 
 #[test]

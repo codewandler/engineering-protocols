@@ -94,6 +94,10 @@ entities:
 
     # Illegal transitions are illegal by absence. `Paid → Cancelled` is not forbidden by a rule,
     # because a rule would be a second place for the same truth to live.
+    #
+    # Every move below has to be caused by some command outcome — see the `moves:` keys under
+    # `commands:`. A transition nothing takes is a state change nothing can trigger, which is refused
+    # as `missing_causation`: the lifecycle equivalent of a type no value can inhabit.
     lifecycle:
       initial: Draft
       states: [Draft, Issued, Paid, Cancelled]
@@ -143,9 +147,15 @@ commands:
 
     # Two outcomes, because this command can be refused. A specification that recorded only the
     # first would generate a suite that never checks what happens when the amount is wrong.
+    #
+    # The subject hangs off the *outcome*, not off the command: `accepted` brings an invoice into
+    # existence and `rejected` brings nothing into existence, and a subject on the command would have
+    # attached a state change to the refusal. `creates:` is not a transition — a new instance has no
+    # state to move out of — so it starts at the lifecycle's `initial`.
     outcomes:
       - name: accepted
         when: amount.amount > 0
+        creates: billing.invoice.Invoice
         emits:
           - billing.invoice.InvoiceCreated
         summary: The invoice is created in Draft.
@@ -153,6 +163,74 @@ commands:
       - name: rejected
         error: billing.invoice.InvalidAmount
         summary: The amount was not positive, and nothing was created.
+
+  # The three commands that drive the lifecycle. `moves:` names the entity and the transition
+  # together — `billing.invoice.Invoice.issue` — because a transition is declared inside an entity,
+  # and nothing infers the driving command from a name: a heuristic on spelling is exactly the
+  # invention the conformance design refuses.
+  - name: billing.invoice.IssueInvoice
+
+    naming:
+      wire: issue-invoice
+      display: Issue invoice
+
+    input:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
+
+    outcomes:
+      - name: issued
+        moves: billing.invoice.Invoice.issue
+        emits:
+          - billing.invoice.InvoiceIssued
+        summary: The invoice leaves Draft and is now Issued.
+
+  # The transition design §19 uses as its worked example: `Issued → Paid`, and the command that
+  # makes it happen. Without this link a generated scenario knows the move is legal and has no verb
+  # to reach it with.
+  - name: billing.invoice.PayInvoice
+
+    naming:
+      wire: pay-invoice
+      display: Pay invoice
+
+    input:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
+      - name: amount
+        type: billing.invoice.Money
+
+    outcomes:
+      - name: settled
+        when: amount.amount > 0
+        moves: billing.invoice.Invoice.settle
+        emits:
+          - billing.invoice.InvoicePaid
+        summary: The payment is accepted and the invoice becomes Paid.
+
+      # A refusal declares no subject, and declaring one is refused as `refusal_mutated_state`: a
+      # refused command changes nothing, so a branch that reports an error cannot also move an
+      # invoice.
+      - name: rejected
+        error: billing.invoice.InvalidAmount
+        summary: The payment was not positive, so the invoice did not move.
+
+  - name: billing.invoice.CancelInvoice
+
+    naming:
+      wire: cancel-invoice
+      display: Cancel invoice
+
+    input:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
+
+    outcomes:
+      - name: cancelled
+        moves: billing.invoice.Invoice.cancel
+        emits:
+          - billing.invoice.InvoiceCancelled
+        summary: The invoice is cancelled, from Draft or from Issued.
 
 events:
   - name: billing.invoice.InvoiceCreated
@@ -163,6 +241,23 @@ events:
         type: billing.invoice.Email
       - name: amount
         type: billing.invoice.Money
+
+  - name: billing.invoice.InvoiceIssued
+    fields:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
+
+  - name: billing.invoice.InvoicePaid
+    fields:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
+      - name: amount
+        type: billing.invoice.Money
+
+  - name: billing.invoice.InvoiceCancelled
+    fields:
+      - name: invoice_id
+        type: billing.invoice.InvoiceId
 
 views:
   - name: billing.invoice.InvoiceById

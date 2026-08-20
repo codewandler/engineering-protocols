@@ -536,6 +536,12 @@ fn a_bindings_delivery_and_failure_semantics_are_stated_in_words() {
         "it is **escalated** — surfaced to a person",
         "on_failure is a required word because a binding that fails silently is a demo",
     );
+    assert_says(
+        &interactions,
+        "publishes `billing.email.DeliveryEscalated` to say so",
+        "an escalation is a hand-off out of the system, so the event is the only mark it leaves \
+         inside it — a page that named none would describe a requirement nobody can prove",
+    );
 
     // The mapping, and the one place two independently written contexts have to agree about a type.
     assert_says(
@@ -609,12 +615,15 @@ fn a_components_ownership_and_a_workloads_replica_floor_are_both_documented() {
     );
     assert_says(
         &readme,
-        "It accepts `billing.invoice.CreateInvoice`.",
-        "a component's outer surface",
+        "It accepts `billing.invoice.CancelInvoice`, `billing.invoice.CreateInvoice`, \
+         `billing.invoice.IssueInvoice` and `billing.invoice.PayInvoice`.",
+        "a component's outer surface, in full: a list that stopped at the first command would say \
+         the component answers for one thing when it answers for four",
     );
     assert_says(
         &readme,
-        "It publishes `billing.invoice.InvoiceCreated`.",
+        "It publishes `billing.invoice.InvoiceCancelled`, `billing.invoice.InvoiceCreated`, \
+         `billing.invoice.InvoiceIssued` and `billing.invoice.InvoicePaid`.",
         "a component's outer surface",
     );
     assert_says(
@@ -666,6 +675,12 @@ fn a_binding_renders_as_a_flow_and_a_lifecycle_as_a_state_diagram() {
         "escalated to a person",
         "the failure edge leaves the system, and that edge is why the word is required",
     );
+    assert_says(
+        &interactions,
+        "escalation[\"billing.email.DeliveryEscalated\"]",
+        "the escalation's event is a node on the flow, because it is the one thing a reader can \
+         look for to tell an escalation from nothing happening",
+    );
 
     let readme = page(&docs, "docs/README.md");
     assert_says(&readme, "```mermaid\nflowchart TB", "the system is a graph");
@@ -700,20 +715,21 @@ fn an_entitys_lifecycle_transitions_reach_the_page_as_arrows() {
         "where an instance starts is a fact a reader cannot infer from the state names",
     );
     for arrow in [
-        "    Draft --> Issued: issue\n",
-        "    Issued --> Paid: settle\n",
-        "    Draft --> Cancelled: cancel\n",
-        "    Issued --> Cancelled: cancel\n",
+        "    Draft --> Issued: issue (IssueInvoice)\n",
+        "    Issued --> Paid: settle (PayInvoice)\n",
+        "    Draft --> Cancelled: cancel (CancelInvoice)\n",
+        "    Issued --> Cancelled: cancel (CancelInvoice)\n",
     ] {
         assert_says(
             &invoice,
             arrow,
-            "a transition missing from the diagram is a move nobody knows is legal",
+            "a transition missing from the diagram is a move nobody knows is legal, and one with no \
+             command on it is a move nobody can make",
         );
     }
     // `cancel` leaves two states, and one arrow per source is the only rendering that keeps that.
     assert_eq!(
-        invoice.matches(": cancel\n").count(),
+        invoice.matches(": cancel (CancelInvoice)\n").count(),
         2,
         "`cancel` leaves both Draft and Issued: {invoice}"
     );
@@ -728,6 +744,78 @@ fn an_entitys_lifecycle_transitions_reach_the_page_as_arrows() {
         &invoice,
         "An instance is created in `Draft`.",
         "the initial state in words, for a reader who does not read Mermaid",
+    );
+}
+
+#[test]
+fn the_command_that_takes_each_move_reaches_the_page_beside_the_move_itself() {
+    // Gate G14, as a reader meets it. A lifecycle whose arrows have no verbs is a diagram of what
+    // may happen with nothing that makes any of it happen, and `Issued -> Paid` is design §19's
+    // worked example: the scenario it wants to generate is unwritable until the page can say which
+    // command takes it.
+    let invoice = page(&docs(), "docs/domains/billing.invoice.md");
+
+    assert_says(
+        &invoice,
+        "- `settle` — taken by `billing.invoice.PayInvoice` on its `settled` outcome",
+        "`Issued -> Paid` names the command and the branch that takes it",
+    );
+    assert_says(
+        &invoice,
+        "- `issue` — taken by `billing.invoice.IssueInvoice` on its `issued` outcome",
+        "every declared move names its cause, not only the interesting one",
+    );
+    assert_says(
+        &invoice,
+        "- `cancel` — taken by `billing.invoice.CancelInvoice` on its `cancelled` outcome",
+        "a move leaving two states still has one cause",
+    );
+    assert_says(
+        &invoice,
+        "An instance is brought into existence by `billing.invoice.CreateInvoice` on its \
+         `accepted` outcome.",
+        "creation is not a transition, and a page that only listed moves would never say where an \
+         instance comes from",
+    );
+    assert!(
+        !invoice.contains("taken by nothing in this specification"),
+        "an uncaused move is refused rather than documented: {invoice}"
+    );
+}
+
+#[test]
+fn an_outcome_says_what_it_does_to_an_entity_and_a_refusal_says_it_changes_none() {
+    let invoice = page(&docs(), "docs/domains/billing.invoice.md");
+
+    assert_says(
+        &invoice,
+        "It creates a `billing.invoice.Invoice`, which starts in `Draft`.",
+        "the branch that brings an invoice into existence says so, and says where it starts",
+    );
+    assert_says(
+        &invoice,
+        "It moves a `billing.invoice.Invoice` from `Issued` to `Paid`, along the declared move \
+         `settle`.",
+        "an outcome that moves an entity carries both states, so a scenario knows what to set up \
+         and what to assert",
+    );
+    assert_says(
+        &invoice,
+        "No entity in this specification changes.",
+        "silence would read the same as a projection that dropped the field; a refusal says it \
+         changed nothing",
+    );
+
+    // `SendEmail` acts on no entity at all, which is the reason the link is optional on this side.
+    let email = page(&docs(), "docs/domains/billing.email.md");
+    assert_says(
+        &email,
+        "No entity in this specification changes.",
+        "a command that changes no entity is not made to invent one",
+    );
+    assert!(
+        !email.contains("It creates a "),
+        "nothing in the email context creates an entity: {email}"
     );
 }
 
@@ -870,9 +958,19 @@ fn an_actors_grant_renders_as_an_edge_from_the_actor_to_that_command_in_the_inde
         "who1[\"billing.invoice.Customer\"]",
         "an actor is a node in the system graph",
     );
+    // The node id is read out of the graph rather than written here: Mermaid ids are indices into
+    // the IR's own order, so hard-coding one asserts how many commands the example happens to
+    // declare instead of asserting that the grant is an edge to *this* command.
+    let node = readme
+        .lines()
+        .find_map(|line| {
+            let line = line.trim();
+            line.strip_suffix("[\"billing.invoice.CreateInvoice\"]")
+        })
+        .unwrap_or_else(|| panic!("the graph has a node for `CreateInvoice`: {readme}"));
     assert_says(
         &readme,
-        "who1 -->|\"may invoke\"| cmd1",
+        &format!("who1 -->|\"may invoke\"| {node}"),
         "the grant is the edge; without it the actor is decoration",
     );
     assert!(

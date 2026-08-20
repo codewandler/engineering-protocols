@@ -479,6 +479,12 @@ pub(crate) fn key(primitive_key: Primitive) -> Option<Node> {
 /// becomes a `null` branch, and an `Optional` in a field position is handled by [`object`], which
 /// leaves the field out of `required` instead. Sending both would give one fact two spellings, which
 /// is the ambiguity the model refuses everywhere else.
+///
+/// Recurses as deep as the reference nests and does not count, because it cannot meet a deep one: a
+/// [`ResolvedTypeRef`] is at most [`MAX_TYPE_DEPTH`](ess_domain::types::MAX_TYPE_DEPTH) deep, and a
+/// named leaf becomes a `$ref` rather than being inlined, so a type graph that refers to itself
+/// produces a wide definitions table and not a deep node. [`reachable`] is what keeps that table
+/// finite, with a worklist and a visited set.
 pub(crate) fn type_ref(reference: &ResolvedTypeRef) -> Node {
     match reference {
         ResolvedTypeRef::Primitive { name } => primitive(*name),

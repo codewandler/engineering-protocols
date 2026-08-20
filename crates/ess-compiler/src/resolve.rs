@@ -36,12 +36,15 @@
 //! "accepts an undeclared command" because that command's input names a misspelt type sends the
 //! reader to the wrong file.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use aep_domain::error::{ValidationCode, ValidationErrors};
 use ess_domain::actor::ActorSpec;
 use ess_domain::binding::{BindingName, BindingSpec, MappingSource};
-use ess_domain::command::{CommandSpec, ErrorSpec, EventSpec, Outcome, OutcomeCondition};
+use ess_domain::command::{
+    CommandSpec, Effect, ErrorSpec, EventSpec, Outcome, OutcomeCondition, Subject,
+};
 use ess_domain::component::{ComponentName, ComponentSpec};
 use ess_domain::entity::{EntitySpec, StateMachine};
 use ess_domain::name::QualifiedName;
@@ -55,9 +58,10 @@ use crate::diagnostic::{Code, Detail, Diagnostic, Diagnostics, Severity};
 use crate::ir::{
     ActorHandle, CommandHandle, ComponentHandle, DomainHandle, EntityHandle, ErrorHandle, EssIr,
     EventHandle, ResolvedActor, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedComponent,
-    ResolvedCondition, ResolvedConversion, ResolvedDomain, ResolvedEntity, ResolvedError,
-    ResolvedEvent, ResolvedField, ResolvedMapping, ResolvedMappingValue, ResolvedOutcome,
-    ResolvedType, ResolvedTypeRef, ResolvedView, ResolvedWorkload, TypeHandle, ViewHandle,
+    ResolvedCondition, ResolvedConversion, ResolvedDomain, ResolvedEffect, ResolvedEntity,
+    ResolvedError, ResolvedEvent, ResolvedField, ResolvedMapping, ResolvedMappingValue,
+    ResolvedOutcome, ResolvedSubject, ResolvedType, ResolvedTypeRef, ResolvedView,
+    ResolvedWorkload, TypeHandle, ViewHandle,
 };
 use crate::source::{Location, SourceMap, Span};
 
@@ -111,6 +115,10 @@ use crate::source::{Location, SourceMap, Span};
 /// | an entity's identity type and field types | here, to mint [`TypeHandle`]s | [`ENTITY_UNDECLARED_REFERENCE`](codes::ENTITY_UNDECLARED_REFERENCE) |
 /// | a view's source entity, and its projected field types | here, to mint an [`EntityHandle`] and [`TypeHandle`]s | [`VIEW_UNDECLARED_REFERENCE`](codes::VIEW_UNDECLARED_REFERENCE) |
 /// | an actor's `may` grant | here, to mint a [`CommandHandle`] | [`ACTOR_UNDECLARED_REFERENCE`](codes::ACTOR_UNDECLARED_REFERENCE) |
+/// | an outcome's subject: the entity it changes, and the transition it takes | here, to mint an [`EntityHandle`] and to carry the move itself | [`COMMAND_UNDECLARED_REFERENCE`](codes::COMMAND_UNDECLARED_REFERENCE) |
+/// | a transition no outcome takes | `ess-domain`, `validate_lifecycle_causes` | `ESS-ENTITY-005`, as `missing_causation` |
+/// | the event a binding escalates with | here, to mint an [`EventHandle`] | [`BINDING_UNDECLARED_REFERENCE`](codes::BINDING_UNDECLARED_REFERENCE) |
+/// | an `escalate` that names no event at all | `ess-domain`, `BindingSpec::validate` | `ESS-BINDING-005`, as `missing_declaration` |
 /// | a projected field the source entity does not have, or whose type disagrees with it | `ess-domain`, `ViewSpec::validate` | `ESS-VIEW-001`, `ESS-VIEW-002` |
 /// | a lifecycle's states: unknown, unreachable, dead-ended, duplicated | `ess-domain`, `StateMachine::validate_at` | `ESS-ENTITY-011`, `ESS-ENTITY-006` |
 /// | an invariant reading a field the entity does not have | `ess-domain`, `EntitySpec::validate` | `ESS-ENTITY-003` |
@@ -122,7 +130,7 @@ use crate::source::{Location, SourceMap, Span};
 /// A lifecycle naming a state it does not declare is refused by *nothing here*. It is settled when
 /// `RawStateMachine` is converted, so an assembled specification cannot carry one; a `Specification`
 /// built field by field can, and that makes the compilation off-contract — the entity stays out of
-/// the IR and [`Resolver::report_off_contract`] says so — rather than being restated as a rule with a
+/// the IR and `Resolver::report_off_contract` says so — rather than being restated as a rule with a
 /// second code.
 ///
 /// Contradictory invariants are not refused by anything. Deciding that `amount >= 0` and
@@ -290,6 +298,10 @@ pub mod codes {
         ERROR_UNDECLARED_REFERENCE = family::ERROR, class::UNDECLARED;
 
         /// A binding names an event, a command, or a command input, that nothing declares.
+        ///
+        /// Two events can be named: the one it reacts to, and the one its `escalate` emits. Which
+        /// it was arrives as a field rather than as a second code, because the repair is the same
+        /// one — fix the name, or declare the event.
         BINDING_UNDECLARED_REFERENCE = family::BINDING, class::UNDECLARED;
 
         /// A mapping's two types differ and no conversion between them is declared.
@@ -303,6 +315,11 @@ pub mod codes {
         MAPPING_READS_UNDECLARED_FIELD = family::BINDING, class::UNREADABLE;
 
         /// A required input of the invoked command is left unmapped.
+        ///
+        /// It shares `ESS-BINDING-005` with `ess-domain`'s other `missing_declaration` about a
+        /// binding — an `escalate` that names no event — because a code names a *kind* of defect
+        /// and not a rule: both are a key the document did not write that what it did write makes
+        /// required, and both are repaired by writing it.
         UNMAPPED_COMMAND_INPUT = family::BINDING, class::MISSING;
     }
 
@@ -363,6 +380,21 @@ pub mod codes {
 pub struct Locator<'a> {
     sources: &'a SourceMap,
     labels: Vec<String>,
+    /// What [`Self::unique`] already answered.
+    ///
+    /// One needle costs a scan of every registered file's whole text, and the search cannot stop
+    /// early: "occurs exactly once *across all files*" is only known once every file has been read
+    /// to the end. Validation accumulates (invariant 3), so a specification with one badly named
+    /// type produces one diagnostic per use of it, and every one of those asks for the same needle —
+    /// which is where the repeated work actually is. A [`BTreeMap`], like everything else in this
+    /// crate: an unordered map is banned here outright (invariant 9, and
+    /// `tests/billing.rs` reads the sources for one), and a memo is no exception even though
+    /// nothing iterates it.
+    ///
+    /// This removes the repeats. It does not make the search sublinear: *n* distinct needles still
+    /// cost *n* passes over the sources, and fixing that needs a substring index rather than a
+    /// cache.
+    located: RefCell<BTreeMap<String, Option<(String, Location)>>>,
 }
 
 impl<'a> Locator<'a> {
@@ -378,6 +410,7 @@ impl<'a> Locator<'a> {
                 .iter()
                 .map(|label| label.as_ref().to_owned())
                 .collect(),
+            located: RefCell::new(BTreeMap::new()),
         }
     }
 
@@ -401,7 +434,21 @@ impl<'a> Locator<'a> {
     }
 
     /// The one place `needle` occurs, or `None` when it occurs nowhere or more than once.
+    ///
+    /// Answered once per needle for the life of the locator; see [`Self::located`].
     fn unique(&self, needle: &str) -> Option<(String, Location)> {
+        if let Some(remembered) = self.located.borrow().get(needle) {
+            return remembered.clone();
+        }
+        let answer = self.scan(needle);
+        self.located
+            .borrow_mut()
+            .insert(needle.to_owned(), answer.clone());
+        answer
+    }
+
+    /// [`Self::unique`], actually reading the files.
+    fn scan(&self, needle: &str) -> Option<(String, Location)> {
         let mut found: Option<(String, Location)> = None;
         for label in &self.labels {
             let Some(text) = self.sources.get(label) else {
@@ -555,6 +602,9 @@ fn class_of(code: ValidationCode) -> u16 {
 /// names a binding, not a binding called `mapping`.
 const STRUCTURAL: &[&str] = &[
     "mapping",
+    "on_failure",
+    "escalate",
+    "delivery",
     "input",
     "fields",
     "outcomes",
@@ -562,6 +612,9 @@ const STRUCTURAL: &[&str] = &[
     "error",
     "when",
     "external",
+    "creates",
+    "moves",
+    "updates",
     "filter",
     "states",
     "terminal",
@@ -710,7 +763,7 @@ impl<'a> Resolver<'a> {
         let entities = self.entities(&types);
         let events = self.events();
         let errors = self.errors();
-        let commands = self.commands(&events, &errors);
+        let commands = self.commands(&events, &errors, &entities);
         let views = self.views(&entities);
         let actors = self.actors(&commands);
         let components = self.components(&commands, &events);
@@ -940,6 +993,11 @@ impl<'a> Resolver<'a> {
     /// `code` is the family of whatever holds the reference — a command's input is
     /// `ESS-COMMAND-001`, a type's own body is `ESS-TYPE-001` — so that the code says where to look
     /// and matches what `ess-domain` would have reported for the same defect at the same location.
+    ///
+    /// Recurses as deep as the reference nests, and does not count: a [`TypeRef`] that reached this
+    /// crate came through [`TypeRef::parse`], which refuses past
+    /// [`MAX_TYPE_DEPTH`](ess_domain::types::MAX_TYPE_DEPTH). Counting here would be a second bound
+    /// on the same document, checked after the one that already refused it.
     fn type_ref(
         &mut self,
         code: Code,
@@ -1194,6 +1252,7 @@ impl<'a> Resolver<'a> {
         &mut self,
         events: &BTreeMap<QualifiedName, ResolvedEvent>,
         errors: &BTreeMap<QualifiedName, ResolvedError>,
+        entities: &BTreeMap<QualifiedName, ResolvedEntity>,
     ) -> BTreeMap<QualifiedName, ResolvedCommand> {
         let declared: Vec<CommandSpec> = self.spec.commands.values().cloned().collect();
         let mut resolved = BTreeMap::new();
@@ -1202,7 +1261,7 @@ impl<'a> Resolver<'a> {
             let needles = vec![format!("name: {}", command.name)];
             let code = codes::COMMAND_UNDECLARED_REFERENCE;
             let input = self.fields(code, &command.input, &command.name, &path, &needles);
-            let outcomes = self.outcomes(&command, events, errors, &path, &needles);
+            let outcomes = self.outcomes(&command, events, errors, entities, &path, &needles);
             let domain = self.owner(code, &command.name, "command");
             if let (Some(input), Some(outcomes), Some(domain)) = (input, outcomes, domain) {
                 resolved.insert(
@@ -1226,6 +1285,7 @@ impl<'a> Resolver<'a> {
         command: &CommandSpec,
         events: &BTreeMap<QualifiedName, ResolvedEvent>,
         errors: &BTreeMap<QualifiedName, ResolvedError>,
+        entities: &BTreeMap<QualifiedName, ResolvedEntity>,
         path: &str,
         needles: &[String],
     ) -> Option<Vec<ResolvedOutcome>> {
@@ -1277,9 +1337,17 @@ impl<'a> Resolver<'a> {
                     }
                 },
             };
+            let mut subject = None;
+            if let Some(declared) = &outcome.subject {
+                subject = self.subject(command, outcome, declared, entities, &path);
+                if subject.is_none() {
+                    complete = false;
+                }
+            }
             resolved.push(ResolvedOutcome {
                 name: outcome.name.clone(),
                 condition: condition_of(outcome),
+                subject,
                 test_strategy: outcome.test_strategy(),
                 emits,
                 error,
@@ -1287,6 +1355,95 @@ impl<'a> Resolver<'a> {
             });
         }
         complete.then_some(resolved)
+    }
+
+    /// One outcome's subject: the entity it acts on, and the move it takes.
+    ///
+    /// Two references to resolve, and both are resolved here for the same reason a view's source is:
+    /// there is no [`EntityHandle`] to put in an outcome for an entity nothing declares, and no
+    /// [`Transition`](ess_domain::entity::Transition) to carry for a move the entity's lifecycle does
+    /// not have. `ess-domain`'s `validate_lifecycle_causes` refuses both under
+    /// `undeclared_reference`, which is the code this bridges to, so one defect keeps one code
+    /// whichever half noticed it.
+    ///
+    /// The *causation* rule — a transition no outcome takes — is deliberately not restated here. An
+    /// uncaused transition is perfectly representable in the IR, so by this pass's own doctrine it
+    /// belongs to `ess-domain` alone and reaches a reader through [`diagnose`].
+    fn subject(
+        &mut self,
+        command: &CommandSpec,
+        outcome: &Outcome,
+        subject: &Subject,
+        entities: &BTreeMap<QualifiedName, ResolvedEntity>,
+        path: &str,
+    ) -> Option<ResolvedSubject> {
+        let verb = subject.effect.verb();
+        let needles = vec![
+            format!("{verb}: {}", subject.entity),
+            format!("name: {}", command.name),
+        ];
+        let entity = match self.entity_of(&subject.entity, entities) {
+            Found::Handle(handle) => handle,
+            Found::Unresolved => return None,
+            Found::Missing => {
+                let available = self.spec.entities.keys().map(ToString::to_string).collect();
+                let span = self.locator.span(format!("{path}.{verb}"), &needles);
+                self.refuse_undeclared(
+                    codes::COMMAND_UNDECLARED_REFERENCE,
+                    format!(
+                        "outcome `{}` of `{}` {verb} `{}`, which is not a declared entity",
+                        outcome.name, command.name, subject.entity
+                    ),
+                    &subject.entity,
+                    "entity",
+                    available,
+                    span,
+                );
+                return None;
+            }
+        };
+
+        let effect = match subject.effect.transition() {
+            None if matches!(subject.effect, Effect::Creates) => ResolvedEffect::Creates,
+            None => ResolvedEffect::Updates,
+            Some(named) => {
+                let declared = entities
+                    .get(&subject.entity)
+                    .and_then(|resolved| resolved.lifecycle.transition(named));
+                let Some(transition) = declared else {
+                    let available = entities
+                        .get(&subject.entity)
+                        .map(|resolved| {
+                            resolved
+                                .lifecycle
+                                .transitions
+                                .iter()
+                                .map(|declared| declared.name.clone())
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let span = self.locator.span(format!("{path}.moves"), &needles);
+                    self.refuse_undeclared(
+                        codes::COMMAND_UNDECLARED_REFERENCE,
+                        format!(
+                            "outcome `{}` of `{}` takes `{named}`, which `{}` does not declare as a \
+                             transition",
+                            outcome.name, command.name, subject.entity
+                        ),
+                        &subject.entity.child(named),
+                        "transition",
+                        available,
+                        span,
+                    );
+                    return None;
+                };
+                ResolvedEffect::Moves {
+                    transition: transition.clone(),
+                }
+            }
+        };
+
+        Some(ResolvedSubject { entity, effect })
     }
 
     // ---- entities, views and actors --------------------------------------------------------
@@ -1623,6 +1780,38 @@ impl<'a> Resolver<'a> {
                     span,
                 );
             }
+            // Resolved beside the trigger and the target, because it is the same kind of reference:
+            // a binding that escalated into an event nobody declares would put a fact in the IR
+            // that nothing reading the IR could look up.
+            let mut escalation = None;
+            let mut escalation_resolved = true;
+            if let Some(emitted) = &binding.escalation {
+                match self.event_of(emitted, events) {
+                    Found::Handle(handle) => escalation = Some(handle),
+                    Found::Unresolved => escalation_resolved = false,
+                    Found::Missing => {
+                        escalation_resolved = false;
+                        let available = self.spec.events.keys().map(ToString::to_string).collect();
+                        let mut escalation_needles = vec![format!("emits: {emitted}")];
+                        escalation_needles.extend_from_slice(&needles);
+                        let span = self.locator.span(
+                            format!("{path}.on_failure.escalate.emits"),
+                            &escalation_needles,
+                        );
+                        self.refuse_undeclared(
+                            codes::BINDING_UNDECLARED_REFERENCE,
+                            format!(
+                                "binding `{}` escalates into an undeclared event",
+                                binding.name
+                            ),
+                            emitted,
+                            "event",
+                            available,
+                            span,
+                        );
+                    }
+                }
+            }
             let command = self.command_of(&binding.command, commands);
             if matches!(command, Found::Missing) {
                 let available = self.spec.commands.keys().map(ToString::to_string).collect();
@@ -1640,6 +1829,12 @@ impl<'a> Resolver<'a> {
             else {
                 continue;
             };
+            // An escalation that did not resolve keeps the whole binding out, rather than putting
+            // one in that says it escalates and cannot say into what: that is the shape G2 exists
+            // to remove, and reintroducing it here would only move it.
+            if !escalation_resolved {
+                continue;
+            }
             let Some(mapping) = self.mapping(
                 &binding,
                 &events[&binding.event],
@@ -1656,6 +1851,7 @@ impl<'a> Resolver<'a> {
                     mapping,
                     delivery: binding.delivery,
                     failure: binding.failure,
+                    escalation,
                     naming: binding.naming,
                 },
             );
@@ -1938,6 +2134,10 @@ struct Members<'a> {
 /// a route back to the question this crate answers. It exists because
 /// [`ConversionRegistry`](ess_domain::types::ConversionRegistry) is asked about
 /// [`TypeRef`]s, and re-resolving a field to obtain one would be a second resolution path.
+///
+/// Unbounded recursion on a bounded tree: this walks a [`ResolvedTypeRef`], whose depth is the
+/// parsed [`TypeRef`]'s depth, which [`TypeRef::parse`] refuses past
+/// [`MAX_TYPE_DEPTH`](ess_domain::types::MAX_TYPE_DEPTH).
 fn spec_type_ref(reference: &ResolvedTypeRef) -> TypeRef {
     match reference {
         ResolvedTypeRef::Primitive { name } => TypeRef::Primitive(*name),

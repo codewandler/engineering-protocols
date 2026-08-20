@@ -1,6 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$ref": "#/$defs/billing.invoice.LineItem",
+  "title": "Pay invoice input",
+  "x-ess-name": "billing.invoice.PayInvoice",
+  "x-ess-kind": "command-input",
+  "type": "object",
+  "properties": {
+    "invoice_id": {
+      "$ref": "#/$defs/billing.invoice.InvoiceId"
+    },
+    "amount": {
+      "$ref": "#/$defs/billing.invoice.Money"
+    }
+  },
+  "required": [
+    "invoice_id",
+    "amount"
+  ],
+  "additionalProperties": false,
   "x-ess-provenance": {
     "system": "billing",
     "specification_version": "v3",
@@ -10,28 +26,13 @@
     "regenerate": "protocol ess generate"
   },
   "$defs": {
-    "billing.invoice.LineItem": {
-      "title": "LineItem",
-      "x-ess-name": "billing.invoice.LineItem",
-      "x-ess-kind": "struct",
-      "type": "object",
-      "properties": {
-        "description": {
-          "type": "string"
-        },
-        "quantity": {
-          "type": "integer"
-        },
-        "unit_price": {
-          "$ref": "#/$defs/billing.invoice.Money"
-        }
-      },
-      "required": [
-        "description",
-        "quantity",
-        "unit_price"
-      ],
-      "additionalProperties": false
+    "billing.invoice.InvoiceId": {
+      "title": "InvoiceId",
+      "x-ess-name": "billing.invoice.InvoiceId",
+      "x-ess-kind": "newtype",
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
     },
     "billing.invoice.Money": {
       "title": "Money",

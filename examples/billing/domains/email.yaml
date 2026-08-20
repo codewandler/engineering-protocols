@@ -47,3 +47,17 @@ events:
         type: billing.email.MessageId
       - name: recipient
         type: billing.email.EmailAddress
+
+  # What an `on_failure: escalate` publishes. Escalation hands the failure to a person, which happens
+  # outside the system — so without an event, nothing inside the system records that it happened and
+  # no conformance target could be asked to prove it did. `escalate` is a required word precisely so
+  # that a binding cannot fail silently; an unobservable escalation is that silence wearing a name.
+  - name: billing.email.DeliveryEscalated
+    naming:
+      display: Delivery escalated
+      summary: Sending was given up on and handed to a person.
+    fields:
+      - name: recipient
+        type: billing.email.EmailAddress
+      - name: template
+        type: billing.email.TemplateId

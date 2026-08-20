@@ -21,9 +21,15 @@ components:
     accepts:
       commands:
         - billing.invoice.CreateInvoice
+        - billing.invoice.IssueInvoice
+        - billing.invoice.PayInvoice
+        - billing.invoice.CancelInvoice
     publishes:
       events:
         - billing.invoice.InvoiceCreated
+        - billing.invoice.InvoiceIssued
+        - billing.invoice.InvoicePaid
+        - billing.invoice.InvoiceCancelled
 
   - component: email-service
     summary: Sends what other contexts ask it to send.
@@ -36,6 +42,7 @@ components:
     publishes:
       events:
         - billing.email.EmailSent
+        - billing.email.DeliveryEscalated
 
 bindings:
   # `delivery` and `on_failure` are required words. A binding that can fail silently is the
@@ -53,4 +60,9 @@ bindings:
       recipient: event.customer_email
       template: invoice-created
     delivery: at_least_once
-    on_failure: escalate
+    # `escalate` names a consequence outside the system — a person is told. The event is how the
+    # system says that happened, so a scenario can force `SendEmail` to fail and then assert
+    # `billing.email.DeliveryEscalated` rather than assert nothing at all.
+    on_failure:
+      escalate:
+        emits: billing.email.DeliveryEscalated

@@ -1,5 +1,5 @@
 # generated from billing v3
-# model digest 120640924b8bdbf5
+# model digest 2940fd167bf4c4cc
 # compiler 0.1.0 · generator 0.1.0
 # do not edit: regenerate with `protocol ess generate`
 openapi: 3.1.0
@@ -14,13 +14,33 @@ info:
   x-ess-provenance:
     system: billing
     specification_version: v3
-    source_digest: 120640924b8bdbf5
+    source_digest: 2940fd167bf4c4cc
     compiler_version: 0.1.0
     generator_version: 0.1.0
 tags:
 - name: invoices
   description: Issuing invoices and tracking whether they are paid.
 paths:
+  /invoices/commands/cancel-invoice:
+    post:
+      operationId: billing.invoice.CancelInvoice
+      summary: Cancel invoice
+      tags:
+      - invoices
+      requestBody:
+        description: The input `billing.invoice.CancelInvoice` declares.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/billing.invoice.CancelInvoice.Input'
+      responses:
+        '202':
+          description: 'Outcome `cancelled`: the branch the specification declares for this input. Events this branch emits are published to consumers, not returned here.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.CancelInvoice.cancelled.Response'
   /invoices/commands/create-invoice:
     post:
       operationId: billing.invoice.CreateInvoice
@@ -49,8 +69,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/billing.invoice.CreateInvoice.rejected.Response'
+  /invoices/commands/issue-invoice:
+    post:
+      operationId: billing.invoice.IssueInvoice
+      summary: Issue invoice
+      tags:
+      - invoices
+      requestBody:
+        description: The input `billing.invoice.IssueInvoice` declares.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/billing.invoice.IssueInvoice.Input'
+      responses:
+        '202':
+          description: 'Outcome `issued`: the branch the specification declares for this input. Events this branch emits are published to consumers, not returned here.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.IssueInvoice.issued.Response'
+  /invoices/commands/pay-invoice:
+    post:
+      operationId: billing.invoice.PayInvoice
+      summary: Pay invoice
+      tags:
+      - invoices
+      requestBody:
+        description: The input `billing.invoice.PayInvoice` declares.
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/billing.invoice.PayInvoice.Input'
+      responses:
+        '202':
+          description: 'Outcome `settled`: the branch the specification declares for this input. Events this branch emits are published to consumers, not returned here.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.PayInvoice.settled.Response'
+        '422':
+          description: 'Outcome `rejected`: the request was understood and refused on domain grounds. The body names the declared error and carries whatever that error declares.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/billing.invoice.PayInvoice.rejected.Response'
 components:
   schemas:
+    billing.invoice.CancelInvoice.Input:
+      title: Cancel invoice input
+      x-ess-name: billing.invoice.CancelInvoice
+      x-ess-kind: command-input
+      type: object
+      properties:
+        invoice_id:
+          $ref: '#/components/schemas/billing.invoice.InvoiceId'
+      required:
+      - invoice_id
+      additionalProperties: false
+    billing.invoice.CancelInvoice.cancelled.Response:
+      additionalProperties: false
+      description: The invoice is cancelled, from Draft or from Issued. Taken when no other outcome's condition matched. A `billing.invoice.Invoice` has moved to `Cancelled`, along `cancel`. Emits `InvoiceCancelled`, published to consumers rather than returned here.
+      properties:
+        outcome:
+          const: cancelled
+          description: Which declared outcome the command took.
+      required:
+      - outcome
+      type: object
     billing.invoice.CreateInvoice.Input:
       title: Create invoice input
       x-ess-name: billing.invoice.CreateInvoice
@@ -67,7 +154,7 @@ components:
       additionalProperties: false
     billing.invoice.CreateInvoice.accepted.Response:
       additionalProperties: false
-      description: The invoice is created in Draft. Taken when `amount.amount > 0` holds of the input. Emits `InvoiceCreated`, published to consumers rather than returned here.
+      description: The invoice is created in Draft. Taken when `amount.amount > 0` holds of the input. A `billing.invoice.Invoice` now exists, in `Draft`. Emits `InvoiceCreated`, published to consumers rather than returned here.
       properties:
         outcome:
           const: accepted
@@ -110,6 +197,34 @@ components:
       required:
       - submitted
       additionalProperties: false
+    billing.invoice.InvoiceId:
+      title: InvoiceId
+      x-ess-name: billing.invoice.InvoiceId
+      x-ess-kind: newtype
+      type: string
+      format: uuid
+      pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+    billing.invoice.IssueInvoice.Input:
+      title: Issue invoice input
+      x-ess-name: billing.invoice.IssueInvoice
+      x-ess-kind: command-input
+      type: object
+      properties:
+        invoice_id:
+          $ref: '#/components/schemas/billing.invoice.InvoiceId'
+      required:
+      - invoice_id
+      additionalProperties: false
+    billing.invoice.IssueInvoice.issued.Response:
+      additionalProperties: false
+      description: The invoice leaves Draft and is now Issued. Taken when no other outcome's condition matched. A `billing.invoice.Invoice` has moved to `Issued`, along `issue`. Emits `InvoiceIssued`, published to consumers rather than returned here.
+      properties:
+        outcome:
+          const: issued
+          description: Which declared outcome the command took.
+      required:
+      - outcome
+      type: object
     billing.invoice.Money:
       title: Money
       x-ess-name: billing.invoice.Money
@@ -128,3 +243,45 @@ components:
       additionalProperties: false
       x-ess-invariants:
       - amount >= 0
+    billing.invoice.PayInvoice.Input:
+      title: Pay invoice input
+      x-ess-name: billing.invoice.PayInvoice
+      x-ess-kind: command-input
+      type: object
+      properties:
+        invoice_id:
+          $ref: '#/components/schemas/billing.invoice.InvoiceId'
+        amount:
+          $ref: '#/components/schemas/billing.invoice.Money'
+      required:
+      - invoice_id
+      - amount
+      additionalProperties: false
+    billing.invoice.PayInvoice.rejected.Response:
+      additionalProperties: false
+      description: The payment was not positive, so the invoice did not move. Taken when no other outcome's condition matched.
+      properties:
+        error:
+          const: billing.invoice.InvalidAmount
+          description: The requested amount is not positive.
+          type: string
+        outcome:
+          const: rejected
+          description: Which declared outcome the command took.
+        payload:
+          $ref: '#/components/schemas/billing.invoice.InvalidAmount.Error'
+      required:
+      - outcome
+      - error
+      - payload
+      type: object
+    billing.invoice.PayInvoice.settled.Response:
+      additionalProperties: false
+      description: The payment is accepted and the invoice becomes Paid. Taken when `amount.amount > 0` holds of the input. A `billing.invoice.Invoice` has moved to `Paid`, along `settle`. Emits `InvoicePaid`, published to consumers rather than returned here.
+      properties:
+        outcome:
+          const: settled
+          description: Which declared outcome the command took.
+      required:
+      - outcome
+      type: object

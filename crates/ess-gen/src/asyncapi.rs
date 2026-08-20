@@ -43,9 +43,13 @@
 //!
 //! | where | what a reader finds |
 //! |---|---|
-//! | `operations.receive.<event>.x-ess-reactions[]` | `delivery`, `on_failure`, and a sentence for each saying what it means for the handler |
-//! | `operations.receive.<event>.description` | the same two facts in prose, one paragraph per binding |
-//! | `operations.send.<event>.x-ess-consumed-by[]` | `delivery` and `on_failure` again, in the *publisher's* document |
+//! | `operations.receive.<event>.x-ess-reactions[]` | `delivery`, `on_failure`, the event an `escalate` emits, and a sentence for each saying what it means for the handler |
+//! | `operations.receive.<event>.description` | the same facts in prose, one paragraph per binding |
+//! | `operations.send.<event>.x-ess-consumed-by[]` | `delivery`, `on_failure` and the escalation event again, in the *publisher's* document |
+//!
+//! `escalates_with` is on both sides for the same reason `on_failure` is: an escalation is a fact
+//! this system publishes, and a consumer of the publisher's document that could not see which event
+//! carries it would have to be told out of band — which is the thing a specification exists to stop.
 //!
 //! The third row is the one that matters for `drop`: the work being abandoned is the publisher's
 //! event, so the publisher's document has to be able to say so. `handled_by: null` there is not a
@@ -72,8 +76,8 @@
 //! `components.schemas` rather than pointing at the JSON Schema projection: a document that only
 //! validates when its sibling files are on disk is a document that does not validate in the field.
 //!
-//! What those schemas *say* is not decided here. It comes from [`types`](crate::schema::types), the
-//! one type mapping this crate has, through [`under_components`], which retargets its pointers at
+//! What those schemas *say* is not decided here. It comes from `schema::types`, the
+//! one type mapping this crate has, through `openapi::under_components`, which retargets its pointers at
 //! this document's own table. This file used to carry a copy of that mapping, and the copy disagreed
 //! with the `schema` projection about the same event: a service validating an `InvoiceCreated`
 //! against *this* document accepted `{"amount": "abc", "currency": "EUR", "bogus": 1}`, which the
@@ -132,8 +136,8 @@
 use std::collections::BTreeMap;
 
 use ess_compiler::ir::{
-    ResolvedBinding, ResolvedComponent, ResolvedEvent, ResolvedMapping, ResolvedMappingValue,
-    TypeHandle,
+    ResolvedBinding, ResolvedComponent, ResolvedEffect, ResolvedEvent, ResolvedFailure,
+    ResolvedMapping, ResolvedMappingValue, TypeHandle,
 };
 use ess_compiler::EssIr;
 use ess_domain::binding::{Delivery, Failure};
@@ -313,8 +317,14 @@ struct Reaction {
     delivery_means: &'static str,
     /// The word an author wrote, spelt as they wrote it.
     on_failure: Failure,
+    /// The event an `escalate` publishes, so a handler knows what it owes the rest of the system.
+    ///
+    /// `None` for `retry` and `drop`, which publish nothing — a retry because it is already
+    /// observable as another invocation, a drop because being unobservable is the whole word.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    escalates_with: Option<String>,
     /// What that word costs, in a sentence.
-    on_failure_means: &'static str,
+    on_failure_means: String,
     mapping: Vec<MappedInput>,
 }
 
@@ -330,6 +340,9 @@ struct Consumer {
     invokes: String,
     delivery: Delivery,
     on_failure: Failure,
+    /// The event an `escalate` publishes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    escalates_with: Option<String>,
 }
 
 /// One filled command input.
@@ -587,7 +600,7 @@ fn send(ir: &EssIr, event: &ResolvedEvent, reactions: &Reactions<'_>) -> Operati
                 .collect()
         })
         .unwrap_or_default();
-    let description = if consumed_by.is_empty() {
+    let mut description = if consumed_by.is_empty() {
         format!("Nothing in this specification reacts to `{identity}`.")
     } else {
         consumed_by
@@ -603,6 +616,10 @@ fn send(ir: &EssIr, event: &ResolvedEvent, reactions: &Reactions<'_>) -> Operati
             .collect::<Vec<_>>()
             .join("\n")
     };
+    for change in state_changes(ir, event) {
+        description.push('\n');
+        description.push_str(&change);
+    }
     Operation {
         action: "send",
         channel: Reference::to(format!("#/channels/{identity}")),
@@ -615,6 +632,46 @@ fn send(ir: &EssIr, event: &ResolvedEvent, reactions: &Reactions<'_>) -> Operati
         reactions: Vec::new(),
         consumed_by,
     }
+}
+
+/// What the outcomes that publish this event did to an entity, one line each.
+///
+/// A subscriber's real question about `InvoiceCreated` is not only what the payload holds but what is
+/// now true of the system: an invoice exists, and it is in `Draft`. The model states it — on the
+/// outcome that emits the event — and a document that carried the payload and dropped the state
+/// change would leave every consumer to rediscover it from a name.
+///
+/// Silent when no publishing outcome changes an entity: `billing.email.EmailSent` reports something
+/// that happened outside, and inventing a sentence for it would be this projection speaking for the
+/// model.
+fn state_changes(ir: &EssIr, event: &ResolvedEvent) -> Vec<String> {
+    let mut out = Vec::new();
+    for command in ir.commands.values() {
+        for outcome in &command.outcomes {
+            if !outcome.emits.iter().any(|it| it.name() == &event.name) {
+                continue;
+            }
+            let Some(subject) = &outcome.subject else {
+                continue;
+            };
+            let entity = ir.entity(&subject.entity);
+            out.push(match &subject.effect {
+                ResolvedEffect::Creates => format!(
+                    "`{}` emits it on `{}`, which creates a `{}` in `{}`.",
+                    command.name, outcome.name, entity.name, entity.lifecycle.initial
+                ),
+                ResolvedEffect::Moves { transition } => format!(
+                    "`{}` emits it on `{}`, which moves a `{}` to `{}` along `{}`.",
+                    command.name, outcome.name, entity.name, transition.to, transition.name
+                ),
+                ResolvedEffect::Updates => format!(
+                    "`{}` emits it on `{}`, which changes a `{}` without moving it.",
+                    command.name, outcome.name, entity.name
+                ),
+            });
+        }
+    }
+    out
 }
 
 /// The operation for reacting to an event.
@@ -665,7 +722,8 @@ fn reaction(ir: &EssIr, binding: &ResolvedBinding) -> Reaction {
         delivery: binding.delivery,
         delivery_means: delivery_means(binding.delivery),
         on_failure: binding.failure,
-        on_failure_means: failure_means(binding.failure),
+        escalates_with: escalates_with(ir, binding),
+        on_failure_means: failure_means(ir, binding),
         mapping: binding.mapping.iter().map(mapped_input).collect(),
     }
 }
@@ -687,6 +745,15 @@ fn consumer(ir: &EssIr, binding: &ResolvedBinding) -> Consumer {
         invokes: ir.command(&binding.command).name.to_string(),
         delivery: binding.delivery,
         on_failure: binding.failure,
+        escalates_with: escalates_with(ir, binding),
+    }
+}
+
+/// The event a binding's escalation publishes, when it escalates.
+fn escalates_with(ir: &EssIr, binding: &ResolvedBinding) -> Option<String> {
+    match binding.on_failure() {
+        ResolvedFailure::Escalate { emits } => Some(ir.event(emits).name.to_string()),
+        ResolvedFailure::Retry | ResolvedFailure::Drop => None,
     }
 }
 
@@ -722,21 +789,26 @@ fn delivery_means(delivery: Delivery) -> &'static str {
 ///
 /// `Drop` gets the longest one on purpose. It is the word review F3 insisted an author has to type,
 /// and a projection in which it reads like the other two would have undone that.
-fn failure_means(failure: Failure) -> &'static str {
-    match failure {
-        Failure::Retry => {
-            "the invocation is retried on whatever schedule the transport provides; the \
-             specification does not say how often, for how long, or where it goes if the retries \
-             run out"
-        }
-        Failure::Escalate => {
-            "the failure is surfaced to a person; the specification does not say through what, so \
-             an implementation has to choose"
-        }
-        Failure::Drop => {
-            "the work is abandoned — the command does not run, nothing retries it, and nobody is \
-             told, so the event's effect is lost and this specification says that is acceptable"
-        }
+///
+/// `Escalate` used to end "the specification does not say through what, so an implementation has to
+/// choose", which was true and was the defect: it named an effect and left nothing to check. It now
+/// names the event, because there now is one.
+fn failure_means(ir: &EssIr, binding: &ResolvedBinding) -> String {
+    match binding.on_failure() {
+        ResolvedFailure::Retry => "the invocation is retried on whatever schedule the transport \
+             provides; the specification does not say how often, for how long, or where it goes if \
+             the retries run out"
+            .to_owned(),
+        ResolvedFailure::Escalate { emits } => format!(
+            "the failure is surfaced to a person, and `{}` is published so that the escalation is \
+             observable from inside the system; the specification does not say what surfaces it to \
+             whom, so an implementation chooses that and not whether to say it happened",
+            ir.event(emits).name
+        ),
+        ResolvedFailure::Drop => "the work is abandoned — the command does not run, nothing \
+             retries it, and nobody is told, so the event's effect is lost and this specification \
+             says that is acceptable"
+            .to_owned(),
     }
 }
 

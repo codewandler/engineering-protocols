@@ -6,7 +6,7 @@
 //! handful of places where JSON Schema is weaker than the model and something has to be *decided*
 //! rather than translated.
 //!
-//! Those decisions are **not here**. They live in [`types`], the one type mapping all three contract
+//! Those decisions are **not here**. They live in `types`, the one type mapping all three contract
 //! projections call, because this file and `asyncapi.rs` each used to carry a copy and the two copies
 //! disagreed about the same event. What is left here is the document layout: which files exist, what
 //! each one describes, and where a reference resolves.
@@ -39,7 +39,7 @@
 //! # Provenance goes in a keyword, not a comment
 //!
 //! `x-ess-provenance`, at the root of every document, holding design §10's four facts.
-//! [`Attribution`](types::Attribution) carries why that is a keyword rather than a `$comment`. The
+//! `Attribution` carries why that is a keyword rather than a `$comment`. The
 //! cost is that a linter demanding a closed keyword set will flag it.
 
 // The shared mapping lives at `src/types.rs`, which is the layout this extraction was asked for, and

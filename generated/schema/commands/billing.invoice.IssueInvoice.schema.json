@@ -1,20 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "EmailSent payload",
-  "x-ess-name": "billing.email.EmailSent",
-  "x-ess-kind": "event-payload",
+  "title": "Issue invoice input",
+  "x-ess-name": "billing.invoice.IssueInvoice",
+  "x-ess-kind": "command-input",
   "type": "object",
   "properties": {
-    "message_id": {
-      "$ref": "#/$defs/billing.email.MessageId"
-    },
-    "recipient": {
-      "$ref": "#/$defs/billing.email.EmailAddress"
+    "invoice_id": {
+      "$ref": "#/$defs/billing.invoice.InvoiceId"
     }
   },
   "required": [
-    "message_id",
-    "recipient"
+    "invoice_id"
   ],
   "additionalProperties": false,
   "x-ess-provenance": {
@@ -26,15 +22,9 @@
     "regenerate": "protocol ess generate"
   },
   "$defs": {
-    "billing.email.EmailAddress": {
-      "title": "EmailAddress",
-      "x-ess-name": "billing.email.EmailAddress",
-      "x-ess-kind": "newtype",
-      "type": "string"
-    },
-    "billing.email.MessageId": {
-      "title": "MessageId",
-      "x-ess-name": "billing.email.MessageId",
+    "billing.invoice.InvoiceId": {
+      "title": "InvoiceId",
+      "x-ess-name": "billing.invoice.InvoiceId",
       "x-ess-kind": "newtype",
       "type": "string",
       "format": "uuid",

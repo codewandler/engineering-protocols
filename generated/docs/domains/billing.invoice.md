@@ -1,6 +1,6 @@
 <!--
 generated from billing v3
-model digest 120640924b8bdbf5
+model digest 2940fd167bf4c4cc
 compiler 0.1.0 · generator 0.1.0
 do not edit: regenerate with `protocol ess generate`
 -->
@@ -57,7 +57,7 @@ Every value satisfies `amount >= 0`.
 
 ## Entities
 
-An entity is what this context is about: something with an identity that outlives any one request, a shape, and a lifecycle. The lifecycle is exhaustive — a move that is not drawn below is a move this specification does not permit, and that is the only way it says so.
+An entity is what this context is about: something with an identity that outlives any one request, a shape, and a lifecycle. The lifecycle is exhaustive — a move that is not drawn below is a move this specification does not permit, and that is the only way it says so. Every move is labelled with the command that takes it, because a move nothing can trigger is refused rather than drawn.
 
 ### `Invoice`
 
@@ -87,13 +87,21 @@ An instance is created in `Draft`. `Cancelled` and `Paid` are terminal, so an in
 ```mermaid
 stateDiagram-v2
     [*] --> Draft
-    Draft --> Issued: issue
-    Issued --> Paid: settle
-    Draft --> Cancelled: cancel
-    Issued --> Cancelled: cancel
+    Draft --> Issued: issue (IssueInvoice)
+    Issued --> Paid: settle (PayInvoice)
+    Draft --> Cancelled: cancel (CancelInvoice)
+    Issued --> Cancelled: cancel (CancelInvoice)
     Cancelled --> [*]
     Paid --> [*]
 ```
+
+Each move is taken by a declared command outcome, and a move nothing takes is refused as `missing_causation` rather than left as a state change nobody can trigger:
+
+- `issue` — taken by `billing.invoice.IssueInvoice` on its `issued` outcome
+- `settle` — taken by `billing.invoice.PayInvoice` on its `settled` outcome
+- `cancel` — taken by `billing.invoice.CancelInvoice` on its `cancelled` outcome
+
+An instance is brought into existence by `billing.invoice.CreateInvoice` on its `accepted` outcome.
 
 Illegal transitions are illegal by absence: no rule forbids them, there is simply no arrow, because a rule would be a second place for the same truth to live. A diagram cannot show an absence, so the pairs it does not connect are listed here, derived from the same transitions — anything named below is a move this specification does not permit.
 
@@ -148,6 +156,18 @@ A generated scenario asserts it once, immediately after the command: a view prom
 
 ## Commands
 
+### `CancelInvoice`
+
+`billing.invoice.CancelInvoice`, shown to a person as "Cancel invoice" and called `cancel-invoice` on the wire.
+
+It takes:
+
+- `invoice_id` — `billing.invoice.InvoiceId`
+
+It has one outcome.
+
+**`cancelled`** — The invoice is cancelled, from Draft or from Issued. The default branch, taken when no other outcome's condition matched. It moves a `billing.invoice.Invoice` from `Draft` and `Issued` to `Cancelled`, along the declared move `cancel`. It emits `billing.invoice.InvoiceCancelled`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
 ### `CreateInvoice`
 
 `billing.invoice.CreateInvoice`, shown to a person as "Create invoice" and called `create-invoice` on the wire.
@@ -159,11 +179,50 @@ It takes:
 
 It has two outcomes.
 
-**`accepted`** — The invoice is created in Draft. Taken when `amount.amount > 0` holds of the input. It emits `billing.invoice.InvoiceCreated`. A test reaches it by constructing an input that satisfies that condition.
+**`accepted`** — The invoice is created in Draft. Taken when `amount.amount > 0` holds of the input. It creates a `billing.invoice.Invoice`, which starts in `Draft`. It emits `billing.invoice.InvoiceCreated`. A test reaches it by constructing an input that satisfies that condition.
 
-**`rejected`** — The amount was not positive, and nothing was created. The default branch, taken when no other outcome's condition matched. It reports `billing.invoice.InvalidAmount`, carrying `submitted`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+**`rejected`** — The amount was not positive, and nothing was created. The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It reports `billing.invoice.InvalidAmount`, carrying `submitted`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `IssueInvoice`
+
+`billing.invoice.IssueInvoice`, shown to a person as "Issue invoice" and called `issue-invoice` on the wire.
+
+It takes:
+
+- `invoice_id` — `billing.invoice.InvoiceId`
+
+It has one outcome.
+
+**`issued`** — The invoice leaves Draft and is now Issued. The default branch, taken when no other outcome's condition matched. It moves a `billing.invoice.Invoice` from `Draft` to `Issued`, along the declared move `issue`. It emits `billing.invoice.InvoiceIssued`. A test reaches it by constructing an input that satisfies no other outcome's condition.
+
+### `PayInvoice`
+
+`billing.invoice.PayInvoice`, shown to a person as "Pay invoice" and called `pay-invoice` on the wire.
+
+It takes:
+
+- `invoice_id` — `billing.invoice.InvoiceId`
+- `amount` — `billing.invoice.Money`
+
+It has two outcomes.
+
+**`settled`** — The payment is accepted and the invoice becomes Paid. Taken when `amount.amount > 0` holds of the input. It moves a `billing.invoice.Invoice` from `Issued` to `Paid`, along the declared move `settle`. It emits `billing.invoice.InvoicePaid`. A test reaches it by constructing an input that satisfies that condition.
+
+**`rejected`** — The payment was not positive, so the invoice did not move. The default branch, taken when no other outcome's condition matched. No entity in this specification changes. It reports `billing.invoice.InvalidAmount`, carrying `submitted`. It emits nothing. A test reaches it by constructing an input that satisfies no other outcome's condition.
 
 ## Events
+
+### `InvoiceCancelled`
+
+`billing.invoice.InvoiceCancelled`.
+
+It carries:
+
+- `invoice_id` — `billing.invoice.InvoiceId`
+
+Emitted by `billing.invoice.CancelInvoice` on its `cancelled` outcome.
+
+Nothing in this system reacts to it.
 
 ### `InvoiceCreated`
 
@@ -179,6 +238,31 @@ Emitted by `billing.invoice.CreateInvoice` on its `accepted` outcome.
 
 `notify-on-invoice-created` reacts to it — see [Interactions](../interactions.md).
 
+### `InvoiceIssued`
+
+`billing.invoice.InvoiceIssued`.
+
+It carries:
+
+- `invoice_id` — `billing.invoice.InvoiceId`
+
+Emitted by `billing.invoice.IssueInvoice` on its `issued` outcome.
+
+Nothing in this system reacts to it.
+
+### `InvoicePaid`
+
+`billing.invoice.InvoicePaid`.
+
+It carries:
+
+- `invoice_id` — `billing.invoice.InvoiceId`
+- `amount` — `billing.invoice.Money`
+
+Emitted by `billing.invoice.PayInvoice` on its `settled` outcome.
+
+Nothing in this system reacts to it.
+
 ## Errors
 
 ### `InvalidAmount`
@@ -190,6 +274,8 @@ It carries:
 - `submitted` — `billing.invoice.Money`
 
 Reported by `billing.invoice.CreateInvoice` on its `rejected` outcome.
+
+Reported by `billing.invoice.PayInvoice` on its `rejected` outcome.
 
 ## Actors
 
@@ -220,4 +306,4 @@ Every crossing in the system is on one page: [Type crossings](../crossings.md).
 
 ---
 
-Generated from billing v3 · model digest `120640924b8bdbf5` · compiler 0.1.0 · generator 0.1.0. Do not edit this file; change the specification and regenerate it with `protocol ess generate`.
+Generated from billing v3 · model digest `2940fd167bf4c4cc` · compiler 0.1.0 · generator 0.1.0. Do not edit this file; change the specification and regenerate it with `protocol ess generate`.

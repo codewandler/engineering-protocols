@@ -19,6 +19,9 @@
 //! |---|---|
 //! | it reacts to an event nothing declares | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
 //! | it invokes a command nothing declares | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
+//! | it escalates and does not say what that emits | [`MissingDeclaration`](ValidationCode::MissingDeclaration) |
+//! | it escalates into an event nothing declares | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
+//! | it names an escalation event and does not escalate | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
 //! | a mapping reads a field the event does not have | [`UnobservableFact`](ValidationCode::UnobservableFact) |
 //! | a mapping writes a field the command does not take | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
 //! | the two types differ and no conversion is declared | [`TypeMismatch`](ValidationCode::TypeMismatch) |
@@ -31,6 +34,40 @@
 //! A delivery guarantee this build does not implement needs no code: [`Delivery`] has one variant,
 //! so `delivery: exactly_once` is refused while the document is read.
 //!
+//! [`MissingDeclaration`](ValidationCode::MissingDeclaration) is written twice in that table — an
+//! unmapped command input is the other one — and both are the same sentence: a document did not
+//! write a key that what it *did* write makes required. The compiler bridges both to
+//! `ESS-BINDING-005`, because a diagnostic code names a kind of defect and not a rule, and
+//! `Detail`s carry which key it was.
+//!
+//! # `escalate` says what it emits
+//!
+//! [`Failure::Escalate`] used to name a consequence outside the system — surface it to a person —
+//! and say nothing about how the system shows that it happened. No event, no command, no view
+//! field, no state: so a conformance target could not be asked to prove escalation occurred, and
+//! `examples/billing/` carried a requirement no oracle could check.
+//!
+//! That is the same silent failure `on_failure:` exists to prevent, one variant along. So an
+//! escalation now publishes a **declared event**, and is observed by exactly the mechanism every
+//! other fact in the system is:
+//!
+//! ```yaml
+//! on_failure:
+//!   escalate:
+//!     emits: billing.email.DeliveryEscalated
+//! ```
+//!
+//! An escalation nobody can observe stays writable — `on_failure: escalate` still parses — and is
+//! refused during validation rather than while the document is read, so it accumulates beside the
+//! binding's other errors instead of hiding them (invariant 3).
+//!
+//! **`retry` and `drop` are deliberately left alone.** A retry is already observable: it is another
+//! invocation of a declared command, which is what [`Delivery::AtLeastOnce`] obliges the handler to
+//! survive, so there is nothing to declare that the model does not already carry. A drop is
+//! deliberately *un*observable — the whole content of the word is that the work is lost and nobody
+//! is told — and giving it an event would turn it into a notification, which is a different policy
+//! that already has a name. Its accountability is a document someone signed, not a runtime fact.
+//!
 //! # Where each rule runs
 //!
 //! [`BindingSpec::validate`] is everything a binding can be wrong about on its own — the shape of
@@ -40,7 +77,7 @@
 //!
 //! # A required input is one that is not `Optional`
 //!
-//! [`TypeRef::Optional`](crate::types::TypeRef::Optional) is the model's only way of saying that a
+//! [`TypeRef::Optional`] is the model's only way of saying that a
 //! value may be absent — a [`Field`] carries no `default:` and no `required:` — so an unmapped
 //! optional input is not an omission, it is the decision that the value is absent, already stated.
 //! Every other input left unmapped leaves a generator with no argument to pass and no statement of
@@ -118,7 +155,7 @@ pub struct RawBindingSpec {
     /// How many times the command may run. Required.
     pub delivery: Delivery,
     /// What happens when it does not run. Required.
-    pub on_failure: Failure,
+    pub on_failure: RawFailure,
     /// What it is called on the wire and shown as.
     #[serde(default)]
     pub naming: Naming,
@@ -157,20 +194,221 @@ pub enum Delivery {
 }
 
 /// What happens when the command does not run.
+///
+/// The word only. What an [`Escalate`](Self::Escalate) publishes is beside it — on
+/// [`RawFailure::emits`] as a document writes it, on [`BindingSpec::escalation`] once validated —
+/// so that this stays the one token every projection prints as "the word an author wrote".
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Failure {
     /// Try again, on whatever schedule the transport provides.
+    ///
+    /// Observable without anything further being declared: a retry is another invocation of the
+    /// command, which [`Delivery::AtLeastOnce`] already obliges the handler to survive.
     Retry,
-    /// Surface it to a person.
+    /// Surface it to a person, and publish the declared event that says so.
+    ///
+    /// The event is required — see [`BindingSpec::escalation`]. Surfacing something to a person is
+    /// an effect outside the system, and a specification that names one without saying how the
+    /// system shows it happened has written a requirement no oracle can check.
     Escalate,
     /// Give up silently.
     ///
     /// Legal, and never a default: a system that loses work is a decision, and the decision has to
     /// be findable in the document that made it.
+    ///
+    /// Deliberately the one policy with nothing to observe. Publishing an event here would make it
+    /// a notification, which is a different decision that already has a word.
     Drop,
+}
+
+impl Failure {
+    /// The three words `on_failure:` accepts, in the order [`Failure`] declares them.
+    ///
+    /// Used to build the refusal a misspelt word gets, so the list a reader is offered cannot fall
+    /// behind the variants.
+    pub const WORDS: &'static [&'static str] = &["retry", "escalate", "drop"];
+
+    /// The policy a word names, or `None` when it names none of them.
+    pub fn parse(word: &str) -> Option<Self> {
+        match word {
+            "retry" => Some(Self::Retry),
+            "escalate" => Some(Self::Escalate),
+            "drop" => Some(Self::Drop),
+            _ => None,
+        }
+    }
+
+    /// The word, as a document writes it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Retry => "retry",
+            Self::Escalate => "escalate",
+            Self::Drop => "drop",
+        }
+    }
+}
+
+impl std::fmt::Display for Failure {
+    /// The word the author wrote, so a diagnostic quotes the document rather than the model.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// What happens when the command does not run, as a document says it.
+///
+/// Two shapes under one key, and the word chooses the shape:
+///
+/// ```yaml
+/// on_failure: retry
+/// ```
+///
+/// ```yaml
+/// on_failure:
+///   escalate:
+///     emits: billing.email.DeliveryEscalated
+/// ```
+///
+/// # Why this parses without ambiguity
+///
+/// A scalar and a mapping are different YAML nodes, so nothing has to guess: the deserializer has
+/// one reader for each shape and neither is a fallback for the other. That is the whole reason this
+/// is a visitor rather than an untagged enum — `#[serde(untagged)]` tries each variant and reports
+/// only that everything failed, which turns one misspelt word into a message naming no word at all.
+///
+/// Each of the four ways to get it wrong is refused with the key it is about:
+///
+/// | written | read as |
+/// |---|---|
+/// | `retry`, `escalate`, `drop` | that policy, with nothing published |
+/// | `escalate:` with `emits:` under it | that policy, publishing that event |
+/// | `retry:`/`drop:` with a block | refused while the document is read: only `escalate` publishes |
+/// | two words under one `on_failure:` | refused while the document is read: a binding has one policy |
+/// | a word that is none of the three | refused while the document is read, naming the three |
+///
+/// `escalate` written bare, `escalate:` with nothing under it, and `escalate:` with an empty block
+/// are all read as "escalates, names no event". They are one author mistake in three spellings, so
+/// they get one refusal — [`MissingDeclaration`](ValidationCode::MissingDeclaration), from
+/// [`BindingSpec::validate`] — rather than a validation error and two different parse errors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawFailure {
+    /// The word.
+    pub failure: Failure,
+    /// The event an escalation publishes, when the document named one.
+    pub emits: Option<QualifiedName>,
+}
+
+/// What an `escalate:` block says, as a document says it.
+///
+/// One key, so that adding a second way to observe an escalation later is a key beside `emits:`
+/// rather than a change to the shape of `on_failure:`.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RawEscalation {
+    /// The event the system publishes when it escalates.
+    ///
+    /// Optional here and required by [`BindingSpec::validate`], so that `escalate:` with an empty
+    /// block is refused by the same rule as `escalate` written bare.
+    #[serde(default)]
+    pub emits: Option<QualifiedName>,
+}
+
+impl<'de> serde::Deserialize<'de> for RawFailure {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Policy;
+
+        impl<'de> serde::de::Visitor<'de> for Policy {
+            type Value = RawFailure;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("`retry`, `drop`, or `escalate:` with `emits: <event>` under it")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, written: &str) -> Result<Self::Value, E> {
+                Ok(RawFailure {
+                    failure: policy_word(written)?,
+                    emits: None,
+                })
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let Some((written, block)) = map.next_entry::<String, Option<RawEscalation>>()?
+                else {
+                    return Err(serde::de::Error::custom(
+                        "`on_failure` says nothing; write `retry`, `drop`, or `escalate:` with \
+                         `emits: <event>` under it",
+                    ));
+                };
+                if let Some((second, _)) = map.next_entry::<String, serde::de::IgnoredAny>()? {
+                    return Err(serde::de::Error::custom(format!(
+                        "`on_failure` says `{written}` and `{second}`; a binding has one policy for \
+                         a command that does not run"
+                    )));
+                }
+                let failure = policy_word(&written)?;
+                if failure != Failure::Escalate {
+                    return Err(serde::de::Error::custom(format!(
+                        "`{written}` is written as a bare word — `on_failure: {written}`. Only \
+                         `escalate` takes a block, because it is the only policy that publishes \
+                         anything"
+                    )));
+                }
+                Ok(RawFailure {
+                    failure,
+                    emits: block.and_then(|escalation| escalation.emits),
+                })
+            }
+        }
+
+        deserializer.deserialize_any(Policy)
+    }
+}
+
+/// One of the three words, or a refusal that names all three.
+fn policy_word<E: serde::de::Error>(written: &str) -> Result<Failure, E> {
+    Failure::parse(written).ok_or_else(|| E::unknown_variant(written, Failure::WORDS))
+}
+
+impl schemars::JsonSchema for RawFailure {
+    // Referenceable: `on_failure` is one construct with two spellings, and a reader following the
+    // schema should land on the pair rather than on a `oneOf` inlined into the binding.
+    fn schema_name() -> String {
+        "BindingFailure".to_owned()
+    }
+
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut block = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::Object.into()),
+            ..Default::default()
+        };
+        block.object().properties.insert(
+            "escalate".to_owned(),
+            generator.subschema_for::<RawEscalation>(),
+        );
+        block.object().required.insert("escalate".to_owned());
+        // Only `escalate` takes a block; `retry:` and `drop:` with one are refused by the reader,
+        // and the published schema has to say the same thing or the two disagree.
+        block.object().additional_properties =
+            Some(Box::new(schemars::schema::Schema::Bool(false)));
+
+        let mut schema = schemars::schema::SchemaObject::default();
+        schema.subschemas().one_of = Some(vec![
+            generator.subschema_for::<Failure>(),
+            schemars::schema::Schema::Object(block),
+        ]);
+        schema.metadata().description = Some(
+            "What happens when the invoked command does not run: `retry`, `drop`, or an \
+             `escalate:` block naming the event the escalation emits."
+                .to_owned(),
+        );
+        schema.into()
+    }
 }
 
 /// One field of the command's input, and where its value comes from.
@@ -387,6 +625,20 @@ pub struct BindingSpec {
     pub delivery: Delivery,
     /// What happens when it does not.
     pub failure: Failure,
+    /// The event an escalation publishes.
+    ///
+    /// `Some` exactly when [`Self::failure`] is [`Failure::Escalate`], and both directions are
+    /// checked: escalating without naming an event is
+    /// [`MissingDeclaration`](ValidationCode::MissingDeclaration), and naming one without
+    /// escalating is [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration). A document
+    /// can only write the second by way of the first, because `retry:` and `drop:` take no block —
+    /// but these fields are public, and a binding assembled in code has not been through the
+    /// reader.
+    ///
+    /// This is what makes escalation provable. Every other consequence in the model is an event, a
+    /// state change or an error; escalation named an effect outside the system and left the system
+    /// with nothing to show for it, so a scenario could not assert that it happened.
+    pub escalation: Option<QualifiedName>,
     /// What it is called on the wire, and what a person is shown.
     pub naming: Naming,
 }
@@ -395,12 +647,15 @@ impl BindingSpec {
     /// Everything checkable without the rest of the specification.
     ///
     /// The shape of each mapping source: a path where the model takes a field, a prefix misspelt
-    /// into a literal, a prefix with nothing after it. Run by [`TryFrom<RawBindingSpec>`], and again
-    /// by [`validate_bindings`] because the fields are public and a binding assembled in code has
-    /// not been through the conversion.
+    /// into a literal, a prefix with nothing after it. Plus the pairing of [`Self::failure`] with
+    /// [`Self::escalation`], which needs nothing else declared to decide. Run by
+    /// [`TryFrom<RawBindingSpec>`], and again by [`validate_bindings`] because the fields are public
+    /// and a binding assembled in code has not been through the conversion.
     pub fn validate(&self) -> ValidationErrors {
         let mut errors = ValidationErrors::new();
         let prefix = MappingSource::EVENT_PREFIX;
+
+        errors.extend(self.check_escalation());
 
         for (target, source) in &self.mapping {
             let at = format!("binding.{}.mapping.{target}", self.name);
@@ -468,6 +723,58 @@ impl BindingSpec {
 
         errors
     }
+
+    /// [`Self::failure`] and [`Self::escalation`] agreeing about whether anything is published.
+    ///
+    /// Not folded into the loop above: it is about the binding's failure policy rather than about
+    /// any one mapping entry, and a document with a broken mapping *and* an unobservable escalation
+    /// has two things wrong with it and gets two errors.
+    fn check_escalation(&self) -> ValidationErrors {
+        let mut errors = ValidationErrors::new();
+        match (self.failure, &self.escalation) {
+            (Failure::Escalate, None) => {
+                errors.push(
+                    ValidationError::new(
+                        // The same code an unmapped command input gets: a document did not write a
+                        // key that what it did write makes required.
+                        ValidationCode::MissingDeclaration,
+                        format!("binding.{}.on_failure", self.name),
+                        format!(
+                            "binding `{}` escalates and does not say what that emits, so nothing \
+                             can be asked to prove the escalation happened",
+                            self.name
+                        ),
+                    )
+                    .with_hint(
+                        "write `on_failure:` with `escalate:` under it and `emits: <event>` under \
+                         that. An escalation nobody can observe is the silent failure `on_failure` \
+                         exists to prevent: `retry` is observable as another invocation, `drop` is \
+                         unobservable on purpose, and `escalate` is neither",
+                    ),
+                );
+            }
+            (other, Some(event)) if other != Failure::Escalate => {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::ConflictingDeclaration,
+                        format!("binding.{}.on_failure", self.name),
+                        format!(
+                            "binding `{}` fails with `{other}` and also emits `{event}` on \
+                             escalation; only `escalate` publishes anything",
+                            self.name
+                        ),
+                    )
+                    .with_hint(
+                        "a document cannot write this — `retry:` and `drop:` take no block — so \
+                         this binding was assembled in code; drop the escalation event, or make \
+                         the policy `escalate`",
+                    ),
+                );
+            }
+            _ => {}
+        }
+        errors
+    }
 }
 
 impl TryFrom<RawBindingSpec> for BindingSpec {
@@ -518,7 +825,8 @@ impl TryFrom<RawBindingSpec> for BindingSpec {
             command: raw.invoke.command,
             mapping,
             delivery: raw.delivery,
-            failure: raw.on_failure,
+            failure: raw.on_failure.failure,
+            escalation: raw.on_failure.emits,
             naming: Naming {
                 summary: raw.naming.summary.or(raw.summary),
                 ..raw.naming
@@ -612,6 +920,18 @@ impl Ends<'_> {
                 )
                 .with_hint(available("command", self.commands.keys())),
             );
+        }
+        if let Some(escalation) = &self.binding.escalation {
+            if !self.events.contains_key(escalation) {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::UndeclaredReference,
+                        self.at("on_failure.escalate.emits"),
+                        format!("`{escalation}` is not a declared event"),
+                    )
+                    .with_hint(available("event", self.events.keys())),
+                );
+            }
         }
 
         for (target, source) in &self.binding.mapping {
@@ -1009,6 +1329,8 @@ mod tests {
 
     const EVENT: &str = "billing.invoice.InvoiceCreated";
     const COMMAND: &str = "billing.email.SendEmail";
+    /// The event `examples/billing/` escalates with.
+    const ESCALATION: &str = "billing.email.DeliveryEscalated";
     /// The mapping `examples/billing/components.yaml` ships.
     const MAPPING: &str = "  recipient: event.customer_email\n  template: invoice-created\n";
 
@@ -1093,16 +1415,21 @@ mod tests {
         [(spec.name.clone(), spec)].into()
     }
 
-    /// The event the example declares.
-    fn invoice_created() -> BTreeMap<QualifiedName, EventSpec> {
-        event(
+    /// The two events the example's binding touches: its trigger, and what its escalation emits.
+    fn declared_events() -> BTreeMap<QualifiedName, EventSpec> {
+        let mut events = event(
             EVENT,
             &[
                 ("invoice_id", "billing.invoice.InvoiceId"),
                 ("customer_email", "billing.invoice.Email"),
                 ("amount", "billing.invoice.Money"),
             ],
-        )
+        );
+        events.extend(event(
+            ESCALATION,
+            &[("recipient", "billing.email.EmailAddress")],
+        ));
+        events
     }
 
     /// The command the example declares.
@@ -1133,7 +1460,8 @@ mod tests {
     fn parse(event: &str, command: &str, mapping: &str) -> Result<BindingSpec, ValidationErrors> {
         let raw: RawBindingSpec = serde_yaml::from_str(&format!(
             "id: notify-on-invoice-created\nwhen:\n  event: {event}\ninvoke:\n  command: \
-             {command}\nmapping:\n{mapping}delivery: at_least_once\non_failure: escalate\n"
+             {command}\nmapping:\n{mapping}delivery: at_least_once\non_failure:\n  escalate:\n    \
+             emits: {ESCALATION}\n"
         ))
         .expect("well formed");
         BindingSpec::try_from(raw)
@@ -1157,7 +1485,7 @@ mod tests {
 
     /// The cross-cutting pass against what the example declares.
     fn check(binding: BindingSpec) -> ValidationErrors {
-        check_against(binding, &invoice_created(), &send_email(), &conversions())
+        check_against(binding, &declared_events(), &send_email(), &conversions())
     }
 
     /// The one error, when exactly one is expected.
@@ -1272,7 +1600,7 @@ mod tests {
         );
         let errors = check_against(
             binding(MAPPING),
-            &invoice_created(),
+            &declared_events(),
             &commands,
             &conversions(),
         );
@@ -1308,7 +1636,7 @@ mod tests {
         // asserted together.
         let refused = check_against(
             binding(MAPPING),
-            &invoice_created(),
+            &declared_events(),
             &send_email(),
             &ConversionRegistry::new(),
         );
@@ -1348,7 +1676,7 @@ mod tests {
         );
         let errors = check_against(
             binding("  recipient: event.customer_email\n"),
-            &invoice_created(),
+            &declared_events(),
             &commands,
             &conversions(),
         );
@@ -1392,7 +1720,7 @@ mod tests {
 
         let errors = check_against(
             binding(&mapping("Postal")),
-            &invoice_created(),
+            &declared_events(),
             &commands,
             &conversions(),
         );
@@ -1407,7 +1735,7 @@ mod tests {
         // An enum is the one literal the model checks exactly, so the accepted case is asserted too.
         let accepted = check_against(
             binding(&mapping("Post")),
-            &invoice_created(),
+            &declared_events(),
             &commands,
             &conversions(),
         );
@@ -1426,7 +1754,7 @@ mod tests {
         );
         let errors = check_against(
             binding(&format!("{MAPPING}  priority: \"3\"\n")),
-            &invoice_created(),
+            &declared_events(),
             &commands,
             &conversions(),
         );
@@ -1451,7 +1779,7 @@ mod tests {
         );
         let errors = check_against(
             binding(&format!("{MAPPING}  amount: 12.00\n")),
-            &invoice_created(),
+            &declared_events(),
             &commands,
             &conversions(),
         );
@@ -1611,6 +1939,146 @@ mod tests {
                 .expect_err("a binding that can fail silently");
             assert!(error.to_string().contains(missing), "{missing}: {error}");
         }
+    }
+
+    /// The example's binding with `on_failure:` written however a test needs it.
+    fn with_policy(policy: &str) -> Result<RawBindingSpec, serde_yaml::Error> {
+        serde_yaml::from_str(&format!(
+            "id: notify-on-invoice-created\nwhen:\n  event: {EVENT}\ninvoke:\n  command: \
+             {COMMAND}\nmapping:\n{MAPPING}delivery: at_least_once\non_failure: {policy}\n"
+        ))
+    }
+
+    #[test]
+    fn an_escalation_that_names_no_event_is_refused_because_nothing_could_prove_it_happened() {
+        // G2. `escalate` used to mean "surface it to a person" and nothing else, so a conformance
+        // target could not be asked to prove escalation occurred. Three spellings of the same
+        // omission, one refusal.
+        for spelling in ["escalate", "\n  escalate:", "\n  escalate: {}"] {
+            let raw = with_policy(spelling).expect("a document may still say this");
+            let errors = BindingSpec::try_from(raw)
+                .expect_err("an escalation nobody can observe: {spelling}");
+
+            let error = only(&errors);
+            assert_eq!(
+                error.code,
+                ValidationCode::MissingDeclaration,
+                "{spelling:?}"
+            );
+            assert_eq!(
+                error.location, "binding.notify-on-invoice-created.on_failure",
+                "{spelling:?}"
+            );
+            assert!(
+                hint(error).contains("emits:"),
+                "the hint names the key to write: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_escalation_names_the_event_it_emits_and_that_event_reaches_the_binding() {
+        let binding = binding(MAPPING);
+        assert_eq!(binding.failure, Failure::Escalate);
+        assert_eq!(
+            binding.escalation.as_ref().map(ToString::to_string),
+            Some(ESCALATION.to_owned())
+        );
+        assert!(check(binding).is_empty());
+    }
+
+    #[test]
+    fn a_binding_that_escalates_into_an_event_nothing_declares_is_refused() {
+        // The same guarantee every other reference in the model has: a binding cannot escalate into
+        // an event nobody declares, so the compiler always has a handle to resolve it to.
+        let raw = with_policy("\n  escalate:\n    emits: billing.email.DeliveryEscalted")
+            .expect("well formed");
+        let binding = BindingSpec::try_from(raw).expect("a name is a name");
+        let errors = check(binding);
+
+        let error = only(&errors);
+        assert_eq!(error.code, ValidationCode::UndeclaredReference);
+        assert_eq!(
+            error.location,
+            "binding.notify-on-invoice-created.on_failure.escalate.emits"
+        );
+        assert!(
+            hint(error).contains(ESCALATION),
+            "the hint says what is declared: {error}"
+        );
+    }
+
+    #[test]
+    fn only_escalate_takes_a_block_because_it_is_the_only_policy_that_publishes_anything() {
+        // `retry` is observable as another invocation and `drop` is unobservable on purpose, so
+        // neither has anything to emit. Refused while the document is read: a scalar and a mapping
+        // are different YAML nodes, so nothing has to guess which was meant.
+        for word in ["retry", "drop"] {
+            let error = with_policy(&format!("\n  {word}:\n    emits: {ESCALATION}"))
+                .expect_err("only `escalate` publishes");
+            assert!(error.to_string().contains(word), "{word}: {error}");
+        }
+    }
+
+    #[test]
+    fn one_on_failure_says_one_thing() {
+        let error = with_policy("\n  escalate:\n    emits: billing.email.EmailSent\n  drop:")
+            .expect_err("a binding has one policy");
+        assert!(error.to_string().contains("one policy"), "{error}");
+    }
+
+    #[test]
+    fn a_failure_policy_that_is_none_of_the_three_words_is_told_which_three_exist() {
+        for spelling in ["dead_letter", "\n  dead_letter:\n    emits: a.B"] {
+            let error = with_policy(spelling).expect_err("there are three");
+            let message = error.to_string();
+            for word in Failure::WORDS {
+                assert!(message.contains(word), "{spelling:?}: {message}");
+            }
+        }
+    }
+
+    #[test]
+    fn an_escalation_event_on_a_binding_that_does_not_escalate_is_refused() {
+        // Unwritable in a document, because `retry:` and `drop:` take no block — but `BindingSpec`'s
+        // fields are public, and a binding assembled in code has not been through the reader.
+        let mut binding = binding(MAPPING);
+        binding.failure = Failure::Drop;
+        let errors = check(binding);
+
+        let error = only(&errors);
+        assert_eq!(error.code, ValidationCode::ConflictingDeclaration);
+        assert_eq!(
+            error.location,
+            "binding.notify-on-invoice-created.on_failure"
+        );
+        assert!(error.message.contains("drop"), "{error}");
+    }
+
+    #[test]
+    fn the_published_schema_offers_both_spellings_of_on_failure() {
+        // A schema that only described the word would tell a document author that the block form is
+        // invalid, and one that only described the block would say the reverse.
+        let schema =
+            serde_json::to_value(schemars::schema_for!(RawBindingSpec)).expect("serialises");
+        let policy = &schema["definitions"]["BindingFailure"];
+        let spellings = policy["oneOf"].as_array().expect("two spellings");
+        assert_eq!(spellings.len(), 2, "{policy}");
+        assert_eq!(
+            spellings[0]["$ref"],
+            serde_json::json!("#/definitions/Failure"),
+            "{policy}"
+        );
+        assert_eq!(
+            spellings[1]["required"],
+            serde_json::json!(["escalate"]),
+            "{policy}"
+        );
+        assert_eq!(
+            spellings[1]["additionalProperties"],
+            serde_json::json!(false),
+            "only `escalate` takes a block: {policy}"
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
 # generated from billing v3
-# model digest 120640924b8bdbf5
+# model digest 2940fd167bf4c4cc
 # compiler 0.1.0 · generator 0.1.0
 # do not edit: regenerate with `protocol ess generate`
 asyncapi: 3.0.0
@@ -18,11 +18,20 @@ info:
   x-ess-provenance:
     system: billing
     specification_version: v3
-    source_digest: 120640924b8bdbf5
+    source_digest: 2940fd167bf4c4cc
     compiler_version: 0.1.0
     generator_version: 0.1.0
 defaultContentType: application/json
 channels:
+  billing.email.DeliveryEscalated:
+    address: billing.email.DeliveryEscalated
+    title: Delivery escalated
+    summary: Sending was given up on and handed to a person.
+    messages:
+      billing.email.DeliveryEscalated:
+        $ref: '#/components/messages/billing.email.DeliveryEscalated'
+    x-ess-event: billing.email.DeliveryEscalated
+    x-ess-address-source: qualified-name
   billing.email.EmailSent:
     address: billing.email.EmailSent
     title: EmailSent
@@ -40,6 +49,15 @@ channels:
     x-ess-event: billing.invoice.InvoiceCreated
     x-ess-address-source: qualified-name
 operations:
+  send.billing.email.DeliveryEscalated:
+    action: send
+    channel:
+      $ref: '#/channels/billing.email.DeliveryEscalated'
+    title: Publish Delivery escalated
+    summary: Publishes `billing.email.DeliveryEscalated`.
+    description: Nothing in this specification reacts to `billing.email.DeliveryEscalated`.
+    messages:
+    - $ref: '#/channels/billing.email.DeliveryEscalated/messages/billing.email.DeliveryEscalated'
   send.billing.email.EmailSent:
     action: send
     channel:
@@ -58,7 +76,7 @@ operations:
     description: |-
       `email-service` receives `billing.invoice.InvoiceCreated` and, under binding `notify-on-invoice-created`, invokes `billing.email.SendEmail`.
       Delivery is at_least_once: the command may run more than once for a single event, so its handler must be idempotent.
-      On failure the system will escalate: the failure is surfaced to a person; the specification does not say through what, so an implementation has to choose.
+      On failure the system will escalate: the failure is surfaced to a person, and `billing.email.DeliveryEscalated` is published so that the escalation is observable from inside the system; the specification does not say what surfaces it to whom, so an implementation chooses that and not whether to say it happened.
     messages:
     - $ref: '#/channels/billing.invoice.InvoiceCreated/messages/billing.invoice.InvoiceCreated'
     x-ess-reactions:
@@ -68,7 +86,8 @@ operations:
       delivery: at_least_once
       delivery_means: the command may run more than once for a single event, so its handler must be idempotent
       on_failure: escalate
-      on_failure_means: the failure is surfaced to a person; the specification does not say through what, so an implementation has to choose
+      escalates_with: billing.email.DeliveryEscalated
+      on_failure_means: the failure is surfaced to a person, and `billing.email.DeliveryEscalated` is published so that the escalation is observable from inside the system; the specification does not say what surfaces it to whom, so an implementation chooses that and not whether to say it happened
       mapping:
       - target: recipient
         type: billing.email.EmailAddress
@@ -84,6 +103,13 @@ operations:
           value: invoice-created
 components:
   messages:
+    billing.email.DeliveryEscalated:
+      name: billing.email.DeliveryEscalated
+      title: Delivery escalated
+      summary: Sending was given up on and handed to a person.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/event.billing.email.DeliveryEscalated'
     billing.email.EmailSent:
       name: billing.email.EmailSent
       title: EmailSent
@@ -97,6 +123,21 @@ components:
       payload:
         $ref: '#/components/schemas/event.billing.invoice.InvoiceCreated'
   schemas:
+    event.billing.email.DeliveryEscalated:
+      title: Delivery escalated payload
+      description: Sending was given up on and handed to a person.
+      x-ess-name: billing.email.DeliveryEscalated
+      x-ess-kind: event-payload
+      type: object
+      properties:
+        recipient:
+          $ref: '#/components/schemas/type.billing.email.EmailAddress'
+        template:
+          $ref: '#/components/schemas/type.billing.email.TemplateId'
+      required:
+      - recipient
+      - template
+      additionalProperties: false
     event.billing.email.EmailSent:
       title: EmailSent payload
       x-ess-name: billing.email.EmailSent
@@ -140,6 +181,11 @@ components:
       type: string
       format: uuid
       pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+    type.billing.email.TemplateId:
+      title: TemplateId
+      x-ess-name: billing.email.TemplateId
+      x-ess-kind: newtype
+      type: string
     type.billing.invoice.Email:
       title: Email
       x-ess-name: billing.invoice.Email

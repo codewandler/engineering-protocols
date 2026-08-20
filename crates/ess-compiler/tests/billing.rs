@@ -11,7 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
-use ess_compiler::ir::{EssIr, ResolvedMappingValue};
+use ess_compiler::ir::{EssIr, ResolvedFailure, ResolvedMappingValue};
 use ess_compiler::resolve::{codes, compile, compile_locating, diagnose_locating};
 use ess_compiler::source::SourceMap;
 use ess_domain::binding::BindingName;
@@ -142,6 +142,9 @@ fn every_handle_in_the_ir_names_something_the_ir_holds() {
     for binding in ir.bindings.values() {
         let _ = ir.event(&binding.event);
         let _ = ir.command(&binding.command);
+        if let Some(escalation) = &binding.escalation {
+            let _ = ir.event(escalation);
+        }
     }
     for component in ir.components.values() {
         for domain in &component.owns {
@@ -251,6 +254,42 @@ fn the_reaction_graph_names_the_binding_that_causes_each_command() {
 }
 
 // ---- review F8: determinism, mechanised ----------------------------------------------------
+
+#[test]
+fn a_binding_that_escalates_carries_the_event_it_emits_as_a_handle() {
+    // G2. `escalate` used to say only "surface it to a person", so nothing in the IR said what an
+    // escalation looks like from inside the system and no scenario could assert one happened. A
+    // handle rather than a name, like every other reference here: the binding cannot escalate into
+    // an event nobody declares.
+    let ir = compiled();
+    let binding = ir
+        .bindings
+        .values()
+        .find(|binding| binding.name.as_str() == "notify-on-invoice-created")
+        .expect("the example binds the two contexts");
+
+    let ResolvedFailure::Escalate { emits } = binding.on_failure() else {
+        panic!("the example's binding escalates: {:?}", binding.failure);
+    };
+    let escalation = ir.event(emits);
+    assert_eq!(
+        escalation.name,
+        name("billing.email.DeliveryEscalated"),
+        "the scenario this enables: force `SendEmail` to fail, expect this event"
+    );
+    // The escalation reaches a generated interface because the component that handles the binding
+    // publishes it, which is what puts it in that component's AsyncAPI document.
+    let handler = ir
+        .components
+        .values()
+        .find(|component| component.accepts.contains(&binding.command))
+        .expect("a component accepts `SendEmail`");
+    assert!(
+        handler.publishes.contains(emits),
+        "`{}` invokes the command and publishes nothing that says it gave up",
+        handler.name
+    );
+}
 
 #[test]
 fn compiling_the_billing_example_twice_produces_byte_identical_json() {

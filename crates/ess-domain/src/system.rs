@@ -627,6 +627,10 @@ fn unmet_requirements(
 }
 
 /// Whether a declaration references a name the registry does not hold.
+///
+/// The inner walk recurses once per generic wrapper and does not count: a [`TypeRef`] cannot nest
+/// past [`MAX_TYPE_DEPTH`](crate::types::MAX_TYPE_DEPTH), which its parser enforces, and this walk
+/// stops at a `Named` leaf rather than following it into the registry.
 fn names_something_undeclared(declared: &NamedType, registry: &TypeRegistry) -> bool {
     fn undeclared(reference: &TypeRef, registry: &TypeRegistry) -> bool {
         match reference {

@@ -22,6 +22,21 @@
 //! skips the branch silently or emits a test nobody can make pass. [`Outcome::test_strategy`] is the
 //! model's answer to that question, so no generator has to guess it.
 //!
+//! # An outcome says what it changes, and a command does not
+//!
+//! [`Outcome::subject`] names the entity a branch acts on and the verb it acts with — `creates`,
+//! `moves` along a declared transition, or `updates`. It hangs off the *outcome* and not off the
+//! [`CommandSpec`], because §10 of the conformance design generates one scenario per outcome and a
+//! command's branches do not agree about what they change: `CreateInvoice` creates an invoice on
+//! `accepted` and creates nothing on `rejected`. A subject on the command would attach a state
+//! change to the refusal, which the model refuses outright — see
+//! [`RefusalMutatedState`](ValidationCode::RefusalMutatedState) below.
+//!
+//! The link is optional here and required on the other side. `billing.email.SendEmail` changes no
+//! entity and says so by writing none of the three keys; a *transition* that no outcome performs is
+//! refused by [`validate_lifecycle_causes`](crate::entity::validate_lifecycle_causes), because a
+//! move nothing can trigger is the lifecycle's version of the type no value can inhabit.
+//!
 //! # Events carry no transport
 //!
 //! [`EventSpec`] has a name and fields, and deliberately nothing else. A topic, a partition key, a
@@ -42,9 +57,12 @@
 //! | no outcome catches the input every `when` missed | [`NonExhaustiveBranches`](ValidationCode::NonExhaustiveBranches) |
 //! | two outcomes are unconditional | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
 //! | an outcome neither emits nor errors | [`EmptyChange`](ValidationCode::EmptyChange) |
-//! | an outcome names an error *and* emits | [`RefusalMutatedState`](ValidationCode::RefusalMutatedState) |
+//! | an outcome names an error *and* emits, or names an error *and* declares a subject | [`RefusalMutatedState`](ValidationCode::RefusalMutatedState) |
 //! | an external outcome states no cause | [`UnexplainedDecision`](ValidationCode::UnexplainedDecision) |
-//! | an outcome is both conditional and external | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
+//! | an outcome is both conditional and external, or declares two of `creates`/`moves`/`updates` | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
+//! | a `moves:` names no entity, only a bare transition | [`MissingDeclaration`](ValidationCode::MissingDeclaration) |
+//! | an outcome acts on an entity nothing declares, or takes a transition its subject does not declare | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
+//! | a declared transition no outcome performs | [`MissingCausation`](ValidationCode::MissingCausation) |
 //! | a `when` reads something that is not an input field | [`UnobservableFact`](ValidationCode::UnobservableFact) |
 //! | an emitted event, a named error or a field's type is not declared | [`UndeclaredReference`](ValidationCode::UndeclaredReference) |
 //! | a name is declared twice | [`DuplicateDeclaration`](ValidationCode::DuplicateDeclaration) |
@@ -54,6 +72,13 @@
 //! emits, so a consumer matching it on a command would read "an entity is stuck" off "a command has
 //! no catch-all"; [`EmptyDeclaration`](ValidationCode::EmptyDeclaration) already means a command
 //! that declares no outcomes at all. Three different mistakes, three different repairs.
+//!
+//! [`MissingCausation`](ValidationCode::MissingCausation) is the one code borrowed for a subject the
+//! protocol half never had. AEP emits it when an event a command caused does not name that command;
+//! ESS emits it when a transition a command must cause is caused by nothing. Both are the same
+//! sentence — *this effect has no cause* — and the location tells the two apart, as it already does
+//! for [`UnknownState`](ValidationCode::UnknownState), which an AEP workflow and an ESS lifecycle
+//! have shared since wave 1.
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -256,6 +281,110 @@ impl fmt::Display for TestStrategy {
     }
 }
 
+/// What one outcome does to the entity it acts on.
+///
+/// Three verbs, because a scenario generator has to do three different things with them:
+///
+/// | variant | what a generated scenario does |
+/// |---|---|
+/// | [`Creates`](Effect::Creates) | expects an instance to exist afterwards, at the lifecycle's `initial` state |
+/// | [`Moves`](Effect::Moves) | brings an instance to one of the transition's `from` states, then expects `to` |
+/// | [`Updates`](Effect::Updates) | expects the instance's state to be *unchanged*, and its invariants still to hold |
+///
+/// Creation is not a transition and is not written as one. A [`Transition`](crate::entity::Transition)
+/// has a `from`; an instance that does not yet exist has no state to move out of, so folding the two
+/// together would need a phantom source state that the lifecycle never declares and every projection
+/// would then have to draw.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "effect", rename_all = "snake_case")]
+pub enum Effect {
+    /// A new instance comes into existence, at its lifecycle's initial state.
+    Creates,
+    /// An existing instance moves along a declared transition, named without the entity's namespace.
+    ///
+    /// The name is checked against the entity's own lifecycle by
+    /// [`validate_lifecycle_causes`](crate::entity::validate_lifecycle_causes) — a transition is
+    /// declared inside the entity, so this is the one reference in the model that points *into*
+    /// another declaration rather than at it.
+    Moves {
+        /// The transition's own name, such as `settle`.
+        transition: String,
+    },
+    /// An existing instance changes without moving along its lifecycle.
+    ///
+    /// The variant that keeps the link honest for a command such as `RenameCustomer`: it changes an
+    /// entity, so an invariant scenario has something to evaluate afterwards, and it changes no
+    /// state, so a lifecycle scenario must not claim it moved one.
+    Updates,
+}
+
+impl Effect {
+    /// The transition this effect takes, when it takes one.
+    pub fn transition(&self) -> Option<&str> {
+        match self {
+            Self::Moves { transition } => Some(transition.as_str()),
+            Self::Creates | Self::Updates => None,
+        }
+    }
+
+    /// How it reads in a sentence: `creates`, `moves`, `updates`.
+    ///
+    /// The word the document is written with, so a diagnostic quotes the key an author would go and
+    /// edit rather than a synonym for it.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Self::Creates => "creates",
+            Self::Moves { .. } => "moves",
+            Self::Updates => "updates",
+        }
+    }
+}
+
+/// The entity an outcome acts on, and what it does to it.
+///
+/// Design §19 asks for a lifecycle scenario with "a subject and a verb"; this is both. It hangs off
+/// an [`Outcome`] rather than off a [`CommandSpec`] because a command has several outcomes and they
+/// do not all change the same thing — `CreateInvoice` creates an invoice on `accepted` and creates
+/// nothing on `rejected`. §10 generates one scenario per *outcome*, so a subject on the command
+/// would attach a state change to every branch including the refusal, which invariant 15 forbids
+/// outright.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Subject {
+    /// The entity this outcome acts on — `billing.invoice.Invoice`.
+    pub entity: QualifiedName,
+    /// What it does to it.
+    #[serde(flatten)]
+    pub effect: Effect,
+}
+
+impl Subject {
+    /// An outcome that brings a new instance of `entity` into existence.
+    pub fn creates(entity: QualifiedName) -> Self {
+        Self {
+            entity,
+            effect: Effect::Creates,
+        }
+    }
+
+    /// An outcome that moves an instance of `entity` along the transition `transition`.
+    pub fn moves(entity: QualifiedName, transition: impl Into<String>) -> Self {
+        Self {
+            entity,
+            effect: Effect::Moves {
+                transition: transition.into(),
+            },
+        }
+    }
+
+    /// An outcome that changes an instance of `entity` without moving it.
+    pub fn updates(entity: QualifiedName) -> Self {
+        Self {
+            entity,
+            effect: Effect::Updates,
+        }
+    }
+}
+
 /// One thing a command can do.
 ///
 /// An outcome is observable or it is not an outcome: it emits events, or it names an error, and a
@@ -267,6 +396,14 @@ pub struct Outcome {
     pub name: OutcomeName,
     /// What decides that this is the outcome taken.
     pub condition: OutcomeCondition,
+    /// The entity this outcome acts on, and what it does to it.
+    ///
+    /// Optional, and deliberately so on this side: `billing.email.SendEmail` changes no entity in
+    /// the specification, and a required subject would make an author invent one. The *other* side
+    /// of the link is not optional — a transition no outcome performs is refused as
+    /// [`MissingCausation`](ValidationCode::MissingCausation), because a move nothing can trigger is
+    /// the lifecycle's version of the type no value can inhabit.
+    pub subject: Option<Subject>,
     /// The events this outcome emits, as facts, in the order they happen.
     pub emits: Vec<QualifiedName>,
     /// The error this outcome reports, from the domain's declared error vocabulary.
@@ -281,6 +418,7 @@ impl Outcome {
         Self {
             name,
             condition: OutcomeCondition::When(predicate),
+            subject: None,
             emits,
             error: None,
             summary: None,
@@ -292,10 +430,18 @@ impl Outcome {
         Self {
             name,
             condition: OutcomeCondition::Otherwise,
+            subject: None,
             emits,
             error: None,
             summary: None,
         }
+    }
+
+    /// The same outcome, acting on `subject`.
+    #[must_use]
+    pub fn acting_on(mut self, subject: Subject) -> Self {
+        self.subject = Some(subject);
+        self
     }
 
     /// `true` when nothing about the input distinguishes this outcome from any other.
@@ -480,6 +626,29 @@ impl CommandSpec {
                     .with_hint(
                         "split it: one outcome that emits, one that errors, each with its own \
                              condition",
+                    ),
+                );
+            }
+            // The same rule read on the lifecycle. AEP's own version of it — a refused command
+            // changes nothing and is still recorded — is what `AuditRecord::validate` enforces at
+            // runtime; this is the specification refusing to *promise* the thing that record would
+            // have to refuse.
+            if let Some(subject) = &outcome.subject {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::RefusalMutatedState,
+                        location.clone(),
+                        format!(
+                            "outcome `{}` reports `{error}` and also {} `{}`; a refused command \
+                             changes nothing, so a refusal has no subject",
+                            outcome.name,
+                            subject.effect.verb(),
+                            subject.entity
+                        ),
+                    )
+                    .with_hint(
+                        "drop the subject from the refusal, and declare it on the branch that \
+                         succeeds",
                     ),
                 );
             }
@@ -775,6 +944,11 @@ pub struct RawCommandSpec {
 ///
 /// `when` and `external` are the two spellings of a condition; writing neither is the default
 /// branch, and writing both is refused.
+///
+/// `creates`, `moves` and `updates` are the three spellings of a [`Subject`], and follow the same
+/// shape for the same reason: three keys an author writes at most one of, rather than one key whose
+/// value is sometimes a keyword and sometimes a name. Writing none of them says the outcome changes
+/// no entity, which is the honest answer for `SendEmail`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RawOutcome {
@@ -786,6 +960,21 @@ pub struct RawOutcome {
     /// What outside the input decides this branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external: Option<String>,
+    /// The entity a new instance of which this outcome brings into existence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creates: Option<QualifiedName>,
+    /// The transition this outcome takes, written as the entity's name followed by the transition's
+    /// own — `billing.invoice.Invoice.settle`.
+    ///
+    /// One name rather than an entity and a transition written separately, because a transition is
+    /// declared *inside* an entity: `billing.invoice.Invoice.State` is already spelt this way by
+    /// [`EntitySpec::state_type`](crate::entity::EntitySpec::state_type), and two keys that only
+    /// mean something together are two keys an author can write half of.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moves: Option<QualifiedName>,
+    /// The entity this outcome changes without moving along its lifecycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updates: Option<QualifiedName>,
     /// The events it emits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub emits: Vec<QualifiedName>,
@@ -848,14 +1037,81 @@ impl TryFrom<RawOutcome> for Outcome {
             (None, Some(cause)) => OutcomeCondition::External { cause },
             (None, None) => OutcomeCondition::Otherwise,
         };
+        let subject = subject_of(&raw.name, raw.creates, raw.moves, raw.updates)?;
         Ok(Self {
             name: raw.name,
             condition,
+            subject,
             emits: raw.emits,
             error: raw.error,
             summary: raw.summary,
         })
     }
+}
+
+/// The one subject an outcome declares, or a refusal naming the ones it declared instead.
+///
+/// Written out rather than folded into a tuple match because the message has to name *which* two
+/// keys collided: "creates and moves" and "moves and updates" are different mistakes with different
+/// repairs, and a message saying only "more than one" leaves the author to find them.
+fn subject_of(
+    name: &OutcomeName,
+    creates: Option<QualifiedName>,
+    moves: Option<QualifiedName>,
+    updates: Option<QualifiedName>,
+) -> Result<Option<Subject>, ValidationErrors> {
+    let declared: Vec<&'static str> = [
+        creates.as_ref().map(|_| "creates"),
+        moves.as_ref().map(|_| "moves"),
+        updates.as_ref().map(|_| "updates"),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    if declared.len() > 1 {
+        return Err(ValidationError::new(
+            // The same code two contradictory spellings of a condition get: each key is well
+            // formed, and what is wrong is that both were written.
+            ValidationCode::ConflictingDeclaration,
+            format!("outcomes.{name}.{}", declared[0]),
+            format!(
+                "outcome `{name}` declares {}; one outcome does one thing to one entity",
+                join(declared.iter().map(|key| format!("`{key}`")))
+            ),
+        )
+        .with_hint(
+            "an outcome that both creates and moves is two outcomes; split it, or say which of the \
+             two this branch is",
+        )
+        .into());
+    }
+
+    if let Some(entity) = creates {
+        return Ok(Some(Subject::creates(entity)));
+    }
+    if let Some(entity) = updates {
+        return Ok(Some(Subject::updates(entity)));
+    }
+    let Some(qualified) = moves else {
+        return Ok(None);
+    };
+    // `billing.invoice.Invoice.settle` is the entity plus the transition's own name. A bare name
+    // with no namespace names no entity at all, and reading it as one would produce a diagnostic
+    // about an entity called `settle`.
+    let Some(entity) = qualified.namespace() else {
+        return Err(ValidationError::new(
+            ValidationCode::MissingDeclaration,
+            format!("outcomes.{name}.moves"),
+            format!(
+                "outcome `{name}` moves `{qualified}`, which names no entity; a move is written as \
+                 the entity followed by the transition"
+            ),
+        )
+        .with_hint("write it as `billing.invoice.Invoice.settle`")
+        .into());
+    };
+    Ok(Some(Subject::moves(entity, qualified.local())))
 }
 
 impl TryFrom<RawCommandSpec> for CommandSpec {
@@ -920,10 +1176,28 @@ impl From<Outcome> for RawOutcome {
             OutcomeCondition::Otherwise => (None, None),
             OutcomeCondition::External { cause } => (None, Some(cause)),
         };
+        let (creates, moves, updates) = match outcome.subject {
+            None => (None, None, None),
+            Some(Subject {
+                entity,
+                effect: Effect::Creates,
+            }) => (Some(entity), None, None),
+            Some(Subject {
+                entity,
+                effect: Effect::Moves { transition },
+            }) => (None, Some(entity.child(&transition)), None),
+            Some(Subject {
+                entity,
+                effect: Effect::Updates,
+            }) => (None, None, Some(entity)),
+        };
         Self {
             name: outcome.name,
             when,
             external,
+            creates,
+            moves,
+            updates,
             emits: outcome.emits,
             error: outcome.error,
             summary: outcome.summary,
@@ -1168,6 +1442,7 @@ outcomes:
             Outcome {
                 name: outcome_name("rejected"),
                 condition: OutcomeCondition::When(negative),
+                subject: None,
                 emits: Vec::new(),
                 error: Some(name("billing.invoice.InvalidAmount")),
                 summary: None,
@@ -1207,6 +1482,7 @@ outcomes:
         let errors = refuse(&command_with(vec![Outcome {
             name: outcome_name("rejected"),
             condition: OutcomeCondition::Otherwise,
+            subject: None,
             emits: vec![name("billing.invoice.InvoiceCreated")],
             error: Some(name("billing.invoice.InvalidAmount")),
             summary: None,
@@ -1236,6 +1512,7 @@ outcomes:
                 condition: OutcomeCondition::External {
                     cause: "  ".to_owned(),
                 },
+                subject: None,
                 emits: Vec::new(),
                 error: Some(name("billing.invoice.InvalidAmount")),
                 summary: None,
@@ -1258,6 +1535,7 @@ outcomes:
             condition: OutcomeCondition::External {
                 cause: "the provider is down".to_owned(),
             },
+            subject: None,
             emits: Vec::new(),
             error: Some(name("billing.invoice.InvalidAmount")),
             summary: None,
@@ -1313,6 +1591,7 @@ outcomes:
             Outcome {
                 name: outcome_name("rejected"),
                 condition: OutcomeCondition::Otherwise,
+                subject: None,
                 emits: Vec::new(),
                 error: Some(name("billing.invoice.InvalidAmount")),
                 summary: None,
@@ -1340,6 +1619,7 @@ outcomes:
             Outcome {
                 name: outcome_name("rejected"),
                 condition: OutcomeCondition::Otherwise,
+                subject: None,
                 emits: Vec::new(),
                 error: Some(name("billing.invoice.AmountTooLarge")),
                 summary: None,
@@ -1456,6 +1736,7 @@ outcomes:
             condition: OutcomeCondition::External {
                 cause: "the provider rejects the address".to_owned(),
             },
+            subject: None,
             emits: Vec::new(),
             error: Some(name("billing.invoice.InvalidAmount")),
             summary: None,
@@ -1608,5 +1889,144 @@ summary: The requested amount is not positive.
             errors.to_string().contains("`billing.invoice.Limit`"),
             "{errors}"
         );
+    }
+    // ---- the entity an outcome acts on ---------------------------------------------------------
+
+    #[test]
+    fn an_outcome_names_the_entity_it_changes_and_the_move_it_takes() {
+        let command: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.PayInvoice
+input:
+  - name: amount
+    type: billing.invoice.Money
+outcomes:
+  - name: settled
+    when: amount.amount > 0
+    moves: billing.invoice.Invoice.settle
+    emits: [billing.invoice.InvoiceCreated]
+  - name: rejected
+    error: billing.invoice.InvalidAmount
+",
+        )
+        .expect("well formed");
+        let command = CommandSpec::try_from(command).expect("valid");
+
+        let settled = command
+            .outcome(&outcome_name("settled"))
+            .expect("the branch that moves it");
+        let subject = settled.subject.as_ref().expect("a subject");
+        assert_eq!(subject.entity, name("billing.invoice.Invoice"));
+        assert_eq!(
+            subject.effect,
+            Effect::Moves {
+                transition: "settle".to_owned()
+            },
+            "the entity and the transition are split from one written name"
+        );
+        assert!(
+            command
+                .outcome(&outcome_name("rejected"))
+                .expect("the refusal")
+                .subject
+                .is_none(),
+            "a refusal changes nothing, so it names nothing"
+        );
+
+        // The written form survives a round trip: `moves:` back out as one qualified name.
+        let rendered = serde_yaml::to_string(&command).expect("serialises");
+        assert!(
+            rendered.contains("moves: billing.invoice.Invoice.settle"),
+            "{rendered}"
+        );
+        let reparsed: RawCommandSpec = serde_yaml::from_str(&rendered).expect("re-parses");
+        assert_eq!(CommandSpec::try_from(reparsed).expect("valid"), command);
+    }
+
+    #[test]
+    fn an_outcome_that_reports_an_error_and_also_changes_an_entity_is_refused() {
+        // The same rule as "reports an error and also emits", read on the lifecycle. A refused
+        // command changes nothing, so a branch cannot both refuse and move an invoice.
+        let errors = refuse(&command_with(vec![
+            Outcome::when(
+                outcome_name("accepted"),
+                Predicate::parse_expression("amount.amount > 0").expect("a predicate"),
+                vec![name("billing.invoice.InvoiceCreated")],
+            ),
+            Outcome {
+                name: outcome_name("rejected"),
+                condition: OutcomeCondition::Otherwise,
+                subject: Some(Subject::moves(name("billing.invoice.Invoice"), "settle")),
+                emits: Vec::new(),
+                error: Some(name("billing.invoice.InvalidAmount")),
+                summary: None,
+            },
+        ]));
+        assert!(
+            errors.contains(ValidationCode::RefusalMutatedState),
+            "{errors}"
+        );
+        assert!(errors.to_string().contains("moves"), "{errors}");
+    }
+
+    #[test]
+    fn an_outcome_that_both_creates_and_moves_is_refused_naming_both_keys() {
+        let raw: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.CreateInvoice
+outcomes:
+  - name: accepted
+    creates: billing.invoice.Invoice
+    moves: billing.invoice.Invoice.settle
+    emits: [billing.invoice.InvoiceCreated]
+",
+        )
+        .expect("well formed");
+        let errors = CommandSpec::try_from(raw).expect_err("two verbs for one branch");
+        assert!(
+            errors.contains(ValidationCode::ConflictingDeclaration),
+            "{errors}"
+        );
+        let message = errors.to_string();
+        assert!(
+            message.contains("creates") && message.contains("moves"),
+            "both keys are named, because which two collided is the repair: {message}"
+        );
+    }
+
+    #[test]
+    fn a_move_written_without_an_entity_is_refused_rather_than_read_as_one() {
+        let raw: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.PayInvoice
+outcomes:
+  - name: settled
+    moves: settle
+    emits: [billing.invoice.InvoiceCreated]
+",
+        )
+        .expect("well formed");
+        let errors = CommandSpec::try_from(raw).expect_err("no entity is named");
+        assert!(
+            errors.contains(ValidationCode::MissingDeclaration),
+            "{errors}"
+        );
+    }
+
+    #[test]
+    fn an_outcome_that_changes_no_entity_says_so_by_saying_nothing() {
+        // `SendEmail` changes nothing in the model, and the link is optional on this side for
+        // exactly that reason: a required subject would make an author invent one.
+        let raw: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.CreateInvoice
+outcomes:
+  - name: accepted
+    emits: [billing.invoice.InvoiceCreated]
+",
+        )
+        .expect("well formed");
+        let command = CommandSpec::try_from(raw).expect("valid without a subject");
+        assert!(command.outcomes[0].subject.is_none());
     }
 }

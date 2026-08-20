@@ -1,5 +1,5 @@
 # generated from billing v3
-# model digest 120640924b8bdbf5
+# model digest 2940fd167bf4c4cc
 # compiler 0.1.0 · generator 0.1.0
 # do not edit: regenerate with `protocol ess generate`
 asyncapi: 3.0.0
@@ -18,11 +18,19 @@ info:
   x-ess-provenance:
     system: billing
     specification_version: v3
-    source_digest: 120640924b8bdbf5
+    source_digest: 2940fd167bf4c4cc
     compiler_version: 0.1.0
     generator_version: 0.1.0
 defaultContentType: application/json
 channels:
+  billing.invoice.InvoiceCancelled:
+    address: billing.invoice.InvoiceCancelled
+    title: InvoiceCancelled
+    messages:
+      billing.invoice.InvoiceCancelled:
+        $ref: '#/components/messages/billing.invoice.InvoiceCancelled'
+    x-ess-event: billing.invoice.InvoiceCancelled
+    x-ess-address-source: qualified-name
   billing.invoice.InvoiceCreated:
     address: billing.invoice.InvoiceCreated
     title: InvoiceCreated
@@ -31,14 +39,43 @@ channels:
         $ref: '#/components/messages/billing.invoice.InvoiceCreated'
     x-ess-event: billing.invoice.InvoiceCreated
     x-ess-address-source: qualified-name
+  billing.invoice.InvoiceIssued:
+    address: billing.invoice.InvoiceIssued
+    title: InvoiceIssued
+    messages:
+      billing.invoice.InvoiceIssued:
+        $ref: '#/components/messages/billing.invoice.InvoiceIssued'
+    x-ess-event: billing.invoice.InvoiceIssued
+    x-ess-address-source: qualified-name
+  billing.invoice.InvoicePaid:
+    address: billing.invoice.InvoicePaid
+    title: InvoicePaid
+    messages:
+      billing.invoice.InvoicePaid:
+        $ref: '#/components/messages/billing.invoice.InvoicePaid'
+    x-ess-event: billing.invoice.InvoicePaid
+    x-ess-address-source: qualified-name
 operations:
+  send.billing.invoice.InvoiceCancelled:
+    action: send
+    channel:
+      $ref: '#/channels/billing.invoice.InvoiceCancelled'
+    title: Publish InvoiceCancelled
+    summary: Publishes `billing.invoice.InvoiceCancelled`.
+    description: |-
+      Nothing in this specification reacts to `billing.invoice.InvoiceCancelled`.
+      `billing.invoice.CancelInvoice` emits it on `cancelled`, which moves a `billing.invoice.Invoice` to `Cancelled` along `cancel`.
+    messages:
+    - $ref: '#/channels/billing.invoice.InvoiceCancelled/messages/billing.invoice.InvoiceCancelled'
   send.billing.invoice.InvoiceCreated:
     action: send
     channel:
       $ref: '#/channels/billing.invoice.InvoiceCreated'
     title: Publish InvoiceCreated
     summary: Publishes `billing.invoice.InvoiceCreated`.
-    description: '`notify-on-invoice-created` reacts by invoking `billing.email.SendEmail`. On failure: `escalate`.'
+    description: |-
+      `notify-on-invoice-created` reacts by invoking `billing.email.SendEmail`. On failure: `escalate`.
+      `billing.invoice.CreateInvoice` emits it on `accepted`, which creates a `billing.invoice.Invoice` in `Draft`.
     messages:
     - $ref: '#/channels/billing.invoice.InvoiceCreated/messages/billing.invoice.InvoiceCreated'
     x-ess-consumed-by:
@@ -47,15 +84,67 @@ operations:
       invokes: billing.email.SendEmail
       delivery: at_least_once
       on_failure: escalate
+      escalates_with: billing.email.DeliveryEscalated
+  send.billing.invoice.InvoiceIssued:
+    action: send
+    channel:
+      $ref: '#/channels/billing.invoice.InvoiceIssued'
+    title: Publish InvoiceIssued
+    summary: Publishes `billing.invoice.InvoiceIssued`.
+    description: |-
+      Nothing in this specification reacts to `billing.invoice.InvoiceIssued`.
+      `billing.invoice.IssueInvoice` emits it on `issued`, which moves a `billing.invoice.Invoice` to `Issued` along `issue`.
+    messages:
+    - $ref: '#/channels/billing.invoice.InvoiceIssued/messages/billing.invoice.InvoiceIssued'
+  send.billing.invoice.InvoicePaid:
+    action: send
+    channel:
+      $ref: '#/channels/billing.invoice.InvoicePaid'
+    title: Publish InvoicePaid
+    summary: Publishes `billing.invoice.InvoicePaid`.
+    description: |-
+      Nothing in this specification reacts to `billing.invoice.InvoicePaid`.
+      `billing.invoice.PayInvoice` emits it on `settled`, which moves a `billing.invoice.Invoice` to `Paid` along `settle`.
+    messages:
+    - $ref: '#/channels/billing.invoice.InvoicePaid/messages/billing.invoice.InvoicePaid'
 components:
   messages:
+    billing.invoice.InvoiceCancelled:
+      name: billing.invoice.InvoiceCancelled
+      title: InvoiceCancelled
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/event.billing.invoice.InvoiceCancelled'
     billing.invoice.InvoiceCreated:
       name: billing.invoice.InvoiceCreated
       title: InvoiceCreated
       contentType: application/json
       payload:
         $ref: '#/components/schemas/event.billing.invoice.InvoiceCreated'
+    billing.invoice.InvoiceIssued:
+      name: billing.invoice.InvoiceIssued
+      title: InvoiceIssued
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/event.billing.invoice.InvoiceIssued'
+    billing.invoice.InvoicePaid:
+      name: billing.invoice.InvoicePaid
+      title: InvoicePaid
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/event.billing.invoice.InvoicePaid'
   schemas:
+    event.billing.invoice.InvoiceCancelled:
+      title: InvoiceCancelled payload
+      x-ess-name: billing.invoice.InvoiceCancelled
+      x-ess-kind: event-payload
+      type: object
+      properties:
+        invoice_id:
+          $ref: '#/components/schemas/type.billing.invoice.InvoiceId'
+      required:
+      - invoice_id
+      additionalProperties: false
     event.billing.invoice.InvoiceCreated:
       title: InvoiceCreated payload
       x-ess-name: billing.invoice.InvoiceCreated
@@ -71,6 +160,31 @@ components:
       required:
       - invoice_id
       - customer_email
+      - amount
+      additionalProperties: false
+    event.billing.invoice.InvoiceIssued:
+      title: InvoiceIssued payload
+      x-ess-name: billing.invoice.InvoiceIssued
+      x-ess-kind: event-payload
+      type: object
+      properties:
+        invoice_id:
+          $ref: '#/components/schemas/type.billing.invoice.InvoiceId'
+      required:
+      - invoice_id
+      additionalProperties: false
+    event.billing.invoice.InvoicePaid:
+      title: InvoicePaid payload
+      x-ess-name: billing.invoice.InvoicePaid
+      x-ess-kind: event-payload
+      type: object
+      properties:
+        invoice_id:
+          $ref: '#/components/schemas/type.billing.invoice.InvoiceId'
+        amount:
+          $ref: '#/components/schemas/type.billing.invoice.Money'
+      required:
+      - invoice_id
       - amount
       additionalProperties: false
     type.billing.invoice.Email:

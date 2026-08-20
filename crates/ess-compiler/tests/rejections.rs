@@ -23,6 +23,7 @@ use ess_domain::command::{
 };
 use ess_domain::component::{ComponentName, ComponentSpec};
 use ess_domain::domain::DomainSpec;
+use ess_domain::entity::{EntitySpec, StateMachine, StateName, Transition};
 use ess_domain::name::{Naming, QualifiedName, Version};
 use ess_domain::spec::Specification;
 use ess_domain::system::{FormatVersion, SystemSpec};
@@ -77,6 +78,7 @@ fn outcome(label: &str, emits: &[&str], error: Option<&str>) -> Outcome {
     Outcome {
         name: OutcomeName::new(label).expect("a valid outcome name"),
         condition: OutcomeCondition::Otherwise,
+        subject: None,
         emits: emits.iter().map(|event| name(event)).collect(),
         error: error.map(name),
         summary: None,
@@ -102,7 +104,10 @@ fn binding(id: &str, trigger: &str, invoked: &str, mapping: &[(&str, &str)]) -> 
             .map(|(target, source)| ((*target).to_owned(), MappingSource::parse(source)))
             .collect(),
         delivery: Delivery::AtLeastOnce,
-        failure: Failure::Escalate,
+        // `retry`, so that a fixture about some other rule does not also have to declare the event
+        // an `escalate` would have to name.
+        failure: Failure::Retry,
+        escalation: None,
         naming: Naming::default(),
     }
 }
@@ -111,6 +116,7 @@ fn binding(id: &str, trigger: &str, invoked: &str, mapping: &[(&str, &str)]) -> 
 #[derive(Default)]
 struct Fixture {
     types: Vec<NamedType>,
+    entities: Vec<EntitySpec>,
     events: Vec<EventSpec>,
     commands: Vec<CommandSpec>,
     errors: Vec<ErrorSpec>,
@@ -142,7 +148,7 @@ impl Fixture {
         let domain = DomainSpec {
             name: name(DOMAIN),
             types: Vec::new(),
-            entities: Vec::new(),
+            entities: owned(self.entities.iter().map(|it| it.name.clone()).collect()),
             commands: owned(self.commands.iter().map(|it| it.name.clone()).collect()),
             events: owned(self.events.iter().map(|it| it.name.clone()).collect()),
             views: Vec::new(),
@@ -161,7 +167,11 @@ impl Fixture {
                 naming: Naming::default(),
                 summary: None,
             },
-            entities: BTreeMap::new(),
+            entities: self
+                .entities
+                .into_iter()
+                .map(|it| (it.name.clone(), it))
+                .collect(),
             commands: self
                 .commands
                 .into_iter()
@@ -371,6 +381,143 @@ fn an_outcome_that_emits_an_event_nobody_declares_is_refused() {
     );
 }
 
+/// An entity with a two-state lifecycle and one move, so an outcome has something to take.
+fn entity(value: &str, transition: &str) -> EntitySpec {
+    let state = |label: &str| StateName::new(label).expect("a valid state name");
+    EntitySpec {
+        name: name(value),
+        identity: field("order_id", "String"),
+        fields: Vec::new(),
+        states: StateMachine {
+            states: [state("Open"), state("Closed")].into(),
+            initial: state("Open"),
+            terminal: [state("Closed")].into(),
+            transitions: vec![
+                Transition::new(transition, [state("Open")], state("Closed")).expect("a move"),
+            ],
+        },
+        invariants: Vec::new(),
+        naming: Naming::default(),
+    }
+}
+
+/// One outcome that acts on an entity, so the subject has to resolve.
+fn acting(label: &str, subject: ess_domain::command::Subject) -> Outcome {
+    Outcome {
+        name: OutcomeName::new(label).expect("a valid outcome name"),
+        condition: OutcomeCondition::Otherwise,
+        subject: Some(subject),
+        emits: Vec::new(),
+        error: None,
+        summary: None,
+    }
+}
+
+#[test]
+fn an_outcome_that_acts_on_an_entity_nobody_declares_is_refused() {
+    // There is no `EntityHandle` to put in the outcome, so this pass cannot build the IR and says
+    // so — the same reason a view's source is resolved here rather than trusted.
+    let diagnostics = Fixture {
+        entities: vec![entity("shop.orders.Order", "close")],
+        commands: vec![command(
+            "shop.orders.Close",
+            Vec::new(),
+            vec![acting(
+                "closed",
+                ess_domain::command::Subject::moves(name("shop.orders.Receipt"), "close"),
+            )],
+        )],
+        ..Fixture::default()
+    }
+    .refused();
+
+    assert!(
+        diagnostics.contains(codes::COMMAND_UNDECLARED_REFERENCE),
+        "{diagnostics}"
+    );
+}
+
+#[test]
+fn an_outcome_that_takes_a_move_the_entity_does_not_declare_is_refused() {
+    // The transition is resolved for the same reason the entity is: the IR carries the move itself
+    // rather than its name, so there is nothing to carry for a move that does not exist.
+    let diagnostics = Fixture {
+        entities: vec![entity("shop.orders.Order", "close")],
+        commands: vec![command(
+            "shop.orders.Close",
+            Vec::new(),
+            vec![acting(
+                "closed",
+                ess_domain::command::Subject::moves(name("shop.orders.Order"), "settle"),
+            )],
+        )],
+        ..Fixture::default()
+    }
+    .refused();
+
+    assert!(
+        diagnostics.contains(codes::COMMAND_UNDECLARED_REFERENCE),
+        "{diagnostics}"
+    );
+    assert!(
+        diagnostics.as_slice().iter().any(|diagnostic| {
+            diagnostic.details.iter().any(|detail| {
+                matches!(
+                    detail,
+                    Detail::Undeclared { expected, available, .. }
+                        if *expected == "transition" && available.iter().any(|it| it == "close")
+                )
+            })
+        }),
+        "the moves the entity does declare are offered: {diagnostics}"
+    );
+}
+
+#[test]
+fn a_resolved_outcome_carries_the_move_itself_rather_than_its_name() {
+    // The one place this IR resolves a reference to a *value* instead of to a handle: a transition
+    // is declared inside a lifecycle and has no map on `EssIr` to be keyed in, so a projection gets
+    // `from` and `to` in hand rather than an `Option` from a lookup.
+    let ir = Fixture {
+        entities: vec![entity("shop.orders.Order", "close")],
+        commands: vec![command(
+            "shop.orders.Close",
+            Vec::new(),
+            vec![acting(
+                "closed",
+                ess_domain::command::Subject::moves(name("shop.orders.Order"), "close"),
+            )],
+        )],
+        ..Fixture::default()
+    }
+    .resolved();
+
+    let closed = &ir
+        .commands
+        .get(&name("shop.orders.Close"))
+        .expect("the command resolves")
+        .outcomes[0];
+    let subject = closed.subject.as_ref().expect("a subject");
+    let transition = subject
+        .effect
+        .transition()
+        .expect("the effect is a declared move");
+    assert_eq!(transition.to.as_str(), "Closed");
+    assert_eq!(
+        subject.entity.name(),
+        &name("shop.orders.Order"),
+        "the subject is a handle, so `EssIr::entity` answers whose invariants a scenario checks"
+    );
+
+    // And the same relation, read the way a lifecycle diagram asks it.
+    let drivers = ir.drivers();
+    let taken = drivers
+        .get(&subject.entity)
+        .expect("the entity has a driver");
+    assert_eq!(taken.len(), 1);
+    assert!(taken[0].takes("close"), "{:?}", taken[0].effect);
+}
+
 #[test]
 fn an_outcome_that_names_an_error_nobody_declares_is_refused() {
     let diagnostics = Fixture {
@@ -442,6 +589,38 @@ fn a_binding_that_invokes_a_command_nobody_declares_is_refused() {
     assert!(
         diagnostics.contains(codes::BINDING_UNDECLARED_REFERENCE),
         "{diagnostics}"
+    );
+}
+
+#[test]
+fn a_binding_that_escalates_into_an_event_nobody_declares_is_refused() {
+    // The guarantee every other reference in the IR has, read on the failure path: a binding cannot
+    // escalate into an event nobody declares, so `ResolvedBinding::escalation` is always a handle
+    // the IR can look up.
+    let mut fixture = crossing("shop.orders.Email");
+    let mut escalating = binding(
+        "notify-on-ordered",
+        "shop.orders.Ordered",
+        "shop.orders.Notify",
+        &[("recipient", "event.customer_email")],
+    );
+    escalating.failure = Failure::Escalate;
+    escalating.escalation = Some(name("shop.orders.NotifyGaveUp"));
+    fixture.bindings = vec![escalating];
+
+    let diagnostics = fixture.refused();
+    assert!(
+        diagnostics.contains(codes::BINDING_UNDECLARED_REFERENCE),
+        "{diagnostics}"
+    );
+    let diagnostic = diagnostics
+        .as_slice()
+        .iter()
+        .find(|diagnostic| diagnostic.code == codes::BINDING_UNDECLARED_REFERENCE)
+        .expect("the refusal");
+    assert!(
+        diagnostic.message.contains("escalates"),
+        "the message tells the two events a binding names apart: {diagnostic:?}"
     );
 }
 
