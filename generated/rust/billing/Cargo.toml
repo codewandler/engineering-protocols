@@ -1,0 +1,8 @@
+# generated from billing v3
+# model digest e19d384dac86219a
+# compiler 0.1.0 · generator 0.1.0
+# do not edit: regenerate with `protocol ess synthesize`
+
+[workspace]
+resolver = "2"
+members = ["crates/billing-types"]

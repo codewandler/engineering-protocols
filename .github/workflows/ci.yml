@@ -116,6 +116,25 @@ jobs:
       - name: Check generated conformance suites
         run: cargo xtask suite --check
 
+  # Its own job for the reason `suites` is, plus one of its own: this check also runs `cargo
+  # check` *inside* each committed workspace, so it fails for two distinguishable reasons — the
+  # tree drifted from the specification (fix: `cargo xtask synth`), or the tree matches and no
+  # longer compiles, which is a defect in `ess-synth` rather than in any specification. Folded
+  # into the gate, both would read as "one of eight steps failed".
+  synthesis:
+    name: Synthesised workspaces up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check synthesised workspaces
+        run: cargo xtask synth --check
+
   # Its own job because it is its own toolchain, which a step in `gate` cannot be. `rust-version =
   # "1.85"` in Cargo.toml is a promise to anyone who depends on these crates, and until this job
   # existed nothing in the repository would have noticed it breaking.

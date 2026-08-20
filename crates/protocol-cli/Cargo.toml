@@ -33,6 +33,11 @@ ess-conformance.workspace = true
 ess-diff.workspace = true
 ess-domain.workspace = true
 ess-gen.workspace = true
+
+# `protocol ess synthesize`. The plan and the emitters live in the library, so the command line is
+# a shell over it: `ess_synth::synthesize(&ir)` from a harness produces the same plan and the same
+# bytes, and `cargo xtask synth` compares the committed tree against what this verb prints.
+ess-synth.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde.workspace = true

@@ -758,6 +758,7 @@ fn every_ess_verb_survives_a_reader_that_stops_reading() {
             "billing.invoice.CreateInvoice",
         ],
         vec!["ess", "graph", "--path", SPECIFICATION],
+        vec!["ess", "synthesize", "--path", SPECIFICATION],
         vec!["ess", "conform", "synthesize", "--path", SPECIFICATION],
         vec![
             "ess",
@@ -1557,6 +1558,140 @@ fn ess_generate_produces_the_same_bytes_twice() {
         "two runs over one specification must produce identical bytes"
     );
 }
+// ---- ess synthesize -------------------------------------------------------------------------------
+
+#[test]
+fn ess_synthesize_plans_the_normative_example_and_says_what_it_refuses() {
+    let output = protocol(&["ess", "synthesize", "--path", SPECIFICATION]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    // The counts are the shape of the answer: what the specification determines, what it leaves
+    // to the implementor, and what this synthesis refuses to pretend it can represent.
+    assert!(
+        text.contains("billing v3 — 43 capabilities: 29 generated, 7 obligation(s), 7 refused"),
+        "{text}"
+    );
+    // Obligations and refusals are said out loud, never as a count alone: an obligation nobody
+    // surfaces is a `todo!()` wearing a document's name.
+    assert!(
+        text.contains("obligation: command behaviour `billing.email.SendEmail`")
+            && text.contains("the provider rejects the recipient address"),
+        "the external obligation carries the specification author's own cause: {text}"
+    );
+    assert!(
+        text.contains("refused: binding `notify-on-invoice-created`"),
+        "{text}"
+    );
+    assert!(
+        text.contains("nothing written"),
+        "a verb that looks read-only has to say it wrote nothing: {text}"
+    );
+}
+
+#[test]
+fn ess_synthesize_offers_exactly_one_target() {
+    // `--target` exists so a second language is a new value rather than a new surface — and only
+    // one value exists, because a target that parses before its emitter exists fails later and
+    // worse.
+    let help = stdout(&protocol(&["ess", "synthesize", "--help"]));
+    assert!(help.contains("--target"), "{help}");
+    assert!(help.contains("[default: rust]"), "{help}");
+    assert!(
+        !help.to_lowercase().contains("go\n") && !help.contains("typescript"),
+        "no target is scaffolded before its emitter exists: {help}"
+    );
+}
+
+#[test]
+fn ess_synthesize_carries_the_plan_and_every_artifacts_contents_in_json() {
+    let output = protocol(&[
+        "ess",
+        "synthesize",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the synthesis report is valid JSON");
+
+    assert_eq!(parsed["provenance"]["system"], "billing");
+    assert_eq!(parsed["provenance"]["specification_version"], "v3");
+    assert_eq!(parsed["target"], "rust");
+    assert_eq!(parsed["generated"], 29);
+    assert_eq!(parsed["obligations"], 7);
+    assert_eq!(parsed["refused"], 7);
+
+    let artifacts = parsed["artifacts"].as_array().expect("artifacts is a list");
+    let paths: Vec<&str> = artifacts
+        .iter()
+        .map(|artifact| artifact["path"].as_str().expect("a path"))
+        .collect();
+    // The plan travels inside the workspace, in both renderings: the person reads PLAN.md, the
+    // drift check and any later tool read plan.json, and neither can go missing alone.
+    for expected in [
+        "PLAN.md",
+        "plan.json",
+        "Cargo.toml",
+        "crates/billing-types/src/invoice.rs",
+    ] {
+        assert!(paths.contains(&expected), "no `{expected}` in {paths:?}");
+    }
+    for artifact in artifacts {
+        assert!(
+            artifact["contents"].is_string(),
+            "contents travel with the path, so the drift check can compare without writing: \
+             {artifact}"
+        );
+    }
+}
+
+#[test]
+fn ess_synthesize_writes_exactly_what_it_reports() {
+    let report = protocol(&[
+        "ess",
+        "synthesize",
+        "--path",
+        SPECIFICATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&report), 0, "{}", stderr(&report));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&report)).expect("the synthesis report is valid JSON");
+
+    let out = scratch("protocol-ess-synthesize-out");
+    let written = protocol(&[
+        "ess",
+        "synthesize",
+        "--path",
+        SPECIFICATION,
+        "--out",
+        printable(&out),
+    ]);
+    assert_eq!(code(&written), 0, "{}", stderr(&written));
+    assert!(
+        stdout(&written).contains("written to"),
+        "{}",
+        stdout(&written)
+    );
+
+    for artifact in parsed["artifacts"].as_array().expect("artifacts is a list") {
+        let path = artifact["path"].as_str().expect("a path");
+        let on_disk = std::fs::read_to_string(out.join(path))
+            .unwrap_or_else(|error| panic!("`{path}` was reported but not written: {error}"));
+        assert_eq!(
+            on_disk,
+            artifact["contents"].as_str().expect("contents"),
+            "`{path}` differs between the report and the tree — the drift check compares against \
+             the report, so the two being one answer is the whole point"
+        );
+    }
+
+    std::fs::remove_dir_all(&out).ok();
+}
+
 // ---- ess conform ----------------------------------------------------------------------------------
 
 #[test]

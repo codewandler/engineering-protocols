@@ -1,0 +1,22 @@
+[package]
+name = "ess-synth"
+description = "Structural synthesis of an executable system specification: a plan with one disposition per capability, and the Rust workspace the generated half of it determines."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+ess-compiler.workspace = true
+ess-domain.workspace = true
+# For `Artifact` and `Provenance`, not for its generators: the projections stay in `ess-gen` and the
+# synthesis stays here (review H6), but an artifact's shape and where-it-came-from stamp are one
+# convention across both crates, and a second provenance type is the drift H3 already caught once.
+ess-gen.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

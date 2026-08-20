@@ -8,8 +8,8 @@ tasks:
 
   check:
     desc: >-
-      Format check, lint, test, doc check, schema check, projection check and suite check —
-      everything CI runs.
+      Format check, lint, test, doc check, schema check, projection check, suite check and
+      synthesis check — everything CI runs.
     cmds:
       - task: fmt-check
       - task: clippy
@@ -18,6 +18,7 @@ tasks:
       - task: schema-check
       - task: generate-check
       - task: suite-check
+      - task: synth-check
 
   fmt:
     desc: Format the workspace.
@@ -61,6 +62,23 @@ tasks:
     desc: Fail if the committed conformance suites differ from what the specifications oblige.
     cmds:
       - cargo xtask suite --check
+
+  # Beside `generate` for the reason `suite` is: `generated/` has one owner per subtree, and the
+  # synthesised workspaces under `generated/rust/` are the synth task's — the projection task's
+  # orphan scan carves that root out, and `xtask`'s ownership test holds the carve-out to the list
+  # of owners. This one also compiles: a workspace that matches its specification byte for byte and
+  # no longer builds is a claim nothing else checks.
+  synth:
+    desc: Regenerate generated/rust/ — the workspaces the specifications determine.
+    cmds:
+      - cargo xtask synth
+
+  synth-check:
+    desc: >-
+      Fail if the committed synthesised workspaces differ from what the specifications determine,
+      or no longer compile.
+    cmds:
+      - cargo xtask synth --check
 
   schema:
     desc: Regenerate schemas/generated/ from the Rust types.

@@ -1,0 +1,366 @@
+{
+  "provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "e19d384dac86219a",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0"
+  },
+  "scope": {
+    "profile": "semantic-types",
+    "planner_version": "0.1.0"
+  },
+  "capabilities": [
+    {
+      "kind": "domain_type",
+      "source": "billing.email.EmailAddress",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.email.MessageId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.email.TemplateId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.invoice.Channel",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.invoice.CompanyRef",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.invoice.Email",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.invoice.Invoice.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.invoice.InvoiceId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.invoice.LineItem",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.invoice.Money",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "billing.invoice.Payee",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
+      "source": "billing.invoice.Invoice",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "billing.email.SendEmail",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "billing.email.SendEmail",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "external",
+          "cause": "the provider rejects the recipient address"
+        },
+        "contract": "given `billing.email.SendEmail` input, decide and enact exactly one outcome — `sent` otherwise, emits `billing.email.EmailSent`; `failed` externally decided (the provider rejects the recipient address), error `billing.email.Undeliverable`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "billing.invoice.CancelInvoice",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "billing.invoice.CancelInvoice",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "unspecified_algorithm"
+        },
+        "contract": "given `billing.invoice.CancelInvoice` input, decide and enact exactly one outcome — `cancelled` otherwise, takes `cancel` of `billing.invoice.Invoice`, emits `billing.invoice.InvoiceCancelled`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "billing.invoice.CreateInvoice",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "billing.invoice.CreateInvoice",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "unspecified_algorithm"
+        },
+        "contract": "given `billing.invoice.CreateInvoice` input, decide and enact exactly one outcome — `accepted` when `amount.amount > 0`, creates `billing.invoice.Invoice`, emits `billing.invoice.InvoiceCreated`; `rejected` otherwise, error `billing.invoice.InvalidAmount`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "billing.invoice.IssueInvoice",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "billing.invoice.IssueInvoice",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "unspecified_algorithm"
+        },
+        "contract": "given `billing.invoice.IssueInvoice` input, decide and enact exactly one outcome — `issued` otherwise, takes `issue` of `billing.invoice.Invoice`, emits `billing.invoice.InvoiceIssued`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "billing.invoice.PayInvoice",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "billing.invoice.PayInvoice",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "unspecified_algorithm"
+        },
+        "contract": "given `billing.invoice.PayInvoice` input, decide and enact exactly one outcome — `settled` when `amount.amount > 0`, takes `settle` of `billing.invoice.Invoice`, emits `billing.invoice.InvoicePaid`; `rejected` otherwise, error `billing.invoice.InvalidAmount`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "billing.email.DeliveryEscalated",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "billing.email.EmailSent",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "billing.invoice.InvoiceCancelled",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "billing.invoice.InvoiceCreated",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "billing.invoice.InvoiceIssued",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "billing.invoice.InvoicePaid",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "billing.email.Undeliverable",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "billing.invoice.InvalidAmount",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "billing.invoice.InvoiceStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "billing.invoice.InvoiceById",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "billing.invoice.InvoiceById",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "projection_maintenance"
+        },
+        "contract": "a query answering `billing.invoice.InvoiceById` with rows projected from `billing.invoice.Invoice` at `eventual` consistency"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "billing.invoice.OutstandingInvoices",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "billing.invoice.OutstandingInvoices",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "projection_maintenance"
+        },
+        "contract": "a query answering `billing.invoice.OutstandingInvoices` with rows projected from `billing.invoice.Invoice` at `read_your_writes` consistency, containing instances where `state == Issued`"
+      }
+    },
+    {
+      "kind": "conversion",
+      "source": "billing.invoice.Email -> billing.email.EmailAddress",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "actor_grants",
+      "source": "billing.invoice.Auditor",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_caller_identity",
+        "stage": "planning",
+        "detail": "observes only; it may invoke no command; a grant is checked against a caller identity, which types do not carry, and enforcement belongs to the layer that knows who is calling"
+      }
+    },
+    {
+      "kind": "actor_grants",
+      "source": "billing.invoice.Customer",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_caller_identity",
+        "stage": "planning",
+        "detail": "may invoke `billing.invoice.CreateInvoice`; a grant is checked against a caller identity, which types do not carry, and enforcement belongs to the layer that knows who is calling"
+      }
+    },
+    {
+      "kind": "binding",
+      "source": "notify-on-invoice-created",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_interaction_layer",
+        "stage": "planning",
+        "detail": "reacts to `billing.invoice.InvoiceCreated` by invoking `billing.email.SendEmail` (at_least_once, on failure escalate); both the transformation and the delivery guarantee need the interaction layer, which the semantic-types scope does not hold"
+      }
+    },
+    {
+      "kind": "component_port",
+      "source": "email-service",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_interaction_layer",
+        "stage": "planning",
+        "detail": "accepts 1 command(s) and publishes 2 event(s); a port surface needs the interaction layer, which the semantic-types scope does not hold"
+      }
+    },
+    {
+      "kind": "component_port",
+      "source": "invoice-service",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_interaction_layer",
+        "stage": "planning",
+        "detail": "accepts 4 command(s) and publishes 4 event(s); a port surface needs the interaction layer, which the semantic-types scope does not hold"
+      }
+    },
+    {
+      "kind": "workload",
+      "source": "email-service",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "topology_deferred",
+        "stage": "planning",
+        "detail": "requires at least 2 replica(s); topology synthesis is deferred with its design"
+      }
+    },
+    {
+      "kind": "workload",
+      "source": "invoice-service",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "topology_deferred",
+        "stage": "planning",
+        "detail": "requires at least 2 replica(s); topology synthesis is deferred with its design"
+      }
+    }
+  ]
+}

@@ -9,7 +9,29 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`protocol ess synthesize --path <spec> [--out <dir>] [--target rust]`** — the part of an
+  implementation that was never yours to write, plus the typed list of exactly what remains. Every
+  semantic capability of the specification gets exactly one disposition in a language-neutral
+  `SynthesisPlan`: **generated**, **obligation** (the contract is declared, the behaviour is yours —
+  with the reason, in the specification author's own words where the spec declares one), or
+  **refused** (with the reason, and the stage that refused). Zero guessed business logic: on the
+  billing example the plan holds 43 capabilities — 29 generated, 7 obligations, 7 refusals — and
+  `calculate_tax`-shaped inventions are unrepresentable, because no disposition means "generated,
+  roughly".
+
+  The Rust emitter writes a standalone zero-dependency workspace: newtypes distinct from their
+  representations, tagged unions as enums, events and declared errors as types, one outcome enum
+  per command with the refusal branches beside the successes, views as row types — and lifecycles
+  as typestate, where the transition the specification refuses is a method that does not exist:
+  `Paid → Cancelled` on the billing invoice does not compile. `PLAN.md` and `plan.json` travel
+  inside the workspace. `--target` takes `rust` today; the plan itself never names a language.
+- **`generated/rust/billing/` is committed and gated.** `cargo xtask synth` regenerates it,
+  `cargo xtask synth --check` — a new step in `task check` and its own CI job — fails on a
+  byte-level drift from the specification *and* runs `cargo check` inside each committed workspace,
+  so "it compiles" is executed rather than claimed. `Cargo.lock` and `target/` inside a generated
+  workspace are the toolchain's, ignored and never committed.
 
 ## [0.5.0-ess-wave-5] — 2026-08-20
 

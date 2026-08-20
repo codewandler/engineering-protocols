@@ -3,6 +3,12 @@
 *.pdb
 .DS_Store
 
+# Written by `cargo check` inside the synthesised workspaces (cargo xtask synth). The committed
+# tree is source-only: a lock file is the toolchain's answer, not the specification's, and the
+# orphan scan in xtask carves these out for the same reason.
+generated/rust/*/Cargo.lock
+generated/rust/*/target/
+
 # Documentation website (Docusaurus). Sources are tracked; installs and build output are not.
 website/node_modules
 website/build

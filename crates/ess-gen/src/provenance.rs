@@ -52,6 +52,14 @@ impl Provenance {
         }
     }
 
+    /// The command that regenerates every projection this crate publishes.
+    ///
+    /// The default for [`Provenance::lines`] and its comment renderings. A stamped artifact from a
+    /// *different* generator names its own command through the `*_for` forms below — `ess-synth`
+    /// writes `protocol ess synthesize` — because a header that tells the reader to run the wrong
+    /// verb is worse than no header at all.
+    pub const REGENERATE: &'static str = "protocol ess generate";
+
     /// The provenance as comment lines, each already prefixed.
     ///
     /// Takes the prefix because every projection has a different one — `#` for YAML, `//` for Rust —
@@ -62,10 +70,15 @@ impl Provenance {
     /// Use [`Provenance::html_comment`], which is the whole block. This method's own documentation
     /// used to recommend the broken form, which is how the docs generator found it.
     pub fn commented(&self, prefix: &str) -> String {
+        self.commented_for(prefix, Self::REGENERATE)
+    }
+
+    /// [`Provenance::commented`], naming the command that actually regenerates the artifact.
+    pub fn commented_for(&self, prefix: &str, regenerate: &str) -> String {
         use std::fmt::Write as _;
 
         let mut out = String::new();
-        for line in self.lines() {
+        for line in self.lines_for(regenerate) {
             let _ = writeln!(out, "{prefix} {line}");
         }
         out
@@ -77,10 +90,15 @@ impl Provenance {
     /// and never closed makes the rest of the document disappear — silently, in a renderer, which is
     /// the worst place to find out.
     pub fn html_comment(&self) -> String {
+        self.html_comment_for(Self::REGENERATE)
+    }
+
+    /// [`Provenance::html_comment`], naming the command that actually regenerates the artifact.
+    pub fn html_comment_for(&self, regenerate: &str) -> String {
         use std::fmt::Write as _;
 
         let mut out = String::from("<!--\n");
-        for line in self.lines() {
+        for line in self.lines_for(regenerate) {
             let _ = writeln!(out, "  {line}");
         }
         out.push_str("-->\n");
@@ -89,6 +107,11 @@ impl Provenance {
 
     /// The provenance as plain lines.
     pub fn lines(&self) -> Vec<String> {
+        self.lines_for(Self::REGENERATE)
+    }
+
+    /// [`Provenance::lines`], naming the command that actually regenerates the artifact.
+    pub fn lines_for(&self, regenerate: &str) -> Vec<String> {
         vec![
             format!(
                 "generated from {} {}",
@@ -99,7 +122,7 @@ impl Provenance {
                 "compiler {} · generator {}",
                 self.compiler_version, self.generator_version
             ),
-            "do not edit: regenerate with `protocol ess generate`".to_owned(),
+            format!("do not edit: regenerate with `{regenerate}`"),
         ]
     }
 }

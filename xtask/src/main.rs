@@ -66,6 +66,30 @@ const SUITE_SPECIFICATIONS: &[&str] = &["examples/billing", "examples/oracle-fix
 /// output tree with a drift check and a CI job of its own.
 const SUITES: &str = "suites/generated";
 
+/// The specifications a Rust workspace is synthesised for.
+///
+/// One: the normative example is the specification wave 6 closes its loop against, and a second
+/// workspace is committed the day a second specification earns one.
+const SYNTH_SPECIFICATIONS: &[&str] = &["examples/billing"];
+
+/// Where those workspaces are committed.
+///
+/// *Inside* `generated/`, which the module documentation above forbids — and the wave 6 plan page
+/// fixes this path, so the conflict is resolved by mechanism rather than by hoping: the nested
+/// root is carved out of the projection task's orphan scan through [`PROJECTION_EXCLUSIONS`], the
+/// carve-out is derived from this same constant's name, and `no_two_tasks_own_one_committed_tree`
+/// now *requires* a nested root to appear in its outer owner's exclusion list. What made an
+/// exclusion list dangerous was that nothing checked it; checked, it is just ownership written
+/// down.
+const SYNTH: &str = "generated/rust";
+
+/// The subtrees of `generated/` the projection task does not own.
+///
+/// Exactly the nested owners' roots, relative to [`PROJECTIONS`] — the ownership test refuses an
+/// entry here that no task owns, because an unowned exclusion is a hole in the drift check that
+/// nobody scans.
+const PROJECTION_EXCLUSIONS: &[&str] = &["rust"];
+
 /// Repository automation for engineering-protocols.
 #[derive(Debug, Parser)]
 #[command(name = "xtask", about, version)]
@@ -96,6 +120,12 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate the committed Rust workspaces the example specifications determine.
+    Synth {
+        /// Verify the committed tree matches — and still compiles — instead of writing it.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -117,6 +147,14 @@ fn main() -> Result<()> {
                 .map(|specification| root.join(specification))
                 .collect();
             suite(&specifications, &root.join(SUITES), check)
+        }
+        Command::Synth { check } => {
+            let root = workspace_root();
+            let specifications: Vec<PathBuf> = SYNTH_SPECIFICATIONS
+                .iter()
+                .map(|specification| root.join(specification))
+                .collect();
+            synth(&specifications, &root.join(SYNTH), check)
         }
     }
 }
@@ -286,10 +324,15 @@ fn generate(spec: &Path, out: &Path, check: bool) -> Result<()> {
     let mut expected = generated.artifacts.clone();
     expected.insert(INDEX.to_owned(), projection_index(&generated));
 
+    let excluded: Vec<String> = PROJECTION_EXCLUSIONS
+        .iter()
+        .map(|subtree| (*subtree).to_owned())
+        .collect();
     sync(
         out,
         &expected,
         check,
+        &excluded,
         "projections",
         "the specification",
         "cargo xtask generate",
@@ -298,10 +341,15 @@ fn generate(spec: &Path, out: &Path, check: bool) -> Result<()> {
 
 /// Writes or checks a committed output tree against what a generator produced.
 ///
-/// Shared by [`generate`] and [`suite`], because the rule is one rule: write only the files whose
-/// content differs, delete the ones nothing generates any more, prune the directories that leaves
-/// empty, and name the command that fixes it. A second copy of this would be a second answer to "is
-/// the tree clean", which is the drift these tasks exist to catch, one level up.
+/// Shared by [`generate`], [`suite`] and [`synth`], because the rule is one rule: write only the
+/// files whose content differs, delete the ones nothing generates any more, prune the directories
+/// that leaves empty, and name the command that fixes it. A second copy of this would be a second
+/// answer to "is the tree clean", which is the drift these tasks exist to catch, one level up.
+///
+/// `excluded` names subtrees and files under `out` that this task does not own — a nested task's
+/// root, or what `cargo` writes while checking a generated workspace — and they are excluded from
+/// the orphan scan and the prune, never from the expected-file comparison: an excluded path is
+/// someone else's to check, not nobody's.
 ///
 /// `noun`, `against` and `fix` are the only things that differ, and they are words in a message
 /// rather than behaviour: a reader who runs the wrong task needs to be told which one to run, and
@@ -310,6 +358,7 @@ fn sync(
     out: &Path,
     expected: &BTreeMap<String, String>,
     check: bool,
+    excluded: &[String],
     noun: &str,
     against: &str,
     fix: &str,
@@ -342,7 +391,7 @@ fn sync(
     // repository has stopped standing behind, and a consumer validating against it goes on passing —
     // which a check that only compares what *is* generated will never notice.
     let mut orphaned = Vec::new();
-    for path in committed_files(out)? {
+    for path in committed_files(out, excluded)? {
         if expected.contains_key(&path) {
             continue;
         }
@@ -383,10 +432,17 @@ fn sync(
     // Only if the tree exists: a write that produced nothing at all has no directories to prune, and
     // reading a directory that is not there is a different failure from a tree that is clean.
     if out.is_dir() {
-        prune_empty_directories(out)?;
+        prune_empty_directories(out, "", excluded)?;
     }
     println!("{noun} written: {written} changed, {removed} no longer generated");
     Ok(())
+}
+
+/// `true` when `path` — relative, `/`-separated — is one of the excluded entries or inside one.
+fn is_excluded(path: &str, excluded: &[String]) -> bool {
+    excluded
+        .iter()
+        .any(|entry| path == entry || path.starts_with(&format!("{entry}/")))
 }
 
 /// Runs `protocol ess generate` over a specification and reads its report.
@@ -518,10 +574,183 @@ fn suite(specifications: &[PathBuf], out: &Path, check: bool) -> Result<()> {
         out,
         &expected,
         check,
+        &[],
         "suites",
         "the specifications",
         "cargo xtask suite",
     )
+}
+
+// ---- the synthesised workspaces ----------------------------------------------------------------
+
+/// One specification's synthesised workspace, as `protocol ess synthesize` reports it.
+struct Synthesized {
+    /// The directory under `examples/` it was synthesised from, which is also where it is filed.
+    directory: String,
+    /// The system and version it was synthesised from, and the digest of the model.
+    provenance: String,
+    /// How many capabilities the plan marks generated.
+    generated: u64,
+    /// How many are the implementor's, each with a contract in the workspace's `PLAN.md`.
+    obligations: u64,
+    /// How many the synthesis refuses to represent.
+    refused: u64,
+    /// Its files, keyed by path relative to the workspace's own directory.
+    artifacts: BTreeMap<String, String>,
+}
+
+/// Writes or checks `generated/rust/`, then proves each workspace still compiles.
+///
+/// The compile step runs in *both* modes and after the tree is settled, because the acceptance
+/// criterion the wave sets is executed rather than asserted: a committed workspace that drifted
+/// fails the diff, and one that matches but no longer compiles — a toolchain moved, a hand edit
+/// slipped through a force-add — fails the check that actually claims "this builds".
+fn synth(specifications: &[PathBuf], out: &Path, check: bool) -> Result<()> {
+    let mut workspaces = Vec::new();
+    for specification in specifications {
+        workspaces.push(synth_of(specification)?);
+    }
+
+    // Filed under the example directory, exactly as the suites are: `generated/rust/billing/`
+    // sits opposite `examples/billing/`, and finding one from the other takes no lookup.
+    let mut expected = BTreeMap::new();
+    let mut excluded = Vec::new();
+    for workspace in &workspaces {
+        for (path, contents) in &workspace.artifacts {
+            expected.insert(format!("{}/{path}", workspace.directory), contents.clone());
+        }
+        // What `cargo check` writes beside a workspace while proving it compiles. Excluded from
+        // the orphan scan — deleting the lock on every run would make the check fight the very
+        // step below — and ignored by git, so neither is ever part of the committed tree.
+        excluded.push(format!("{}/Cargo.lock", workspace.directory));
+        excluded.push(format!("{}/target", workspace.directory));
+    }
+    expected.insert(INDEX.to_owned(), synth_index(&workspaces));
+
+    sync(
+        out,
+        &expected,
+        check,
+        &excluded,
+        "synthesised workspaces",
+        "the specifications",
+        "cargo xtask synth",
+    )?;
+
+    for workspace in &workspaces {
+        check_generated_workspace(&out.join(&workspace.directory))?;
+    }
+    Ok(())
+}
+
+/// Runs `protocol ess synthesize` over one specification and reads its report.
+fn synth_of(spec: &Path) -> Result<Synthesized> {
+    let report = protocol_json(
+        &["ess", "synthesize", "--format", "json", "--path"],
+        spec,
+        "synthesising the workspace",
+    )?;
+
+    let mut artifacts = BTreeMap::new();
+    for artifact in array(&report, "artifacts")? {
+        artifacts.insert(text(artifact, "path")?, text(artifact, "contents")?);
+    }
+
+    let provenance = &report["provenance"];
+    Ok(Synthesized {
+        directory: spec
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .with_context(|| {
+                format!(
+                    "{} has no directory name to file its workspace under",
+                    spec.display()
+                )
+            })?,
+        provenance: format!(
+            "{} {} (model digest {})",
+            text(provenance, "system")?,
+            text(provenance, "specification_version")?,
+            text(provenance, "source_digest")?
+        ),
+        generated: number(&report, "generated")?,
+        obligations: number(&report, "obligations")?,
+        refused: number(&report, "refused")?,
+        artifacts,
+    })
+}
+
+/// Runs `cargo check` inside one generated workspace.
+///
+/// The target directory is redirected into this repository's `target/` so the committed tree stays
+/// source-only; the lock file cargo writes beside the generated manifest is gitignored and carved
+/// out of the orphan scan, because it is the toolchain's answer, not the specification's.
+fn check_generated_workspace(workspace: &Path) -> Result<()> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = std::process::Command::new(&cargo)
+        .arg("check")
+        .current_dir(workspace)
+        .env(
+            "CARGO_TARGET_DIR",
+            workspace_root().join("target/ess-synth"),
+        )
+        .output()
+        .with_context(|| format!("running {cargo:?} in {}", workspace.display()))?;
+    if !output.status.success() {
+        bail!(
+            "the synthesised workspace at {} does not compile — that is a defect in `ess-synth`, \
+             not in the specification:\n{}{}",
+            workspace.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
+}
+
+/// What `generated/rust/README.md` opens with, one line per line.
+const SYNTH_INDEX_PREAMBLE: &[&str] = &[
+    "# Synthesised Rust workspaces",
+    "",
+    "**Do not edit these files.** They are synthesised from the specifications under",
+    "[`examples/`](../../examples) by `cargo xtask synth`, and CI fails if they differ from what",
+    "the specifications determine — or if a workspace stops compiling.",
+    "",
+    "A workspace here is the part of an implementation that was never anyone's to write: the",
+    "types, the states whose illegal transitions do not compile, the contracts. What remains",
+    "deliberately unwritten is each workspace's `PLAN.md` — every capability of the specification",
+    "with exactly one disposition: generated, an obligation carrying its contract, or a refusal",
+    "carrying its reason. `Cargo.lock` and `target/` inside a workspace are written by `cargo",
+    "check` and are not part of the committed tree.",
+    "",
+    "| workspace | generated from | generated | obligations | refused | plan |",
+    "| --- | --- | --- | --- | --- | --- |",
+];
+
+/// The index of `generated/rust/`.
+///
+/// It lists the obligation and refusal counts because those are the numbers a change moves: a
+/// specification that stops saying enough about a capability does not remove code noisily — the
+/// plan quietly gains an obligation, which nothing but a diff of this table would surface.
+fn synth_index(workspaces: &[Synthesized]) -> String {
+    let mut out = String::new();
+    for line in SYNTH_INDEX_PREAMBLE {
+        out.push_str(line);
+        out.push('\n');
+    }
+    for workspace in workspaces {
+        let _ = writeln!(
+            out,
+            "| [`{directory}/`]({directory}) | {} | {} | {} | {} | \
+             [`{directory}/PLAN.md`]({directory}/PLAN.md) |",
+            workspace.provenance,
+            workspace.generated,
+            workspace.obligations,
+            workspace.refused,
+            directory = workspace.directory,
+        );
+    }
+    out
 }
 
 /// Runs `protocol ess conform synthesize` over one specification and reads its report.
@@ -706,12 +935,14 @@ fn array<'a>(value: &'a serde_json::Value, field: &str) -> Result<&'a [serde_jso
         .with_context(|| format!("the report has no list `{field}`"))
 }
 
-/// Every file under `directory`, as `/`-separated paths relative to it.
+/// Every file under `directory`, as `/`-separated paths relative to it, minus the excluded
+/// subtrees — which belong to another task or to `cargo`, and are therefore not this scan's
+/// orphans to report or delete.
 ///
 /// Recursive, unlike the schema directory's flat scan, because a projection's artifacts sit in a
 /// subdirectory of its own: a scan that read only the top level would report nothing at all and call
 /// the tree clean.
-fn committed_files(directory: &Path) -> Result<BTreeSet<String>> {
+fn committed_files(directory: &Path, excluded: &[String]) -> Result<BTreeSet<String>> {
     let mut found = BTreeSet::new();
     // A tree nobody has written yet holds no orphans, which is a different answer from "unreadable".
     if !directory.is_dir() {
@@ -727,6 +958,9 @@ fn committed_files(directory: &Path) -> Result<BTreeSet<String>> {
             } else {
                 format!("{prefix}/{name}")
             };
+            if is_excluded(&relative, excluded) {
+                continue;
+            }
             if entry.path().is_dir() {
                 pending.push((entry.path(), relative));
             } else {
@@ -741,17 +975,26 @@ fn committed_files(directory: &Path) -> Result<BTreeSet<String>> {
 ///
 /// A withdrawn projection's files are orphans and its directory is what survives them. An empty
 /// `openapi/` in a committed tree reads as a projection that produces nothing, which is a different
-/// claim from one this repository no longer publishes.
-fn prune_empty_directories(directory: &Path) -> Result<bool> {
+/// claim from one this repository no longer publishes. An excluded subtree is neither entered nor
+/// counted empty: what it holds is another owner's business.
+fn prune_empty_directories(directory: &Path, prefix: &str, excluded: &[String]) -> Result<bool> {
     let mut empty = true;
     for entry in
         fs::read_dir(directory).with_context(|| format!("reading {}", directory.display()))?
     {
         let entry = entry.with_context(|| format!("reading {}", directory.display()))?;
         let path = entry.path();
-        if !path.is_dir() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let relative = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        };
+        // A file keeps its directory, and so does an excluded subtree — not entered, because what
+        // it holds is another owner's business, and never counted empty for the same reason.
+        if !path.is_dir() || is_excluded(&relative, excluded) {
             empty = false;
-        } else if prune_empty_directories(&path)? {
+        } else if prune_empty_directories(&path, &relative, excluded)? {
             fs::remove_dir(&path).with_context(|| format!("removing {}", path.display()))?;
         } else {
             empty = false;
@@ -821,8 +1064,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        generate, schema, suite, workspace_root, INDEX, NORMATIVE_EXAMPLE, PROJECTIONS, SUITES,
-        SUITE_SPECIFICATIONS,
+        generate, schema, suite, synth, workspace_root, INDEX, NORMATIVE_EXAMPLE, PROJECTIONS,
+        PROJECTION_EXCLUSIONS, SUITES, SUITE_SPECIFICATIONS, SYNTH, SYNTH_SPECIFICATIONS,
     };
 
     /// A scratch tree with a freshly generated `schemas/generated/` in it.
@@ -1117,21 +1360,176 @@ mod tests {
     }
 
     #[test]
-    fn no_two_tasks_own_one_committed_tree() {
-        // The reason the suites are beside `generated/` rather than in it. Both orphan scans are
-        // recursive and both delete what their own task did not produce, so a tree with two owners
-        // is a tree where each task removes the other's committed contract. Nesting one inside the
-        // other is the way that happens by accident, and this is the line that refuses it.
-        let roots = ["schemas/generated", PROJECTIONS, SUITES];
-        for (index, one) in roots.iter().enumerate() {
-            for other in roots.iter().skip(index + 1) {
+    fn no_two_tasks_own_one_committed_tree_unless_the_outer_carves_the_inner_out() {
+        // Both orphan scans are recursive and both delete what their own task did not produce, so
+        // a tree with two owners is a tree where each task removes the other's committed contract.
+        // Nesting is therefore only legal when the outer owner's scan *provably* does not enter
+        // the inner root — the exclusion list is the mechanism, and this test is what makes an
+        // exclusion list safe to have: an uncovered nesting fails, and so does an exclusion that
+        // no task owns, because an unowned exclusion is a subtree nobody checks for drift.
+        let owners: &[(&str, &[&str])] = &[
+            ("schemas/generated", &[]),
+            (PROJECTIONS, PROJECTION_EXCLUSIONS),
+            (SUITES, &[]),
+            (SYNTH, &[]),
+        ];
+
+        let covered = |exclusions: &[&str], relative: &str| {
+            exclusions
+                .iter()
+                .any(|entry| relative == *entry || relative.starts_with(&format!("{entry}/")))
+        };
+        for (index, (one, exclusions_of_one)) in owners.iter().enumerate() {
+            for (other, exclusions_of_other) in owners.iter().skip(index + 1) {
+                if let Some(relative) = other.strip_prefix(&format!("{one}/")) {
+                    assert!(
+                        covered(exclusions_of_one, relative),
+                        "`{other}` nests inside `{one}` without a carve-out, so `{one}`'s orphan \
+                         scan deletes the other task's committed output"
+                    );
+                } else if let Some(relative) = one.strip_prefix(&format!("{other}/")) {
+                    assert!(
+                        covered(exclusions_of_other, relative),
+                        "`{one}` nests inside `{other}` without a carve-out, so `{other}`'s \
+                         orphan scan deletes the other task's committed output"
+                    );
+                }
+            }
+        }
+
+        for (root, exclusions) in owners {
+            for entry in *exclusions {
+                let excluded_root = format!("{root}/{entry}");
                 assert!(
-                    !one.starts_with(&format!("{other}/"))
-                        && !other.starts_with(&format!("{one}/")),
-                    "`{one}` and `{other}` are one tree with two owners, and each task's orphan \
-                     scan deletes the other's output"
+                    owners.iter().any(|(owner, _)| *owner == excluded_root),
+                    "`{root}` excludes `{entry}`, but no task owns `{excluded_root}` — an \
+                     unowned exclusion is a subtree nothing checks for drift"
                 );
             }
         }
+    }
+
+    // ---- the synthesised workspaces --------------------------------------------------------------
+
+    /// The specifications a workspace is synthesised for, read where they live.
+    fn synth_specifications() -> Vec<PathBuf> {
+        SYNTH_SPECIFICATIONS
+            .iter()
+            .map(|specification| workspace_root().join(specification))
+            .collect()
+    }
+
+    /// A scratch tree holding freshly synthesised workspaces, already compile-checked once.
+    fn synthed(name: &str) -> PathBuf {
+        let out = std::env::temp_dir().join(name);
+        std::fs::remove_dir_all(&out).ok();
+        synth(&synth_specifications(), &out, false).expect("the workspaces are written");
+        out
+    }
+
+    #[test]
+    fn the_synth_check_passes_on_a_freshly_written_tree() {
+        let out = synthed("xtask-synth-fresh");
+        synth(&synth_specifications(), &out, true).expect("a freshly written tree is up to date");
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn the_synth_check_refuses_a_generated_file_somebody_edited() {
+        // It bites harder here than for a projection: a hand edit in generated code is reverted by
+        // the next regeneration, and in the meantime the committed workspace is code nobody's
+        // specification stands behind.
+        let out = synthed("xtask-synth-edited");
+        let edited = out.join("billing/crates/billing-types/src/invoice.rs");
+        let mut committed = std::fs::read_to_string(&edited).expect("the module is readable");
+        committed.push_str("\n// a note in the wrong place\n");
+        std::fs::write(&edited, committed).expect("the fixture is writable");
+
+        let refusal = synth(&synth_specifications(), &out, true)
+            .expect_err("an edited workspace differs from what the specification determines");
+        let reason = format!("{refusal:#}");
+        assert!(reason.contains("invoice.rs"), "{reason}");
+        assert!(
+            reason.contains("cargo xtask synth"),
+            "a refusal has to name what fixes it: {reason}"
+        );
+
+        synth(&synth_specifications(), &out, false).expect("the workspaces are rewritten");
+        synth(&synth_specifications(), &out, true).expect("the check passes once they are");
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn the_synth_check_refuses_a_workspace_file_that_nothing_generates_any_more() {
+        let out = synthed("xtask-synth-orphaned");
+        let orphan = out.join("billing/crates/billing-types/src/withdrawn.rs");
+        std::fs::write(&orphan, "// abandoned\n").expect("the fixture is writable");
+
+        let refusal = synth(&synth_specifications(), &out, true)
+            .expect_err("a file nobody generates is drift");
+        let reason = format!("{refusal:#}");
+        assert!(reason.contains("withdrawn.rs"), "{reason}");
+
+        synth(&synth_specifications(), &out, false).expect("the workspaces are rewritten");
+        assert!(
+            !orphan.exists(),
+            "what the check refuses, writing the workspaces has to fix"
+        );
+        synth(&synth_specifications(), &out, true).expect("the check passes once it is gone");
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn what_cargo_writes_while_checking_is_not_this_tasks_orphan() {
+        // `cargo check` writes `Cargo.lock` beside the generated manifest — the compile step above
+        // has already done so by the time the *next* check runs. Treating either as an orphan
+        // would make the check fight its own compile step: every second run red, fixed by the
+        // deletion that makes the run after red again.
+        let out = synthed("xtask-synth-transients");
+        let lock = out.join("billing/Cargo.lock");
+        assert!(
+            lock.is_file(),
+            "the compile step wrote a lock file; if it stopped, this test is checking nothing"
+        );
+        let scratch = out.join("billing/target/debug/marker");
+        std::fs::create_dir_all(scratch.parent().expect("a parent"))
+            .expect("the fixture is writable");
+        std::fs::write(&scratch, "cargo writes here\n").expect("the fixture is writable");
+
+        synth(&synth_specifications(), &out, true)
+            .expect("what cargo writes is not drift in the committed tree");
+        synth(&synth_specifications(), &out, false).expect("the workspaces are rewritten");
+        assert!(
+            lock.is_file() && scratch.is_file(),
+            "and writing the workspaces leaves the toolchain's files alone"
+        );
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn the_projection_check_leaves_the_synthesised_tree_to_its_own_task() {
+        // The carve-out, load-bearing: `generated/rust/` nests inside the projection task's root,
+        // and before the exclusion existed this exact fixture would have been reported — and in
+        // write mode deleted — as the projection task's orphan.
+        let out = projected("xtask-projections-synth-carveout");
+        let foreign = out.join("rust/billing/crates/billing-types/src/lib.rs");
+        std::fs::create_dir_all(foreign.parent().expect("a parent"))
+            .expect("the fixture is writable");
+        std::fs::write(&foreign, "// the synth task's output, not this task's\n")
+            .expect("the fixture is writable");
+
+        generate(&specification(), &out, true)
+            .expect("a file under the synth task's root is not the projection task's orphan");
+        generate(&specification(), &out, false).expect("the projections are rewritten");
+        assert!(
+            foreign.is_file(),
+            "writing the projections must not delete the synth task's committed output"
+        );
+
+        std::fs::remove_dir_all(&out).ok();
     }
 }

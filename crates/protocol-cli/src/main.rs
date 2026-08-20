@@ -429,67 +429,7 @@ fn run() -> Result<ExitCode> {
             artifacts,
             format,
         } => validate(&root, artifacts.as_deref(), format),
-        Command::Ess { command } => match command {
-            EssCommand::Validate { path, format } => ess_validate(&path, format),
-            EssCommand::Compile { path, format } => ess_compile(&path, format),
-            EssCommand::Inspect {
-                path,
-                name,
-                kind,
-                format,
-            } => ess_inspect(&path, &name, kind, format),
-            EssCommand::Generate {
-                path,
-                kind,
-                out,
-                format,
-            } => ess_generate(&path, kind, out.as_deref(), format),
-            EssCommand::Graph { path, format } => ess_graph(&path, format),
-            EssCommand::Diff { from, to, format } => ess_diff(&from, &to, format),
-            EssCommand::Impact {
-                from,
-                to,
-                suite,
-                format,
-            } => ess_impact(&from, &to, &suite, format),
-            EssCommand::Conform { command } => match command {
-                EssConformCommand::Synthesize { path, out, format } => {
-                    ess_conform_synthesize(&path, out.as_deref(), format)
-                }
-                EssConformCommand::Run {
-                    path,
-                    suite,
-                    target,
-                    inject,
-                    untraced,
-                    format,
-                } => ess_conform_run(
-                    &path,
-                    suite.as_deref(),
-                    target,
-                    inject.as_deref(),
-                    untraced,
-                    format,
-                ),
-                EssConformCommand::Evidence {
-                    path,
-                    suite,
-                    target,
-                    inject,
-                    untraced,
-                    out,
-                    format,
-                } => ess_conform_evidence(
-                    &path,
-                    suite.as_deref(),
-                    target,
-                    inject.as_deref(),
-                    untraced,
-                    out.as_deref(),
-                    format,
-                ),
-            },
-        },
+        Command::Ess { command } => run_ess(command),
         Command::Resolve(args) => resolve(&args),
         Command::Inspect {
             root,
@@ -525,6 +465,80 @@ fn run() -> Result<ExitCode> {
 }
 
 /// `protocol conformance`
+/// The `ess` verb family, one arm per subcommand.
+///
+/// Its own function rather than arms inline in [`run`], because clippy's line budget for one
+/// function is a real reviewer's budget too — and the family keeps growing by design.
+fn run_ess(command: EssCommand) -> Result<ExitCode> {
+    match command {
+        EssCommand::Validate { path, format } => ess_validate(&path, format),
+        EssCommand::Compile { path, format } => ess_compile(&path, format),
+        EssCommand::Inspect {
+            path,
+            name,
+            kind,
+            format,
+        } => ess_inspect(&path, &name, kind, format),
+        EssCommand::Generate {
+            path,
+            kind,
+            out,
+            format,
+        } => ess_generate(&path, kind, out.as_deref(), format),
+        EssCommand::Synthesize {
+            path,
+            target,
+            out,
+            format,
+        } => ess_synthesize(&path, target, out.as_deref(), format),
+        EssCommand::Graph { path, format } => ess_graph(&path, format),
+        EssCommand::Diff { from, to, format } => ess_diff(&from, &to, format),
+        EssCommand::Impact {
+            from,
+            to,
+            suite,
+            format,
+        } => ess_impact(&from, &to, &suite, format),
+        EssCommand::Conform { command } => match command {
+            EssConformCommand::Synthesize { path, out, format } => {
+                ess_conform_synthesize(&path, out.as_deref(), format)
+            }
+            EssConformCommand::Run {
+                path,
+                suite,
+                target,
+                inject,
+                untraced,
+                format,
+            } => ess_conform_run(
+                &path,
+                suite.as_deref(),
+                target,
+                inject.as_deref(),
+                untraced,
+                format,
+            ),
+            EssConformCommand::Evidence {
+                path,
+                suite,
+                target,
+                inject,
+                untraced,
+                out,
+                format,
+            } => ess_conform_evidence(
+                &path,
+                suite.as_deref(),
+                target,
+                inject.as_deref(),
+                untraced,
+                out.as_deref(),
+                format,
+            ),
+        },
+    }
+}
+
 fn conformance(
     level: &str,
     suite: Option<&str>,
@@ -693,6 +707,34 @@ enum EssCommand {
         #[arg(long, value_enum)]
         kind: Option<EssProjection>,
         /// Where to write the artifacts. Without it nothing is written and they are listed instead.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// How to render the result. `json` and `yaml` carry every artifact's contents.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Synthesize the code a specification determines, and the plan for what it does not.
+    ///
+    /// Not `conform synthesize`: that verb writes a suite an implementation is judged by, this one
+    /// writes part of the implementation itself — a standalone workspace of semantic types, plus
+    /// `PLAN.md` and `plan.json`, the typed list of every capability with its disposition:
+    /// generated, an obligation carrying the contract you owe, or a refusal carrying its reason.
+    /// Zero guessed business logic; what the specification does not determine is a plan entry, not
+    /// a plausible-looking function.
+    ///
+    /// Read-only unless `--out` is given, exactly as `protocol ess generate` is, and for the same
+    /// reason: a verb that scatters files over a working tree the first time someone tries it is a
+    /// verb nobody tries twice. `--format json` carries every artifact's contents, which is what
+    /// `cargo xtask synth --check` reads.
+    Synthesize {
+        /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// The language to emit. One value today; the flag exists so a second target does not
+        /// change the surface.
+        #[arg(long, value_enum, default_value_t = EssSynthTarget::Rust)]
+        target: EssSynthTarget,
+        /// Where to write the workspace. Without it nothing is written and it is listed instead.
         #[arg(long)]
         out: Option<PathBuf>,
         /// How to render the result. `json` and `yaml` carry every artifact's contents.
@@ -1008,6 +1050,27 @@ impl EssProjection {
             Self::Schema => "schema",
             Self::OpenApi => "openapi",
             Self::AsyncApi => "asyncapi",
+        }
+    }
+}
+
+/// Which language `ess synthesize` emits.
+///
+/// One variant, and the flag exists anyway: the synthesis plan is language-neutral and Rust is the
+/// first target rather than the only intended one, so the day a second emitter lands, callers gain
+/// a value instead of a breaking change. No further variants are scaffolded before their emitters
+/// exist — a `--target` that parses and then fails is worse than one that does not parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum EssSynthTarget {
+    /// A standalone Rust workspace of semantic types.
+    Rust,
+}
+
+impl EssSynthTarget {
+    /// The name the report carries.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Rust => "rust",
         }
     }
 }
@@ -1550,6 +1613,135 @@ fn ess_generate(
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// What `ess synthesize` reports.
+///
+/// Provenance sits in the report and not only in the artifacts, for the reason `ess generate`'s
+/// does: a consumer reading this over a pipe has no file header to look at. Contents travel
+/// whether or not `--out` was given — `cargo xtask synth --check` compares the committed tree
+/// against exactly these bytes. The full plan is not repeated here, because it *is* one of the
+/// artifacts (`plan.json`); the counts are here so a consumer that only wants the shape of the
+/// answer does not have to parse the plan to get it.
+#[derive(serde::Serialize)]
+struct EssSynthesized<'a> {
+    /// Which specification, resolved by which build.
+    provenance: &'a ess_gen::Provenance,
+    /// The language emitted.
+    target: &'static str,
+    /// The planning scope the dispositions were decided against.
+    scope: &'a ess_synth::plan::SynthesisScope,
+    /// Where the workspace was written, when it was.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    written_to: Option<String>,
+    /// How many capabilities the plan holds.
+    capabilities: usize,
+    /// How many are generated.
+    generated: usize,
+    /// How many are obligations — the implementor's list.
+    obligations: usize,
+    /// How many are refused.
+    refused: usize,
+    /// Every artifact, in path order, with its contents.
+    artifacts: Vec<&'a Artifact>,
+}
+
+/// `protocol ess synthesize`
+///
+/// Printed and written artifacts are the same bytes, from one call into `ess-synth`; the drift
+/// guard in `cargo xtask synth --check` means nothing unless there is one answer to compare with.
+fn ess_synthesize(
+    path: &Path,
+    target: EssSynthTarget,
+    out: Option<&Path>,
+    format: Format,
+) -> Result<ExitCode> {
+    let ir = match ess_compiled(path, format)? {
+        EssCompiled::Compiled { ir, .. } => ir,
+        EssCompiled::Reported => return Ok(exit_code(false)),
+    };
+
+    // `--target` selects an emitter; with one emitter there is nothing to select, but matching on
+    // it here is what keeps the day a second one lands a local change.
+    let EssSynthTarget::Rust = target;
+    let synthesis = ess_synth::synthesize(&ir);
+
+    // Written, and nothing else: `--out` may be any directory a caller names, and a command that
+    // deletes what it did not write is a command nobody points at a working tree. `cargo xtask
+    // synth` owns the committed tree, and owns removing from it.
+    if let Some(directory) = out {
+        for artifact in synthesis.artifacts.values() {
+            let file = directory.join(&artifact.path);
+            if let Some(parent) = file.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            fs::write(&file, &artifact.contents)
+                .with_context(|| format!("writing {}", file.display()))?;
+        }
+    }
+
+    let counts = synthesis.plan.counts();
+    let report = EssSynthesized {
+        provenance: &synthesis.plan.provenance,
+        target: target.name(),
+        scope: &synthesis.plan.scope,
+        written_to: out.map(|directory| directory.display().to_string()),
+        capabilities: synthesis.plan.capabilities.len(),
+        generated: counts.generated,
+        obligations: counts.obligations,
+        refused: counts.refused,
+        artifacts: synthesis.artifacts.values().collect(),
+    };
+
+    match format {
+        Format::Text => ess_synthesize_text(&report, &synthesis.plan),
+        Format::Yaml | Format::Json => print_serialised(&report, format)?,
+    }
+
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The human rendering of a synthesis: counts first, then the two lists a reader acts on — said
+/// out loud and in full, never as a count alone, because an obligation nobody surfaces is a
+/// `todo!()` wearing a document's name.
+fn ess_synthesize_text(report: &EssSynthesized<'_>, plan: &ess_synth::SynthesisPlan) {
+    outln!(
+        "{} {} — {} capabilities: {} generated, {} obligation(s), {} refused, model digest {}",
+        report.provenance.system,
+        report.provenance.specification_version,
+        report.capabilities,
+        report.generated,
+        report.obligations,
+        report.refused,
+        report.provenance.source_digest
+    );
+    for planned in &plan.capabilities {
+        match &planned.disposition {
+            ess_synth::SynthesisDisposition::Generated => {}
+            ess_synth::SynthesisDisposition::Obligation(obligation) => outln!(
+                "  obligation: {} `{}` — {}",
+                planned.capability.kind.describes(),
+                planned.capability.source,
+                obligation.reason.describes()
+            ),
+            ess_synth::SynthesisDisposition::Refused(refusal) => outln!(
+                "  refused: {} `{}` — {}",
+                planned.capability.kind.describes(),
+                planned.capability.source,
+                refusal.reason.describes()
+            ),
+        }
+    }
+    for artifact in &report.artifacts {
+        outln!("  {} — {} byte(s)", artifact.path, artifact.contents.len());
+    }
+    match &report.written_to {
+        Some(directory) => outln!("written to {directory}"),
+        None => outln!(
+            "nothing written: pass --out to write the workspace, or --format json for its contents"
+        ),
+    }
 }
 
 /// The file a suite is written as, under `--out` and under `suites/generated/<system>/`.
