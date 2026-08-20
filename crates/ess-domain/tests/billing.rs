@@ -26,7 +26,11 @@ fn read(relative: &str) -> (Source, RawSpecFile) {
     let path = example().join(relative);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("{} is readable: {error}", path.display()));
-    let parsed: RawSpecFile = serde_yaml::from_str(&text)
+    // `RawSpecFile::parse`, not `serde_yaml::from_str`: the latter keeps the last of two identical
+    // mapping keys without saying so, and it is not what any real caller uses — the CLI reads the
+    // example through `RawSpecFile::parse` (`protocol-cli/src/main.rs:734`). A test of the
+    // normative example that takes a path no caller takes is not testing the example.
+    let parsed = RawSpecFile::parse(&text)
         .unwrap_or_else(|error| panic!("{} is well formed: {error}", path.display()));
     (Source::new(relative), parsed)
 }
@@ -187,6 +191,73 @@ fn an_illegal_move_is_illegal_because_nobody_wrote_it() {
         "no transition says so, and no rule needs to: a second statement of the same truth is a \
          second thing that can disagree"
     );
+}
+
+#[test]
+fn every_move_the_invoice_can_make_names_the_command_that_makes_it() {
+    // Gate G14 on the normative example. Before it, the invoice declared three moves and no command
+    // took any of them: design §19 could see that `Issued -> Paid` is legal and had no verb to
+    // reach it with, so the scenario it wants to generate was unwritable. Read here from the
+    // specification rather than from a name that looks like a transition's — inferring a command
+    // from a spelling is the invention §19 refuses.
+    let specification = billing();
+
+    let taker = |transition: &str| -> Vec<String> {
+        specification
+            .commands
+            .values()
+            .flat_map(|command| {
+                command.outcomes.iter().filter_map(move |outcome| {
+                    let subject = outcome.subject.as_ref()?;
+                    (subject.entity.to_string() == "billing.invoice.Invoice"
+                        && subject.effect.transition() == Some(transition))
+                    .then(|| format!("{}.{}", command.name, outcome.name))
+                })
+            })
+            .collect()
+    };
+
+    assert_eq!(
+        taker("settle"),
+        vec!["billing.invoice.PayInvoice.settled".to_owned()],
+        "`Issued -> Paid` is design §19's worked example, and it is the one that has to have a verb"
+    );
+    assert_eq!(
+        taker("issue"),
+        vec!["billing.invoice.IssueInvoice.issued".to_owned()]
+    );
+    assert_eq!(
+        taker("cancel"),
+        vec!["billing.invoice.CancelInvoice.cancelled".to_owned()]
+    );
+
+    // Every declared move, not just the three checked by name: the rule is total, and a fourth
+    // transition added to the example without a command would fail here as well as in validation.
+    let invoice = specification
+        .entities
+        .get(&"billing.invoice.Invoice".parse().expect("a name"))
+        .expect("the example declares Invoice");
+    for transition in &invoice.states.transitions {
+        assert!(
+            !taker(&transition.name).is_empty(),
+            "`{}` is a state change nothing can trigger",
+            transition.name
+        );
+    }
+
+    // And creation, which is not a transition: an instance has to come from somewhere, and §20 asks
+    // whose invariants to evaluate after `CreateInvoice`.
+    let created = specification
+        .commands
+        .get(&"billing.invoice.CreateInvoice".parse().expect("a name"))
+        .expect("the example declares CreateInvoice")
+        .outcome(&"accepted".parse().expect("an outcome name"))
+        .expect("the accepted branch")
+        .subject
+        .clone()
+        .expect("acceptance creates an invoice");
+    assert_eq!(created.entity.to_string(), "billing.invoice.Invoice");
+    assert_eq!(created.effect, ess_domain::command::Effect::Creates);
 }
 
 #[test]
@@ -462,6 +533,41 @@ fn the_example_binds_one_context_to_the_other_and_says_what_happens_when_it_fail
         "the binding fills both of SendEmail's inputs: {:?}",
         binding.mapping
     );
+}
+
+#[test]
+fn the_examples_escalation_names_the_event_that_proves_it_happened() {
+    // G2. `escalate` names a consequence outside the system — a person is told — so without an
+    // event, nothing inside the system records that it happened and the normative example carried a
+    // requirement no oracle could check. The scenario this enables: force `SendEmail` to fail,
+    // expect `billing.email.DeliveryEscalated`.
+    use ess_domain::binding::Failure;
+
+    let specification = billing();
+    let binding = specification
+        .bindings
+        .values()
+        .find(|binding| binding.name.as_str() == "notify-on-invoice-created")
+        .expect("the example binds the two contexts");
+
+    assert_eq!(binding.failure, Failure::Escalate);
+    let emitted = binding
+        .escalation
+        .as_ref()
+        .expect("an escalation nobody can observe is the silent failure `on_failure` prevents");
+    assert_eq!(emitted.to_string(), "billing.email.DeliveryEscalated");
+
+    // Declared, so it has fields a scenario can assert on rather than being a bare name.
+    let declared = specification
+        .events
+        .get(emitted)
+        .expect("the escalation event is declared");
+    let carried: Vec<&str> = declared
+        .fields
+        .iter()
+        .map(|field| field.name.as_str())
+        .collect();
+    assert_eq!(carried, ["recipient", "template"]);
 }
 
 #[test]

@@ -54,6 +54,23 @@ pub enum ParseError {
         reason: String,
     },
 
+    /// A nested construct is written deeper than the parser will walk.
+    ///
+    /// Its own variant rather than a [`Self::Identifier`] with a different sentence in it, because
+    /// this is the one parse failure a caller has to be able to recognise mechanically: it is the
+    /// refusal that stands between a document and a stack overflow, and a harness that cannot tell
+    /// it apart from "you misspelt a type" cannot report it as what it is. `kind` names the
+    /// construct and `limit` states the depth, so the message never has to be read for either.
+    #[error("{kind} nesting is deeper than {limit} levels: {value}")]
+    TooDeep {
+        /// What nests, such as `type` or `predicate`.
+        kind: &'static str,
+        /// The offending value, truncated: what is being refused is unbounded by definition.
+        value: String,
+        /// The greatest depth the parser accepts.
+        limit: usize,
+    },
+
     /// A document fragment has the wrong shape.
     #[error("{location}: expected {expected}, found {found}")]
     Shape {
@@ -101,6 +118,22 @@ impl ParseError {
         }
     }
 
+    /// Builds a [`ParseError::TooDeep`], quoting at most [`Self::ECHO_LIMIT`] bytes of the value.
+    ///
+    /// Truncated because the value that triggers this is the one value in the format with no length
+    /// bound — a type reference nested ten thousand deep is a ten-thousand-character string, and an
+    /// error that echoes it whole turns a refusal into a second denial of service.
+    pub fn too_deep(kind: &'static str, value: &str, limit: usize) -> Self {
+        Self::TooDeep {
+            kind,
+            value: echoable(value),
+            limit,
+        }
+    }
+
+    /// How much of an offending value an error message repeats.
+    pub const ECHO_LIMIT: usize = 60;
+
     /// Builds a [`ParseError::Shape`].
     pub fn shape(
         location: impl Into<String>,
@@ -113,6 +146,16 @@ impl ParseError {
             found: found.into(),
         }
     }
+}
+
+/// `value` as an error message may repeat it: quoted, and cut at a character boundary.
+fn echoable(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.chars().count() <= ParseError::ECHO_LIMIT {
+        return format!("{trimmed:?}");
+    }
+    let head: String = trimmed.chars().take(ParseError::ECHO_LIMIT).collect();
+    format!("{head:?}…")
 }
 
 /// Declares every validation code once.

@@ -280,6 +280,37 @@ impl Version {
         })?;
         Self::new(parsed)
     }
+
+    /// Reads the numeric spelling, `3` rather than `v3`.
+    ///
+    /// Refuses exactly what [`Version::parse`] refuses, which is the whole reason it is a function
+    /// and not a cast. `4294967296 as u32` saturates to `4294967295` and `1e300` lands on the same
+    /// value, so a document naming a version this type cannot hold used to become a *different*
+    /// version silently — and two documents that disagree about which version they mean then
+    /// compared equal. The published [`Version::PATTERN`] refuses both spellings of that, so a
+    /// numeric path that accepted them was a parser looser than its own schema.
+    fn from_number(number: aep_domain::facts::Number) -> Result<Self, ParseError> {
+        let value = number.get();
+        if !value.is_finite() || value.fract() != 0.0 {
+            return Err(ParseError::reference(
+                "version",
+                &number.to_string(),
+                "expected a whole number, without a fractional part",
+            ));
+        }
+        if !(0.0..=f64::from(u32::MAX)).contains(&value) {
+            return Err(ParseError::reference(
+                "version",
+                &number.to_string(),
+                format!("versions run from 1 to {}", u32::MAX),
+            ));
+        }
+        // Guarded directly above: whole, not negative, and no larger than `u32::MAX`, so the cast
+        // is exact rather than saturating.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let major = value as u32;
+        Self::new(major)
+    }
 }
 
 /// Reads the digits of a major version: one or more, no sign, no leading zero.
@@ -328,10 +359,13 @@ impl schemars::JsonSchema for Version {
             })),
             ..Default::default()
         };
+        // Bounded at both ends, because the parser is: an unbounded `minimum: 1` would tell an
+        // author that `4294967296` is a valid version and the tool would then refuse the file.
         let number = schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::Integer.into()),
             number: Some(Box::new(schemars::schema::NumberValidation {
                 minimum: Some(1.0),
+                maximum: Some(f64::from(u32::MAX)),
                 ..Default::default()
             })),
             ..Default::default()
@@ -356,16 +390,15 @@ impl schemars::JsonSchema for Version {
 impl<'de> serde::Deserialize<'de> for Version {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         // Accepts `v1` and a bare `1`, because both read naturally in a document and neither is
-        // ambiguous.
+        // ambiguous — and the two spellings agree, which is what makes that true. Whatever `v…`
+        // refuses, a bare number refuses as well; see [`Version::from_number`].
         let node = aep_domain::node::Node::deserialize(deserializer)?;
         match &node {
             aep_domain::node::Node::Text(text) => {
                 Self::parse(text).map_err(serde::de::Error::custom)
             }
-            aep_domain::node::Node::Number(number) if number.is_integral() => {
-                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                let value = number.get() as u32;
-                Self::new(value).map_err(serde::de::Error::custom)
+            aep_domain::node::Node::Number(number) => {
+                Self::from_number(*number).map_err(serde::de::Error::custom)
             }
             other => Err(serde::de::Error::custom(format!(
                 "expected a version such as `v1`, found {}",
@@ -414,6 +447,71 @@ mod tests {
             return false;
         };
         first.is_ascii_digit() && first != '0' && characters.all(|c| c.is_ascii_digit())
+    }
+
+    #[test]
+    fn the_two_spellings_of_a_version_mean_the_same_thing() {
+        // `version: v3` and `version: 3` are one version written two ways. If they ever disagree,
+        // two documents naming different versions compare equal and nothing says so.
+        for major in [1_u32, 2, 42, u32::MAX] {
+            let written: Version = serde_yaml::from_str(&format!("v{major}")).expect("written");
+            let numeric: Version = serde_yaml::from_str(&major.to_string()).expect("numeric");
+            assert_eq!(written, numeric, "the spellings of v{major} disagree");
+            assert_eq!(written.get(), major);
+            assert_eq!(
+                Version::parse(&written.to_string()).expect("round trips"),
+                written,
+                "`parse(display(v))` is not `v`"
+            );
+        }
+    }
+
+    #[test]
+    fn a_numeric_version_out_of_range_is_refused_rather_than_saturated() {
+        // Every one of these used to become `v4294967295` or `v1`, silently: the numeric path cast
+        // with `as u32`, which saturates. The written spelling refused all of them already.
+        for refused in ["4294967296", "1e300", "-1", "1.5", "0"] {
+            let error = serde_yaml::from_str::<Version>(refused)
+                .expect_err(&format!("`{refused}` is not a version"));
+            assert!(
+                Version::parse(&format!("v{refused}")).is_err(),
+                "the written spelling of `{refused}` must be refused too"
+            );
+            let rendered = error.to_string();
+            assert!(
+                rendered.contains("versions run from 1 to 4294967295")
+                    || rendered.contains("versions start at 1")
+                    || rendered.contains("whole number"),
+                "the reader has to be told which bound was missed: {rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_version_too_wide_for_the_document_model_is_refused_before_it_reaches_the_parser() {
+        // A number is carried as an `f64`, so a literal wider than that is refused one layer out
+        // and the diagnostic is the document model's rather than this type's — asserted separately
+        // for exactly that reason, so a change to either message is visible here.
+        let error = serde_yaml::from_str::<Version>("18446744073709551616").expect_err("too wide");
+        assert!(error.to_string().contains("invalid type"), "{error}");
+    }
+
+    #[test]
+    fn the_schema_bounds_the_numeric_version_where_the_parser_does() {
+        // The published schema is what an editor validates against. A schema that accepts
+        // `4294967296` while the parser refuses it is the same defect in the other direction.
+        let mut generator = schemars::gen::SchemaGenerator::default();
+        let schema = serde_json::to_value(<Version as schemars::JsonSchema>::json_schema(
+            &mut generator,
+        ))
+        .expect("the schema serialises");
+        let branches = schema["oneOf"].as_array().expect("two spellings");
+        let numeric = branches
+            .iter()
+            .find(|branch| branch["type"] == "integer")
+            .expect("a numeric branch");
+        assert_eq!(numeric["minimum"], serde_json::json!(1.0));
+        assert_eq!(numeric["maximum"], serde_json::json!(4_294_967_295.0));
     }
 
     #[test]

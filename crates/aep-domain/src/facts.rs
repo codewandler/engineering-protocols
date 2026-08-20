@@ -20,16 +20,37 @@ use std::sync::OnceLock;
 
 use crate::error::ParseError;
 
-/// A number that is never NaN, so it can be totally ordered and compared for equality.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+/// A number that is always finite, so it can be totally ordered, compared for equality, and
+/// written back out as the value it was read as.
+///
+/// NaN is refused because it makes the ordering partial, and the infinities are refused for a
+/// reason that only shows up on the way out: JSON has no spelling for them, so `serde_json` writes
+/// either one as `null`. A guard reading `amount >= 1e400` would then be published as
+/// `any_of: [null]` — not a crash, and not a refusal, but a document that says something the author
+/// never wrote. Refusing at the door is the only place that difference is still visible.
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(transparent)]
 pub struct Number(f64);
 
+impl<'de> serde::Deserialize<'de> for Number {
+    /// Deserialises through [`Number::new`], so a document cannot conjure a value the constructor
+    /// refuses.
+    ///
+    /// Hand-written rather than derived: `#[serde(transparent)]` with a derived implementation
+    /// reads straight into the field and never calls the constructor, which is how `.nan` in a
+    /// document produced a `Number` this type's own documentation says cannot exist.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = f64::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
 impl Number {
-    /// Builds a number, rejecting NaN.
+    /// Builds a number, refusing anything that is not finite.
     pub fn new(value: f64) -> Result<Self, ParseError> {
-        if value.is_nan() {
-            return Err(ParseError::shape("number", "a real number", "NaN"));
+        if !value.is_finite() {
+            let found = if value.is_nan() { "NaN" } else { "an infinity" };
+            return Err(ParseError::shape("number", "a finite number", found));
         }
         Ok(Self(value))
     }
@@ -203,8 +224,11 @@ impl FactValue {
             "false" => return Self::Bool(false),
             _ => {}
         }
+        // `1e400` parses as `f64::INFINITY` rather than failing, so the check is finiteness and
+        // not merely NaN: an unrepresentable literal stays the text the author typed, which is
+        // both truthful and comparable, instead of becoming an infinity that serialises as `null`.
         if let Ok(number) = trimmed.parse::<f64>() {
-            if !number.is_nan() {
+            if number.is_finite() {
                 return Self::Number(Number(number));
             }
         }
@@ -725,6 +749,44 @@ mod tests {
             !rest.matches(&path("tests")),
             "`**` requires at least one segment"
         );
+    }
+
+    #[test]
+    fn a_number_too_large_to_represent_stays_the_text_it_was_written_as() {
+        // `1e400` overflows to `f64::INFINITY`, which JSON cannot spell: `serde_json` writes it as
+        // `null`. A guard published as `any_of: [null]` says something its author never wrote, and
+        // nothing downstream can tell that from a deliberate null.
+        let value = FactValue::parse_literal("1e400");
+        assert_eq!(
+            value,
+            FactValue::text("1e400"),
+            "an unrepresentable literal must not become an infinity"
+        );
+        let json = serde_json::to_string(&value).expect("a fact value serialises");
+        assert!(
+            !json.contains("null"),
+            "a literal must never round-trip into a null: {json}"
+        );
+    }
+
+    #[test]
+    fn an_infinity_is_refused_because_it_cannot_be_written_back_out() {
+        let error = Number::new(f64::INFINITY).expect_err("an infinity is not a number here");
+        assert!(error.to_string().contains("infinity"), "{error}");
+        Number::new(f64::NEG_INFINITY).expect_err("nor is a negative one");
+    }
+
+    #[test]
+    fn a_document_cannot_deserialise_a_number_the_constructor_would_refuse() {
+        // `#[serde(transparent)]` with a derived `Deserialize` reads straight into the field and
+        // never calls `new`, so `.nan` in a document used to produce a `Number` this type says
+        // cannot exist — and a NaN makes `Ord` a lie for every value it is compared against.
+        for spelling in [".nan", ".inf", "-.inf"] {
+            serde_yaml::from_str::<Number>(spelling)
+                .expect_err(&format!("`{spelling}` is not a finite number"));
+        }
+        let ordinary: Number = serde_yaml::from_str("1.5").expect("a finite number still reads");
+        assert!((ordinary.get() - 1.5).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -9,6 +9,9 @@
 //!
 //! The distinction matters to whoever has to fix the document: a syntax error is a typo on one
 //! line, while a semantic error is a statement that parses fine and means something impossible.
+//!
+//! Reading the text is itself two steps, for the reason `read_yaml` gives: a mapping key written
+//! twice is refused before anything is deserialized, because otherwise it is not refused at all.
 
 use std::fmt;
 
@@ -149,6 +152,34 @@ impl DocumentError {
     }
 }
 
+/// Reads YAML or JSON text, refusing a mapping key that is written twice.
+///
+/// The first parse is the guard, and it is the whole reason there are two. Deserializing straight
+/// into the target type lets `serde_yaml` **silently keep the last of two identical keys**: a
+/// profile that writes `capabilities:` twice keeps one block and drops the other, so the profile
+/// that grants capabilities grants a different set than the file appears to, and nothing anywhere
+/// says so. Parsing to [`serde_yaml::Value`] first refuses it, naming the key and the line.
+///
+/// This is a **syntax** failure, not a semantic one, on the definition this module's own header
+/// gives: a duplicated key is a defect in the text that can be seen without knowing what the
+/// document means, and there is no well-defined mapping for a validator to disagree with. It is
+/// also the only classification available to every kind alike — [`lifecycle`] and [`evidence_list`]
+/// have no raw stage and so can only fail as [`DocumentError::Syntax`] — and one class of defect
+/// that reports differently depending on the document kind is worse than either choice.
+///
+/// The typed parse then reads the *text* again rather than the parsed `Value`. `serde_yaml::from_value`
+/// carries no spans, so staging through it would buy the duplicate-key diagnostic at the price of
+/// the line and column on every shape error, and pointing at one line is what a `Syntax` error is
+/// for. Parsing twice costs nothing at document sizes.
+///
+/// The same guard is written once more, in `ess_domain::spec::RawSpecFile::parse`. The two cannot
+/// share one implementation today: `aep-schema` depends on `ess-domain`, not the other way round,
+/// and `aep-domain` — the crate both depend on — deliberately holds no serialization format.
+fn read_yaml<T: DeserializeOwned>(text: &str) -> Result<T, serde_yaml::Error> {
+    let _: serde_yaml::Value = serde_yaml::from_str(text)?;
+    serde_yaml::from_str(text)
+}
+
 /// Reads one document: YAML or JSON text into a raw type, then into its validated counterpart.
 ///
 /// `origin` is used only in error messages; pass the file path when there is one.
@@ -161,7 +192,7 @@ where
     Raw: DeserializeOwned,
     Domain: TryFrom<Raw, Error = ValidationErrors>,
 {
-    let raw: Raw = serde_yaml::from_str(text).map_err(|source| DocumentError::Syntax {
+    let raw: Raw = read_yaml(text).map_err(|source| DocumentError::Syntax {
         kind,
         origin: origin.map(ToOwned::to_owned),
         source,
@@ -223,7 +254,7 @@ pub fn lifecycle(
     text: &str,
     origin: Option<&str>,
 ) -> Result<aep_domain::artifact::ArtifactLifecycle, DocumentError> {
-    serde_yaml::from_str(text).map_err(|source| DocumentError::Syntax {
+    read_yaml(text).map_err(|source| DocumentError::Syntax {
         kind: DocumentKind::Lifecycle,
         origin: origin.map(ToOwned::to_owned),
         source,
@@ -265,7 +296,7 @@ pub fn evidence_list(
     text: &str,
     origin: Option<&str>,
 ) -> Result<Vec<EvidenceInput>, DocumentError> {
-    serde_yaml::from_str(text).map_err(|source| DocumentError::Syntax {
+    read_yaml(text).map_err(|source| DocumentError::Syntax {
         kind: DocumentKind::Evidence,
         origin: origin.map(ToOwned::to_owned),
         source,
@@ -329,6 +360,102 @@ states:
             review.subject.to_string(),
             "design:passkeys",
             "the payload's own subject must not be taken by the envelope"
+        );
+    }
+
+    #[test]
+    fn a_profile_that_writes_one_key_twice_is_refused_with_the_key_named() {
+        // A profile is the document that *grants* capabilities. Keeping the last of two
+        // `capabilities:` blocks means this file grants `production.write` and denies nothing that
+        // it appears to deny — a silent widening of what an agent may do, from a typo.
+        let error = profile(
+            r"
+id: test.standard
+title: Test standard
+protocol: aep/1
+workflow: test/linear
+capabilities:
+  allow: [repository.read]
+capabilities:
+  allow: [production.write]
+",
+            Some("profiles/test.yaml"),
+        )
+        .expect_err("the key is written twice");
+        assert!(
+            matches!(error, DocumentError::Syntax { .. }),
+            "a key written twice is a defect in the text, not a statement that means something \
+             impossible: {error}"
+        );
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("capabilities"),
+            "the diagnostic has to name the key: {rendered}"
+        );
+        assert!(
+            rendered.contains("duplicate"),
+            "the reader has to be told which fault this is: {rendered}"
+        );
+        assert_eq!(error.origin(), Some("profiles/test.yaml"));
+    }
+
+    #[test]
+    fn a_duplicated_key_is_refused_in_a_document_with_no_raw_stage_too() {
+        // `lifecycle` and `evidence_list` deserialize straight into their final shape, so `Syntax`
+        // is the only failure they can report. That is the argument for classifying a duplicated
+        // key as syntax everywhere rather than only where a raw stage happens to exist.
+        let error = lifecycle(
+            r"
+kind: design
+initial: draft
+transitions:
+  draft: [in_review]
+  draft: [archived]
+",
+            None,
+        )
+        .expect_err("the state is written twice");
+        let rendered = error.to_string();
+        assert!(rendered.contains("draft"), "{rendered}");
+        assert!(rendered.contains("duplicate"), "{rendered}");
+
+        let error = evidence_list(
+            r"
+- kind: review
+  subject: design:passkeys
+  subject: design:something-else
+  reviewer: {reviewer: human, id: ada}
+  disposition: approved
+  producer: {producer: human, id: ada}
+",
+            None,
+        )
+        .expect_err("the key is written twice");
+        let rendered = error.to_string();
+        assert!(rendered.contains("subject"), "{rendered}");
+        assert!(rendered.contains("duplicate"), "{rendered}");
+    }
+
+    #[test]
+    fn a_shape_error_still_says_which_line_it_is_on() {
+        // The duplicate-key guard parses the text twice rather than deserializing from the parsed
+        // `serde_yaml::Value`, because a `Value` carries no spans. If that ever changes, this is
+        // the test that notices: a syntax error whose whole job is to point at one line stops
+        // pointing at anything.
+        let error = profile(
+            r"
+id: test.standard
+title: [not, a, string]
+protocol: aep/1
+workflow: test/linear
+",
+            None,
+        )
+        .expect_err("a title is not a list");
+        let rendered = error.to_string();
+        assert!(
+            rendered.contains("line 3"),
+            "a shape error must keep its location: {rendered}"
         );
     }
 

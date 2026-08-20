@@ -398,6 +398,10 @@ impl ViewSpec {
 /// `Optional` is unwrapped: a value that may be absent is still one of the same names when it is
 /// there. Anything else — a primitive, a struct, a list, a type nothing declares — has no listed
 /// values, so there is nothing to check a comparison against.
+///
+/// Recurses once per `Optional` and does not count: a [`TypeRef`] cannot nest past
+/// [`MAX_TYPE_DEPTH`](crate::types::MAX_TYPE_DEPTH), which its parser enforces. Note that it does
+/// not follow a `Named` type into its body, so a newtype chain cannot lengthen this walk either.
 fn enumeration<'a>(
     types: &'a TypeRegistry,
     reference: &TypeRef,
@@ -423,6 +427,11 @@ fn compared_values(predicate: &Predicate) -> Vec<(&FactPath, &FactValue)> {
 }
 
 /// Walks a predicate, because a filter is as often `any: [...]` as a single comparison.
+///
+/// Unbounded recursion on a bounded tree: a filter is parsed by
+/// [`Predicate::from_node`](aep_domain::predicate::Predicate::from_node) or
+/// [`parse_expression`](aep_domain::predicate::Predicate::parse_expression), both of which refuse
+/// past [`MAX_PREDICATE_DEPTH`](aep_domain::predicate::MAX_PREDICATE_DEPTH).
 fn collect_compared_values<'a>(
     predicate: &'a Predicate,
     found: &mut Vec<(&'a FactPath, &'a FactValue)>,

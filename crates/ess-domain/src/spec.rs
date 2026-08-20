@@ -236,6 +236,14 @@ impl Specification {
             }
         }
 
+        // The link between a command's outcomes and the lifecycles they drive, checked once and in
+        // both directions: neither an entity nor a command can see it alone, because it is a
+        // relation between them.
+        errors.extend(crate::entity::validate_lifecycle_causes(
+            &self.entities,
+            &self.commands,
+        ));
+
         let catalogue = EntityCatalogue::new(self.entities.values());
         for view in self.views.values() {
             if let Err(view_errors) = view.validate(&registry, &catalogue) {
@@ -768,6 +776,17 @@ entities:
         - name: close
           from: [Open]
           to: Closed
+
+commands:
+  - name: shop.cart.CloseCart
+    outcomes:
+      - name: closed
+        moves: shop.cart.Cart.close
+        emits: [shop.cart.CartClosed]
+
+events:
+  - name: shop.cart.CartClosed
+    fields: []
 ",
         ));
         let specification = Specification::assemble(files).expect("valid");

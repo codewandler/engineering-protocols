@@ -103,6 +103,19 @@ impl fmt::Display for Primitive {
 /// A reference to a type, as written in a specification.
 ///
 /// `Email`, `List<Money>`, `Optional<CustomerId>`, `Map<String, Money>`.
+///
+/// # Depth
+///
+/// Every value of this type that a document can produce is at most [`MAX_TYPE_DEPTH`] deep, because
+/// [`TypeRef::parse`] is the only way a document reaches one — [`serde::Deserialize`] goes through
+/// it, and the compiler's two conversions
+/// (`Resolver::type_ref` and `spec_type_ref`) map one constructor to one constructor and so preserve
+/// depth exactly. That is what lets the walkers below — [`Self::named_dependencies`],
+/// [`Self::required`], [`Display`](fmt::Display), [`is_assignable`], and the ones in [`crate::view`],
+/// [`crate::system`] and [`crate::binding`] — recurse without counting: at 32 levels the deepest of
+/// them uses a few kilobytes of stack. It stops being true the moment something builds a `TypeRef`
+/// by wrapping rather than by parsing, which is why the bound lives in the parser and this note
+/// lives on the type.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeRef {
     /// A primitive.
@@ -117,17 +130,50 @@ pub enum TypeRef {
     Map(Primitive, Box<TypeRef>),
 }
 
+/// How many generic wrappers a type reference may nest before it is refused.
+///
+/// A document chooses this number by writing it — `type: Optional<Optional<…>>` is one YAML scalar,
+/// and nothing above this function bounds a scalar's length. Measured on this machine, a debug
+/// build of [`TypeRef::parse`] overflows the 8 MiB main-thread stack between 3 000 and 4 000
+/// wrappers, and the 2 MiB a spawned worker gets between 800 and 1 000; a stack overflow is an abort
+/// with no diagnostic, which is the one failure mode this compiler does not otherwise have.
+///
+/// 32 because the deepest type a real specification writes is
+/// `Optional<List<Map<String, Optional<Money>>>>`, which is five, and because
+/// `WRAPPER_LIMIT` in [`crate::binding`] already chose 32 for the same reason in the same crate: one
+/// number is easier to defend than two. That leaves a factor of twenty-five below the smallest
+/// measured floor, and a factor of six above anything anybody has written. `serde_yaml`'s own
+/// structural recursion cap is 128, so this refusal is reached first and carries our message rather
+/// than the deserializer's.
+pub const MAX_TYPE_DEPTH: usize = 32;
+
 impl TypeRef {
     /// Parses a type reference.
+    ///
+    /// Refuses nesting beyond [`MAX_TYPE_DEPTH`] with [`ParseError::TooDeep`]. The check is made on
+    /// the way down, before the `Box` for that level is allocated, so a refused document never
+    /// builds the chain whose `Drop` would recurse just as deeply as the parse did.
     pub fn parse(value: &str) -> Result<Self, ParseError> {
+        Self::parse_nested(value, 0)
+    }
+
+    /// [`Self::parse`], counting how many wrappers deep it already is.
+    fn parse_nested(value: &str, depth: usize) -> Result<Self, ParseError> {
         let trimmed = value.trim();
         let reject = |reason: &str| ParseError::identifier("type", value, reason.to_owned());
 
+        if depth > MAX_TYPE_DEPTH {
+            return Err(ParseError::too_deep("type", trimmed, MAX_TYPE_DEPTH));
+        }
+
         if let Some(inner) = generic_argument(trimmed, "Optional") {
-            return Ok(Self::Optional(Box::new(Self::parse(inner)?)));
+            return Ok(Self::Optional(Box::new(Self::parse_nested(
+                inner,
+                depth + 1,
+            )?)));
         }
         if let Some(inner) = generic_argument(trimmed, "List") {
-            return Ok(Self::List(Box::new(Self::parse(inner)?)));
+            return Ok(Self::List(Box::new(Self::parse_nested(inner, depth + 1)?)));
         }
         if let Some(inner) = generic_argument(trimmed, "Map") {
             let (key, value_type) = inner.split_once(',').ok_or_else(|| {
@@ -144,7 +190,10 @@ impl TypeRef {
                     ),
                 )
             })?;
-            return Ok(Self::Map(key, Box::new(Self::parse(value_type)?)));
+            return Ok(Self::Map(
+                key,
+                Box::new(Self::parse_nested(value_type, depth + 1)?),
+            ));
         }
         if trimmed.contains(['<', '>']) {
             return Err(reject(
@@ -904,6 +953,65 @@ mod tests {
             let parsed = TypeRef::parse(spelling).expect("parses");
             assert_eq!(parsed.to_string(), spelling, "round trip");
         }
+    }
+
+    #[test]
+    fn the_deepest_type_a_real_specification_writes_is_still_accepted() {
+        // The failure mode of a depth bound is refusing a good document, so the bound is asserted
+        // from the accepting side first: this is the deepest thing anybody writes, and it is five.
+        let spelling = "Optional<List<Map<String, Optional<billing.Money>>>>";
+        let parsed = TypeRef::parse(spelling).expect("a real specification's deepest type");
+        assert_eq!(parsed.to_string(), spelling, "round trip");
+
+        // And the whole budget, exactly, one wrapper short of the refusal.
+        let at_limit = format!(
+            "{}String{}",
+            "Optional<".repeat(MAX_TYPE_DEPTH),
+            ">".repeat(MAX_TYPE_DEPTH)
+        );
+        assert!(
+            TypeRef::parse(&at_limit).is_ok(),
+            "{MAX_TYPE_DEPTH} wrappers is the limit, not one past it"
+        );
+    }
+
+    #[test]
+    fn a_type_nested_past_the_limit_is_refused_rather_than_overflowing_the_stack() {
+        // 10 000 wrappers overflowed an 8 MiB stack before this bound existed; the point of the
+        // test is that the answer is a refusal a caller can read, not an abort.
+        let deep = format!("{}String{}", "Optional<".repeat(10_000), ">".repeat(10_000));
+        let error = TypeRef::parse(&deep).expect_err("nesting past the limit");
+        assert!(
+            matches!(
+                error,
+                ParseError::TooDeep {
+                    kind: "type",
+                    limit: MAX_TYPE_DEPTH,
+                    ..
+                }
+            ),
+            "the refusal names the construct and the limit: {error:?}"
+        );
+    }
+
+    #[test]
+    fn a_refused_type_is_not_built_so_dropping_it_cannot_overflow_either() {
+        // `TypeRef` is `Box`-recursive, so a chain deep enough to overflow the parser would also
+        // overflow its own `Drop`, and refusing late would not save the stack. The bound is checked
+        // on the way down: 10 000 wrappers refuse without ever allocating the tenth box.
+        let deep = format!("{}String{}", "Optional<".repeat(10_000), ">".repeat(10_000));
+        let refused = TypeRef::parse(&deep);
+        assert!(refused.is_err());
+        drop(refused);
+
+        // The deepest value the parser will build, dropped explicitly.
+        let accepted = TypeRef::parse(&format!(
+            "{}String{}",
+            "Optional<".repeat(MAX_TYPE_DEPTH),
+            ">".repeat(MAX_TYPE_DEPTH)
+        ))
+        .expect("at the limit");
+        drop(accepted);
     }
 
     #[test]
