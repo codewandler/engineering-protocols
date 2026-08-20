@@ -126,6 +126,16 @@ belongs in the commit message or in `docs/design/`.
 
 ### Fixed
 
+- **An artifact evidence record could not be written in a document at all.** The evidence envelope is
+  tagged by `kind`, and this one kind of record also had a field called `kind` — so the parser
+  consumed the key as the tag and then reported the field it had just consumed as missing. Every
+  attempt failed with `missing field 'kind'`, however it was written. The field is `artifact_kind` on
+  the wire now.
+
+  The consequence was wider than one record type: `design-by-contract` and `preserve-evidence` both
+  require artifact evidence, so no `development.critical` task could satisfy either through a
+  document, and none could reach `implement`. The variant existed, was documented, appeared in the
+  published schema, and was unreachable from the one place a person writes evidence.
 - **The CLI and the documentation page were drawing two different system graphs.** The command line
   showed no actors and no grants at all, and it grouped a command by which component *owns* its domain
   while the page grouped by what a component *accepts* and *publishes* — and the model allows those to
