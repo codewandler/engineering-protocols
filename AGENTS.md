@@ -24,17 +24,19 @@ in the reconciliation register §5. Add to that list rather than diverging silen
 proposal is not a work order, however long and however recent it is.
 `ess-implementor-design-v0.1.md` and `ess-review-v0.1.md` show what acceptance looks like:
 [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) and the wave 1–3 plan pages took them up, and
-waves 1 to 3 shipped from them. Four proposals are currently open, and none has been accepted:
+waves 1 to 3 shipped from them. The four proposals filed 2026-08-20 have since been reviewed, and
+their acceptance state is:
 
 | proposed design | status |
 |---|---|
-| [`ess-closed-loop-execution-conformance-design-v0.1.md`](docs/design/ess-closed-loop-execution-conformance-design-v0.1.md) | reviewed, reconciled against the code, and frozen for implementation — except the four open decisions D1–D4 named in its §2. This is ESS wave 4, and it starts when [`docs/plan/ess-wave-3.5-reconciliation.md`](docs/plan/ess-wave-3.5-reconciliation.md) closes its gates |
-| [`ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | **not reviewed at all.** Sequenced after wave 4 |
-| [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | reviewed by [`docs/reviews/2026-08-20-next-waves-feasibility-review.md`](docs/reviews/2026-08-20-next-waves-feasibility-review.md) and **not reconciled**: nothing was folded back in, and that review reads the document as four waves rather than one. Unsequenced |
-| [`semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | **not reviewed at all.** Unsequenced |
+| [`ess-closed-loop-execution-conformance-design-v0.1.md`](docs/design/ess-closed-loop-execution-conformance-design-v0.1.md) | **implemented** as ESS wave 4 (`0.4.0-ess-wave-4`); its four open decisions D1–D4 were taken at their stated defaults |
+| [`ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | **core implemented** as ESS wave 5 (`0.5.0-ess-wave-5`). Two of its seventy-eight sections are rejected outright (the proposal-evaluation loop and architecture search); the rest past §31 stays proposed |
+| [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | **accepted in part** by [`docs/plan/ess-wave-6-structural-synthesis.md`](docs/plan/ess-wave-6-structural-synthesis.md), which is wave 6, in progress. Its obligation/`Realization` programme stays proposed (W7.4 takes a slice), and its §28 is refused by invariant 6 |
+| [`semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | reviewed and **deferred whole**; two ideas harvested |
 
 Do not implement from an unreviewed design, and do not treat one as evidence of what this repository
-is. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* says what each would add.
+is. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* says what each would add, and
+[`docs/plan/gap-register.md`](docs/plan/gap-register.md) holds every open gap with what closes it.
 
 ## Current state
 
@@ -42,8 +44,8 @@ See the status table in [`README.md`](README.md); keep it accurate when you land
 is the per-wave record of what actually shipped — read it before believing any prose about progress.
 
 **Every crate in the workspace is implemented and gated. There are no skeletons left.** The most
-recent tag is `0.3.2-ess-wave-3`; `task check` currently passes 41 suites and 953 tests, with 0
-clippy warnings and 0 rustdoc warnings.
+recent tag is `0.5.0-ess-wave-5`; `task check` (eight steps) currently passes 60 suites and 1346
+tests, with 0 clippy warnings and 0 rustdoc warnings.
 
 * **AEP — the protocol; the v0.2 scope is implemented.** `aep-domain`, `aep-schema`, `aep-engine`,
   `aep-contract`, `aep-backend-memory`, `aep-conformance`, `adp-domain`, `aop-domain`,
@@ -53,18 +55,21 @@ clippy warnings and 0 rustdoc warnings.
   conformance levels, and a `FaultyBackend` whose injected defects the suites are checked against
   (45 inline plus 7 integration tests), beside the development and operations typed vocabularies.
   `0.2.1` added project discovery.
-* **ESS — executable system specifications; roughly 60% of its design.** Three delivered, gated
-  crates: `ess-domain` (the typed model, `0.3.0-ess-wave-1`), `ess-compiler` (resolution, `EssIr`,
-  source-aware diagnostics, `0.3.1-ess-wave-2`) and `ess-gen` (Markdown + Mermaid, JSON Schema,
-  OpenAPI 3.1 and AsyncAPI 3.0 behind one `Generator` trait, `0.3.2-ess-wave-3`). `generated/`
-  holds 27 committed artifacts plus an index, drift-checked by `cargo xtask generate --check`.
-* **Not built yet:** test synthesis and the conformance runner (ESS wave 4), Rust structural
-  synthesis (ESS wave 5), and any durable backend — the only implementation of the contract is in
-  memory.
+* **ESS — executable system specifications.** Six delivered, gated crates: `ess-domain` (the typed
+  model, `0.3.0-ess-wave-1`), `ess-compiler` (resolution, `EssIr`, source-aware diagnostics,
+  `0.3.1-ess-wave-2`), `ess-gen` (four projections behind one `Generator` trait,
+  `0.3.2-ess-wave-3`), `ess-conformance` (the specification as oracle: synthesis, runner, evidence,
+  `0.4.0-ess-wave-4`), `ess-diff` (semantic delta and impact closure, `0.5.0-ess-wave-5`) and
+  `ess-synth` (language-neutral synthesis plan, Rust emission — wave 6, in progress). `generated/`
+  holds the committed projections and the synthesised workspace, `suites/generated/` the committed
+  conformance suites; all drift-checked in the gate.
+* **Not built yet:** wave 6's W6.3 (the generated code passing the generated suite) until it lands;
+  the wave 6.5 hardening batch and wave 7, both scheduled on the roadmap; attested evidence
+  (gap register D-3, proposed and unaccepted); any durable backend — the only implementation of the
+  contract is in memory.
 * Work order: [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) §4 for AEP,
-  [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) for ESS. Wave 4 does not start until
-  [`docs/plan/ess-wave-3.5-reconciliation.md`](docs/plan/ess-wave-3.5-reconciliation.md) closes its
-  gates.
+  [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) for ESS, and
+  [`docs/plan/gap-register.md`](docs/plan/gap-register.md) for what is owed outside any wave.
 
 ## Invariants
 
