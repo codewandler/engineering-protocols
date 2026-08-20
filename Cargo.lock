@@ -370,6 +370,9 @@ dependencies = [
  "aep-domain",
  "ess-compiler",
  "ess-domain",
+ "ess-gen",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

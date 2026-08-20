@@ -1,6 +1,6 @@
 [package]
 name = "ess-conformance"
-description = "Deciding whether a candidate command input satisfies a specification's guard, and refusing when it cannot be decided."
+description = "What a conformance suite is — the canonical scenario IR — and deciding whether a candidate command input satisfies a specification's guard."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -13,10 +13,20 @@ aep-domain.workspace = true
 ess-compiler.workspace = true
 ess-domain.workspace = true
 
-# No third-party dependency, and that is a decision rather than an absence. The whole crate is a walk
-# over two trees this workspace already owns — a `ResolvedTypeRef` and a `Node` — producing a
-# `FactStore` `aep-domain` already defines. `thiserror` would have bought two `Display` impls that are
-# eleven lines each, and a value tree of its own would have bought a second spelling of `Node`.
+# For `SuiteProvenance`, which derives every fact it shares with a projected artifact from
+# `ess_gen::Provenance` rather than computing the digest, the system and the versions a second way.
+# Two provenance types in one repository are two answers to "which specification produced this".
+ess-gen.workspace = true
+
+# The two the suite format needs, both already declared once in `[workspace.dependencies]`. A
+# committed suite is JSON — the repository's canonical form, and the one a future runner in another
+# language can read — so `serde_json` is a dependency of the definition, not only of a test.
+#
+# Still no third-party crate beyond the workspace list, and that stays a decision: `thiserror` would
+# have bought two `Display` impls that are eleven lines each, and a value tree of this crate's own
+# would have bought a second spelling of `aep_domain::node::Node`.
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

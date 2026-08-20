@@ -1,4 +1,17 @@
-//! Deciding whether a candidate command input reaches a specification's guard.
+//! What a conformance suite is, and whether a candidate command input reaches a guard in it.
+//!
+//! Two things, in the order wave 4 needs them.
+//!
+//! [`scenario`] is the **canonical scenario IR** (design §21): the serialisable definition of every
+//! check a specification obliges an implementation to pass. It executes nothing. That separation is
+//! the point — generate a runner's tests straight from an
+//! [`EssIr`](ess_compiler::EssIr) and the first runner becomes the semantic definition by accident,
+//! which is the failure §22 exists to prevent.
+//!
+//! [`decision`] and [`input`] are the other half: given a candidate input, does a declared guard
+//! hold? A suite cannot claim an input reaches an outcome without one.
+//!
+//! # The rest of the crate's job
 //!
 //! An [`EssIr`](ess_compiler::EssIr) says a command has an outcome taken `when: amount.amount > 0`.
 //! A conformance runner wanting to exercise that branch has to answer one question first: **given
@@ -51,11 +64,18 @@
 //! * **Branch selection.** [`when`] returns the predicate an outcome declares, and nothing here says
 //!   *which* outcome a candidate reaches: `otherwise` is defined relative to every other branch of
 //!   the same command, and `external` is by construction not decidable from an input at all.
+//! * **A runner.** [`scenario`] defines what a suite *is*; executing one against a target is a
+//!   later slice, and mixing the two is how a runner becomes the definition.
 //! * **A clock.** The crate that will hold one is this one; the part of it that needs one does not
 //!   exist yet.
 
 pub mod decision;
 pub mod input;
+pub mod scenario;
 
 pub use decision::{when, Decision, Reason, Unevaluable, UnknownCause};
 pub use input::{flatten, InputFacts, ShapeError, ShapeErrors};
+pub use scenario::{
+    ConformanceScenario, ConformanceSuite, EssSemanticRef, ScenarioId, ScenarioPurpose,
+    ScenarioStep, SuiteProvenance,
+};
