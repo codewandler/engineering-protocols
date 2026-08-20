@@ -263,12 +263,12 @@ first slice, its exclusions, and the decision itself are on the plan page.
 
 ## ESS wave 6 — structural synthesis
 
-> **Proposed.** Design:
-> [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](../design/ess-structural-synthesis-obligations-realizations-design-v0.1.md),
-> which assumes wave 4's oracle already exists and is trusted. Wave 5 stays gated on wave 4 closing
-> its loop, both halves: a correct target producing valid evidence that lets ADP complete, and a
-> faulty target producing a failure that refuses completion. Generating code judged by an oracle
-> nobody has seen fail is the exact mistake the ordering rule exists to prevent.
+> **Accepted for implementation, 2026-08-20** — the gate it waited on is met, both halves: a correct
+> target passes 27 of 27 and completes the task, a faulty one is refused by name (`0.4.0-ess-wave-4`).
+> Design:
+> [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](../design/ess-structural-synthesis-obligations-realizations-design-v0.1.md);
+> decisions and slices on the plan page,
+> [`ess-wave-6-structural-synthesis.md`](ess-wave-6-structural-synthesis.md).
 
 **Goal: a generated invoice service and email service that compile, and that pass the suite wave 4
 generated.**
@@ -277,22 +277,22 @@ Design phase 6, and §38's last success criterion. It is last for a reason: a ge
 model that has not survived three projections and a conformance suite generates confident nonsense,
 and every wave before this one exists to make that claim falsifiable before the code is written.
 
-### W5.1 Domain types, commands, events, views
+### W6.1 Domain types, commands, events, views
 
 Rust from the IR: newtypes that stay distinct from their representations, tagged unions as enums,
 lifecycles as state types whose illegal transitions do not compile, commands as traits with an outcome
 type per declared outcome.
 
-### W5.2 Component skeletons and one transport adapter
+### W6.2 Component skeletons and one transport adapter
 
 A component's inner domain generated in full; its outer surface generated as a port, with exactly one
 transport implemented — the one the billing example needs. Every other transport is a later wave, and
 pretending otherwise is how a generator acquires six half-adapters.
 
-### W5.3 The generated code passes the generated tests
+### W6.3 The generated code passes the generated tests
 
 The whole point, and the only acceptance criterion that matters: `cargo test` in the generated
-workspace runs wave 4's suite against wave 5's code and passes — with the deliberately-wrong
+workspace runs wave 4's suite against wave 6's code and passes — with the deliberately-wrong
 implementation still failing the checks it should.
 
 **Deliverable:** `ess synthesize`, a generated buildable workspace, and CI that regenerates it and
