@@ -65,6 +65,7 @@ it implements the contract by running a suite against itself.
 | `ess-domain` — the typed model | 100% | 13 modules; entities, commands, views, actors, components, bindings, topology |
 | `ess-compiler` — resolution, IR, diagnostics | 100% | an unresolved reference is unrepresentable; codes, spans, byte-identical output |
 | `ess-gen` — four projections behind one `Generator` trait | 100% | Markdown + Mermaid, JSON Schema, OpenAPI 3.1, AsyncAPI 3.0; one shared type mapping, agreement asserted; 123 tests |
+| `ess-conformance` — can this candidate satisfy this guard? | 5% | the evaluation bridge wave 4 cannot start without: a command input projected into a `FactSource`, and a decision that refuses rather than guesses when a guard cannot be evaluated; 30 tests |
 | `protocol ess validate\|compile\|inspect\|graph\|generate` | 100% | one file or a directory; every problem in one run |
 | The join — artifact kind, evidence kind, `ess-conformance` principle | 100% | a task can already be blocked until something proves conformance |
 | Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 100% | 27 artifacts plus a generated index, committed under `generated/`, provenance on each, drift-checked in CI |

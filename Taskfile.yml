@@ -7,11 +7,12 @@ tasks:
     deps: [check]
 
   check:
-    desc: Format check, lint, test and schema check — everything CI runs.
+    desc: Format check, lint, test, doc check, schema check and projection check — everything CI runs.
     cmds:
       - task: fmt-check
       - task: clippy
       - task: test
+      - task: doc-check
       - task: schema-check
       - task: generate-check
 
@@ -57,5 +58,15 @@ tasks:
 
   doc:
     desc: Build the API documentation.
+    cmds:
+      - cargo doc --workspace --no-deps
+
+  # Doc comments carry the design reasoning here, so a broken intra-doc link loses an argument, not
+  # just a hyperlink. Same defect class as a clippy warning, so it is a step in `check` rather than a
+  # job of its own, and it reuses the dependency build `test` has already paid for.
+  doc-check:
+    desc: Fail if rustdoc emits any warning.
+    env:
+      RUSTDOCFLAGS: -D warnings
     cmds:
       - cargo doc --workspace --no-deps

@@ -1,11 +1,33 @@
 # ESS Closed-Loop Execution & Conformance — Design v0.1
 
 > **Repository:** `codewandler/engineering-protocols`  
-> **Status:** Proposed next implementation milestone  
+> **Status:** **Reviewed and reconciled 2026-08-20 — frozen for implementation**, except the open decisions listed in §2 under *Open decisions this freeze does not close*.  
+> **Milestone:** ESS wave 4 in [`docs/plan/ess-roadmap.md`](../plan/ess-roadmap.md).  
 > **Audience:** Implementor continuing the existing ESS work after `ess-domain`, `ess-compiler`, and `ess-gen`  
 > **Relationship to existing design:** Additive. This document does not replace `docs/design/ess-implementor-design-v0.1.md` or `docs/plan/ess-roadmap.md`. It narrows the next milestone into an executable closed loop.
 >
-> **Local-state assumption:** `ess-gen` exists locally but is not yet pushed. This document assumes it implements, or is implementing, the projection boundary described by ESS wave 3. Reconcile names with the actual local API rather than creating duplicate abstractions.
+> **What the reconciliation changed, 2026-08-20.** The v0.1 draft was written against a repository
+> state that no longer exists — it assumed `ess-gen` was local and unpushed. Two independent reviews
+> were folded into this document **in place**, not appended: the repository baseline (§2), the refusal
+> model that makes synthesis fallible and keeps it out of `ess_gen::Generator` (§11, §36), the crate
+> boundary for the runner (§35), four things to reuse rather than rebuild (§14, §23, §25, §30), the
+> compiler decisions synthesis must consume by name rather than re-derive (§11, §14), suite identity
+> being semantic rather than handle-based (§21), execution determinism (§37), and the §15/§40
+> contradiction over sleeps. The header's original instruction — *reconcile names with the actual local
+> API rather than creating duplicate abstractions* — is what this pass carried out.
+>
+> **Frozen means:** implement what is written and do not re-litigate it. The four open decisions in §2
+> are the exceptions; each must be settled before the code it governs is written.
+>
+> **Before any of it:** the blocking gates in
+> [`docs/plan/ess-wave-3.5-reconciliation.md`](../plan/ess-wave-3.5-reconciliation.md) come first.
+> Several are model changes — a command has no declared link to the lifecycle transition it causes or
+> the entity it acts on (G14), and `on_failure: escalate` has no observable consequence (G2) — and
+> both are far cheaper to fix before a synthesizer is built around their absence than after.
+>
+> **After it:** wave 5, structural synthesis, stays gated on wave 4 closing its loop — **both** halves:
+> a correct target producing valid evidence that lets an ADP task complete, *and* a faulty target
+> producing a failure that refuses completion. An oracle nobody has watched fail is not an oracle.
 
 ---
 
@@ -90,7 +112,8 @@ AEP
 
 ESS
 ├── ess-domain
-└── ess-compiler
+├── ess-compiler
+└── ess-gen
 ```
 
 The existing AEP side already provides:
@@ -128,9 +151,47 @@ The existing ESS side already provides:
 - source-aware diagnostics;
 - the normative billing fixture.
 
-The local, not-yet-pushed `ess-gen` is assumed to provide the projection boundary from `EssIr`.
+`ess-gen` provides the projection boundary from `EssIr`. It is **on `main`**, tagged
+`0.3.2-ess-wave-3`, and provides:
+
+- four projections — Markdown + Mermaid, JSON Schema per message and named type, OpenAPI 3.1 and
+  AsyncAPI 3.0 per component;
+- one `Generator` trait all four implement;
+- `Provenance` on every artifact — system, specification version, a digest of the resolved IR,
+  compiler version, generator version;
+- one shared type mapping across the projections, with agreement asserted keyword by keyword;
+- 27 committed artifacts plus a generated index under `generated/`, drift-checked in CI by
+  `cargo xtask generate --check`;
+- 123 tests.
+
+Two properties of that crate constrain this design rather than merely informing it. §35 and §36 turn
+on them:
+
+- **`Generator::generate` is infallible by contract.** "A generator reaching a construct it cannot
+  project is a gap in this crate, not a fault in the specification — and the specification has already
+  been refused if it was wrong […] So there is nothing left for a `Result` to report."
+  (`crates/ess-gen/src/artifact.rs:45`.)
+- **The crate holds no clock and no randomness.** "Same IR in, byte-identical bytes out. No clock, no
+  RNG, `BTreeMap`/`BTreeSet` only." (`crates/ess-gen/src/lib.rs:24`.)
 
 This document starts at that boundary.
+
+### Open decisions this freeze does not close
+
+Four, each named again at the section that raises it. Each has a default, so silence does not block the
+work — but each must be settled before the code it governs is written, because all four decide type
+signatures rather than internals.
+
+| # | decision | section | default if nobody decides |
+|---|---|---|---|
+| D1 | which crate owns the scenario IR, the synthesizer and the runner | §35, §36 | a new `ess-conformance` crate — `ess-gen` can hold neither the synthesizer's fallibility nor the runner's clock |
+| D2 | what drives `async fn run_suite`; this workspace has no async runtime | §27 | make the runner synchronous, and keep `async` out until a transport-level target needs it |
+| D3 | how a bounded eventual assertion waits, given that §40 forbids sleeps | §15, §40 | the target waits; the runner passes a deadline and never sleeps |
+| D4 | what `generator_version` means once the synthesizer is not `ess-gen` | §23 | two fields — `generator_version` for the projector, `synthesizer_version` for the suite producer |
+
+Everything else here is settled. A reader who disagrees with a settled part records the disagreement in
+[`docs/design/reconciliation-v0.2.md`](reconciliation-v0.2.md) §5 rather than diverging silently, which
+is this repository's standing rule.
 
 ---
 
@@ -312,6 +373,11 @@ The exact trait may change.
 
 The semantic responsibilities should not.
 
+Note what is deliberately **absent** from those seven methods: a clock, a seed and an id source. That
+is not an oversight to be corrected by adding them here — it is the boundary §37 draws. Everything that
+varies is minted by the runner and handed to the target; the target mints nothing the report will
+compare.
+
 ---
 
 ## 8. Scenario Isolation
@@ -447,6 +513,44 @@ The important invariant is:
 
 A refusal is better than a false test.
 
+### Consume `ResolvedOutcome::test_strategy`; do not re-derive it
+
+The compiler has **already decided**, per outcome, whether that branch is reachable by constructing an
+input. The decision is stored: `ResolvedOutcome::test_strategy`
+(`crates/ess-compiler/src/ir.rs:488`), computed once during resolution, for the reason its own doc
+comment gives — a decision made per projection is a decision made wrong eventually.
+
+Synthesis therefore **reads `test_strategy` and branches on it**. It does not re-inspect the predicate
+and form an independent opinion about reachability. Asking that question a second time is a
+**regression**, not an optimisation: it reintroduces exactly the divergence the field was added to
+prevent, and the divergence will not be visible until two projections disagree about one outcome.
+
+### `Unknown` refuses — it is not "try another candidate"
+
+Predicate evaluation is Kleene three-valued and the workspace invariant is blunt: *`Unknown` is not
+`False`*. A witness search that treats `Unknown` as a near miss spends its whole budget on a
+specification defect and then reports the result as a flaky test.
+
+So: keep `True`, discard `False`, and **refuse on `Unknown`**, with a diagnostic naming the predicate
+and the fact path that could not be resolved. `Unknown` says the specification does not yet say enough
+— which is information for the person who wrote it, not noise for the generator to retry through.
+
+### Refusal is an outcome, not a defect
+
+These are legitimate, expected results of synthesis, not bugs in it:
+
+- no safe witness can be produced for the outcome's predicate;
+- the failure policy a scenario would have to assert has no observable in the model (see
+  [G2](../plan/ess-wave-3.5-reconciliation.md));
+- the predicate is valid but not constructively satisfiable;
+- evaluation returns `Unknown`.
+
+Each is returned as a **typed diagnostic** carrying a stable code, a structured body and the ESS element
+that caused it — the same shape `ess-compiler` already uses for a bad document, because a coding agent
+consumes both as repair instructions. Silently omitting the scenario is the one unacceptable option.
+
+This is why scenario synthesis cannot be an `ess_gen::Generator`. See §36.
+
 Possible later extension:
 
 ```text
@@ -544,20 +648,15 @@ The runner must preserve that distinction.
 
 ### Read-your-writes
 
-A command result may return an opaque consistency token:
+**Both types already ship in `aep-contract`. Use them; do not declare a second pair.**
 
-```rust
-pub struct ConsistencyToken(String);
-```
+| this section originally proposed | what exists |
+|---|---|
+| `pub struct ConsistencyToken(String)` | `aep_contract::consistency::ConsistencyToken` — opaque, backend-issued, validated (`crates/aep-contract/src/consistency.rs:30`) |
+| `pub enum ViewConsistency { Current, AtLeast(_) }` | `aep_contract::consistency::QueryConsistency` — `Current` as the default, and a token-bearing variant beside it (`crates/aep-contract/src/consistency.rs:76`) |
 
-A view request can require:
-
-```rust
-pub enum ViewConsistency {
-    Current,
-    AtLeast(ConsistencyToken),
-}
-```
+They are the same idea, arrived at twice. A parallel pair would buy nothing but a translation table
+between two spellings of one concept, and a translation table is a place for the two to drift apart.
 
 Generated flow:
 
@@ -586,7 +685,18 @@ Again:
 
 > No arbitrary sleep in generated tests.
 
-Use a bounded eventual assertion abstraction.
+Use a bounded eventual assertion abstraction. What "bounded" means concretely — a deadline the runner
+owns, and waiting that happens inside the target — is settled in §15.
+
+### Consume `ResolvedView::assertion_style`; do not re-derive it
+
+Whether a view assertion is immediate or must be retried is not a question for the synthesizer either.
+`ResolvedView::assertion_style` (`crates/ess-compiler/src/ir.rs:609`) holds the answer, computed once
+from the view's declared consistency, stored "for the reason `ResolvedOutcome::test_strategy` is: it is
+a decision, and a decision made per projection is a decision made wrong eventually".
+
+Synthesis reads it. Deciding `expect` versus `eventually` again, by reading the consistency word a
+second time, is a regression for the same reason `test_strategy` is.
 
 ---
 
@@ -609,12 +719,36 @@ conformance:
 
   eventual:
     timeout: 5s
-    poll_interval: 25ms
 ```
 
 These values affect test execution, not the meaning of the ESS.
 
 If the ESS later models a true semantic SLA such as "event must occur within 2 seconds", that is a different specification concept.
+
+### `poll_interval` is gone — §40 wins
+
+An earlier draft of this section configured `poll_interval: 25ms` beside the timeout. §40 forbids
+sleeps as synchronisation. **A poll interval is a sleep by another name** — the same fixed delay,
+spelled as configuration and repeated in a loop — so the two sections contradicted each other. Resolved
+here, in favour of §40: **the runner configures a deadline and nothing else about waiting.**
+
+`ResolvedView::assertion_style`'s own doc comment names this failure mode from the other side:
+asserting an eventual view with `expect` "races the projection, and the repair everyone reaches for is
+a sleep — which makes the suite a test of the machine it runs on"
+(`crates/ess-compiler/src/ir.rs:606`). Configuring the sleep centrally does not stop it being that
+test.
+
+**What waits instead is the target.** A view query or an event observation carries the scenario's
+deadline; the target returns when it can answer or when the deadline expires. *How* it waits — a
+channel, a notification, a condition variable, the backend's own consistency mechanism — is an adapter
+concern the runner must not know about, exactly as §14 already makes the target responsible for
+satisfying `AtLeast(token)`.
+
+**Open decision D3.** If a target genuinely cannot block — a stateless HTTP adapter with no
+subscription — someone has to wait somewhere. That case is out of wave 4's scope, whose reference
+target is in-process, and it is deferred rather than pre-solved with an interval. If it is ever
+answered with a poll loop, the interval belongs to the **target**, is recorded in the report as part of
+that target's identity, and §40's invariant is amended in writing rather than quietly broken.
 
 ---
 
@@ -685,8 +819,14 @@ For:
 
 ```yaml
 delivery: at_least_once
-on_failure: escalate
+on_failure:
+  escalate:
+    emits: billing.email.DeliveryEscalated
 ```
+
+Since gate G2 landed, `escalate` names the event it emits, so the scenario below asserts that event
+rather than needing an observation the model could not make.
+
 
 the suite must have a scenario that forces the downstream failure.
 
@@ -742,6 +882,20 @@ The exact rejection mechanism must come from the declared command/error semantic
 
 Do not generate vague "operation fails" tests if the domain declares a specific error.
 
+### This section is blocked on a model gap
+
+Both classes above are written as sequences of `ExecuteCommand` steps, so both need to know **which
+command drives a transition** — and the model does not say. `ResolvedCommand` names its domain, its
+input and its outcomes, but no subject (`crates/ess-compiler/src/ir.rs:501`); an entity's `Transition`
+names a `from`, a `to` and its own label, but no cause (`crates/ess-domain/src/entity.rs:157`). In the normative billing example that is three declared
+transitions and zero commands that drive any of them.
+
+That is gate G14 in [`ess-wave-3.5-reconciliation.md`](../plan/ess-wave-3.5-reconciliation.md), and it
+is a model change — a construct in `ess-domain`, resolution in the compiler, a rendering in the
+projections, an example edit. **Do not work around it in the synthesizer.** Inferring the driving
+command from a name, an event or an ordering is exactly the kind of invention §11 refuses, and it would
+bake the omission in behind a heuristic nobody could later find.
+
 ---
 
 ## 20. Invariant Scenarios
@@ -775,6 +929,11 @@ proof / counterexample
 ```
 
 The current milestone only needs deterministic conformance cases.
+
+Same dependency as §19: "evaluate invariants after a state-changing command" needs a command→entity
+link to answer *whose* invariants to evaluate after `CreateInvoice`. Gate G14 again. And evaluating a
+typed invariant against a candidate value needs a projection from an input to a `FactSource`, which
+does not exist yet either — gate G16. Both are prerequisites of this section, not work inside it.
 
 ---
 
@@ -830,6 +989,23 @@ execution technology
 
 It should be serializable for inspection and future cross-language runners.
 
+### A serialized suite carries semantic identity, not handles
+
+`EssIr` handles are valid only inside the IR that minted them. Using one against a different `EssIr`
+**panics by design** — "a handle belongs to the IR that minted it"
+(`crates/ess-compiler/src/ir.rs:141`) — because inside one process that is a programming mistake, not a
+specification's problem.
+
+A committed `ConformanceSuite` is not inside one process. It is written to `generated/`, drift-checked
+in CI, read back by a runner in a later process on a later checkout, and referred to by scenario id
+from the fault matrix. **So every reference it holds is a stable ESS semantic name** — `CommandRef`,
+`OutcomeRef`, `EventRef`, `ViewRef`, `EssSemanticRef` — resolvable against any compilation of the same
+specification. No handle, no index into a `Vec`, no slot number.
+
+A suite whose references only mean something inside the process that produced it is not an artifact; it
+is a cache. It also cannot be what §22 promises — a portable bridge to a future cross-language runner —
+because a handle is not portable across a process, let alone a language.
+
 ---
 
 ## 22. Why Scenario IR Matters
@@ -879,6 +1055,17 @@ pub struct SuiteProvenance {
     pub suite_version: String,
 }
 ```
+
+**This type largely exists.** `ess_gen::Provenance` (`crates/ess-gen/src/provenance.rs:13`) already
+carries the system, the specification version, a digest of the resolved model, the compiler version and
+the generator version, and every projected artifact emits it. Extend or reuse it rather than declaring
+a parallel shape: two provenance types in one repository are two answers to "which specification
+produced this", and the point of provenance is that there is one.
+
+**Open decision D4.** Once the synthesizer is a separate thing from `ess-gen` (§36), `generator_version`
+has two possible referents, and a report that cannot say which oracle produced a verdict is not
+reproducible — which is the whole purpose of the field. Default: two fields, `generator_version` for
+the projector and `synthesizer_version` for the suite producer.
 
 Every scenario should also identify which ESS semantic elements caused it to exist.
 
@@ -988,6 +1175,20 @@ enum Fault {
 
 Prefer this if the fault controls remain obvious and isolated.
 
+**Option B already ships, one crate over.** `aep-conformance` does exactly this for the AEP backend
+suites, and it is the precedent to copy rather than reinvent:
+
+| the design proposes | what exists |
+|---|---|
+| `enum Fault { … }` | `Fault`, a small `#[non_exhaustive]` enum with a `Fault::ALL` constant (`crates/aep-conformance/src/faulty.rs:34`) |
+| "each fault fails its intended check" | `Fault::caught_by()`, naming the one suite that exists to catch each variant (`crates/aep-conformance/src/faulty.rs:88`) |
+| §26's meta-test | `each_fault_is_caught_by_the_suite_that_exists_to_catch_it`, which iterates `ALL` and fails on any fault no designated suite catches (`crates/aep-conformance/tests/faults.rs:55`) |
+| a deliberately broken implementation | `FaultyBackend`, the target those faults are injected into |
+
+The ESS fault matrix is that pattern with ESS scenario ids where AEP suite names are. What is worth
+carrying over unchanged is the `ALL` constant: it is what makes the meta-test a matrix rather than a
+list someone has to remember to extend.
+
 The important invariant:
 
 > Each deliberate fault must fail the specific scenario intended to detect it.
@@ -1062,6 +1263,29 @@ The target owns:
 - observing semantic outputs;
 - mapping implementation-specific failures into target errors;
 - consistency waiting where required.
+
+The split above is about responsibility. §37 makes the same split about *variation* — the runner owns
+every source of it, and the target owns none — and that is the stricter of the two.
+
+### There is no async runtime in this workspace — open decision D2
+
+The signature above says `async fn`, and nothing in this repository can drive it. The only executor
+present is `aep_contract::testing::block_on` (`crates/aep-contract/src/testing.rs:22`), which polls a
+future up to a million times with a no-op waker and then panics. That is right for what it was written
+for — a synchronous backend whose futures are ready on the first poll, where still-pending genuinely
+means deadlock — and wrong for a runner awaiting a target that really yields. Handing it a suite
+against an HTTP target would either burn a million polls or panic on a future that was merely slow.
+
+So the runner's execution model is an open decision, not an implementation detail:
+
+| option | cost |
+|---|---|
+| **synchronous runner** (default) | no new dependency; the in-process reference target needs nothing more; a future transport target must block internally, which §15 already asks of it |
+| add a real executor (`tokio`, `smol`) as a workspace dependency | the first async runtime in a workspace that has deliberately had none, and a `[lints]`/MSRV surface to keep green |
+| keep `async fn` and require the caller to bring an executor | pushes the choice onto adopters, and makes the runner untestable in this workspace without one |
+
+Settle it before step 1 of §49: it decides whether every signature in the scenario IR and the target
+trait is `async`, and changing that afterwards is a rewrite rather than a refactor.
 
 ---
 
@@ -1177,6 +1401,13 @@ error
 ```
 
 If any required scenario is unsupported, aggregate status is not `passed`.
+
+**Read the existing report type before designing this one.** `aep_conformance::report` already models a
+conformance run with per-check results: `ConformanceReport`, carrying the level that was claimed and a
+`SuiteReport` of what each suite found (`crates/aep-conformance/src/report.rs:204`). The ESS report is
+genuinely a different shape — scenarios rather than suites, and it must carry specification identity,
+which the AEP one has no need of — but the per-check result structure, the status vocabulary and the
+aggregation rule are all solved there, tested, and shipped.
 
 ---
 
@@ -1343,7 +1574,11 @@ protocol ess conformance run <spec> --target <adapter>
 protocol ess conformance report <report>
 ```
 
-Do not treat these names as normative if the unpushed `ess-gen` already established a coherent command shape.
+The shipped verbs are `protocol ess validate | compile | inspect | graph | generate`, and
+`generate --kind docs|schema|openapi|asyncapi` is already the established shape — so the conformance
+verbs extend that surface rather than proposing a parallel one. `protocol conformance` is separately
+taken by the AEP backend suites; whatever the ESS spelling ends up being, it must not read as the same
+command.
 
 The required semantics are more important than CLI spelling.
 
@@ -1351,81 +1586,110 @@ The required semantics are more important than CLI spelling.
 
 ## 35. Where the Code Should Live
 
-Respect the existing review decision to avoid premature crate proliferation.
+Respect the existing review decision to avoid premature crate proliferation. But the shape this section
+originally proposed — a `conformance/` module tree inside `ess-gen`, holding `scenario.rs`,
+`synthesize.rs`, `target.rs`, `runner.rs` and `report.rs` — is **not available**, and the reason is in
+`ess-gen`'s own documentation rather than in anyone's taste.
 
-At the start of this milestone, prefer modules inside the existing ESS implementation boundary.
+### `ess-gen` cannot hold the runner
 
-Possible first shape:
+| what the runner is | what `ess-gen` says about itself |
+|---|---|
+| **fallible** — a target can be unreachable, a check can `error`, an observation can be `unsupported` | `Generator::generate` is infallible by contract: a construct it cannot project is a defect in the crate, and "there is nothing left for a `Result` to report" (`crates/ess-gen/src/artifact.rs:45`) |
+| **takes a clock** — deadlines, `ScenarioResult::duration`, the report's `started_at`/`completed_at` | "No clock, no RNG, `BTreeMap`/`BTreeSet` only" (`crates/ess-gen/src/lib.rs:24`) |
+| **talks to an external implementation** | pure `EssIr` → bytes, with a determinism test per generator that generates twice and compares |
 
-```text
-crates/
-├── ess-domain/
-├── ess-compiler/
-└── ess-gen/
-    └── src/
-        ├── docs/
-        ├── schema/
-        ├── openapi/
-        ├── asyncapi/
-        └── conformance/
-            ├── scenario.rs
-            ├── synthesize.rs
-            ├── target.rs
-            ├── runner.rs
-            └── report.rs
-```
+Putting a fallible, clock-taking, implementation-touching runner inside that crate does not stretch
+those two claims — it **falsifies** them. And they are load-bearing: the byte-identical determinism
+tests rest on the second, and the "a gap is a crate defect, not a specification fault" reasoning that
+lets every projection be infallible rests on the first.
 
-However, conformance has a strong chance of becoming a real independent boundary because it:
+The same argument applies, one degree weaker, to the synthesizer: it is fallible (§11, §36) even though
+it holds no clock.
 
-- consumes scenario IR;
-- interacts with external implementations;
-- is used without generating docs/contracts;
-- will likely gain multiple target adapters.
+### Open decision D1 — the crate boundary
 
-Therefore apply the repository's existing rule:
+Settle before step 1 of §49: it decides where the scenario IR type lives, and every later module
+imports it.
+
+| option | scenario IR | synthesizer | runner + target | note |
+|---|---|---|---|---|
+| **A — one `ess-conformance` crate (default)** | `ess-conformance` | `ess-conformance` | `ess-conformance` | one boundary, one crate; `ess-gen` untouched and both of its claims intact |
+| B — synthesis in `ess-gen`, execution in `ess-conformance` | `ess-conformance` | `ess-gen` | `ess-conformance` | keeps §36's "all derivation from `EssIr` is `ess-gen`" — but only by adding a second, fallible trait beside `Generator` in a crate whose doc says a failure there is a defect |
+| C — everything in `ess-gen` | `ess-gen` | `ess-gen` | `ess-gen` | **rejected**: falsifies the table above |
+
+The repository's rule is:
 
 > Split when the boundary has been argued about twice.
 
-A later split into:
-
-```text
-ess-conformance
-```
-
-is appropriate once the API proves itself.
-
-Do not create it merely because this document names the concept.
+It has now been argued about twice — once in this document's first draft, which put it inside `ess-gen`,
+and once in the review that reconciled the draft against the code. The argument settled that the
+boundary is real: conformance consumes scenario IR, interacts with external implementations, is used
+without generating docs or contracts, and will gain target adapters. That is the condition the rule
+asks for, which is why option A is the default here rather than a premature split.
 
 ---
 
 ## 36. Relationship to `ess-gen`
 
-`ess-gen` should remain the owner of deterministic derivation from `EssIr`.
+`ess-gen` remains the owner of **infallible** deterministic derivation from `EssIr`.
 
-Scenario synthesis is a projection.
+Scenario synthesis is derivation too — but it is not the same contract, and the original diagram here,
+which hung `ConformanceSuite` off `ess-gen` as a fifth branch beside docs, JSON Schema, OpenAPI and
+AsyncAPI, hid the difference.
 
-Therefore:
+### Two contracts, not one trait
+
+| | `ess_gen::Generator` | scenario synthesis |
+|---|---|---|
+| result | `Vec<Artifact>` — always | a `ConformanceSuite` **or** typed refusal diagnostics |
+| a construct it cannot handle | a gap in the crate; a defect to fix (`crates/ess-gen/src/artifact.rs:45`) | a legitimate outcome, reported to whoever wrote the specification |
+| what a refusal means | nothing — there is no refusal to express | "this specification does not yet say enough for an oracle to check it" |
+| who acts on a failure | the maintainer of `ess-gen` | the author of the ESS |
+
+The refusals are the whole reason. Synthesis legitimately declines when no safe witness can be produced
+for an outcome's predicate, when a binding's failure policy has no observable to assert against, when a
+valid predicate is not constructively satisfiable, and when predicate evaluation returns `Unknown`
+(§11). None of those is a bug in the synthesizer, and none of them can be expressed by returning
+`Vec<Artifact>` — which is why forcing synthesis behind `Generator` would mean either lying (emit a
+scenario that asserts nothing) or panicking (turn a thin specification into a broken tool). Both are
+failures this repository exists to prevent.
 
 ```text
 EssIr
-  ↓
-ess-gen
-  ├── docs
-  ├── JSON Schema
-  ├── OpenAPI
-  ├── AsyncAPI
-  └── ConformanceSuite
+  ├── ess-gen — infallible
+  │     ├── docs
+  │     ├── JSON Schema
+  │     ├── OpenAPI
+  │     └── AsyncAPI
+  │
+  └── scenario synthesis — fallible
+        └── ConformanceSuite | Vec<SynthesisRefusal>
 ```
 
-The **runner** is different.
+A `SynthesisRefusal` is **typed and diagnostic**, in the shape `ess-compiler` already uses for a bad
+document: a stable code, a structured body, and the ESS element that caused it. A coding agent consumes
+both as repair instructions, so they should read the same way.
 
-It executes a `ConformanceSuite` against a target.
+Silently omitting a scenario is the one unacceptable option. A suite that quietly contains fewer checks
+than the specification requires is precisely the "generated tests are green" failure §51 rules out —
+and unlike a refusal, nothing about it is visible in a passing run.
 
-If implementation pressure makes this distinction awkward inside one crate, that is the first concrete argument for extracting `ess-conformance`.
+### The runner is a third thing
+
+It executes a `ConformanceSuite` against a target, it is fallible, and it takes a clock. It does not
+belong in `ess-gen` under any option; see §35 and open decision D1.
 
 ---
 
 ## 37. Determinism
+
+Two claims are needed, not one: a suite must be **generated** the same way twice, and it must be **run**
+the same way twice. The original section made only the first. The second is added below, because wave
+4's product is evidence that decides whether work may be declared complete, and evidence from a run
+nobody can repeat is a claim rather than evidence.
+
+### Generation determinism
 
 Generated scenario suites must follow the same deterministic rules as the compiler and other projections.
 
@@ -1454,6 +1718,79 @@ Execution reports may contain timestamps.
 
 Generated definitions may not.
 
+### Execution determinism
+
+Everything above is about *generating* a suite. It says nothing about *running* one, and that closing
+pair — reports may carry timestamps, definitions may not — is a formatting rule, not a reproducibility
+claim.
+
+The repository already answered this one layer down. **Invariant 8:** the domain crate is clock-free and
+randomness-free, and the engine takes a `Clock` "so an execution is replayable". `aep-conformance`'s
+`Harness` is the worked example — a monotonic sequence counter and a clock starting at a fixed instant,
+both held by the harness rather than read from the environment
+(`crates/aep-conformance/src/harness.rs:77`).
+
+The `ConformanceTarget` in §7 has seven methods and not one of them is a clock, a seed or an id source.
+So a correlation id, a timestamp or an idempotency key minted during a run currently comes **from
+nowhere in particular**. Fix that here, before the runner exists.
+
+**A `ScenarioId` is a semantic name, never a counter.** This document says both in two places, and only
+one of them survives contact with a specification that changes. A counter is stable "across unchanged
+input", which is what §50 asks for — but insert one outcome and every scenario after it is renumbered,
+so the committed suite re-keys wholesale, the fault matrix's references rot, and every stored report
+names scenarios that no longer exist. Worse, a semantic diff of two specifications cannot line up
+yesterday's result with today's scenario, which is the whole basis of deciding whether prior evidence
+still holds.
+
+So a scenario id is derived from what the scenario is *about* — the qualified name of the command, the
+outcome, the transition or the binding it exercises — and two scenarios about the same thing in the same
+way are the same id. It is a name, so it is diffable, greppable, and stable under every change that does
+not touch the construct it names. A counter is none of those.
+
+**A scenario's `source` is its dependency set, not the construct that spawned it.** `derived_from` as
+sketched lists what *caused* the scenario to exist — a command, an outcome, an error. What a later
+consumer needs is every construct the scenario *depends on*: the types its input mentions, the entity it
+moves, the view it asserts, the event it expects. The two differ exactly where it matters. A scenario
+generated from `CreateInvoice.rejected` and asserting an `InvalidAmount` payload depends on `Money`; if
+`Money` gains a field, that scenario's result is stale and a `derived_from` naming only the outcome will
+not say so. Collecting the dependency set costs nothing at generation time, because the generator has
+just walked every one of those constructs to build the scenario. Reconstructing it afterwards means
+regenerating the suite.
+
+**The runner owns every source of variation.** It is constructed with them, and nothing below it reaches
+for an ambient one:
+
+| the runner is given | so that |
+|---|---|
+| a `Clock` | deadlines, `ScenarioResult::duration`, and the report's `started_at`/`completed_at` are reproducible under a fixed clock |
+| an id source — a monotonic counter, seeded from the suite | correlation ids and idempotency keys are derived from the suite, not from a wall clock or a random device. **Not scenario ids** — see below |
+| the suite, the target and `RunnerConfig` | those are the only inputs; the runner reads nothing else |
+
+**The target owns nothing that varies.** It may not mint a correlation id, read a clock for anything the
+report will contain, or invent an identifier the runner will compare. What it owns is what §27 already
+says: invoking the implementation, observing semantic outputs, mapping implementation failures into
+`TargetError`, and waiting until it can satisfy a consistency requirement (§15). A target that needs an
+id or a timestamp is **given** one in the request.
+
+**The claim this buys.** With the same injected clock and id source, against a deterministic target, two
+runs of one suite produce **byte-identical reports** — which is what makes a committed report reviewable
+by diff. Against a live target under a real clock, two runs differ *only* in the fields below.
+
+| may legitimately differ between two runs | may not |
+|---|---|
+| `started_at`, `completed_at`, `ScenarioResult::duration` | any `status` — on any scenario, on any check |
+| how many times a bounded eventual assertion had to ask before it was satisfied | which checks ran, and in what order |
+| implementation-internal detail quoted inside a diagnostic — a hostname, an address | scenario ids, correlation ids, expected values, or the set of observations compared |
+
+**A `status` that differs between two runs is a defect, never noise.** It is a bug in the runner, in the
+target, or in the specification, and the answer is to find it rather than to retry. §26's fault matrix
+is the test that catches it: if a scenario's verdict is not a function of its inputs, the matrix has
+stopped being a matrix and become a sample.
+
+`error` (§28) exists for the case where the runner or adapter could not execute a check. It is not a
+place to hide non-determinism: an `error` that appears in one run and not the next is itself the finding,
+and is reported as one.
+
 ---
 
 ## 38. Generated Suite as an Artifact
@@ -1463,7 +1800,7 @@ Commit the generated billing suite or an equivalent canonical fixture.
 Example:
 
 ```text
-examples/billing/generated/
+generated/
 ├── docs/
 ├── schema/
 ├── openapi/
@@ -1472,7 +1809,10 @@ examples/billing/generated/
     └── suite.json
 ```
 
-The exact layout can follow `ess-gen` conventions.
+Wave 3 already committed the first four directories under `generated/` at the repository root, with an
+index beside them, drift-checked by `cargo xtask generate --check`; the suite joins them there. (The
+first draft of this section wrote `examples/billing/generated/`, which is not where anything landed —
+`examples/billing/` holds the specification, `generated/` holds what the specification produces.)
 
 CI should regenerate and diff.
 
@@ -1546,6 +1886,14 @@ Use:
 - event observation with deadlines.
 
 A fixed delay tests machine timing, not system semantics.
+
+### `poll_interval` versus this invariant
+
+§15's earlier `poll_interval: 25ms` was a fixed delay under a configuration name, which contradicted
+this section outright. Resolved in §15 **in favour of this one**: the runner configures a *deadline* and
+never sleeps. "Bounded polling" above therefore means a bounded number of semantic queries whose
+*waiting* happens inside the target — the only layer that knows what it is waiting for. See §15 for the
+resolution and open decision D3.
 
 ---
 
@@ -1652,7 +2000,7 @@ Once the suite is trusted, the next milestone becomes straightforward:
 ```text
 EssIr
     ↓
-ess-gen rust
+rust structural synthesis
     ↓
 generated billing workspace
     ↓
@@ -1662,6 +2010,14 @@ same runner
     ↓
 passed
 ```
+
+**"Once the suite is trusted" is a gate, not a transition.** Wave 5 starts only after wave 4 has closed
+its loop in both directions: a correct target producing valid evidence that lets an ADP task complete,
+*and* a faulty target producing a failure that refuses completion. A suite that has only ever been
+green has not been trusted — it has been unexamined, and generating code against it produces confident
+nonsense that nothing can contradict. The wave 5 design
+([`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](ess-structural-synthesis-obligations-realizations-design-v0.1.md))
+opens by assuming this milestone "already exists and is trusted"; that assumption is this gate.
 
 No new behavioral oracle should be written for generated Rust.
 
@@ -1810,7 +2166,13 @@ AEP already governs the retry process.
 
 ## 49. Implementation Order
 
-Recommended order after `ess-gen` projection work is stable enough to consume.
+`ess-gen`'s projection work is delivered and stable (§2), so this order starts now — after the blocking
+gates in [`ess-wave-3.5-reconciliation.md`](../plan/ess-wave-3.5-reconciliation.md).
+
+**Two open decisions come before step 1, not during it.** D1 (§35) decides which crate the step 1 types
+live in; D2 (§27) decides whether their signatures are `async`. Both are changes to every signature in
+the scenario IR and the target trait, so deciding either after step 1 means rewriting step 1. D3 (§15)
+is needed by step 3 and D4 (§23) by step 8.
 
 ### Step 1 — Scenario IR
 
@@ -1823,10 +2185,13 @@ ScenarioStep
 SuiteProvenance
 ```
 
+Every reference inside them is a stable ESS semantic name, not an `EssIr` handle (§21).
+
 Acceptance:
 
 ```text
 billing EssIr → deterministic inspectable scenario suite
+a suite serialized in one process resolves in another
 ```
 
 ### Step 2 — Outcome scenarios
@@ -1839,24 +2204,29 @@ Generate:
 - expected emitted events;
 - negative event assertions.
 
+Branch on `ResolvedOutcome::test_strategy` rather than re-deriving reachability (§11), and return typed
+refusals rather than omitting a scenario.
+
 Acceptance:
 
 ```text
 CreateInvoice has both happy and rejection cases
+a construct synthesis declines to cover appears as a typed refusal, not as an absence
 ```
 
 ### Step 3 — View semantics
 
 Implement:
 
-- read-your-writes consistency token flow;
-- eventual view assertions;
-- runner deadline config.
+- read-your-writes consistency token flow, on `aep_contract::consistency` rather than a new pair (§14);
+- eventual view assertions, driven by `ResolvedView::assertion_style` rather than by re-reading the
+  consistency word (§14);
+- runner deadline config — a deadline, and no poll interval (§15).
 
 Acceptance:
 
 ```text
-no sleeps
+no sleeps, and no poll interval either
 ```
 
 ### Step 4 — Correct hand-written billing target
@@ -1895,7 +2265,14 @@ Generate legal and illegal transition checks.
 
 ### Step 8 — Full report
 
-Produce `EssConformanceReport`.
+Produce `EssConformanceReport`, reusing `ess_gen::Provenance` and the per-check result structure of
+`aep_conformance::report` (§23, §30). Settle D4 here.
+
+Acceptance:
+
+```text
+two runs under one injected clock produce byte-identical reports
+```
 
 ### Step 9 — AEP join
 
@@ -1955,6 +2332,24 @@ This milestone is complete when all of the following are true.
 - Scenario generation is byte-identical.
 - Generated suite is drift-checked in CI.
 - Scenario IDs are stable across unchanged input.
+- The committed suite resolves in a process that did not produce it — semantic names, no handles (§21).
+
+### Execution determinism
+
+- Two runs of one suite against one implementation agree on **every** status, on every scenario and
+  every check.
+- Under the same injected clock and id source, two runs produce byte-identical reports; under a real
+  clock they differ only in the fields §37 permits.
+- The runner takes its clock and its id source by injection. Neither the runner nor any target reads an
+  ambient clock, seed or random device.
+- No generated scenario and no runner test sleeps, and no configuration names a poll interval (§15, §40).
+
+### Refusal
+
+- Synthesis returns typed refusal diagnostics rather than silently omitting a scenario, and each names
+  the ESS element that caused it.
+- Predicate evaluation returning `Unknown` refuses, with the predicate and the missing fact path in the
+  diagnostic. It is never treated as "try another candidate" (§11).
 
 ---
 
@@ -1998,48 +2393,46 @@ The closed loop is the deliverable.
 
 ## 52. Suggested Repository Additions
 
-Illustrative only; adapt to the actual local `ess-gen` tree.
+Illustrative only; adapt to the tree as it stands on `main`.
 
 ```text
 engineering-protocols/
 ├── crates/
 │   ├── ess-domain/
 │   ├── ess-compiler/
-│   └── ess-gen/
+│   ├── ess-gen/                     unchanged — infallible projections only (§35)
+│   └── ess-conformance/             open decision D1, §35 option A
 │       └── src/
-│           └── conformance/
-│               ├── mod.rs
-│               ├── scenario.rs
-│               ├── synthesize.rs
-│               ├── target.rs
-│               ├── runner.rs
-│               └── report.rs
+│           ├── lib.rs
+│           ├── scenario.rs          scenario IR — stable ESS names, no handles (§21)
+│           ├── synthesize.rs        fallible: a suite, or typed refusals (§11, §36)
+│           ├── target.rs            ConformanceTarget (§7)
+│           ├── runner.rs            owns the clock and the id source (§37)
+│           └── report.rs
 │
 ├── examples/
-│   └── billing/
+│   └── billing/                     the specification
 │       ├── domains/
 │       ├── components.yaml
 │       ├── topology.yaml
-│       ├── generated/
-│       │   └── conformance/
-│       │       └── suite.json
-│       │
 │       └── reference/
 │           ├── Cargo.toml
 │           └── src/
+│
+├── generated/                       what the specification produces — already drift-checked in CI
+│   └── conformance/
+│       └── suite.json
 │
 └── conformance/
     └── ess/
         └── fault-matrix/
 ```
 
-If the runner/target API becomes independently reusable and causes `ess-gen` to mix generation with execution, extract:
-
-```text
-crates/ess-conformance/
-```
-
-only then.
+Two corrections to the first draft of this tree, both matching what the repository actually does:
+committed artifacts live under `generated/` at the root, not under `examples/billing/generated/`
+(§38), and the conformance code is its own crate rather than a module inside `ess-gen` (§35). The
+second is open decision D1; if it is settled the other way, only the crate path changes — the file
+list and the responsibilities above do not.
 
 ---
 
@@ -2071,7 +2464,11 @@ docs/design/ess-review-v0.1.md
         │
         ▼
 docs/plan/ess-roadmap.md
-    waves 1–5
+    waves 1–5; waves 1–3 delivered
+        │
+        ▼
+docs/plan/ess-wave-3.5-reconciliation.md
+    the gates wave 4 waits behind
         │
         ▼
 THIS DOCUMENT
@@ -2085,6 +2482,15 @@ THIS DOCUMENT
 ```
 
 It is intentionally narrower than the ESS implementor design.
+
+Downstream of it, and gated on it closing its loop:
+
+```text
+THIS DOCUMENT (ESS wave 4)
+        │
+        ▼
+docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md (ESS wave 5)
+```
 
 ---
 

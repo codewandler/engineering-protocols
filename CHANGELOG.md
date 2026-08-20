@@ -9,6 +9,77 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+### Added
+
+- **A command outcome says which entity it acts on, and a transition nobody takes is refused.** An
+  outcome declares `creates:`, `moves:` or `updates:`, so `CreateInvoice.accepted` creates an invoice
+  and `CreateInvoice.rejected` creates nothing — the distinction lives on the outcome because a
+  subject on the command would attach a state change to a refusal. A lifecycle transition no outcome
+  takes is now `missing_causation`: it is a state change nothing can trigger, which is the lifecycle's
+  version of a type no value can inhabit, and the refusal names the outcome that could take it.
+- **The published schemas accept every spelling the parsers do.** `component:` beside `name:` in a
+  specification, `id:` beside `name:` on a binding, `type:` beside `kind:` in a task, `require:` beside
+  `requires:` in a workflow, and fourteen more. An editor loaded with
+  `schemas/generated/ess.schema.json` marked this repository's own normative example invalid, and
+  offered no fix, because the spelling it objected to was the spelling the guide's examples use. The
+  aliases were always deliberate; the schema simply did not know about them, since a `#[serde(alias)]`
+  is invisible to schema generation. Fifteen of the seventeen were in documents nobody had checked.
+- **Conformance evidence is bound to the revision it was produced against.** A run against yesterday's
+  specification no longer satisfies a requirement about today's, and a specification artifact that
+  records no model digest is conformed to by nothing. The second half is deliberate and is the
+  uncomfortable one: unproven is not proven, so a specification whose artifact carries no digest leaves
+  its conformance requirement permanently owed until someone records one. The alternative — treating an
+  unrecorded digest as "probably fine" — is how evidence outlives the thing it was evidence for.
+- **`ess-conformance`** — the one piece the verification oracle cannot start without: a candidate
+  command input projected into facts, and a guard decided against it. It answers with four outcomes
+  rather than a boolean, because "this value does not satisfy the guard" and "this guard cannot be
+  decided at all" are different answers and only the first means *try another value*. A guard ordering
+  two pieces of text with no declared scale, or reading a path no type declares, is unevaluable — and
+  saying so is the point, since treating it as a failure would report a specification's defect as a
+  flaky test.
+- **A binding that escalates must say what that emits.** `on_failure: escalate` on its own is now
+  refused: write `escalate:` with `emits:` naming a declared event. "Surface it to a person" is not
+  something a conformance target can be asked to prove, so a failure policy that said only that was a
+  promise nobody could be held to. `retry` and `drop` are unchanged and stay single words — a retry is
+  observable as another invocation, and a drop is unobservable on purpose, which is the whole reason it
+  has to be typed out.
+- **A property-test result carries the seed that reproduces it.** A counterexample you cannot re-run
+  is a bug report without a repro, so `seed` is now part of the record — an opaque string rather than a
+  number, because proptest, Hypothesis, fast-check and a fuzz corpus each spell a seed differently and
+  a numeric field would force three of them to encode a lie.
+- **Conformance evidence names the specification it attests**, by digest and not by a free-text string.
+  A record that cannot say which specification produced it proves that some implementation passed some
+  suite; it cannot prove that the implementation in front of you conforms to the specification in front
+  of you.
+
+### Changed
+
+- **`version: 4294967296` is refused rather than silently becoming `4294967295`.** The two spellings of
+  a version now agree: `v4294967296` was already refused, while the numeric form saturated, so two
+  documents that disagreed about a version compared equal.
+- **A YAML mapping key written twice is refused in every document this repository reads.** It was
+  already refused in a specification; a protocol, principle, workflow, profile or lifecycle silently
+  kept the last of the two. A profile that granted a capability twice lost one of them with no
+  diagnostic.
+- **A number a document cannot round-trip is refused.** `1e400` parses as an infinity, and JSON has no
+  spelling for one — so it was published as `null`, turning a guard the author wrote into a guard
+  nobody wrote. `.nan` likewise slipped past the constructor into a type whose documentation promises
+  it cannot exist, which made ordering unreliable for every comparison against it.
+- **A type or predicate nested deeper than 32 levels is refused instead of overflowing the stack.** A
+  refusal names the construct and the limit; the abort it replaces named nothing.
+
+### Fixed
+
+- **A refused approval no longer authorises the action it refused.** A reviewer who read a change,
+  refused it, and recorded that refusal was granting the production write — at three separate places in
+  the engine. Also: a capability a principle denied could be downgraded to merely requiring an
+  approval, an approval floor on `deployment.create:production` did not catch a profile granting the
+  broader `deployment.create`, and the audit trail accepted a record that claimed a refusal and listed
+  the rows it changed.
+- **A validated type can no longer be conjured from a document.** Adding `Deserialize` to a type that
+  is supposed to be reachable only through validation compiled and passed every check; the invariant
+  every other guarantee rests on was enforced by nothing. It is now enforced mechanically.
+
 ## [0.3.2-ess-wave-3] — 2026-08-20
 
 ### Added

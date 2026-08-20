@@ -14,19 +14,19 @@
 //! ```
 //!
 //! Every answer is deterministic in the validated documents plus the evidence submitted. Given a
-//! [`FixedClock`](clock::FixedClock), replaying an execution reproduces its event stream exactly.
+//! [`FixedClock`], replaying an execution reproduces its event stream exactly.
 //!
 //! | module | responsibility |
 //! |---|---|
 //! | [`registry`] | the documents in force, and the cross-document checks |
 //! | [`load`] | reading a document tree from disk |
 //! | [`project`] | finding and loading an adopting project |
-//! | [`resolve`] | `Task` + registry → [`ExecutionPlan`](aep_domain::ExecutionPlan) |
+//! | [`resolve`](mod@resolve) | `Task` + registry → [`ExecutionPlan`](aep_domain::ExecutionPlan) |
 //! | [`execution`] | live state: facts, evidence, events, artifacts |
 //! | [`evaluate`] | what is owed, what is permitted |
 //! | [`policy`] | capability decisions, with the rule that produced each one |
 //! | [`explain`] | human- and machine-readable explanations |
-//! | [`engine`] | the [`ProtocolEngine`](engine::ProtocolEngine) trait and its implementation |
+//! | [`engine`] | the [`ProtocolEngine`] trait and its implementation |
 //! | [`clock`] | injected time, so executions replay |
 //! | [`trail`] | protocol decisions as audit records, and the context commands inherit |
 

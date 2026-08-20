@@ -1,10 +1,7 @@
 # ESS wave 3.5 — reconciliation, and the gates wave 4 waits behind
 
-> **In progress — 15 of 19 gates closed. All of wave A is done and `task check` is green with six
-> steps.** Remaining: G2, G15, G16, G19. Wave 3 delivered the projections and is tagged `0.3.2-ess-wave-3`. This page is the list
-> of things that must be true before wave 4 — the specification as an executable oracle — is worth
-> starting, and the evidence each one is closed by. Nothing here is a redesign: every gate is bounded,
-> and four of them are hours of work rather than days.
+> **Complete — all 20 gates closed.** `task check` is green with six steps: 45 suites, 1043
+> tests, 0 clippy warnings, 0 rustdoc warnings, schemas and projections both up to date.
 
 ## Why a milestone between two waves
 
@@ -28,13 +25,14 @@ findings are the subject of gate G5.
 | # | gate | severity | blocks wave 4 | closed by |
 |---|---|---|---|---|
 | G1 | the control documents describe the repository that exists | high operationally | yes | **closed** — the drift list below is empty |
-| G2 | `on_failure: escalate` has an observable consequence | high | yes | a conformance target can prove escalation happened without a test-only hook |
+| G2 | `on_failure: escalate` has an observable consequence | high | yes | **closed** — `escalate:` names the event it emits; the bare word is refused as `missing_declaration` |
 | G3 | wave 3's acceptance criterion says what is actually true | medium | no | **closed** — roadmap and tests agree |
 | G4 | the wave 4 design is reconciled against the code and frozen | high | yes | **closed** (D1–D4 open by design) — the design's baseline is the real API and its refusal model is stated |
 | G5 | the guards on the safety envelope actually guard | **critical** | yes | **closed** — all 7 survivors fail a test; the engine's three `== Granted` sites verified by mutation |
 | G17 | a validated type cannot be conjured from a document | **critical** | yes | **closed** — a source scan over 10 `Raw*`→validated pairs, no new dependency |
 | G18 | a number a document cannot round-trip is refused at the door | high | no | **closed** — non-finite refused in `new`, in `parse_literal`, and in a hand-written `Deserialize` |
-| G19 | conformance evidence is bound to the specification *revision* it attests | high | no (blocks trusting wave 4's output) | an `Artifact` carries a model digest and `EvidenceRequirement` checks it, as `ReviewRequirement` already checks a review covers a revision |
+| G19 | conformance evidence is bound to the specification *revision* it attests | high | no (blocks trusting wave 4's output) | **closed** — `Artifact::is_at_revision`, fail-closed, and the fail-open polarity verified by mutation |
+| G20 | the published schema accepts what the parser accepts | high | no | **closed** — 17 aliases across 7 schemas; the test reads the serde attributes and checks both directions |
 | G6 | property-test evidence can reproduce its own counterexample | medium | no (blocks the fuzz work) | **closed** — `Seed` on the run, an opaque string so no tool has to encode a lie |
 | G7 | HEAD passes its own gate | — | **already closed** | `task check` exit 0; CI green on `3647f80` |
 | G8 | MSRV and rustdoc are checked, not just declared | low | no | **closed** — MSRV job green on 1.85; rustdoc at 0 warnings and `doc-check` now in the gate |
@@ -44,8 +42,8 @@ findings are the subject of gate G5.
 | G12 | a conformance run is reproducible, not merely unslept | high | yes | **closed** — the runner's clock and id source are injected, as the engine's already are |
 | G13 | a duplicated YAML key is refused on the AEP side too | medium | no | **closed** — `read_yaml` guards every AEP document kind, re-parsing so spans survive |
 | G14 | a command can be tied to the transition and the entity it drives | **critical** | yes | **closed** — an outcome declares `creates:`/`moves:`/`updates:`; an uncaused transition is refused |
-| G15 | the normative example can exercise what the oracle must prove | high | yes | its `read_your_writes` view can hold a row |
-| G16 | a candidate input can be evaluated against a predicate at all | high | yes (blocks witness synthesis) | an input projects into a `FactSource`, and `Unknown` refuses |
+| G15 | the normative example can exercise what the oracle must prove | high | yes | **closed** — `examples/oracle-fixture/`, 11 tests, every fault row machine-derived |
+| G16 | a candidate input can be evaluated against a predicate at all | high | yes (blocks witness synthesis) | **closed** — `ess-conformance` decides a guard against a candidate; `Unknown` refuses with a named reason |
 
 ---
 
@@ -293,6 +291,40 @@ is the thing the guard-efficacy review spent the day finding.
 
 Not blocking wave 4's *implementation*, because the runner can be built and the evidence produced
 before the binding is enforced. Blocking anyone *trusting* the result.
+
+### G20 — the published schema accepts what the parser accepts
+
+`schemas/generated/ess.schema.json` **rejects `examples/billing/components.yaml`** — six errors,
+reproduced independently with a conforming validator. It demands `name:` on a component and a binding,
+while the parser accepts `component:` and `id:` and the normative example uses exactly those.
+
+The cause is one line of type-level drift: `#[serde(alias = "component")]` on
+`crates/ess-domain/src/component.rs` is invisible to `schemars`, so the generated schema describes the
+canonical spelling only. `AGENTS.md` records that wire-format aliases are deliberate — both spellings
+appear in the design documents, and aliases are accepted on input on purpose. The schema does not know
+that, so it publishes half the language.
+
+The consequence lands on the one person this artifact exists for. `docs/guide/specification.md:264`
+tells an author to point their editor at this schema; doing so marks the normative example as invalid
+and offers no fix, because the spelling it objects to is the spelling the guide's own examples use.
+
+**The guard that should have caught it excluded the evidence.**
+`crates/aep-schema/tests/published.rs:60` iterates a hard-coded list of three files —
+`system.yaml`, `domains/invoice.yaml`, `domains/email.yaml` — and `components.yaml` is simply not in
+it. A test named *the specification schema accepts the normative example* checks three fifths of the
+normative example. That is the same shape as every survived mutation this milestone found: the
+assertion is real, and the state where it would fail is unreachable from the fixture.
+
+This exact defect class is recorded in this repository already, in
+`crates/ess-gen/tests/schema.rs`'s module doc: *"this repository has published a schema that rejected
+its own normative example, and … one that described a Rust representation rather than what an author
+writes. Both were well formed. Both passed every check that only asked whether the output parsed."* It
+has now happened a third time, in the one place that comment was not looking.
+
+Two things to fix, and the second matters more: the schema should describe both spellings, since both
+are legal input; and the test must **discover** the example's files rather than list them, so a file
+added to the example cannot be silently exempt. `crates/ess-compiler/tests/billing.rs` already
+discovers rather than lists, and says why.
 
 ## The property-based work, and where it sits
 

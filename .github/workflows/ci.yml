@@ -21,6 +21,9 @@ jobs:
   gate:
     name: Gate
     runs-on: ubuntu-latest
+    # A hung job holds a runner for six hours on GitHub's default. Nothing here takes more than a few
+    # minutes, so these ceilings are only ever reached by a hang, never by honest work.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -41,12 +44,30 @@ jobs:
       - name: Test
         run: cargo test --workspace
 
+      # A step, not a job — the opposite call from `schemas` and `projections` below, and for a
+      # reason. Those two check committed artifacts for drift and are fixed by rerunning a generator,
+      # so each is its own kind of failure and earns its own compile. This one checks the source a
+      # contributor just edited, the same class of defect as Clippy, and it reuses the dependency
+      # build the Test step has already paid for: 2s marginal, against roughly two minutes for a
+      # separate job that would compile the whole dependency graph again to learn the same thing.
+      #
+      # Clippy already denies `missing_docs`, so this is not that. What only rustdoc sees is the rest
+      # of invariant 11: intra-doc links that resolve to nothing, public documentation pointing at
+      # private items, and redundant explicit link targets. Doc comments in this repository carry the
+      # design reasoning, so a link that goes nowhere is a real defect and not a cosmetic one.
+      # Mirrors `task doc-check`.
+      - name: Docs
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
+
   # Its own job so schema drift reads as schema drift. Folded into the gate it would surface as "one of
   # four steps failed" behind a test log; here the failing check's name says that `schemas/generated/`
   # no longer matches the Rust types, and the fix is `cargo xtask schema`.
   schemas:
     name: Schemas up to date
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -64,6 +85,7 @@ jobs:
   projections:
     name: Projections up to date
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -73,3 +95,35 @@ jobs:
 
       - name: Check generated projections
         run: cargo xtask generate --check
+
+  # Its own job because it is its own toolchain, which a step in `gate` cannot be. `rust-version =
+  # "1.85"` in Cargo.toml is a promise to anyone who depends on these crates, and until this job
+  # existed nothing in the repository would have noticed it breaking.
+  #
+  # It builds and does not test, deliberately. `rust-version` is a promise about consuming the
+  # published crates, and a consumer never builds this workspace's dev-dependencies. `cargo test` on
+  # 1.85 does not compile and fail — it refuses to resolve at all, because the dev-dependency
+  # `jsonschema` pulls `idna 1.1` -> `idna_adapter 1.2.2` (requires 1.86) -> `icu_* 2.3` (requires
+  # 1.88). Running the tests on 1.85 would mean pinning those back or raising the declared MSRV, and
+  # that is a decision about what this repository supports rather than something CI should settle.
+  # Until it is taken, this job checks exactly the surface the promise covers: every lib and bin.
+  #
+  # `--locked` is load-bearing. Without it 1.85's MSRV-aware resolver may quietly select older
+  # versions than the committed Cargo.lock, and the job would then vouch for a dependency set that
+  # nobody actually ships.
+  msrv:
+    name: MSRV 1.85
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.85.0
+
+      # No extra cache key is needed here. rust-cache's default key already includes the rustc
+      # release, host and hash alongside the job id, so this job's 1.85 artifacts can never be handed
+      # to the stable jobs, nor theirs to it.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build on the declared MSRV
+        run: cargo build --workspace --locked

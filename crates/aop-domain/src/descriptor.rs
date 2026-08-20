@@ -7,7 +7,7 @@
 //! # Why two of the three publish no lifecycle
 //!
 //! [`aep_contract::registry::LifecycleDescriptor`] is expressed in
-//! [`ArtifactStatus`](aep_domain::artifact::ArtifactStatus) — `draft`, `in_review`, `approved`,
+//! [`ArtifactStatus`] — `draft`, `in_review`, `approved`,
 //! `superseded` — which is the right vocabulary for a document and has no word for `canary`. A
 //! [`Runbook`] is a document and gets a real lifecycle. An [`Incident`] and a [`Release`] are not:
 //! their ladders are operational states, and mapping `triaged` onto `proposed` or `promoted` onto
