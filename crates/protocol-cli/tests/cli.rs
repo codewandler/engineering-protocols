@@ -1886,3 +1886,280 @@ fn ess_conform_synthesize_is_deterministic() {
         "two runs over one specification must produce identical bytes"
     );
 }
+
+// ---- the closed loop -----------------------------------------------------------------------
+//
+// Design §33 and §49 step 10: a real task that completes only because an independent conformance
+// run says the implementation matches the specification, and refuses when it does not. Everything
+// above this line is machinery; these are the tests that say the machinery changed what the
+// protocol permits.
+
+/// The worked example this section replays.
+const CONFORMANCE_TASK: &str = "examples/billing-conformance/task.yaml";
+const CONFORMANCE_ARTIFACTS: &str = "examples/billing-conformance/artifacts.yaml";
+
+/// The evidence that gets the task to the point where only conformance is outstanding.
+const PRIOR_EVIDENCE: [&str; 5] = [
+    "examples/billing-conformance/evidence/01-red-test.yaml",
+    "examples/billing-conformance/evidence/02-implementation.yaml",
+    "examples/billing-conformance/evidence/03-verification.yaml",
+    "examples/billing-conformance/evidence/04-review.yaml",
+    "examples/billing-conformance/evidence/05-verifications.yaml",
+];
+
+const PASSING_RECORD: &str = "examples/billing-conformance/evidence/06-conformance.yaml";
+const FAILING_RECORD: &str = "examples/billing-conformance/evidence/06-conformance-faulty.yaml";
+
+/// `protocol evaluate --advance` over the worked example, with `records` submitted last.
+fn evaluate_conformance_task(artifacts: &str, records: &[&str]) -> Output {
+    let mut args = vec![
+        "evaluate",
+        "--task",
+        CONFORMANCE_TASK,
+        "--artifacts",
+        artifacts,
+    ];
+    for path in PRIOR_EVIDENCE.iter().chain(records) {
+        args.push("--evidence");
+        args.push(path);
+    }
+    args.push("--advance");
+    protocol(&args)
+}
+
+#[test]
+fn the_committed_conformance_evidence_is_what_the_runner_produces_and_not_what_someone_typed() {
+    // The one check that makes the rest of this section evidence rather than a fixture. Both
+    // records in the worked example are regenerated here and compared byte for byte: if either
+    // could be edited by hand without a test noticing, the example would prove nothing that a
+    // hardcoded `true` would not.
+    for (record, fault) in [
+        (PASSING_RECORD, None),
+        (FAILING_RECORD, Some("accept-invalid-amount")),
+    ] {
+        let mut args = vec![
+            "ess",
+            "conform",
+            "evidence",
+            "--path",
+            SPECIFICATION,
+            "--target",
+            "billing",
+        ];
+        if let Some(fault) = fault {
+            args.push("--inject");
+            args.push(fault);
+        }
+        let output = protocol(&args);
+        assert_eq!(code(&output), 0, "{record}: {}", stderr(&output));
+        let committed = std::fs::read_to_string(root().join(record)).expect("the record is there");
+        assert_eq!(
+            stdout(&output),
+            committed,
+            "{record} is not what the runner produces; regenerate it with `{}`",
+            args.join(" ")
+        );
+    }
+}
+
+#[test]
+fn the_conformance_record_names_the_runner_as_its_producer_and_carries_the_spec_digest() {
+    // The two fields the requirement is made of. `producer: verifier / conformance-runner` is what
+    // `independent: true` and `verifier: conformance-runner` check against, and `spec_digest` is
+    // what binds the run to one resolution of the model — gate G19's rule, which fails closed.
+    let output = protocol(&[
+        "ess",
+        "conform",
+        "evidence",
+        "--path",
+        SPECIFICATION,
+        "--target",
+        "billing",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let document = stdout(&output);
+    for required in [
+        "kind: ess_conformance",
+        "spec_digest: e19d384dac86219a",
+        "producer: verifier",
+        "verifier: conformance-runner",
+        "status: passed",
+    ] {
+        assert!(
+            document.contains(required),
+            "an evidence record carries {required:?}; it read:\n{document}"
+        );
+    }
+    assert!(
+        !document.contains("producer: agent"),
+        "a record an agent produced does not satisfy `independent: true`: {document}"
+    );
+}
+
+#[test]
+fn the_evidence_verb_writes_a_failing_run_down_rather_than_exiting_on_it() {
+    // Direction two needs the record to exist. A verb that refused to write evidence of a failure
+    // would make "the task cannot complete" unprovable — the task would simply have no evidence,
+    // which is a different reason and a weaker one.
+    let output = protocol(&[
+        "ess",
+        "conform",
+        "evidence",
+        "--path",
+        SPECIFICATION,
+        "--target",
+        "billing",
+        "--inject",
+        "accept-invalid-amount",
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "the verdict belongs in the record, not in this exit code: {}",
+        stderr(&output)
+    );
+    let document = stdout(&output);
+    assert!(document.contains("status: failed"), "{document}");
+    assert!(
+        document.contains("failed billing.invoice.CreateInvoice/outcome/rejected"),
+        "the record names the scenario, so the refusal downstream is actionable: {document}"
+    );
+    assert!(
+        document.contains("verifier: conformance-runner"),
+        "a failing run is produced by the same verifier as a passing one: {document}"
+    );
+}
+
+#[test]
+fn a_task_governed_by_a_specification_completes_only_once_the_conformance_run_exists() {
+    // The fixture has to reach the state the rule is load-bearing in: without the record, every
+    // other requirement of `development.critical` is already met, so what stops the task can only
+    // be conformance. Then the record arrives and it completes.
+    let without = evaluate_conformance_task(CONFORMANCE_ARTIFACTS, &[]);
+    assert_eq!(code(&without), 0, "{}", stderr(&without));
+    let owed = stdout(&without);
+    assert!(
+        !owed.contains("Task complete"),
+        "a task with no conformance run must not complete: {owed}"
+    );
+    assert!(
+        owed.contains("0 of 1 required record(s) submitted"),
+        "and the reason must be the missing run: {owed}"
+    );
+
+    let with = evaluate_conformance_task(CONFORMANCE_ARTIFACTS, &[PASSING_RECORD]);
+    assert_eq!(code(&with), 0, "{}", stderr(&with));
+    let done = stdout(&with);
+    assert!(
+        done.contains("state       complete (Complete)")
+            && done.contains("Task complete in `complete`"),
+        "the passing run is the only thing that changed, so it is what completed the task: {done}"
+    );
+}
+
+#[test]
+fn a_faulty_implementation_cannot_complete_the_task_and_the_refusal_names_the_reason() {
+    // The half that matters. Same task, same everything else, one implementation that accepts an
+    // invoice the specification refuses — and the engine will not let it through.
+    let output = evaluate_conformance_task(CONFORMANCE_ARTIFACTS, &[FAILING_RECORD]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+
+    assert!(
+        !text.contains("Task complete"),
+        "a contradicted specification must not close the task: {text}"
+    );
+    assert!(
+        text.contains("state       review (Review)"),
+        "and it stops one state short of complete rather than somewhere unrelated: {text}"
+    );
+    for reason in [
+        "ess_conformance.passed = false",
+        "ess_conformance.scenarios.failed = 1",
+    ] {
+        assert!(
+            text.contains(reason),
+            "the refusal has to name {reason:?} rather than merely refusing: {text}"
+        );
+    }
+    assert!(
+        text.contains("[principle ess-conformance]"),
+        "and it names the rule a person can go and read: {text}"
+    );
+    assert!(
+        text.contains("✓ evidence ess_conformance from conformance-runner (independent)"),
+        "the evidence was submitted and accepted as independent — what fails is what it says, \
+         which is a different finding from a missing record: {text}"
+    );
+}
+
+#[test]
+fn a_conformance_run_against_another_revision_of_the_model_does_not_close_the_task() {
+    // Gate G19's rule at the level a person meets it. The run passed, the record is independent,
+    // and it attests a resolution of the specification that is not the one the manifest pins — so
+    // it is a true report about a different model and the requirement stays owed.
+    let directory = scratch("aep-cli-stale-conformance");
+    let manifest = directory.join("artifacts.yaml");
+    let committed =
+        std::fs::read_to_string(root().join(CONFORMANCE_ARTIFACTS)).expect("the manifest is there");
+    assert!(
+        committed.contains("e19d384dac86219a"),
+        "the fixture must pin the digest it is about to change, or it tests nothing"
+    );
+    write(
+        &manifest,
+        &committed.replace("e19d384dac86219a", "0000000000000000"),
+    );
+
+    let output = evaluate_conformance_task(printable(&manifest), &[PASSING_RECORD]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(
+        !text.contains("Task complete"),
+        "a passing run against yesterday's model must not close today's task: {text}"
+    );
+    assert!(
+        text.contains("e19d384dac86219a") && text.contains("0000000000000000"),
+        "the refusal must name both revisions so a person knows what to re-run: {text}"
+    );
+}
+
+#[test]
+fn the_same_run_claimed_by_the_agent_that_wrote_the_code_does_not_close_the_task() {
+    // What `independent: true` buys, checked by taking it away. Every number in the record is
+    // identical — the same passing run, the same digest, the same 27 scenarios — and only the
+    // producer changes. The requirement stops being satisfied, which is design §32's whole point:
+    // an agent's report that its own implementation conforms is not a conformance run.
+    let directory = scratch("aep-cli-agent-conformance");
+    let record = directory.join("06-conformance.yaml");
+    let committed =
+        std::fs::read_to_string(root().join(PASSING_RECORD)).expect("the record is there");
+    assert!(
+        committed.contains("verifier: conformance-runner"),
+        "the fixture must start from an independent record or it tests nothing"
+    );
+    write(
+        &record,
+        &committed.replace(
+            "    producer: verifier\n    verifier: conformance-runner",
+            "    producer: agent\n    id: opus-5",
+        ),
+    );
+
+    let output = evaluate_conformance_task(CONFORMANCE_ARTIFACTS, &[printable(&record)]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    assert!(
+        !text.contains("Task complete"),
+        "an agent's own claim of conformance must not close the task: {text}"
+    );
+    assert!(
+        text.contains("0 of 1 required record(s) submitted"),
+        "and the reason is that no independent record was submitted, not that the run failed — \
+         the facts it carries are true, they are just not evidence: {text}"
+    );
+    assert!(
+        text.contains("ess_conformance.passed"),
+        "the facts are still read off the record; what fails is who produced it: {text}"
+    );
+}

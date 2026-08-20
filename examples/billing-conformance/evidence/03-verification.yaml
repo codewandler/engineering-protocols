@@ -1,0 +1,66 @@
+# What the verifiers found. Every record here comes from something other than the agent that wrote
+# the code, because `development.critical` marks all of them `independent: true`.
+- kind: test_result
+  suite: unit
+  passed: 61
+  failed: 0
+  producer:
+    producer: verifier
+    verifier: test-runner
+
+- kind: test_result
+  suite: regression
+  passed: 1204
+  failed: 0
+  producer:
+    producer: verifier
+    verifier: test-runner
+
+- kind: test_result
+  suite: mutation
+  passed: 88
+  failed: 0
+  producer:
+    producer: verifier
+    verifier: test-runner
+
+- kind: test_result
+  suite: differential
+  passed: 40
+  failed: 0
+  producer:
+    producer: verifier
+    verifier: test-runner
+
+- kind: contract_result
+  checked: 6
+  failed: 0
+  breaking_changes: 0
+  producer:
+    producer: verifier
+    verifier: contract-runner
+
+- kind: static_analysis
+  errors: 0
+  warnings: 1
+  producer:
+    producer: verifier
+    verifier: static-analyzer
+
+- kind: property_test_result
+  property: invoice-amount-is-positive
+  cases: 10000
+  seed: "0x2c9f31ab"
+  status: passed
+  producer:
+    producer: verifier
+    verifier: property-tester
+
+- kind: specification
+  artifact: spec:billing
+  satisfied: true
+  requirements_total: 6
+  requirements_satisfied: 6
+  producer:
+    producer: verifier
+    verifier: test-runner

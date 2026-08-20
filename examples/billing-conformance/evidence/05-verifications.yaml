@@ -1,0 +1,53 @@
+# The claims `development.critical` asks something other than the agent to make: that the tests
+# themselves were checked, that behaviour was compared against the implementation being replaced,
+# that the invariants hold for inputs nobody wrote a case for, and that the contracts on each
+# operation were checked. Each is a claim id from the shared vocabulary, not a new one.
+- kind: verification
+  claim: mutation
+  verifier: mutation-runner
+  status: passed
+  producer:
+    producer: verifier
+    verifier: mutation-runner
+
+- kind: verification
+  claim: differential
+  verifier: differential-runner
+  status: passed
+  producer:
+    producer: verifier
+    verifier: differential-runner
+
+- kind: verification
+  claim: invariant
+  verifier: model-checker
+  status: passed
+  producer:
+    producer: verifier
+    verifier: model-checker
+
+- kind: verification
+  claim: precondition
+  verifier: model-checker
+  status: passed
+  producer:
+    producer: verifier
+    verifier: model-checker
+
+- kind: verification
+  claim: postcondition
+  verifier: model-checker
+  status: passed
+  producer:
+    producer: verifier
+    verifier: model-checker
+
+- kind: verification
+  claim: provenance
+  verifier: policy-engine
+  status: passed
+  producer:
+    producer: verifier
+    verifier: policy-engine
+  provenance:
+    command: git log --format=%H -1

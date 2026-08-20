@@ -1,0 +1,12 @@
+# The change. Written by an agent and recorded as written by an agent — which is exactly why nothing
+# it says about its own conformance would count.
+- kind: diff
+  files_changed: 9
+  lines_added: 486
+  lines_removed: 12
+  paths:
+    - crates/billing/src/invoice.rs
+    - crates/billing/src/email.rs
+  producer:
+    producer: agent
+    id: opus-5

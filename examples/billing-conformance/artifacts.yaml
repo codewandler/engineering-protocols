@@ -1,0 +1,72 @@
+# The artifact graph for BILL-301. One entry here is the reason this example exists: the
+# `executable-system-specification`, which is what turns the conditional `ess-conformance` rule on.
+#
+# Its `model_digest` is not decoration. It is the content identity of the resolved model, copied from
+# what the compiler produced — `protocol ess compile --path examples/billing` prints it, and
+# `ess-gen` stamps the same value into every generated file's header. A conformance run whose own
+# digest is not this one is a true report about a different specification, and the engine refuses it.
+version: aep.artifacts/1
+
+artifacts:
+  - id: prd:billing
+    kind: product-requirements
+    status: active
+    location:
+      provider: linear
+      reference: BILLING-PRD
+    metadata:
+      title: Invoicing
+
+  - id: story:BILL-300
+    kind: story
+    status: active
+    location:
+      provider: linear
+      reference: BILL-300
+    relations:
+      - derived_from: prd:billing
+
+  - id: spec:billing
+    kind: specification
+    status: approved
+    location:
+      path: examples/billing/README.md
+    relations:
+      - specifies: story:BILL-300
+    metadata:
+      summary: >-
+        An invoice is created, issued, paid or cancelled; a non-positive amount is refused; creating
+        an invoice notifies the customer by email.
+
+  # The one that matters. `ess` is accepted as a spelling of this kind, and `model_digest` is the
+  # digest of the resolved model — the value `protocol ess conform run` reports as `spec_digest`.
+  - id: ess:billing
+    kind: executable-system-specification
+    status: approved
+    version: v3
+    location:
+      path: examples/billing
+    relations:
+      - specifies: story:BILL-300
+    model_digest: e19d384dac86219a
+    metadata:
+      title: billing/v3
+
+  - id: design:billing-invoicing
+    kind: design
+    status: approved
+    version: "3"
+    freshness: bound_to_revision
+    location:
+      path: docs/designs/billing-invoicing.md
+    relations:
+      - designs: spec:billing
+
+  - id: review:design-billing-invoicing
+    kind: review-result
+    status: active
+    location:
+      provider: github
+      reference: review-4412
+    relations:
+      - reviews: design:billing-invoicing

@@ -433,6 +433,23 @@ fn run() -> Result<ExitCode> {
                     untraced,
                     format,
                 ),
+                EssConformCommand::Evidence {
+                    path,
+                    suite,
+                    target,
+                    inject,
+                    untraced,
+                    out,
+                    format,
+                } => ess_conform_evidence(
+                    &path,
+                    suite.as_deref(),
+                    target,
+                    inject.as_deref(),
+                    untraced,
+                    out.as_deref(),
+                    format,
+                ),
             },
         },
         Command::Resolve(args) => resolve(&args),
@@ -755,6 +772,52 @@ enum EssConformCommand {
         untraced: bool,
         /// How to render the report.
         #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Run a suite and write the AEP evidence record the run produced.
+    ///
+    /// The handoff (design §31): what `run` prints is a report about an implementation, and what the
+    /// protocol decides on is an evidence record. This verb produces the second — a document
+    /// `protocol evaluate --evidence` reads directly, carrying the specification's digest, the
+    /// implementation that answered, the verdict, and `producer: verifier / conformance-runner`,
+    /// which is what `principles/verification/ess-conformance.yaml` means by `independent: true`.
+    ///
+    /// # Why this runs the suite rather than converting a saved report
+    ///
+    /// A verb that turned a `--report report.json` into evidence would produce a record whose
+    /// contents came from a file the caller wrote, and the caller is often the agent under review.
+    /// That is design §32's forbidden shape with a JSON file in the middle of it. So the record is
+    /// only ever minted in the same process that executed the suite, from the report that process
+    /// produced, and there is no input through which a caller can describe the outcome.
+    ///
+    /// # Exit code
+    ///
+    /// `0` whenever a record was produced, **including for a failing run** — because a failing run
+    /// is exactly what direction two of the loop needs written down. The verdict is in the record
+    /// and the engine is what decides on it; the same rule `protocol evaluate` follows when it
+    /// reports a blocked execution and exits `0`. Use `run` when you want the verdict as an exit
+    /// code.
+    Evidence {
+        /// The specification to synthesise the suite from.
+        #[arg(long, default_value = ".")]
+        path: PathBuf,
+        /// A written suite to run instead, such as `suites/generated/billing/suite.json`.
+        #[arg(long, conflicts_with = "path")]
+        suite: Option<PathBuf>,
+        /// Which built-in reference implementation to run against.
+        #[arg(long, value_enum)]
+        target: EssTarget,
+        /// Break one property on purpose, and watch the evidence stop satisfying the requirement.
+        #[arg(long)]
+        inject: Option<String>,
+        /// Hide the one observation §16 refuses to require of every implementation.
+        #[arg(long)]
+        untraced: bool,
+        /// Where to write the record. Without it the document goes to standard output.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// How to write it. Both are read by `protocol evaluate --evidence`.
+        #[arg(long, value_enum, default_value_t = Format::Yaml)]
         format: Format,
     },
 }
@@ -1570,44 +1633,13 @@ fn ess_conform_run(
         Some(name) => Some(ess_fault(name, target)?),
     };
 
-    // A written suite reports no refusals, and that is not the same as reporting none: the document
-    // holds the scenarios that were synthesised and never the constructs that were not, so `None`
-    // says nobody asked rather than claiming zero.
-    let (suite, refusals, suite_source) = if let Some(file) = suite_file {
-        let text = fs::read_to_string(file)
-            .with_context(|| format!("reading the suite {}", file.display()))?;
-        let suite = ess_conformance::ConformanceSuite::from_json(&text)
-            .with_context(|| format!("reading the suite {}", file.display()))?;
-        (suite, None, file.display().to_string())
-    } else {
-        let ir = match ess_compiled(path, format)? {
-            EssCompiled::Compiled { ir, .. } => ir,
-            EssCompiled::Reported => return Ok(exit_code(false)),
-        };
-        let synthesis = ess_conformance::synthesize(&ir);
-        (
-            synthesis.suite,
-            Some(synthesis.refusals.len()),
-            path.display().to_string(),
-        )
-    };
-
-    // Four arms rather than a boxed target, because `Faulty<Billing>` and `Faulty<Oracle>` are
-    // different types and the wrapper is generic — the alternative is a trait object for the sake of
-    // saving two lines.
-    let report = match (target, fault) {
-        (EssTarget::Billing, None) => {
-            ess_conform_execute(&suite, ess_conformance::reference::Billing::new(), untraced)
-        }
-        (EssTarget::Billing, Some(fault)) => {
-            ess_conform_execute(&suite, ess_conformance::faulty::billing(fault), untraced)
-        }
-        (EssTarget::OracleFixture, None) => {
-            ess_conform_execute(&suite, ess_conformance::reference::Oracle::new(), untraced)
-        }
-        (EssTarget::OracleFixture, Some(fault)) => {
-            ess_conform_execute(&suite, ess_conformance::faulty::oracle(fault), untraced)
-        }
+    let Some(Run {
+        report,
+        refusals,
+        suite_source,
+    }) = ess_conform_perform(path, suite_file, target, fault, untraced, format)?
+    else {
+        return Ok(exit_code(false));
     };
 
     let rendered = EssConformance {
@@ -1652,6 +1684,178 @@ fn ess_conform_run(
     }
 
     Ok(ess_conform_exit(report.status))
+}
+
+/// One run: what it found, where the suite came from, and how much of the specification it covers.
+///
+/// A struct rather than a tuple because three of its fields are the same shape at a call site and
+/// two of them mean opposite things — `refusals: None` says nobody asked, `Some(0)` says nobody was
+/// refused, and a tuple position does not say which is which.
+struct Run {
+    /// The verdict, scenario by scenario.
+    report: ess_conformance::ConformanceReport,
+    /// How many constructs got no scenario, when the suite was synthesised here.
+    refusals: Option<usize>,
+    /// Where the suite came from.
+    suite_source: String,
+}
+
+/// Resolves the suite and runs it, or reports why the specification could not be compiled.
+///
+/// `Ok(None)` means the specification did not compile and the diagnostics have been printed — the
+/// caller's only remaining job is the exit code. Shared by `run` and `evidence` so that the record
+/// one produces and the report the other prints can never come from different executions.
+fn ess_conform_perform(
+    path: &Path,
+    suite_file: Option<&Path>,
+    target: EssTarget,
+    fault: Option<ess_conformance::Fault>,
+    untraced: bool,
+    format: Format,
+) -> Result<Option<Run>> {
+    // A written suite reports no refusals, and that is not the same as reporting none: the document
+    // holds the scenarios that were synthesised and never the constructs that were not, so `None`
+    // says nobody asked rather than claiming zero.
+    let (suite, refusals, suite_source) = if let Some(file) = suite_file {
+        let text = fs::read_to_string(file)
+            .with_context(|| format!("reading the suite {}", file.display()))?;
+        let suite = ess_conformance::ConformanceSuite::from_json(&text)
+            .with_context(|| format!("reading the suite {}", file.display()))?;
+        (suite, None, file.display().to_string())
+    } else {
+        let ir = match ess_compiled(path, format)? {
+            EssCompiled::Compiled { ir, .. } => ir,
+            EssCompiled::Reported => return Ok(None),
+        };
+        let synthesis = ess_conformance::synthesize(&ir);
+        (
+            synthesis.suite,
+            Some(synthesis.refusals.len()),
+            path.display().to_string(),
+        )
+    };
+
+    // Four arms rather than a boxed target, because `Faulty<Billing>` and `Faulty<Oracle>` are
+    // different types and the wrapper is generic — the alternative is a trait object for the sake of
+    // saving two lines.
+    let report = match (target, fault) {
+        (EssTarget::Billing, None) => {
+            ess_conform_execute(&suite, ess_conformance::reference::Billing::new(), untraced)
+        }
+        (EssTarget::Billing, Some(fault)) => {
+            ess_conform_execute(&suite, ess_conformance::faulty::billing(fault), untraced)
+        }
+        (EssTarget::OracleFixture, None) => {
+            ess_conform_execute(&suite, ess_conformance::reference::Oracle::new(), untraced)
+        }
+        (EssTarget::OracleFixture, Some(fault)) => {
+            ess_conform_execute(&suite, ess_conformance::faulty::oracle(fault), untraced)
+        }
+    };
+
+    Ok(Some(Run {
+        report,
+        refusals,
+        suite_source,
+    }))
+}
+
+/// `protocol ess conform evidence`
+///
+/// The whole handoff, in one place: run the suite, ask the runner's own crate for the record that
+/// run produced, and write it. Nothing here reads the verdict and decides what to say about it —
+/// [`ess_conformance::ConformanceReport::to_evidence`] does that, on the producing side of the
+/// boundary invariant 7 draws, and this function cannot influence the outcome it writes down.
+fn ess_conform_evidence(
+    path: &Path,
+    suite_file: Option<&Path>,
+    target: EssTarget,
+    inject: Option<&str>,
+    untraced: bool,
+    out: Option<&Path>,
+    format: Format,
+) -> Result<ExitCode> {
+    let fault = match inject {
+        None => None,
+        Some(name) => Some(ess_fault(name, target)?),
+    };
+
+    let Some(run) = ess_conform_perform(path, suite_file, target, fault, untraced, format)? else {
+        return Ok(exit_code(false));
+    };
+
+    let record = run
+        .report
+        .to_evidence()
+        .obtained_by(ess_conform_invocation(
+            path, suite_file, target, inject, untraced,
+        ))
+        .from_input(run.suite_source);
+
+    // A list of one, because that is the shape `--evidence` reads: a file holding several records
+    // and a file holding one are the same document, and a bare record would be a second shape to
+    // support.
+    let document = match format {
+        // There is no second rendering of an evidence record. `text` gets the document too, rather
+        // than a summary a person might paste into a file and find the engine will not read.
+        Format::Json => serde_json::to_string_pretty(&[&record])
+            .map(|mut json| {
+                json.push('\n');
+                json
+            })
+            .context("rendering the evidence record")?,
+        Format::Text | Format::Yaml => {
+            serde_yaml::to_string(&[&record]).context("rendering the evidence record")?
+        }
+    };
+
+    match out {
+        Some(file) => {
+            if let Some(parent) = file
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            fs::write(file, &document).with_context(|| format!("writing {}", file.display()))?;
+            outln!("{} — {}", file.display(), record.result().status);
+        }
+        None => out!("{document}"),
+    }
+
+    // Exit 0 for a failing run as well. The verdict is in the record; the engine decides on it.
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The command line that produced a record, for its provenance.
+///
+/// Reconstructed rather than read off `std::env::args`, so that the record says what was *done* —
+/// one canonical spelling of the run — instead of whatever shell alias or absolute path happened to
+/// invoke it. Provenance a reader cannot compare across two records is provenance nobody uses.
+fn ess_conform_invocation(
+    path: &Path,
+    suite_file: Option<&Path>,
+    target: EssTarget,
+    inject: Option<&str>,
+    untraced: bool,
+) -> String {
+    let source = match suite_file {
+        Some(file) => format!("--suite {}", file.display()),
+        None => format!("--path {}", path.display()),
+    };
+    let mut words = vec![
+        "protocol ess conform evidence".to_owned(),
+        source,
+        format!("--target {}", ess_target_name(target)),
+    ];
+    if let Some(fault) = inject {
+        words.push(format!("--inject {fault}"));
+    }
+    if untraced {
+        words.push("--untraced".to_owned());
+    }
+    words.join(" ")
 }
 
 /// Runs a suite against one target, under a runner seeded from the suite itself.

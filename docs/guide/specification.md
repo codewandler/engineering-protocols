@@ -21,6 +21,8 @@ its HTTP layer.
 | Derive documentation, schemas and contracts | `protocol ess generate --kind docs\|schema\|openapi\|asyncapi` |
 | Derive the conformance suite it obliges | `protocol ess conform synthesize --path <path>` |
 | Run that suite against an implementation | `protocol ess conform run --path <path> --target <name>` |
+| Turn that run into AEP evidence | `protocol ess conform evidence --path <path> --target <name>` |
+| Complete a task only once that evidence exists | [`examples/billing-conformance/`](../../examples/billing-conformance/) |
 | Read the suites this repository commits | [`suites/generated/`](../../suites/generated/) |
 | Validate in an editor as you type | [`schemas/generated/ess.schema.json`](../../schemas/generated/ess.schema.json) |
 | Require conformance to one, as a protocol rule | [`principles/verification/ess-conformance.yaml`](../../principles/verification/ess-conformance.yaml) |
@@ -29,7 +31,6 @@ its HTTP layer.
 `ConformanceTarget` is a Rust trait, so `protocol ess conform run` reaches only what it was compiled
 with: the two hand-written references inside `ess-conformance`. Holding your own system to a
 specification means writing that adapter in Rust today — the suite is the same document either way.
-Turning a report into AEP evidence is also still by hand.
 
 ### The graph, without generating a documentation tree
 
@@ -355,10 +356,54 @@ principles:
   - ess-conformance
 ```
 
-The runner exists now — `protocol ess conform run` produces the report those claims are about — but
-nothing yet turns a report into an AEP evidence record, so a person still writes that step by hand.
-The point is that the *shape* was already right: the protocol side did not change when the runner
-arrived.
+### The handoff, end to end
+
+`protocol ess conform run` prints a report about an implementation.
+`protocol ess conform evidence` produces the record the protocol decides on — the same run, written
+as evidence:
+
+```console
+$ protocol ess conform evidence --path examples/billing --target billing
+- kind: ess_conformance
+  specification: billing/v3
+  spec_digest: e19d384dac86219a
+  implementation: billing-reference 0.1.0
+  status: passed
+  scenarios_total: 27
+  scenarios_failed: 0
+  producer:
+    producer: verifier
+    verifier: conformance-runner
+```
+
+That file goes straight into `protocol evaluate --evidence`, and
+[`examples/billing-conformance/`](../../examples/billing-conformance/) walks the whole sequence:
+a passing run completes the task, and a run against an implementation with one deliberate fault
+leaves it blocked, naming `ess_conformance.scenarios.failed = 1` and the principle that refused it.
+
+Three things about that record are worth knowing before you rely on it.
+
+**The conversion happens in the runner, not in the engine.** Invariant 7 — the engine never
+manufactures evidence — and design §32: an agent may trigger a run, read the report and repair what
+it says, and may not construct the record by assertion.
+[`ConformanceReport::to_evidence`](../../crates/ess-conformance/src/evidence.rs) takes no argument
+naming who produced it, so there is no call site at which a caller can describe itself as the
+verifier. That is also why the verb runs the suite rather than converting a saved report: a
+`--report report.json` input would be a record whose contents came from a file the caller wrote.
+
+**The digest is what the record is worth anything for.** `billing/v3` is a label two different
+resolutions can share; `spec_digest` is the content identity of the resolved model, and the rule
+fails closed — an ESS artifact recording no `model_digest` can never be shown to have been conformed
+to, and a run against yesterday's model does not close a task built against today's.
+
+**`independent: true` is structural, not attested.** It says the producer is not the agent under
+review, checked by one comparison. Nothing signs the file, and a person can type one. Which
+producers a harness lets write records is the harness's decision, exactly as it is for a test
+runner's `tests.unit.failed == 0`.
+
+**A run that could not be carried out is not a failure.** `passed`, `failed` and `inconclusive` are
+three different findings; the third means nobody found out, which is a target to go and reach rather
+than a defect to fix. None of the last two is a pass, so the requirement stays owed either way.
 
 ## Writing one
 

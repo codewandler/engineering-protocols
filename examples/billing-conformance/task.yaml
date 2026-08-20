@@ -1,0 +1,42 @@
+# The task the whole project exists to make possible: work whose completion is decided by running a
+# specification's own suite, not by anyone reading a diff.
+#
+# `development.critical` is chosen because it is the shipped profile that carries `ess-conformance`,
+# and because the reason it carries it applies here — this is money movement, and a defect in an
+# invoice's amount is a wrong number rather than an error.
+id: BILL-301
+kind: feature
+objective: implement-the-billing-specification
+
+protocol: adp/1
+profile: development.critical
+
+derived_from:
+  - story:BILL-300
+context:
+  product_requirements:
+    - prd:billing
+
+manifest: examples/billing-conformance/artifacts.yaml
+
+constraints:
+  facts:
+    # The invoice API is called by the billing portal, so contract testing applies.
+    change.public_contract: true
+    change.architectural: false
+    # Declared here under protest, and only because it cannot be recorded properly today.
+    #
+    # `design-by-contract` blocks the move into implementation until an artifact validator reports
+    # that the design has the sections its kind requires. That report is an `Evidence::Artifact`
+    # record — and one cannot be written in an evidence document at all: `Evidence` is tagged with
+    # `kind`, `ArtifactEvidence` also has a field called `kind`, and serde's internal tagging
+    # consumes the tag before the struct sees it, so `kind: artifact` always fails with
+    # "missing field `kind`". `preserve-evidence` asks for the same record and hits the same wall.
+    #
+    # Delete this line the moment that field is renamed on the wire. Until then a task governed by
+    # `development.critical` cannot reach `implement` through the CLI at all, and a stand-in that a
+    # reader can see beats a worked example that stops three states short of the thing it exists to
+    # show.
+    artifact.design.sections_present: true
+  notes:
+    - The executable system specification in `examples/billing/` is normative for this work.

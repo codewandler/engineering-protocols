@@ -1,0 +1,19 @@
+- kind: ess_conformance
+  specification: billing/v3
+  spec_digest: e19d384dac86219a
+  implementation: billing-reference-accept-invalid-amount 0.1.0
+  status: failed
+  scenarios_total: 27
+  scenarios_failed: 1
+  suite_version: ess-conformance/1
+  compiler_version: 0.1.0
+  generator_version: 0.1.0
+  failed_scenarios:
+  - failed billing.invoice.CreateInvoice/outcome/rejected
+  producer:
+    producer: verifier
+    verifier: conformance-runner
+  provenance:
+    command: protocol ess conform evidence --path examples/billing --target billing --inject accept-invalid-amount
+    inputs:
+    - examples/billing

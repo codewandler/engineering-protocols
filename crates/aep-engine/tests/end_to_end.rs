@@ -994,3 +994,179 @@ fn completion_is_refused_with_the_missing_requirements_named() {
         "and nothing else is: {still_outstanding:?}"
     );
 }
+
+// ---- the closed loop -------------------------------------------------------------------------
+//
+// Design §33 and §49 step 10, at the level the engine sees it. The tests above build conformance
+// records in Rust, which is enough to check the engine's rules and not enough to check the claim
+// the project actually makes — that a *real run* of a specification's own suite is what decides a
+// task. These two replay `examples/billing-conformance/`, whose two conformance records are
+// produced by `protocol ess conform evidence` and drift-checked against the runner in
+// `crates/protocol-cli/tests/cli.rs`. The engine only ever reads them, which is invariant 7: the
+// conversion happened in the crate that ran the suite, and nothing here could have written it.
+
+/// The worked example that requires conformance.
+fn conformance_example(file: &str) -> PathBuf {
+    root().join("examples/billing-conformance").join(file)
+}
+
+/// The task and artifact graph of that example.
+fn conformance_task() -> (Task, ArtifactGraph) {
+    let origin = "examples/billing-conformance/task.yaml";
+    let text = fs::read_to_string(conformance_example("task.yaml")).expect("the task is readable");
+    let task = aep_schema::parse::task(&text, Some(origin)).expect("the task is valid");
+
+    let origin = "examples/billing-conformance/artifacts.yaml";
+    let text = fs::read_to_string(conformance_example("artifacts.yaml"))
+        .expect("the manifest is readable");
+    let graph =
+        aep_schema::parse::artifact_manifest(&text, Some(origin)).expect("the manifest is valid");
+    (task, graph)
+}
+
+/// Submits one evidence file of the example, exactly as the CLI would.
+fn submit_file(engine: &Engine<FixedClock>, execution: &mut aep_engine::Execution, file: &str) {
+    let path = conformance_example(&format!("evidence/{file}"));
+    let text = fs::read_to_string(&path).expect("the evidence file is readable");
+    let inputs = aep_schema::parse::evidence_list(&text, Some(&path.display().to_string()))
+        .unwrap_or_else(|error| panic!("{} is not valid evidence: {error}", path.display()));
+    for input in inputs {
+        let mut submission = EvidenceSubmission::new(input.evidence, input.producer);
+        submission.subject = input.about;
+        if let Some(provenance) = input.provenance {
+            submission.provenance = provenance;
+        }
+        engine
+            .submit_evidence(execution, submission)
+            .unwrap_or_else(|error| panic!("{} was refused: {error}", path.display()));
+    }
+}
+
+/// The example's evidence, up to but not including the conformance run.
+const EVERYTHING_BUT_CONFORMANCE: [&str; 5] = [
+    "01-red-test.yaml",
+    "02-implementation.yaml",
+    "03-verification.yaml",
+    "04-review.yaml",
+    "05-verifications.yaml",
+];
+
+/// Walks the example with `record` as its conformance evidence, if any.
+fn walk_conformance_example(record: Option<&str>) -> (Engine<FixedClock>, aep_engine::Execution) {
+    let engine = engine();
+    let (task, graph) = conformance_task();
+    let mut execution = engine
+        .initialize_with_artifacts(task, graph)
+        .expect("initialises");
+    for file in EVERYTHING_BUT_CONFORMANCE {
+        submit_file(&engine, &mut execution, file);
+    }
+    if let Some(record) = record {
+        submit_file(&engine, &mut execution, record);
+    }
+    advance(&engine, &mut execution);
+    (engine, execution)
+}
+
+#[test]
+fn a_task_governed_by_a_specification_finishes_only_on_a_conformance_run_it_did_not_produce() {
+    // The fixture reaches the state the rule is load-bearing in first: with everything else
+    // submitted the task is still short, and the only thing it is short of is the run. Asserting
+    // that before submitting it is what makes the second half attributable.
+    let (engine, execution) = walk_conformance_example(None);
+    let owed = engine.explain_completion(&execution);
+    let outstanding: Vec<&str> = owed
+        .outstanding()
+        .map(|item| item.requirement.as_str())
+        .collect();
+    assert!(!owed.complete, "not without the run: {outstanding:#?}");
+    assert!(
+        outstanding.iter().all(|requirement| {
+            // The profile's own completion line is the one exception, and only because
+            // `evidence.missing` counts the record that is not there — checked below rather than
+            // waved through, so a second unrelated gap could not hide behind it.
+            requirement.contains("ess_conformance")
+                || requirement.contains("conformance-runner")
+                || requirement.contains("evidence.missing")
+        }),
+        "everything except conformance must already hold, or the next assertion proves nothing: \
+         {outstanding:#?}"
+    );
+    assert!(
+        owed.outstanding().any(|item| {
+            item.requirement.contains("evidence.missing")
+                && item.detail.as_deref() == Some("evidence.missing = 1")
+        }),
+        "and the one record missing is the conformance run: {outstanding:#?}"
+    );
+
+    let (engine, execution) = walk_conformance_example(Some("06-conformance.yaml"));
+    let done = engine.explain_completion(&execution);
+    assert!(
+        done.complete,
+        "the run is the only thing that changed: {}",
+        done.outstanding()
+            .map(|item| format!("{} — {:?}", item.requirement, item.detail))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert_eq!(execution.state_id().to_string(), "complete");
+}
+
+#[test]
+fn a_run_that_found_the_implementation_wrong_leaves_the_task_open_and_says_which_scenario() {
+    // Direction two. The record is present, independent, produced by the conformance runner and
+    // about the right revision of the model — every structural check passes. What refuses it is
+    // what it *says*, which is the only kind of refusal worth having.
+    let (engine, execution) = walk_conformance_example(Some("06-conformance-faulty.yaml"));
+    let owed = engine.explain_completion(&execution);
+    assert!(
+        !owed.complete,
+        "a contradicted specification does not finish"
+    );
+    assert_ne!(
+        execution.state_id().to_string(),
+        "complete",
+        "and the workflow does not reach the terminal state either"
+    );
+
+    let conformance: Vec<&aep_engine::explain::ExplainedItem> = owed
+        .outstanding()
+        .filter(|item| item.requirement.contains("ess_conformance"))
+        .collect();
+    assert_eq!(
+        conformance.len(),
+        2,
+        "both predicates the shipped rule names must refuse it: {conformance:#?}"
+    );
+    for item in &conformance {
+        assert_eq!(
+            item.truth,
+            aep_domain::predicate::Truth::False,
+            "a failing run contradicts the requirement; it does not leave it unobserved: {item:?}"
+        );
+        assert!(
+            item.source.contains("ess-conformance"),
+            "the refusal names the rule a person can read: {item:?}"
+        );
+    }
+    assert!(
+        conformance
+            .iter()
+            .any(|item| item.detail.as_deref() == Some("ess_conformance.scenarios.failed = 1")),
+        "and it says how many scenarios the specification lost: {conformance:#?}"
+    );
+
+    // The record itself still names the scenario, so the repair is one lookup away rather than a
+    // re-run. This is §48's counterexample-as-feedback, arriving through the protocol.
+    assert_eq!(
+        aep_domain::requirement::RequirementContext::facts(&execution)
+            .fact(&aep_domain::facts::FactPath::from_segments([
+                "ess_conformance",
+                "spec_digest"
+            ]))
+            .map(|value| value.to_string()),
+        Some("e19d384dac86219a".to_owned()),
+        "a failing run still attests which revision it was run against"
+    );
+}

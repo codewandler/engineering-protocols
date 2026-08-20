@@ -1,0 +1,12 @@
+# The failing test, before any code. Same rule as the passkeys example: red before green is an
+# ordering fact the engine records, not a promise the agent makes.
+- kind: test_result
+  suite: unit
+  passed: 0
+  failed: 1
+  producer:
+    producer: verifier
+    verifier: test-runner
+  about: task:BILL-301
+  provenance:
+    command: cargo test -p billing an_invoice_of_zero_is_refused

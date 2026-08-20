@@ -124,6 +124,7 @@
 //!   matrix needed it.
 
 pub mod decision;
+pub mod evidence;
 pub mod faulty;
 pub mod input;
 pub mod reference;
@@ -135,6 +136,7 @@ pub mod target;
 pub mod witness;
 
 pub use decision::{when, Decision, Reason, Unevaluable, UnknownCause};
+pub use evidence::ConformanceEvidence;
 pub use faulty::{Caught, Fault, Faulty, Injection, System};
 pub use input::{flatten, resolve_path, InputFacts, ShapeError, ShapeErrors, Target};
 pub use report::{
