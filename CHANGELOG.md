@@ -18,6 +18,9 @@ belongs in the commit message or in `docs/design/`.
   the Executable System Specification design: a system described once as a typed semantic model, from
   which contracts, documentation, tests, deployment artifacts and structural code are derived.
   Specified, not built.
+- **[`docs/design/ess-review-v0.1.md`](docs/design/ess-review-v0.1.md)** — a review of that design
+  against what this repository learned building the same shape twice: eleven findings, three of which
+  would make generated tests assert false things, and a narrower recommended v0.1 scope.
 
 ## [0.2.1] — 2026-08-20
 

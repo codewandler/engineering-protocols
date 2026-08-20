@@ -167,6 +167,7 @@ Without `task`: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-ta
 | [`docs/VISION.md`](docs/VISION.md) | why this exists, and how its two halves compose |
 | [`docs/design/consolidated-design-v0.2.md`](docs/design/consolidated-design-v0.2.md) | authoritative specification for the protocol (AEP) |
 | [`docs/design/ess-implementor-design-v0.1.md`](docs/design/ess-implementor-design-v0.1.md) | design for the Executable System Specification (ESS) — specified, not built |
+| [`docs/design/ess-review-v0.1.md`](docs/design/ess-review-v0.1.md) | review of that design, with the findings that change what gets built first |
 | [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) | what is implemented, what v0.2 adds, work order, recorded deviations |
 | [`docs/plan/wave-1-execution-core.md`](docs/plan/wave-1-execution-core.md) | the wave just delivered, with its acceptance criteria |
 | [`docs/plan/document-authoring-brief.md`](docs/plan/document-authoring-brief.md) | how to write a valid principle, workflow, profile or lifecycle |
