@@ -1,9 +1,9 @@
 # ESS roadmap — waves 1 to 6
 
-> **Waves 1 to 4 delivered; 5 and 6 proposed.** Numbering restarts: these are ESS waves, not a
-> continuation of the protocol's. Tags are `0.3.0-ess-wave-1`, `0.3.1-ess-wave-2`,
-> `0.3.2-ess-wave-3`, `0.3.3-ess-wave-3.5` and `0.4.0-ess-wave-4`, keeping the convention that a tag
-> is named after its changelog heading.
+> **Waves 1 to 5 delivered; 6 in progress; 6.5 scheduled behind it.** Numbering restarts: these are
+> ESS waves, not a continuation of the protocol's. Tags are `0.3.0-ess-wave-1`, `0.3.1-ess-wave-2`,
+> `0.3.2-ess-wave-3`, `0.3.3-ess-wave-3.5`, `0.4.0-ess-wave-4` and `0.5.0-ess-wave-5`, keeping the
+> convention that a tag is named after its changelog heading.
 >
 > Waves 1 to 4 are design §32's seven phases, with 3 and 4 merged (both are projections of the same
 > IR, and separating them would mean shipping documentation nothing checks) and 7 left out (behavioural
@@ -18,11 +18,12 @@
 > | 2 | 2 — compiler |
 > | 3 | 3 + 4 — documentation, OpenAPI, AsyncAPI |
 > | 4 | 5 — test synthesis |
-> | 5 | 6 — Rust structural synthesis |
+> | 5 | — semantic diff, from the later design |
+> | 6 | 6 — structural synthesis, Rust first |
 
 Scope and ordering follow [`ess-review-v0.1.md`](../design/ess-review-v0.1.md): the review's findings
-are folded into the waves that would otherwise have to unlearn them. Rust structural synthesis
-(design §32 phase 6) is **wave 5 of this roadmap**, and it is last on purpose: it starts only once the
+are folded into the waves that would otherwise have to unlearn them. Structural synthesis
+(design §32 phase 6) is **wave 6 of this roadmap**, and it is last on purpose: it starts only once the
 model has survived three projections *and* wave 4's oracle has proven it can fail a wrong
 implementation. An earlier version of this paragraph said structural synthesis was "deliberately
 outside this roadmap — wave 4 at the earliest", which contradicted the wave 5 section below it and
