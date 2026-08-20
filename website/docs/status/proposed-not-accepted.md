@@ -18,7 +18,7 @@ has been agreed.
 | What it would add | Status |
 |---|---|
 | **Closed-loop execution and conformance** — the specification becomes an *oracle*: a verdict on an implementation, not only a projection of a model | **built.** Delivered as ESS wave 4, `0.4.0-ess-wave-4`. Its four open decisions were each taken at the default the design named |
-| **Semantic diff, impact and evolution** — the system changing over time, impact closure, what a revision invalidates | **core accepted**, as a stated amendment to the thesis, and sequenced as ESS wave 5. Not built. Two of its seventy-eight sections were rejected outright rather than deferred, being a different product |
+| **Semantic diff, impact and evolution** — the system changing over time, impact closure, what a revision invalidates | **core implemented** as ESS wave 5 (`0.5.0-ess-wave-5`), after being accepted as a stated amendment to the thesis. Two of its seventy-eight sections were rejected outright rather than deferred, being a different product |
 | **Structural synthesis, obligations and realizations** — generated applications, and human or agent work carried as typed obligations | proposed, not accepted, not reconciled against the code. The review reads it as four waves rather than one |
 | **Infrastructure discovery and multi-cloud realization** — a fourth domain, with infrastructure specified and checked beside the existing pair | proposed, not accepted, and **deferred whole** — roughly eleven waves at this repository's measured rate. Two ideas were harvested from it |
 
@@ -50,7 +50,7 @@ boundary.
 | Wave | Goal | State |
 |---|---|---|
 | ESS wave 4 | a generated conformance suite, and proof that it bites — checked against an implementation that is deliberately wrong | **delivered.** Twelve deliberately wrong implementations, eleven of them caught by the named scenario that exists to catch them; the twelfth recorded as caught by nothing, with the reason |
-| ESS wave 5 | two compiled specifications, and a typed answer to what moved between them | not started. It moved ahead of code generation by decision, because wave 4 left everything derived from a single revision with no way to say what a change invalidates |
+| ESS wave 5 | two compiled specifications, and a typed answer to what moved between them | **delivered**, `0.5.0-ess-wave-5`. It moved ahead of code generation by decision, because wave 4 left everything derived from a single revision with no way to say what a change invalidates |
 | after that | a generated invoice service and email service that compile, and that pass the suite wave 4 generated | not started. It was gated behind wave 4 closing its loop in both directions — a correct target producing evidence that lets a task complete, and a faulty one producing a failure that refuses it. That gate is now open |
 
 The ordering rule underneath all of them: **each wave must be falsifiable by the one before it.** A

@@ -65,8 +65,22 @@ const config: Config = {
           editUrl:
             'https://github.com/codewandler/engineering-protocols/tree/main/website/',
         },
-        // No blog. There is nothing to announce yet, and an empty blog is a dead link on a navbar.
-        blog: false,
+        // The blog is the release record for a reader: one post per release, each a worked
+        // tutorial on what the release adds, with real command output rather than claims about it.
+        // It stayed `false` until there was a first post, because an empty blog is a dead link.
+        blog: {
+          routeBasePath: 'releases',
+          blogTitle: 'Releases, in practice',
+          blogDescription:
+            'What each release adds to the tooling, shown on real output rather than described.',
+          blogSidebarTitle: 'All releases',
+          blogSidebarCount: 'ALL',
+          showReadingTime: true,
+          // Same policy as links: a post that leaks its full body onto the index page is a defect.
+          onUntruncatedBlogPosts: 'throw',
+          editUrl:
+            'https://github.com/codewandler/engineering-protocols/tree/main/website/',
+        },
         theme: {
           customCss: './src/css/custom.css',
         },
@@ -96,6 +110,11 @@ const config: Config = {
         {
           to: '/docs/status/where-this-stands',
           label: 'Status',
+          position: 'left',
+        },
+        {
+          to: '/releases',
+          label: 'Releases',
           position: 'left',
         },
         {
@@ -134,6 +153,7 @@ const config: Config = {
             {label: 'Status', to: '/docs/status/where-this-stands'},
             {label: 'What you still have to trust', to: '/docs/status/what-you-have-to-trust'},
             {label: 'Proposed, not accepted', to: '/docs/status/proposed-not-accepted'},
+            {label: 'Releases, in practice', to: '/releases'},
             {
               label: 'Source',
               href: 'https://github.com/codewandler/engineering-protocols',

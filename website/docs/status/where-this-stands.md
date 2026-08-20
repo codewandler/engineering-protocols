@@ -6,10 +6,10 @@ description: What is implemented, what is in progress, and what is not built —
 
 # Where this stands
 
-Honest as of the tag `0.4.0-ess-wave-4`. The repository's gate, `task check`, runs seven steps —
+Honest as of the tag `0.5.0-ess-wave-5`. The repository's gate, `task check`, runs seven steps —
 formatting, clippy with warnings as errors, the test suite, rustdoc with warnings as errors, a schema
-drift check, a projection drift check and a conformance-suite drift check — and reports **50 suites
-and 1216 tests, with 0 clippy warnings and 0 rustdoc warnings**.
+drift check, a projection drift check and a conformance-suite drift check — and reports **57 suites
+and 1305 tests, with 0 clippy warnings and 0 rustdoc warnings**.
 
 Nothing lands that does not pass all seven, and CI runs the same seven.
 
@@ -32,8 +32,8 @@ CI fails on if they drift from the Rust types.
 
 ## ESS — executable system specifications
 
-Four waves delivered. A specification is now the source of its own documentation, its own contracts
-and its own tests.
+Five waves delivered. A specification is now the source of its own documentation, its own
+contracts and its own tests — and when it changes, the change itself is a typed, queryable object.
 
 | | State |
 |---|---|
@@ -43,8 +43,8 @@ and its own tests.
 | the model reconciled before the oracle was built | implemented, `0.3.3-ess-wave-3.5` — 20 gates closed before the oracle was allowed to start |
 | the join: artifact kind, evidence kind, the `ess-conformance` principle | implemented — a task can be blocked until something proves conformance |
 | the specification as an oracle: generated suites, a conformance runner, evidence | implemented, `0.4.0-ess-wave-4` — 27 scenarios from the normative example and 31 from a second fixture, committed and drift-checked |
-| what a change to a specification invalidates | **not built.** Accepted into the thesis as a stated amendment, and sequenced next |
-| generated Rust code | **not built.** Proposed, and sequenced after the above |
+| what a change to a specification invalidates | implemented, `0.5.0-ess-wave-5` — a semantic delta over six construct families, and an impact closure that narrows what is owed and can never say "still valid" |
+| generated Rust code | **not built.** Proposed, and sequenced next |
 
 Building the oracle changed the specification language four times, and that is the part worth
 knowing. Two of the four gaps were found by review before a line of the synthesizer existed; the
