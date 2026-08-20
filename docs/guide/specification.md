@@ -97,14 +97,17 @@ protocol ess conform run --path examples/billing --target billing
 
 The first walks the IR and writes one scenario per thing the specification obliges: each declared
 outcome, each lifecycle move, each move that must **not** be honoured, what must still hold of an
-entity afterwards, and each of the four claims a binding makes. 27 of them for `examples/billing/`.
+entity afterwards, what a value object declares of every value at each observable field position
+that holds one, and each of the four claims a binding makes. 29 of them for `examples/billing/`.
 The second executes them against an implementation and reports scenario by scenario.
 
 **A construct the specification does not say enough about to test is refused, not omitted.** Billing
-has one — a value object's own invariants are declared over a type rather than over an instance, and
-synthesising them is a later slice. It is printed beside the scenarios that exist, because a suite
-quietly holding fewer checks than the specification requires is the one failure a passing run cannot
-show.
+had one — a value object's own invariants are declared over a type rather than over an instance —
+until wave 6.5 delivered the slice its refusal promised: `Money`'s `amount >= 0` is now read at each
+view field position that holds a `Money`, rebased onto the position (`total.amount >= 0`, over every
+row, with at least one row demanded). What genuinely has no witness keeps a refusal — the oracle
+fixture prints six. A refusal is printed beside the scenarios that exist, because a suite quietly
+holding fewer checks than the specification requires is the one failure a passing run cannot show.
 
 | exit | what it means |
 |---|---|
@@ -210,7 +213,7 @@ its result depends on.
 $ protocol ess impact --from examples/billing --to billing-with-one-grant-moved/ \
     --suite suites/generated/billing/suite.json
 billing v3 → v3
-  before  e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
+  before  13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
   after   fd52355634fd35e7401e371f924e806f9f30b69e95f98bd5d5fcd8c0ef504f5a
 
 2 change(s): 1 widening, 1 narrowing, 0 other
@@ -220,7 +223,7 @@ billing v3 → v3
   narrows  actor billing.invoice.Customer: may no longer invoke `billing.invoice.CreateInvoice`
            actor/billing.invoice.Customer/grant-removed/billing.invoice.CreateInvoice
 
-suite billing v3 (e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5): 7 of 27 scenario(s) owed again
+suite billing v3 (13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861): 7 of 29 scenario(s) owed again
 2 construct(s) reached: 2 changed, 0 depend on one directly, 0 through another
 
   billing.invoice.CreateInvoice/outcome/accepted
@@ -308,7 +311,7 @@ $ target/debug/protocol ess validate --path /var/tmp/copy
 Every problem is reported in one run. An author who has to re-run the tool to discover the second
 error is an author running it ten times to learn what one pass already knew.
 
-## Five things the model insists on
+## Six things the model insists on
 
 **A command that can be refused says so.** Not an `emits` list — *outcomes*:
 
@@ -371,6 +374,36 @@ fails with an untyped infrastructure error. With it, the illegal-move scenarios 
 and the error by name. A command that moves nothing has no state to be wrong in, so declaring the
 branch there is refused as `unreachable_branch`; two of them on one command is
 `conflicting_declaration`, because an instance is in one state and both would claim it.
+
+**An event's values are a guess until the outcome says where they come from.** `emits:` declares
+*which* facts a branch announces; `payload:` declares what fills their fields:
+
+```yaml
+- name: accepted
+  when: amount.amount > 0
+  creates: billing.invoice.Invoice
+  instance: invoice_id
+  emits: [billing.invoice.InvoiceCreated]
+  payload:
+    billing.invoice.InvoiceCreated:
+      customer_email: input.customer_email
+      amount: input.amount
+```
+
+Without it, an implementation announcing an amount nobody submitted contradicts nothing: every field
+is present and well-typed, and asserting `InvoiceCreated.amount == CreateInvoice.amount` from the
+shared spelling would be a guess that fails a correct implementation naming its fields differently.
+With it, the generated scenario holds the announced amount to the submitted one — a reading of the
+declaration, not an inference.
+
+The block is **optional per field**, and the absence means something: `invoice_id` has no line
+because the identity is the implementation's to assign. An undetermined field stays covered by the
+suite's presence-and-type assertion and by no value, which is how a reader of the suite sees exactly
+what the specification leaves open. A source is `input.<field>` — checked against the command's
+input, with the same type discipline and the same declared-conversion escape hatch a binding's
+`mapping:` has — or literal text, checked as far as text can be. The two mappings are one idea read
+in two directions: a binding fills a command's input *from an event*, an outcome fills an event's
+payload *from the input*.
 
 Over HTTP the same branch is a `409`, where an input-decided refusal is a `422`: the caller sent
 nothing wrong, so there is nothing for it to correct.
@@ -489,10 +522,10 @@ as evidence:
 $ protocol ess conform evidence --path examples/billing --target billing
 - kind: ess_conformance
   specification: billing/v3
-  spec_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
+  spec_digest: 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
   implementation: billing-reference 0.1.0
   status: passed
-  scenarios_total: 27
+  scenarios_total: 29
   scenarios_failed: 0
   producer:
     producer: verifier

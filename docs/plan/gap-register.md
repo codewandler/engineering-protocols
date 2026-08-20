@@ -68,15 +68,22 @@ fine against drift and weak against construction. Decided: widen to the full SHA
 next model-touching batch (below), regenerating committed artifacts once. Not done live because
 every committed suite and projection embeds the digest and the regeneration belongs in one commit.
 
-## Open, owned by the post-wave-6 hardening batch
+## Closed by code, 2026-08-21 — wave 6.5 chunk B
 
-One batch, one wave-sized commit series, sequenced after wave 6 so it does not race the synthesis
-work. Five of its seven rows closed as chunk A (below); what remains, each with its source:
+The last two rows of the post-wave-6 hardening batch. As with chunk A, each new guard was verified
+by mutation before being trusted: the one-line violation it exists to catch was applied, the
+failure was watched naming the defect, and the mutation reverted.
 
-| gap | evidence | close |
-|---|---|---|
-| nothing relates a command's input to an emitted event payload — the one fault caught by nothing | `crates/ess-conformance/src/faulty.rs:254` | a model construct (payload-from-input mapping), then the fault matrix row stops saying "nothing" |
-| value-object invariant scenarios not synthesised (design §20) | `ess conform synthesize` prints the refusal today | a later `ess-conformance` slice, as the refusal text already promises |
+| gap | what closes it now |
+|---|---|
+| nothing relates a command's input to an emitted event payload — the one fault caught by nothing | a `payload:` declaration on a command outcome (`ess-domain`), resolved and type-checked with the binding mapping's own discipline (`ess-compiler`, `ESS-COMMAND-003` and the shared `ESS-COMMAND-002`); synthesis asserts the declared values in `ExpectEvent`, and `wrong-event-payload` moved to the caught side of the matrix — designated by `billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled`, blast radius 2. A field with no declared source stays *undetermined* by decision: the suite asserts its presence and type and never a value, and there is no `unmapped_payload_field` refusal |
+| value-object invariant scenarios not synthesised (design §20) | `ScenarioId::ValueInvariant` — `<type>/invariant/at/<view>/<field>` — one scenario per observable field position that holds a value of the type, the type's own predicate rebased onto the position and required of every row with at least one row demanded. Billing gains two (`Money` at `InvoiceById.total` and `OutstandingInvoices.total`, 27→29 scenarios, refusals 1→0); what has no witness keeps a refusal under the new honest cause `ESS-SYNTH-013` rather than "not synthesised yet". The family's own fault, `negative-projected-total`, is caught by the position it corrupts with blast radius 2 |
+
+A change to either construct lands in the command family, which the semantic delta deliberately
+does not compare until W7.2 — so `ess impact` gained fail-closed mechanism 6: the uncompared
+families are checked for canonical equality, and any difference owes the whole suite
+(`WholeSuite::UncomparedFamilyChanged`, with the test that a payload-only change is `Whole` over an
+empty delta).
 
 ## Closed by code, 2026-08-20 — wave 6.5 chunk A
 

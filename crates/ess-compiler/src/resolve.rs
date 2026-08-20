@@ -42,6 +42,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use aep_domain::error::{ValidationCode, ValidationErrors};
 use ess_domain::actor::ActorSpec;
 use ess_domain::binding::{BindingName, BindingSpec, MappingSource};
+use ess_domain::command::PayloadSource;
 use ess_domain::command::{
     CommandSpec, Effect, ErrorSpec, EventSpec, InstanceSurface, Outcome, OutcomeCondition, Subject,
 };
@@ -60,8 +61,9 @@ use crate::ir::{
     EventHandle, ResolvedActor, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedComponent,
     ResolvedCondition, ResolvedConversion, ResolvedDomain, ResolvedEffect, ResolvedEntity,
     ResolvedError, ResolvedEvent, ResolvedField, ResolvedInstance, ResolvedMapping,
-    ResolvedMappingValue, ResolvedOutcome, ResolvedSubject, ResolvedType, ResolvedTypeRef,
-    ResolvedView, ResolvedWorkload, TypeHandle, ViewHandle,
+    ResolvedMappingValue, ResolvedOutcome, ResolvedPayload, ResolvedPayloadField,
+    ResolvedPayloadValue, ResolvedSubject, ResolvedType, ResolvedTypeRef, ResolvedView,
+    ResolvedWorkload, TypeHandle, ViewHandle,
 };
 use crate::source::{Location, SourceMap, Span};
 
@@ -305,13 +307,16 @@ pub mod codes {
         /// one — fix the name, or declare the event.
         BINDING_UNDECLARED_REFERENCE = family::BINDING, class::UNDECLARED;
 
-        /// An outcome's `instance:` names a field that is not typed as the entity's identity.
+        /// Two types a command's declared link makes meet do not agree.
         ///
-        /// The link between a command and the instance it acts on, checked at the only place that
-        /// can check it: `ess-domain` refuses it too, under `type_mismatch`, and both arrive here as
-        /// `ESS-COMMAND-002` so a consumer cannot tell which half noticed. `instance:
-        /// customer_email` resolves to a declared field and identifies no invoice; a scenario built
-        /// on it would send an address where an implementation expects an id.
+        /// Two links land here, because a code names a kind of defect and not a rule. An
+        /// `instance:` naming a field that is not typed as the entity's identity — `instance:
+        /// customer_email` resolves to a declared field and identifies no invoice, and a scenario
+        /// built on it would send an address where an implementation expects an id. And a
+        /// `payload:` source whose input type is not the event field's and has no declared
+        /// conversion, which is [`MAPPING_TYPE_MISMATCH`]'s defect read in the other direction.
+        /// `ess-domain` refuses both too, under `type_mismatch`, and all of them arrive here as
+        /// `ESS-COMMAND-002` so a consumer cannot tell which half noticed.
         COMMAND_TYPE_MISMATCH = family::COMMAND, class::TYPE_MISMATCH;
 
         /// A mapping's two types differ and no conversion between them is declared.
@@ -323,6 +328,14 @@ pub mod codes {
 
         /// A mapping reads a field the triggering event does not carry.
         MAPPING_READS_UNDECLARED_FIELD = family::BINDING, class::UNREADABLE;
+
+        /// An outcome's `payload:` fills a field the emitted event does not carry.
+        ///
+        /// The payload construct's own member of [`class::UNREADABLE`]: the document points at a
+        /// field that is not there to touch, exactly as
+        /// [`MAPPING_READS_UNDECLARED_FIELD`] does one construct over — the direction differs (a
+        /// mapping *reads* the event, a payload *fills* it) and the defect does not.
+        PAYLOAD_FILLS_UNDECLARED_FIELD = family::COMMAND, class::UNREADABLE;
 
         /// A required input of the invoked command is left unmapped.
         ///
@@ -1367,17 +1380,251 @@ impl<'a> Resolver<'a> {
                     complete = false;
                 }
             }
+            let payload = self.payload(command, outcome, input, &emits, events);
+            if payload.is_none() {
+                complete = false;
+            }
+            let payload = payload.unwrap_or_default();
             resolved.push(ResolvedOutcome {
                 name: outcome.name.clone(),
                 condition: condition_of(outcome),
                 subject,
                 test_strategy: outcome.test_strategy(),
                 emits,
+                payload,
                 error,
                 summary: outcome.summary.clone(),
             });
         }
         complete.then_some(resolved)
+    }
+
+    /// One outcome's declared payload, resolved against the events it fills and the input it
+    /// reads.
+    ///
+    /// The mirror of [`Resolver::mapping`], one construct over, and checked here for the reason
+    /// that one is: the event, the command and the conversion registry are needed at once, so no
+    /// single declaration can decide it. `ess-domain` has already refused an assembled
+    /// specification that breaks any of these rules; a `Specification` built field by field has
+    /// not, which is what the backstop arms catch.
+    ///
+    /// What is deliberately not checked: an event field with **no** source. Undetermined is a
+    /// statement, not an omission — [`ResolvedPayload`] carries the argument.
+    fn payload(
+        &mut self,
+        command: &CommandSpec,
+        outcome: &ess_domain::command::Outcome,
+        input: Option<&[ResolvedField]>,
+        emits: &[EventHandle],
+        events: &BTreeMap<QualifiedName, ResolvedEvent>,
+    ) -> Option<Vec<ResolvedPayload>> {
+        let mut complete = true;
+        let mut resolved = Vec::new();
+        for (event_name, fields) in &outcome.payload {
+            // A backstop: `ess-domain` refuses a payload block about an event the branch does not
+            // emit, so only a hand-built specification reaches this arm.
+            let Some(handle) = emits.iter().find(|handle| handle.name() == event_name) else {
+                complete = false;
+                self.refuse_payload(
+                    command,
+                    outcome,
+                    event_name,
+                    None,
+                    codes::COMMAND_UNDECLARED_REFERENCE,
+                    format!(
+                        "outcome `{}` of `{}` declares payload sources for `{event_name}`, which \
+                         it does not emit",
+                        outcome.name, command.name
+                    ),
+                    Vec::new(),
+                );
+                continue;
+            };
+            let Some(event) = events.get(event_name) else {
+                // The event itself did not resolve, and the `emits` walk already said so.
+                complete = false;
+                continue;
+            };
+
+            let mut determined = Vec::new();
+            // The event's declaration order, as a binding's mapping takes the command's input
+            // order: the IR's order is the model's, never the document's.
+            for target in &event.fields {
+                let Some(source) = fields.get(&target.name) else {
+                    continue;
+                };
+                match self.payload_field(command, outcome, event, target, source, input) {
+                    Some(field) => determined.push(field),
+                    None => complete = false,
+                }
+            }
+            for (target, source) in fields {
+                if event.field(target).is_none() {
+                    complete = false;
+                    let carried = names(event.fields.iter().map(|field| field.name.clone()));
+                    self.refuse_payload(
+                        command,
+                        outcome,
+                        event_name,
+                        Some((target, source)),
+                        codes::PAYLOAD_FILLS_UNDECLARED_FIELD,
+                        format!(
+                            "outcome `{}` of `{}` fills `{event_name}.{target}`, which the event \
+                             does not carry",
+                            outcome.name, command.name
+                        ),
+                        vec![Detail::Note {
+                            text: format!("`{event_name}` carries: {carried}"),
+                        }],
+                    );
+                }
+            }
+            resolved.push(ResolvedPayload {
+                event: handle.clone(),
+                fields: determined,
+            });
+        }
+        complete.then_some(resolved)
+    }
+
+    /// One determined field: the source resolved, and the two types checked against each other.
+    fn payload_field(
+        &mut self,
+        command: &CommandSpec,
+        outcome: &ess_domain::command::Outcome,
+        event: &ResolvedEvent,
+        target: &ResolvedField,
+        source: &PayloadSource,
+        input: Option<&[ResolvedField]>,
+    ) -> Option<ResolvedPayloadField> {
+        let value = match source {
+            PayloadSource::Literal { value } => {
+                // Taken on trust past `ess-domain`'s representation check, as a binding's literal
+                // is: nothing in the model says how to read text as anything but text.
+                return Some(ResolvedPayloadField {
+                    target: target.name.clone(),
+                    target_type: target.type_ref.clone(),
+                    value: ResolvedPayloadValue::Literal {
+                        value: value.clone(),
+                    },
+                    conversion: None,
+                });
+            }
+            PayloadSource::InputField { field } => field,
+        };
+        let Some(read) = input.and_then(|fields| fields.iter().find(|it| &it.name == value)) else {
+            // Either the input did not resolve — its own refusal stands — or a hand-built
+            // specification reads a field the command does not take.
+            if input.is_some() {
+                let takes = names(command.input.iter().map(|field| field.name.clone()));
+                self.refuse_payload(
+                    command,
+                    outcome,
+                    &event.name,
+                    Some((&target.name, source)),
+                    codes::COMMAND_UNDECLARED_REFERENCE,
+                    format!(
+                        "outcome `{}` of `{}` reads `input.{value}`, which the command does not \
+                         take",
+                        outcome.name, command.name
+                    ),
+                    vec![Detail::Note {
+                        text: format!("`{}` takes: {takes}", command.name),
+                    }],
+                );
+            }
+            return None;
+        };
+
+        let from = spec_type_ref(&read.type_ref);
+        let to = spec_type_ref(&target.type_ref);
+        let conversion = if is_assignable(&from, &to) {
+            None
+        } else if let Some(crossing) = self
+            .spec
+            .conversions
+            .iter()
+            .find(|crossing| crossing.from == from && crossing.to == to)
+        {
+            Some(crossing.because.clone())
+        } else {
+            self.refuse_payload(
+                command,
+                outcome,
+                &event.name,
+                Some((&target.name, source)),
+                codes::COMMAND_TYPE_MISMATCH,
+                format!(
+                    "outcome `{}` of `{}` is invalid",
+                    outcome.name, command.name
+                ),
+                vec![
+                    Detail::Typed {
+                        subject: format!("{}.{}", command.name, read.name),
+                        type_ref: read.type_ref.to_string(),
+                        requires: false,
+                    },
+                    Detail::Typed {
+                        subject: format!("{}.{}", event.name, target.name),
+                        type_ref: target.type_ref.to_string(),
+                        requires: true,
+                    },
+                    Detail::Note {
+                        text: format!(
+                            "no conversion from `{}` to `{}` is declared",
+                            read.type_ref, target.type_ref
+                        ),
+                    },
+                ],
+            );
+            return None;
+        };
+
+        Some(ResolvedPayloadField {
+            target: target.name.clone(),
+            target_type: target.type_ref.clone(),
+            value: ResolvedPayloadValue::InputField {
+                field: read.name.clone(),
+                type_ref: read.type_ref.clone(),
+            },
+            conversion,
+        })
+    }
+
+    /// Refuses one payload entry, pointing at the line the entry is written on.
+    #[allow(clippy::too_many_arguments)]
+    fn refuse_payload(
+        &mut self,
+        command: &CommandSpec,
+        outcome: &ess_domain::command::Outcome,
+        event: &QualifiedName,
+        entry: Option<(&String, &PayloadSource)>,
+        code: Code,
+        message: String,
+        details: Vec<Detail>,
+    ) {
+        let mut needles = Vec::new();
+        let mut path = format!(
+            "commands.{}.outcomes.{}.payload.{event}",
+            command.name, outcome.name
+        );
+        if let Some((target, source)) = entry {
+            path.push('.');
+            path.push_str(target);
+            needles.push(format!("{target}: {source}"));
+        }
+        needles.push(format!("name: {}", command.name));
+        let span = self.locator.span(path, &needles);
+        self.refuse(
+            code,
+            message,
+            details,
+            Some(
+                "a payload source fills a field the emitted event carries, from a field of the \
+                 command's input or from a literal",
+            ),
+            span,
+        );
     }
 
     /// One outcome's subject: the entity it acts on, and the move it takes.

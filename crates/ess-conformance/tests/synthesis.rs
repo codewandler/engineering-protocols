@@ -554,16 +554,18 @@ fn an_outcome_no_input_decides_is_reached_by_injection_and_by_nothing_else() {
 }
 
 #[test]
-fn an_event_assertion_carries_the_shape_the_specification_declares_and_no_value_at_all() {
+fn an_event_assertion_carries_the_declared_shape_and_exactly_the_values_the_payload_determines() {
     // §13, and the line the model draws through the middle of an event's payload. What the
-    // specification *declares* is the field set and the types, and that is what the assertion
+    // specification *declares* is the field set and the types, and that is what the shape
     // carries: a newtype is transparent, so `invoice_id` is a `Uuid`, and a struct contributes one
     // leaf per field under a dotted path.
     //
-    // What it does not carry is a **value**. Nothing in the model relates a command's input to a
-    // payload field, so `amount = 120` here would be a match on a shared field name — and a suite
-    // that guessed would fail an implementation doing nothing wrong. `wrong-event-payload` in the
-    // fault matrix is that gap, kept visible rather than closed by inference.
+    // A **value** is asserted exactly where the outcome's `payload:` says where it comes from.
+    // `accepted` determines `customer_email` and `amount` from the input, so the assertion carries
+    // the literals this scenario supplied there — a reading of the declaration, not a match on a
+    // shared field name. `invoice_id` has no declared source: the identity is the
+    // implementation's to assign, so it stays undetermined, covered by the shape and by no value —
+    // which is how a reader of the suite sees which fields the specification leaves open.
     let synthesis = synthesize(&example("billing"));
     let created = steps(&synthesis, "billing.invoice.CreateInvoice/outcome/accepted")
         .iter()
@@ -580,11 +582,24 @@ fn an_event_assertion_carries_the_shape_the_specification_declares_and_no_value_
         .expect("`accepted` asserts the event it emits");
 
     let (payload, shape) = created;
-    assert!(
-        payload.is_empty(),
-        "a value is asserted only where the model says where it comes from, and it does not: \
-         {payload:?}"
+    let executed = steps(&synthesis, "billing.invoice.CreateInvoice/outcome/accepted")
+        .iter()
+        .find_map(|step| match step {
+            ScenarioStep::ExecuteCommand { input, .. } => Some(input.clone()),
+            _ => None,
+        })
+        .expect("the scenario executes the command");
+    let sent = |field: &str| match executed.get(field) {
+        Some(ScenarioValue::Literal { value }) => value.clone(),
+        other => panic!("`{field}` is a literal this scenario chose, not {other:?}"),
+    };
+    assert_eq!(
+        payload.keys().map(String::as_str).collect::<Vec<_>>(),
+        vec!["amount", "customer_email"],
+        "the two determined fields and never the undetermined identity: {payload:?}"
     );
+    assert_eq!(payload["amount"], sent("amount"));
+    assert_eq!(payload["customer_email"], sent("customer_email"));
 
     let leaves: Vec<(&str, String)> = shape
         .leaves()
@@ -1695,21 +1710,65 @@ fn an_invariant_over_a_field_no_view_publishes_refuses_rather_than_being_dropped
 }
 
 #[test]
-fn a_value_objects_own_invariants_are_refused_rather_than_silently_skipped() {
-    // `billing.invoice.Money` says `amount >= 0` of every `Money` in the system, and this build
-    // evaluates entity invariants only. A reader of the suite cannot tell that from a specification
-    // with nothing to check, so §36's rule applies to a gap in this crate exactly as it does to a
-    // gap in the model.
+fn a_value_objects_own_invariants_are_read_at_every_field_position_a_view_holds_one() {
+    // `billing.invoice.Money` says `amount >= 0` of every `Money` in the system. This family sat
+    // behind an `ESS-SYNTH-006` refusal until wave 6.5 delivered the slice the refusal promised:
+    // the claim is now read at each observable field position that holds a `Money` — both views
+    // publish one at `total` — as the type's own predicate rebased onto the position, over every
+    // row, with at least one row demanded. Two positions are two scenarios, because a projection
+    // can corrupt one and not the other.
     let synthesis = synthesize(&example("billing"));
-    let named: Vec<String> = synthesis
-        .refused(code(6))
-        .map(|refusal| refusal.subject.to_string())
-        .collect();
+    assert!(
+        synthesis.refused(code(6)).next().is_none(),
+        "the refusal that promised this slice is gone only because the scenarios exist"
+    );
 
-    assert_eq!(
-        named,
-        vec!["type billing.invoice.Money".to_owned()],
-        "the one value object in the example that constrains its own values"
+    for (view, block) in [
+        ("billing.invoice.InvoiceById", "eventually"),
+        ("billing.invoice.OutstandingInvoices", "expect"),
+    ] {
+        let id = format!("billing.invoice.Money/invariant/at/{view}/total");
+        let (style, expectation) = expectation(&synthesis, &id, view);
+        assert_eq!(
+            style, block,
+            "the block is the view's own consistency, exactly as §14 places every other assertion"
+        );
+        let ViewExpectation::Satisfies { predicate } = expectation else {
+            panic!("`{id}` requires every row rather than one value: {expectation:?}");
+        };
+        assert_eq!(
+            predicate.to_string(),
+            "total.amount >= 0",
+            "the type's own words, re-rooted at the field position that holds one"
+        );
+    }
+}
+
+#[test]
+fn a_value_object_nothing_observable_holds_keeps_a_refusal_naming_what_would_close_it() {
+    // Never delete a refusal without replacing it with the scenario it promised — and the
+    // positions this slice does not synthesise keep one with the honest cause. `LineItem` prices
+    // are `Money` too, but `lines` is a `List`, and a fact path has no index: with the two `total`
+    // positions projected away, that unreachable holding is all that is left, and the type's
+    // refusal comes back. Built by narrowing the example's views to their identity field, which is
+    // a legal view set the specification could have declared.
+    let mut ir = example("billing");
+    for view in ir.views.values_mut() {
+        view.fields.retain(|field| field.name == "invoice_id");
+    }
+    let synthesis = synthesize(&ir);
+    let refusal = synthesis
+        .refused(code(13))
+        .find(|refusal| refusal.subject.to_string() == "type billing.invoice.Money")
+        .expect("the value object keeps a refusal where nothing holds one");
+    let rendered = refusal.to_string();
+    assert!(
+        rendered.contains("no view publishes a field position"),
+        "the cause names the gap, not a missing slice: {rendered}"
+    );
+    assert!(
+        rendered.contains("amount >= 0"),
+        "and quotes the author's own condition: {rendered}"
     );
 }
 
@@ -1757,12 +1816,11 @@ fn each_example_synthesises_the_families_its_specification_declares() {
     // being produced at all, which no test of one scenario's shape can see. Read as a table because
     // that is what it is: what each specification declares, and what it therefore obliges.
     //
-    // The refusal count no longer includes the illegal-move family. Both examples declare a
-    // `wrong_state:` branch on every command that moves an entity, so all sixteen `ESS-SYNTH-012`
-    // refusals became assertions of a declared error. What is left is what the model still cannot
-    // say: one for billing — the value object whose own invariants are not read off the fields that
-    // hold one — and six for the oracle fixture, its five unobservable invariants and its one
-    // `on_failure: drop` binding.
+    // The refusal count no longer includes the illegal-move family, and — since wave 6.5 — no
+    // longer includes billing's value object either: `Money`'s own invariants are read at the two
+    // view positions that hold one, so billing's refusal count is zero. What is left is the oracle
+    // fixture's six: its five unobservable entity invariants and its one `on_failure: drop`
+    // binding.
     for (system, expected, refusals) in [
         (
             "billing",
@@ -1770,10 +1828,10 @@ fn each_example_synthesises_the_families_its_specification_declares() {
                 ("/outcome/", 8),
                 ("/transition/", 3),
                 ("/state/", 8),
-                ("/invariant/", 4),
+                ("/invariant/", 6),
                 ("/binding/", 4),
             ],
-            1,
+            0,
         ),
         (
             "oracle-fixture",

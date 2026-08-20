@@ -3,7 +3,7 @@
 //! Wave 6's only acceptance criterion that matters, and it is executed rather than asserted:
 //! `suites/generated/billing/suite.json`, exactly as wave 4 committed it, runs against the
 //! generated workspace linked with this crate's hand-written obligation implementations, and
-//! passes 27 of 27. Then the falsifiability half: the *same* suite, against the linkage carrying
+//! passes 29 of 29. Then the falsifiability half: the *same* suite, against the linkage carrying
 //! the one deliberately corrupted obligation, fails exactly the scenario that exists to catch it.
 //!
 //! # The bridge is an adapter, not an implementation
@@ -729,7 +729,7 @@ fn the_committed_suite_unchanged_passes_the_linked_synthesized_system() {
     let suite = committed_suite();
     assert_eq!(
         suite.len(),
-        27,
+        29,
         "the criterion is the whole committed suite; fewer scenarios would prove less than wave \
          6 claims"
     );
@@ -751,7 +751,7 @@ fn the_committed_suite_unchanged_passes_the_linked_synthesized_system() {
             .next()
             .map_or_else(|| "none".to_owned(), ToString::to_string)
     );
-    assert_eq!(report.scenarios.len(), 27);
+    assert_eq!(report.scenarios.len(), 29);
     assert_eq!(report.status, ConformanceStatus::Passed);
     assert!(report.is_conformant());
     assert_eq!(
@@ -778,7 +778,7 @@ fn two_runs_against_the_linked_system_produce_byte_identical_reports() {
 
 #[test]
 fn the_same_suite_fails_the_corrupted_linkage_exactly_where_the_lie_is() {
-    // The falsifiability half. Without it, 27 green scenarios show only that the suite asks
+    // The falsifiability half. Without it, 29 green scenarios show only that the suite asks
     // nothing an honest linkage cannot answer — nothing about whether it would notice a wrong
     // one. The corrupted linkage differs from the honest one by exactly one obligation, so the
     // suite's verdict about it is attributable to the one lie.

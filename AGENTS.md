@@ -66,9 +66,10 @@ tests, with 0 clippy warnings and 0 rustdoc warnings.
   the one scenario that exists to catch it). `generated/` holds the committed projections and the
   synthesised workspace, `suites/generated/` the committed conformance suites; all drift-checked
   in the gate.
-* **Not built yet:** the rest of the wave 6.5 hardening batch (chunk A — the three unenforced
-  invariants, the digest widening and `proptest` phase 1 — is done; the input→event-payload model
-  gap and value-object invariant scenarios remain) and wave 7, both scheduled on the roadmap;
+* **Not built yet:** wave 7, scheduled on the roadmap (the wave 6.5 hardening batch is done:
+  chunk A closed the three unenforced invariants, the digest widening and `proptest` phase 1;
+  chunk B closed the input→event-payload model gap — an outcome's `payload:` declaration — and
+  the value-object invariant scenarios);
   attested evidence (gap register D-3, proposed and unaccepted); any durable backend — the only
   implementation of the contract is in memory.
 * Work order: [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) §4 for AEP,

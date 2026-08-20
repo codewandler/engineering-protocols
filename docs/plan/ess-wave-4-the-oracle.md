@@ -153,6 +153,10 @@ outcome to say where a payload field comes from. That is a construct, a resoluti
 in every projection and an edit to the normative example — the same cost as `instance:`, and it is the
 clearest candidate the wave produced for the next model change.
 
+*(Wave 6.5 closed it, in exactly that shape: a `payload:` declaration on a command outcome, and the
+row now designates the scenario that catches it. This section stays as the record of why the gap
+existed and what the closure had to cost.)*
+
 What synthesis *can* ask for, it now asks. `partial-event-payload` is the same event with a declared
 field missing, and that one is caught, because the type is declared. Presence and shape are a row in
 the matrix rather than a sentence in a doc comment.

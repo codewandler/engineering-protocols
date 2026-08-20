@@ -612,7 +612,7 @@ impl<C: Clock> Runner<C> {
                 // crossing a component boundary changes when a consequence is observable, not what
                 // it carries.
                 let executing = run.last_command.as_ref().map(Executed::quoted);
-                expect_payload(event, &carried, shape, executing, run);
+                expect_payload(event, &carried, &BTreeMap::new(), shape, executing, run);
                 return Flow::Continue;
             }
             if deadline.has_passed(self.clock.now()) {
@@ -847,20 +847,20 @@ fn expect_event(
         return Flow::Stop;
     };
     let about = format!("event {event}");
+    // By name alone, never by the asserted values: "you published the wrong event" and "you
+    // published the right event carrying the wrong value" are two different repairs, and folding
+    // the values into the match would report the second as the first.
     let found = executed
         .result
         .direct_events
         .iter()
-        .find(|observed| &observed.event == event && matches(&observed.payload, payload))
+        .find(|observed| &observed.event == event)
         .map(|observed| observed.payload.clone());
     let Some(carried) = found else {
-        let mut diagnostic = Diagnostic::new(CheckCode::Event, run.id.clone())
+        let diagnostic = Diagnostic::new(CheckCode::Event, run.id.clone())
             .declared_by(event.clone())
             .executing(executed.quoted())
             .expected(format!("event {event} published"));
-        for (field, value) in payload {
-            diagnostic = diagnostic.expected(format!("{event}.{field} = {}", quote(value)));
-        }
         let observed = published(&executed.result);
         run.record(CheckResult::failed(about, diagnostic.observed(observed)));
         return Flow::Continue;
@@ -870,28 +870,35 @@ fn expect_event(
     // A separate check, and separately named: "the event happened" and "the event carried what it
     // declares" are two rules, and a report that folded them into one would say `ESS-CF-EVENT`
     // failed for a system that published exactly the right event with half a payload.
-    expect_payload(event, &carried, shape, Some(executing), run);
+    expect_payload(event, &carried, payload, shape, Some(executing), run);
     Flow::Continue
 }
 
-/// Requires that an occurrence carried every field it declares, each of the declared type (§13).
+/// Requires that an occurrence carried every field it declares, each of the declared type, and —
+/// where the outcome's `payload:` determined one — the value the specification says it carries
+/// (§13).
+///
+/// # What the two halves are
+///
+/// The **shape** is free: the declared fields, present and well-typed. A **value** is asserted
+/// exactly where the model licenses it — the outcome's declared payload says which input or
+/// literal fills the field, and `values` carries what the suite supplied there. A field with no
+/// declared source has no entry in `values`, stays covered by the shape alone, and that
+/// undeterminedness is a fact about the specification the suite shows rather than an error.
 ///
 /// # What is not checked here, and why
 ///
-/// A **value**. `PayloadShape` argues it in full: the model relates a command's input to no payload
-/// field, so `InvoiceCreated.amount == CreateInvoice.amount` is a name match rather than a reading,
-/// and a suite that asserted it would fail an implementation that is doing nothing wrong.
-///
-/// An **undeclared** field, for the mirror-image reason: nothing in the model closes an event's
-/// payload, so refusing an extra field would enforce a rule no document wrote.
+/// An **undeclared** field: nothing in the model closes an event's payload, so refusing an extra
+/// field would enforce a rule no document wrote.
 fn expect_payload(
     event: &EventRef,
     carried: &BTreeMap<String, Node>,
+    values: &BTreeMap<String, Node>,
     shape: &PayloadShape,
     executing: Option<String>,
     run: &mut Run,
 ) {
-    if shape.is_empty() {
+    if shape.is_empty() && values.is_empty() {
         return;
     }
     let about = format!("payload of {event}");
@@ -904,6 +911,16 @@ fn expect_payload(
     // an event with three fields of the wrong type is three repairs, and reporting one makes the
     // other two look like consequences of it.
     let mut wrong = Vec::new();
+    for (field, expected) in values {
+        if carried.get(field) == Some(expected) {
+            continue;
+        }
+        diagnostic = diagnostic.expected(format!("{event}.{field} = {}", quote(expected)));
+        wrong.push(match carried.get(field) {
+            Some(observed) => format!("{field} = {}", quote(observed)),
+            None => format!("{field} was not carried"),
+        });
+    }
     for (path, leaf) in shape.leaves() {
         let reached = reach_into(carried, path);
         let admitted = match &reached {

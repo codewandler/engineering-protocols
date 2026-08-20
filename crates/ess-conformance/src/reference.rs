@@ -96,7 +96,7 @@ const DELIVERY_ESCALATED: &str = "billing.email.DeliveryEscalated";
 /// `billing.invoice.InvoiceById`, the projection.
 const INVOICE_BY_ID: &str = "billing.invoice.InvoiceById";
 /// `billing.invoice.OutstandingInvoices`, read-your-writes.
-const OUTSTANDING: &str = "billing.invoice.OutstandingInvoices";
+pub(crate) const OUTSTANDING: &str = "billing.invoice.OutstandingInvoices";
 
 /// `notify-on-invoice-created`.
 const NOTIFY: &str = "notify-on-invoice-created";

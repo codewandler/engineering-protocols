@@ -150,7 +150,7 @@
 //! for [`UnknownState`](ValidationCode::UnknownState), which an AEP workflow and an ESS lifecycle
 //! have shared since wave 1.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::str::FromStr;
 
@@ -528,6 +528,235 @@ impl fmt::Display for InstanceSurface {
     }
 }
 
+// ---- where a payload field's value comes from ---------------------------------------------------
+
+/// Where one field of an emitted event's payload comes from.
+///
+/// The model's second mapping, and deliberately the same shape as a binding's
+/// [`MappingSource`](crate::binding::MappingSource): a prefix marks a reference, anything else is
+/// literal text, and the reference variant is the one the type check verifies. What differs is only
+/// the surface the reference reads — a binding fills a command's input *from the triggering event*,
+/// an outcome fills an event's payload *from the command's input* — so the prefix is `input.` where
+/// the binding's is `event.`.
+///
+/// It exists because of what its absence cost. An outcome could say *which* events it emits and
+/// never what fills their fields, so an `InvoiceCreated` carrying an amount nobody submitted
+/// contradicted nothing the model licensed — `wrong-event-payload`, the one fault in
+/// `ess-conformance`'s matrix that was caught by nothing. Asserting
+/// `InvoiceCreated.amount == CreateInvoice.amount` without a declaration would be a match on a
+/// shared field name, which is the inference this workspace refuses everywhere else; this is the
+/// declaration that licenses it.
+///
+/// # Per field, and optional per field
+///
+/// A binding must fill every required input of the command it invokes, because an unfilled input is
+/// a command that cannot run. An event field with no declared source is nothing of the kind: the
+/// value is the implementation's to choose — `InvoiceCreated.invoice_id` is exactly that, an
+/// identity the caller cannot know — so it stays **undetermined**, a fact a synthesized suite shows
+/// by asserting the field's presence and type and never its value. There is no
+/// `unmapped_payload_field` refusal, and that is a decision rather than an omission.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum PayloadSource {
+    /// A field of the command's declared input: `input.amount`.
+    InputField {
+        /// The field's name.
+        field: String,
+    },
+    /// A value written in the outcome itself.
+    ///
+    /// Checked exactly as far as a binding's literal is — text, or a variant of the enum the event
+    /// field is underneath, never a value with structure — and a distinct variant for the same
+    /// reason: a reader can see which payload fields were verified against the input and which were
+    /// taken on trust.
+    Literal {
+        /// The value, as written.
+        value: String,
+    },
+}
+
+impl PayloadSource {
+    /// The prefix that marks a field of the command's input.
+    pub const INPUT_PREFIX: &'static str = "input.";
+
+    /// Reads `input.amount` as a field, anything else as a literal.
+    pub fn parse(value: &str) -> Self {
+        match value.strip_prefix(Self::INPUT_PREFIX) {
+            Some(field) => Self::InputField {
+                field: field.to_owned(),
+            },
+            None => Self::Literal {
+                value: value.to_owned(),
+            },
+        }
+    }
+}
+
+impl fmt::Display for PayloadSource {
+    /// As the document wrote it, so a diagnostic quotes the author rather than the model.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InputField { field } => write!(f, "{}{field}", Self::INPUT_PREFIX),
+            Self::Literal { value } => f.write_str(value),
+        }
+    }
+}
+
+/// One filled field of an emitted event's payload.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PayloadField {
+    /// The event field being filled.
+    pub target: String,
+    /// Where the value comes from.
+    pub source: PayloadSource,
+}
+
+/// One event's payload sources, as a document says them: one entry per line, in the order written.
+///
+/// A `BTreeMap` here would repeat the defect [`MappingTable`](crate::binding::MappingTable) exists
+/// to catch: `serde_yaml` accepts a repeated key and keeps the last, so a document that filled one
+/// field two contradictory ways would parse clean and silently lose a line. The entries stay a list
+/// until [`TryFrom<RawOutcome>`] has reported any duplicate; past that point [`Outcome::payload`]
+/// is keyed by field, so a duplicate is unrepresentable.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PayloadTable(pub Vec<PayloadField>);
+
+impl<'de> serde::Deserialize<'de> for PayloadTable {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entries;
+
+        impl<'de> serde::de::Visitor<'de> for Entries {
+            type Value = PayloadTable;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a mapping of event field to source, as in `amount: input.amount`")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut entries = Vec::new();
+                while let Some((target, source)) = map.next_entry::<String, String>()? {
+                    entries.push(PayloadField {
+                        target,
+                        source: PayloadSource::parse(&source),
+                    });
+                }
+                Ok(PayloadTable(entries))
+            }
+        }
+
+        deserializer.deserialize_map(Entries)
+    }
+}
+
+impl serde::Serialize for PayloadTable {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for entry in &self.0 {
+            map.serialize_entry(&entry.target, &entry.source.to_string())?;
+        }
+        map.end()
+    }
+}
+
+impl schemars::JsonSchema for PayloadTable {
+    // Inlined, as `MappingTable`'s is: the list is an implementation detail of catching a repeated
+    // key, not something a document can see.
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "PayloadTable".to_owned()
+    }
+
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut schema = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::Object.into()),
+            ..Default::default()
+        };
+        schema.object().additional_properties = Some(Box::new(generator.subschema_for::<String>()));
+        schema.into()
+    }
+}
+
+/// An outcome's whole `payload:` block: one table per emitted event, in the order written.
+///
+/// A list of pairs rather than a map, for the reason [`PayloadTable`] is: the outer keys can be
+/// repeated in a document too, and the second block would silently replace the first.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PayloadDeclaration(pub Vec<(QualifiedName, PayloadTable)>);
+
+impl PayloadDeclaration {
+    /// `true` when no event is given any source.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PayloadDeclaration {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Entries;
+
+        impl<'de> serde::de::Visitor<'de> for Entries {
+            type Value = PayloadDeclaration;
+
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a mapping of emitted event to its payload sources")
+            }
+
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Self::Value, A::Error> {
+                let mut entries = Vec::new();
+                while let Some((event, table)) = map.next_entry::<QualifiedName, PayloadTable>()? {
+                    entries.push((event, table));
+                }
+                Ok(PayloadDeclaration(entries))
+            }
+        }
+
+        deserializer.deserialize_map(Entries)
+    }
+}
+
+impl serde::Serialize for PayloadDeclaration {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (event, table) in &self.0 {
+            map.serialize_entry(event, table)?;
+        }
+        map.end()
+    }
+}
+
+impl schemars::JsonSchema for PayloadDeclaration {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "PayloadDeclaration".to_owned()
+    }
+
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut schema = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::Object.into()),
+            ..Default::default()
+        };
+        schema.object().additional_properties =
+            Some(Box::new(generator.subschema_for::<PayloadTable>()));
+        schema.into()
+    }
+}
+
 /// One thing a command can do.
 ///
 /// An outcome is observable or it is not an outcome: it emits events, or it names an error, and a
@@ -549,6 +778,13 @@ pub struct Outcome {
     pub subject: Option<Subject>,
     /// The events this outcome emits, as facts, in the order they happen.
     pub emits: Vec<QualifiedName>,
+    /// Where the fields of those events' payloads come from, for the fields some declaration
+    /// determines.
+    ///
+    /// Keyed by emitted event, then by that event's field. Sparse on both levels by design — see
+    /// [`PayloadSource`]: an event or a field absent here is *undetermined*, which is a fact about
+    /// the specification rather than a defect in it.
+    pub payload: BTreeMap<QualifiedName, BTreeMap<String, PayloadSource>>,
     /// The error this outcome reports, from the domain's declared error vocabulary.
     pub error: Option<QualifiedName>,
     /// One line for generated documentation and for the generated scenario's title.
@@ -563,6 +799,7 @@ impl Outcome {
             condition: OutcomeCondition::When(predicate),
             subject: None,
             emits,
+            payload: BTreeMap::new(),
             error: None,
             summary: None,
         }
@@ -575,6 +812,7 @@ impl Outcome {
             condition: OutcomeCondition::Otherwise,
             subject: None,
             emits,
+            payload: BTreeMap::new(),
             error: None,
             summary: None,
         }
@@ -591,6 +829,7 @@ impl Outcome {
             condition: OutcomeCondition::WrongState,
             subject: None,
             emits: Vec::new(),
+            payload: BTreeMap::new(),
             error: Some(error),
             summary: None,
         }
@@ -600,6 +839,21 @@ impl Outcome {
     #[must_use]
     pub fn acting_on(mut self, subject: Subject) -> Self {
         self.subject = Some(subject);
+        self
+    }
+
+    /// The same outcome, with `event`'s field `target` determined by `source`.
+    #[must_use]
+    pub fn determining(
+        mut self,
+        event: QualifiedName,
+        target: impl Into<String>,
+        source: PayloadSource,
+    ) -> Self {
+        self.payload
+            .entry(event)
+            .or_default()
+            .insert(target.into(), source);
         self
     }
 
@@ -866,7 +1120,60 @@ impl CommandSpec {
             }
         }
 
+        errors.extend(self.validate_payload_shape(outcome, inputs, &location));
         errors.extend(self.validate_guard(outcome, inputs, &location));
+        errors
+    }
+
+    /// The payload's local half: each block is about an event this branch emits, and each
+    /// `input.` source reads a field the caller supplies. The other half — the event's fields and
+    /// the two types — needs the domain's event declarations and runs in [`validate_payloads`].
+    fn validate_payload_shape(
+        &self,
+        outcome: &Outcome,
+        inputs: &BTreeSet<&str>,
+        location: &str,
+    ) -> ValidationErrors {
+        let mut errors = ValidationErrors::new();
+        for (event, fields) in &outcome.payload {
+            if !outcome.emits.contains(event) {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::UndeclaredReference,
+                        format!("{location}.payload.{event}"),
+                        format!(
+                            "outcome `{}` says where `{event}`'s payload comes from and does not \
+                             emit it, so the sources describe an event this branch never publishes",
+                            outcome.name
+                        ),
+                    )
+                    .with_hint(if outcome.emits.is_empty() {
+                        "this branch emits nothing; a refusal has no payload to determine"
+                            .to_owned()
+                    } else {
+                        format!("this branch emits: {}", join(outcome.emits.iter()))
+                    }),
+                );
+            }
+            for (target, source) in fields {
+                let PayloadSource::InputField { field } = source else {
+                    continue;
+                };
+                if !inputs.contains(field.as_str()) {
+                    errors.push(
+                        ValidationError::new(
+                            ValidationCode::UndeclaredReference,
+                            format!("{location}.payload.{event}.{target}"),
+                            format!(
+                                "`{source}` reads `{field}`, which `{}` does not declare as input",
+                                self.name
+                            ),
+                        )
+                        .with_hint(format!("declared input: {}", join(inputs.iter()))),
+                    );
+                }
+            }
+        }
         errors
     }
 
@@ -1091,6 +1398,218 @@ impl CommandSpec {
     }
 }
 
+/// Checks every outcome's `payload:` block against the events it fills and the inputs it reads.
+///
+/// The cross-declaration half of the construct, mirroring [`validate_bindings`](crate::binding::validate_bindings)
+/// clause for clause because the two are one rule read in two directions: a binding fills a
+/// command's input from an event, an outcome fills an event's payload from a command's input, and
+/// in both the target field must exist, the two types must agree or a conversion must be declared,
+/// and a literal is text checked as far as text can be.
+///
+/// What is deliberately *not* here is an `unmapped_payload_field`: an event field with no source is
+/// undetermined, not incomplete — see [`PayloadSource`].
+pub fn validate_payloads(
+    commands: &BTreeMap<QualifiedName, CommandSpec>,
+    events: &BTreeMap<QualifiedName, EventSpec>,
+    types: &TypeRegistry,
+    conversions: &crate::types::ConversionRegistry,
+) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+    for command in commands.values() {
+        for outcome in &command.outcomes {
+            for (event_name, fields) in &outcome.payload {
+                // An event nothing declares was already reported by `CommandSpec::validate` —
+                // either the `emits:` check or the local `payload ⊆ emits` one — and resolving its
+                // fields would report the same repair a second way.
+                let Some(event) = events.get(event_name) else {
+                    continue;
+                };
+                for (target, source) in fields {
+                    let at = format!(
+                        "command.{}.outcomes.{}.payload.{event_name}.{target}",
+                        command.name, outcome.name
+                    );
+                    errors.extend(check_payload_entry(
+                        &at,
+                        command,
+                        event,
+                        target,
+                        source,
+                        types,
+                        conversions,
+                    ));
+                }
+            }
+        }
+    }
+    errors
+}
+
+/// One payload entry: the event field it fills, the value it takes, and whether the two agree.
+fn check_payload_entry(
+    at: &str,
+    command: &CommandSpec,
+    event: &EventSpec,
+    target: &str,
+    source: &PayloadSource,
+    types: &TypeRegistry,
+    conversions: &crate::types::ConversionRegistry,
+) -> ValidationErrors {
+    let mut errors = ValidationErrors::new();
+
+    let Some(filled) = event.field(target) else {
+        errors.push(
+            ValidationError::new(
+                ValidationCode::UndeclaredReference,
+                at.to_owned(),
+                format!("`{target}` is not a field `{}` carries", event.name),
+            )
+            .with_hint(crate::binding::readable(event)),
+        );
+        return errors;
+    };
+
+    match source {
+        PayloadSource::InputField { field } => {
+            // An input nothing declares was already reported by the outcome's own shape check,
+            // and the type of a field that does not exist is not a second finding.
+            let Some(read) = command.input_field(field) else {
+                return errors;
+            };
+            if conversions.permits(&read.type_ref, &filled.type_ref) {
+                return errors;
+            }
+            errors.push(
+                ValidationError::new(
+                    ValidationCode::TypeMismatch,
+                    at.to_owned(),
+                    format!(
+                        "`{}.{field}` has type `{}`, and `{}.{target}` requires `{}`; no \
+                         conversion is declared",
+                        command.name, read.type_ref, event.name, filled.type_ref
+                    ),
+                )
+                .with_hint(format!(
+                    "declare the crossing — `conversions: [{{from: {}, to: {}, because: …}}]` — \
+                     or make the two types agree. The reason is required, because a crossing \
+                     nobody explained is the silent widening this refusal exists to catch",
+                    read.type_ref, filled.type_ref
+                )),
+            );
+        }
+        PayloadSource::Literal { value } => {
+            errors.extend(check_payload_literal(
+                at, command, event, target, filled, value, types,
+            ));
+        }
+    }
+    errors
+}
+
+/// A payload literal, against the representation of the event field it fills.
+///
+/// The same three guards a binding's literal gets, because the mistake is the same one wearing the
+/// other prefix: a reference meant and text written. `amount: amount` names the input without its
+/// prefix; `amount: inptu.amount` misspells the prefix; and a well-meant literal still has to be
+/// spellable as the field's representation, which only text and an enum variant are.
+fn check_payload_literal(
+    at: &str,
+    command: &CommandSpec,
+    event: &EventSpec,
+    target: &str,
+    filled: &Field,
+    value: &str,
+    types: &TypeRegistry,
+) -> ValidationErrors {
+    use crate::binding::{is_field_name, near_miss, representation, Representation};
+
+    let mut errors = ValidationErrors::new();
+    let prefix = PayloadSource::INPUT_PREFIX;
+
+    if command.input_field(value).is_some() {
+        errors.push(
+            ValidationError::new(
+                ValidationCode::MisspelledReference,
+                at.to_owned(),
+                format!(
+                    "`{value}` is an input of `{}` and is written here as literal text",
+                    command.name
+                ),
+            )
+            .with_hint(format!(
+                "write `{prefix}{value}` to read the input; without the prefix the value is the \
+                 text `{value}` itself"
+            )),
+        );
+        return errors;
+    }
+
+    if let Some((written, rest)) = value.split_once('.') {
+        let meant_input = near_miss(written, "input") && is_field_name(rest);
+        // `event.amount` in a payload is the binding's prefix carried over: it reads nothing here,
+        // because the event is what is being *filled*.
+        let meant_event = written == "event" && is_field_name(rest);
+        if meant_input || meant_event {
+            errors.push(
+                ValidationError::new(
+                    ValidationCode::MisspelledReference,
+                    at.to_owned(),
+                    format!(
+                        "`{value}` reads as the literal text `{value}`; a payload source reads \
+                         the command's input, written `{prefix}<field>`"
+                    ),
+                )
+                .with_hint(format!(
+                    "write `{prefix}{rest}` to read the input field, or quote the text if the \
+                     dot is really part of the value"
+                )),
+            );
+            return errors;
+        }
+    }
+
+    let refuse = |reason: String| {
+        ValidationError::new(ValidationCode::TypeMismatch, at.to_owned(), reason).with_hint(
+            format!(
+                "only text and the variants of an enum can be written as a literal; take the \
+                 value from an input of `{}` instead",
+                command.name
+            ),
+        )
+    };
+    match representation(&filled.type_ref, types) {
+        Some(Representation::Text) | None => {}
+        Some(Representation::Variants(variants)) => {
+            if !variants.iter().any(|variant| variant == value) {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::TypeMismatch,
+                        at.to_owned(),
+                        format!(
+                            "`{value}` is not a variant of what `{}.{target}` carries",
+                            event.name
+                        ),
+                    )
+                    .with_hint(format!("variants: {}", variants.join(", "))),
+                );
+            }
+        }
+        Some(Representation::Primitive(primitive)) => {
+            errors.push(refuse(format!(
+                "`{}.{target}` is `{primitive}` underneath, and a literal in a payload is text",
+                event.name
+            )));
+        }
+        Some(Representation::Structured) => {
+            errors.push(refuse(format!(
+                "`{}.{target}` has structure, and a literal in a payload is one piece of text",
+                event.name
+            )));
+        }
+    }
+    errors
+}
+
 /// An immutable fact: something that happened, named in the domain's own words.
 ///
 /// There is nothing here about how it travels. See the [module documentation](self).
@@ -1257,6 +1776,12 @@ pub struct RawOutcome {
     /// The events it emits.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub emits: Vec<QualifiedName>,
+    /// Where the emitted events' payload fields come from, for the fields the author determines.
+    ///
+    /// Keyed by emitted event, then by that event's field, and sparse on both levels — see
+    /// [`PayloadSource`] for why an absent field is a statement rather than an omission.
+    #[serde(default, skip_serializing_if = "PayloadDeclaration::is_empty")]
+    pub payload: PayloadDeclaration,
     /// The error it reports.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<QualifiedName>,
@@ -1349,15 +1874,69 @@ impl TryFrom<RawOutcome> for Outcome {
             (None, None, false) => OutcomeCondition::Otherwise,
         };
         let subject = subject_of(&raw.name, raw.creates, raw.moves, raw.updates, raw.instance)?;
+        let payload = keyed_payload(&raw.name, raw.payload)?;
         Ok(Self {
             name: raw.name,
             condition,
             subject,
             emits: raw.emits,
+            payload,
             error: raw.error,
             summary: raw.summary,
         })
     }
+}
+
+/// The `payload:` block keyed by event and field, or every duplicate the document wrote.
+///
+/// The one check that has to happen while the entries are still a list: `serde_yaml` accepts a
+/// repeated key, so two sources for one field — or two blocks for one event — reach this function
+/// as two entries, and keying them without looking would keep one and lose the author's conflict.
+/// Accumulating rather than stopping at the first (invariant 3): a document with three duplicated
+/// lines is three repairs.
+fn keyed_payload(
+    name: &OutcomeName,
+    declared: PayloadDeclaration,
+) -> Result<BTreeMap<QualifiedName, BTreeMap<String, PayloadSource>>, ValidationErrors> {
+    let mut errors = ValidationErrors::new();
+    let mut payload: BTreeMap<QualifiedName, BTreeMap<String, PayloadSource>> = BTreeMap::new();
+    for (event, table) in declared.0 {
+        if payload.contains_key(&event) {
+            errors.push(
+                ValidationError::new(
+                    ValidationCode::DuplicateDeclaration,
+                    format!("outcomes.{name}.payload.{event}"),
+                    format!(
+                        "`{event}` is given payload sources more than once; two blocks for one \
+                         event leave nothing downstream able to tell which the author meant"
+                    ),
+                )
+                .with_hint("merge the two blocks into one"),
+            );
+            continue;
+        }
+        let mut fields: BTreeMap<String, PayloadSource> = BTreeMap::new();
+        for entry in table.0 {
+            if fields.contains_key(&entry.target) {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::DuplicateDeclaration,
+                        format!("outcomes.{name}.payload.{event}.{}", entry.target),
+                        format!(
+                            "`{event}.{}` is given a source more than once; the parser would keep \
+                             the last line and silently drop the author's conflict",
+                            entry.target
+                        ),
+                    )
+                    .with_hint("keep the line that says where the value really comes from"),
+                );
+                continue;
+            }
+            fields.insert(entry.target, entry.source);
+        }
+        payload.insert(event, fields);
+    }
+    errors.into_result(payload)
 }
 
 /// The one subject an outcome declares, or a refusal naming the ones it declared instead.
@@ -1543,6 +2122,23 @@ impl From<Outcome> for RawOutcome {
                 instance,
             }) => (None, None, Some(entity), Some(instance)),
         };
+        let payload = PayloadDeclaration(
+            outcome
+                .payload
+                .into_iter()
+                .map(|(event, fields)| {
+                    (
+                        event,
+                        PayloadTable(
+                            fields
+                                .into_iter()
+                                .map(|(target, source)| PayloadField { target, source })
+                                .collect(),
+                        ),
+                    )
+                })
+                .collect(),
+        );
         Self {
             name: outcome.name,
             when,
@@ -1553,6 +2149,7 @@ impl From<Outcome> for RawOutcome {
             updates,
             instance,
             emits: outcome.emits,
+            payload,
             error: outcome.error,
             summary: outcome.summary,
         }
@@ -1798,6 +2395,7 @@ outcomes:
                 condition: OutcomeCondition::When(negative),
                 subject: None,
                 emits: Vec::new(),
+                payload: BTreeMap::new(),
                 error: Some(name("billing.invoice.InvalidAmount")),
                 summary: None,
             },
@@ -1838,6 +2436,7 @@ outcomes:
             condition: OutcomeCondition::Otherwise,
             subject: None,
             emits: vec![name("billing.invoice.InvoiceCreated")],
+            payload: BTreeMap::new(),
             error: Some(name("billing.invoice.InvalidAmount")),
             summary: None,
         }]));
@@ -1868,6 +2467,7 @@ outcomes:
                 },
                 subject: None,
                 emits: Vec::new(),
+                payload: BTreeMap::new(),
                 error: Some(name("billing.invoice.InvalidAmount")),
                 summary: None,
             },
@@ -1891,6 +2491,7 @@ outcomes:
             },
             subject: None,
             emits: Vec::new(),
+            payload: BTreeMap::new(),
             error: Some(name("billing.invoice.InvalidAmount")),
             summary: None,
         }]));
@@ -1950,6 +2551,7 @@ outcomes:
                 condition: OutcomeCondition::WrongState,
                 subject: None,
                 emits: Vec::new(),
+                payload: BTreeMap::new(),
                 error: None,
                 summary: None,
             },
@@ -2126,6 +2728,7 @@ outcomes:
                 condition: OutcomeCondition::Otherwise,
                 subject: None,
                 emits: Vec::new(),
+                payload: BTreeMap::new(),
                 error: Some(name("billing.invoice.InvalidAmount")),
                 summary: None,
             },
@@ -2154,6 +2757,7 @@ outcomes:
                 condition: OutcomeCondition::Otherwise,
                 subject: None,
                 emits: Vec::new(),
+                payload: BTreeMap::new(),
                 error: Some(name("billing.invoice.AmountTooLarge")),
                 summary: None,
             },
@@ -2271,6 +2875,7 @@ outcomes:
             },
             subject: None,
             emits: Vec::new(),
+            payload: BTreeMap::new(),
             error: Some(name("billing.invoice.InvalidAmount")),
             summary: None,
         };
@@ -2498,6 +3103,7 @@ outcomes:
                     "invoice_id",
                 )),
                 emits: Vec::new(),
+                payload: BTreeMap::new(),
                 error: Some(name("billing.invoice.InvalidAmount")),
                 summary: None,
             },
@@ -2617,6 +3223,7 @@ outcomes:
                     condition: OutcomeCondition::Otherwise,
                     subject: None,
                     emits: Vec::new(),
+                    payload: BTreeMap::new(),
                     error: Some(name("billing.invoice.InvalidAmount")),
                     summary: None,
                 },
@@ -2694,5 +3301,317 @@ outcomes:
         .expect("well formed");
         let command = CommandSpec::try_from(raw).expect("valid without a subject");
         assert!(command.outcomes[0].subject.is_none());
+    }
+
+    // ---- the payload construct ---------------------------------------------------------------
+
+    /// `CreateInvoice` with the `payload:` block `examples/billing/` declares: two fields
+    /// determined from the input, the identity left to the implementation.
+    const CREATE_INVOICE_WITH_PAYLOAD: &str = r"
+name: billing.invoice.CreateInvoice
+input:
+  - name: customer_email
+    type: billing.invoice.Email
+  - name: amount
+    type: billing.invoice.Money
+outcomes:
+  - name: accepted
+    when: amount.amount > 0
+    emits:
+      - billing.invoice.InvoiceCreated
+    payload:
+      billing.invoice.InvoiceCreated:
+        customer_email: input.customer_email
+        amount: input.amount
+  - name: rejected
+    error: billing.invoice.InvalidAmount
+";
+
+    /// `InvoiceCreated` as the fixture declares it, for the cross-declaration half.
+    fn invoice_created() -> EventSpec {
+        let raw: RawEventSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.InvoiceCreated
+fields:
+  - name: invoice_id
+    type: billing.invoice.Email
+  - name: customer_email
+    type: billing.invoice.Email
+  - name: amount
+    type: billing.invoice.Money
+",
+        )
+        .expect("parses");
+        EventSpec::try_from(raw).expect("a valid event")
+    }
+
+    /// The two maps [`validate_payloads`] walks, built from one command and one event.
+    fn payload_context(
+        command: CommandSpec,
+    ) -> (
+        BTreeMap<QualifiedName, CommandSpec>,
+        BTreeMap<QualifiedName, EventSpec>,
+    ) {
+        let event = invoice_created();
+        (
+            [(command.name.clone(), command)].into(),
+            [(event.name.clone(), event)].into(),
+        )
+    }
+
+    #[test]
+    fn a_payload_mapping_parses_validates_and_round_trips() {
+        let raw: RawCommandSpec =
+            serde_yaml::from_str(CREATE_INVOICE_WITH_PAYLOAD).expect("parses");
+        let command = CommandSpec::try_from(raw).expect("a valid command");
+        assert!(
+            command.validate(&registry(), &events(), &errors()).is_ok(),
+            "the fixture's own payload block must validate"
+        );
+        let accepted = command
+            .outcome(&outcome_name("accepted"))
+            .expect("the branch exists");
+        assert_eq!(
+            accepted.payload[&name("billing.invoice.InvoiceCreated")]["amount"],
+            PayloadSource::InputField {
+                field: "amount".to_owned()
+            }
+        );
+
+        let (commands, declared_events) = payload_context(command.clone());
+        let cross = validate_payloads(
+            &commands,
+            &declared_events,
+            &registry(),
+            &crate::types::ConversionRegistry::default(),
+        );
+        assert!(cross.is_empty(), "{cross}");
+
+        let rendered = serde_yaml::to_string(&command).expect("serialises");
+        let reparsed: RawCommandSpec = serde_yaml::from_str(&rendered).expect("re-parses");
+        let round_tripped = CommandSpec::try_from(reparsed).expect("still valid");
+        assert_eq!(round_tripped, command, "{rendered}");
+    }
+
+    #[test]
+    fn an_event_field_with_no_declared_source_is_undetermined_and_not_an_error() {
+        // The decision, pinned: `invoice_id` has no source in the fixture above — the identity is
+        // the implementation's to assign — and neither half of validation calls that incomplete.
+        // A binding must fill every required input; a payload determines exactly what the author
+        // says it determines.
+        let raw: RawCommandSpec =
+            serde_yaml::from_str(CREATE_INVOICE_WITH_PAYLOAD).expect("parses");
+        let command = CommandSpec::try_from(raw).expect("a valid command");
+        let determined = &command
+            .outcome(&outcome_name("accepted"))
+            .expect("the branch exists")
+            .payload[&name("billing.invoice.InvoiceCreated")];
+        assert!(
+            !determined.contains_key("invoice_id"),
+            "the fixture leaves the identity undetermined"
+        );
+        assert!(command.validate(&registry(), &events(), &errors()).is_ok());
+    }
+
+    #[test]
+    fn a_payload_for_an_event_the_branch_does_not_emit_is_refused() {
+        let raw: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.CreateInvoice
+input:
+  - name: amount
+    type: billing.invoice.Money
+outcomes:
+  - name: accepted
+    when: amount.amount > 0
+    emits:
+      - billing.invoice.InvoiceCreated
+  - name: rejected
+    error: billing.invoice.InvalidAmount
+    payload:
+      billing.invoice.InvoiceCreated:
+        amount: input.amount
+",
+        )
+        .expect("parses");
+        let errors = CommandSpec::try_from(raw).expect_err("the refusal emits nothing");
+        assert_eq!(errors.len(), 1, "{errors}");
+        assert!(errors.contains(ValidationCode::UndeclaredReference));
+        assert!(errors.to_string().contains("does not emit it"), "{errors}");
+    }
+
+    #[test]
+    fn a_payload_reading_an_undeclared_input_accumulates_beside_its_neighbours() {
+        // Invariant 3: two bad sources are two repairs, reported together.
+        let raw: RawCommandSpec = serde_yaml::from_str(
+            r"
+name: billing.invoice.CreateInvoice
+input:
+  - name: amount
+    type: billing.invoice.Money
+outcomes:
+  - name: accepted
+    when: amount.amount > 0
+    emits:
+      - billing.invoice.InvoiceCreated
+    payload:
+      billing.invoice.InvoiceCreated:
+        amount: input.amout
+        customer_email: input.email
+  - name: rejected
+    error: billing.invoice.InvalidAmount
+",
+        )
+        .expect("parses");
+        let errors = CommandSpec::try_from(raw).expect_err("two sources read nothing");
+        assert_eq!(errors.len(), 2, "{errors}");
+        assert!(errors.contains(ValidationCode::UndeclaredReference));
+        assert!(
+            errors.to_string().contains("does not declare as input"),
+            "{errors}"
+        );
+    }
+
+    #[test]
+    fn a_repeated_payload_line_is_refused_rather_than_silently_last_wins() {
+        // `serde_yaml` accepts both repeated keys below and would keep the last of each; the list
+        // representation is what lets this be reported instead. One duplicated field and one
+        // duplicated event block are two repairs (invariant 3).
+        let raw: RawOutcome = serde_yaml::from_str(
+            r"
+name: accepted
+emits:
+  - billing.invoice.InvoiceCreated
+payload:
+  billing.invoice.InvoiceCreated:
+    amount: input.amount
+    amount: input.other
+  billing.invoice.InvoiceCreated:
+    amount: input.amount
+",
+        )
+        .expect("parses, which is the problem being caught");
+        let errors = Outcome::try_from(raw).expect_err("both duplicates are reported");
+        assert_eq!(errors.len(), 2, "{errors}");
+        assert!(errors.contains(ValidationCode::DuplicateDeclaration));
+    }
+
+    #[test]
+    fn a_payload_filling_a_field_the_event_does_not_carry_is_refused() {
+        let command = create_invoice_determining("total", "input.amount");
+        let (commands, declared_events) = payload_context(command);
+        let found = validate_payloads(
+            &commands,
+            &declared_events,
+            &registry(),
+            &crate::types::ConversionRegistry::default(),
+        );
+        assert_eq!(found.len(), 1, "{found}");
+        assert!(found.contains(ValidationCode::UndeclaredReference));
+        assert!(found.to_string().contains("is not a field"), "{found}");
+    }
+
+    #[test]
+    fn a_payload_whose_two_types_disagree_needs_a_declared_conversion() {
+        // `customer_email` (an `Email`) into `InvoiceCreated.amount` (a `Money`): refused without
+        // a conversion, permitted with one — the same two halves the binding mapping's check has.
+        let command = create_invoice_determining("amount", "input.customer_email");
+        let (commands, declared_events) = payload_context(command);
+        let found = validate_payloads(
+            &commands,
+            &declared_events,
+            &registry(),
+            &crate::types::ConversionRegistry::default(),
+        );
+        assert_eq!(found.len(), 1, "{found}");
+        assert!(found.contains(ValidationCode::TypeMismatch));
+        assert!(
+            found.to_string().contains("no conversion is declared"),
+            "{found}"
+        );
+
+        let mut conversions = crate::types::ConversionRegistry::default();
+        conversions
+            .insert(crate::types::Conversion {
+                from: TypeRef::Named(name("billing.invoice.Email")),
+                to: TypeRef::Named(name("billing.invoice.Money")),
+                because: "a test crossing".to_owned(),
+            })
+            .expect("a new crossing");
+        let (commands, declared_events) =
+            payload_context(create_invoice_determining("amount", "input.customer_email"));
+        let permitted = validate_payloads(&commands, &declared_events, &registry(), &conversions);
+        assert!(permitted.is_empty(), "{permitted}");
+    }
+
+    #[test]
+    fn a_payload_literal_that_names_an_input_is_a_misspelled_reference() {
+        let command = create_invoice_determining("customer_email", "customer_email");
+        let (commands, declared_events) = payload_context(command);
+        let found = validate_payloads(
+            &commands,
+            &declared_events,
+            &registry(),
+            &crate::types::ConversionRegistry::default(),
+        );
+        assert_eq!(found.len(), 1, "{found}");
+        assert!(found.contains(ValidationCode::MisspelledReference));
+        assert!(
+            found.to_string().contains("input.customer_email"),
+            "the hint writes the repair: {found}"
+        );
+    }
+
+    #[test]
+    fn a_payload_literal_with_a_misspelt_prefix_is_a_misspelled_reference() {
+        // `inptu.amount` and the binding's own `event.amount` both read as literal text, and both
+        // are a reference meant: the first misspells this construct's prefix, the second carries
+        // the binding's prefix into a mapping that reads the other surface.
+        for written in ["inptu.amount", "event.amount"] {
+            let command = create_invoice_determining("customer_email", written);
+            let (commands, declared_events) = payload_context(command);
+            let found = validate_payloads(
+                &commands,
+                &declared_events,
+                &registry(),
+                &crate::types::ConversionRegistry::default(),
+            );
+            assert_eq!(found.len(), 1, "{written}: {found}");
+            assert!(
+                found.contains(ValidationCode::MisspelledReference),
+                "{written}: {found}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_payload_literal_cannot_fill_a_field_with_structure() {
+        // `Money` is a struct, and a literal is one piece of text.
+        let command = create_invoice_determining("amount", "one hundred");
+        let (commands, declared_events) = payload_context(command);
+        let found = validate_payloads(
+            &commands,
+            &declared_events,
+            &registry(),
+            &crate::types::ConversionRegistry::default(),
+        );
+        assert_eq!(found.len(), 1, "{found}");
+        assert!(found.contains(ValidationCode::TypeMismatch));
+        assert!(found.to_string().contains("has structure"), "{found}");
+    }
+
+    /// The valid fixture command with one payload entry swapped in, for each cross-check to break.
+    fn create_invoice_determining(target: &str, source: &str) -> CommandSpec {
+        let mut command = create_invoice();
+        let accepted = command
+            .outcomes
+            .iter_mut()
+            .find(|outcome| outcome.name == outcome_name("accepted"))
+            .expect("the branch exists");
+        accepted.payload.insert(
+            name("billing.invoice.InvoiceCreated"),
+            [(target.to_owned(), PayloadSource::parse(source))].into(),
+        );
+        command
     }
 }

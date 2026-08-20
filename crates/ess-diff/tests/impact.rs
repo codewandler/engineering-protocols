@@ -5,9 +5,10 @@
 //! puts back to owed, rather than that some number of them did. That distinction is the whole reason
 //! the fixture exists: an impact engine's failure mode is a plausible answer nobody checks.
 //!
-//! It also breaks the three fail-closed mechanisms that can be broken from outside the crate and
-//! watches each one fail: a suite from the wrong revision, a suite from another system, and a
-//! scenario resting on a construct no graph has a node for.
+//! It also breaks the four fail-closed mechanisms that can be broken from outside the crate and
+//! watches each one fail: a suite from the wrong revision, a suite from another system, a scenario
+//! resting on a construct no graph has a node for, and a model that moved in a family the delta
+//! does not compare.
 
 mod support;
 
@@ -313,6 +314,52 @@ fn a_suite_resting_on_a_construct_no_graph_has_a_node_for_owes_the_whole_suite()
         report.churn.conformance_scenarios_invalidated,
         suite.len(),
         "every scenario, not the ones a partial walk happened to reach"
+    );
+}
+
+#[test]
+fn a_change_in_a_family_the_delta_does_not_compare_owes_the_whole_suite() {
+    // Fail-closed mechanism 6, reached with the construct that motivated it: an outcome's
+    // `payload:` mapping lives in the command family, which wave 5 deliberately does not compare.
+    // Erasing one produces two different models and an **empty** delta — no change entry has a
+    // vocabulary for it — and an empty delta narrowing to nothing would be a survival claim about
+    // a model that moved. So it is not narrowed at all.
+    let before = compiled("examples/billing");
+    let mut after = compiled("examples/billing");
+    let settled = after
+        .commands
+        .get_mut(&QualifiedName::new("billing.invoice.PayInvoice").expect("a name"))
+        .expect("the fixture declares it")
+        .outcomes
+        .iter_mut()
+        .find(|outcome| outcome.name.as_str() == "settled")
+        .expect("the branch exists");
+    assert!(
+        !settled.payload.is_empty(),
+        "the fixture declares where `InvoicePaid`'s fields come from, or there is nothing to erase"
+    );
+    settled.payload.clear();
+
+    let suite = synthesize(&before).suite;
+    let report = impact(&before, &after, &suite).expect("one system, and the earlier one's suite");
+
+    assert!(
+        report.delta.is_empty(),
+        "the delta has no entry for it, which is exactly why narrowing is not entitled to an \
+         answer: {:?}",
+        report.delta
+    );
+    let Invalidation::Whole { because } = &report.invalidation else {
+        panic!(
+            "a model that moved where no comparison reads owes everything: {:?}",
+            report.invalidation
+        );
+    };
+    assert_eq!(*because, ess_diff::WholeSuite::UncomparedFamilyChanged);
+    assert_eq!(
+        report.churn.conformance_scenarios_invalidated,
+        suite.len(),
+        "every scenario, because none of them can honestly be said to stand"
     );
 }
 

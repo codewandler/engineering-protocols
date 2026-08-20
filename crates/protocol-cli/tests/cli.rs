@@ -1705,7 +1705,7 @@ fn ess_conform_synthesize_derives_the_suite_the_normative_example_obliges() {
     let output = protocol(&["ess", "conform", "synthesize", "--path", SPECIFICATION]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let text = stdout(&output);
-    assert!(text.contains("billing v3 — 27 scenario(s)"), "{text}");
+    assert!(text.contains("billing v3 — 29 scenario(s)"), "{text}");
     // A scenario id, because the ids are the contract: a fault matrix and a stored report both key
     // on them, and a run of this command is where a reader first sees one.
     assert!(
@@ -1721,12 +1721,15 @@ fn ess_conform_synthesize_derives_the_suite_the_normative_example_obliges() {
 #[test]
 fn ess_conform_synthesize_names_a_construct_it_cannot_test_rather_than_omitting_it() {
     // §36, and the only failure a passing run cannot show. A suite quietly holding fewer checks than
-    // the specification requires looks exactly like a suite that holds them all.
-    let output = protocol(&["ess", "conform", "synthesize", "--path", SPECIFICATION]);
+    // the specification requires looks exactly like a suite that holds them all. The oracle fixture
+    // is the example that still has refusals — billing's last one closed when wave 6.5 taught
+    // synthesis to read a value object's invariants off the fields that hold one, and that closure
+    // is asserted below rather than assumed.
+    let output = protocol(&["ess", "conform", "synthesize", "--path", ORACLE]);
     let text = stdout(&output);
-    assert!(text.contains("1 refusal(s)"), "{text}");
+    assert!(text.contains("6 refusal(s)"), "{text}");
     assert!(
-        text.contains("billing.invoice.Money"),
+        text.contains("oracle.order.Order"),
         "a refusal names the construct it is about: {text}"
     );
     assert!(
@@ -1739,20 +1742,30 @@ fn ess_conform_synthesize_names_a_construct_it_cannot_test_rather_than_omitting_
         "conform",
         "synthesize",
         "--path",
-        SPECIFICATION,
+        ORACLE,
         "--format",
         "json",
     ])))
     .expect("the synthesis report is valid JSON");
     assert_eq!(parsed["complete"], false);
     let refusals = parsed["refusals"].as_array().expect("refusals is a list");
-    assert_eq!(refusals.len(), 1, "{parsed}");
+    assert_eq!(refusals.len(), 6, "{parsed}");
     for refusal in refusals {
         // Fields, not a sentence: this output is read by a coding agent as repair instructions.
         for field in ["code", "subject", "because", "help"] {
             assert!(refusal[field].is_string(), "{field} is missing: {refusal}");
         }
     }
+
+    // The other half of §36's ledger: a refusal leaves it only when the scenario it promised
+    // exists. Billing's value object had one, the scenarios exist, and the count says so.
+    let closed = protocol(&["ess", "conform", "synthesize", "--path", SPECIFICATION]);
+    let text = stdout(&closed);
+    assert!(text.contains("0 refusal(s)"), "{text}");
+    assert!(
+        text.contains("billing.invoice.Money/invariant/at/billing.invoice.InvoiceById/total"),
+        "the scenario that replaced billing's refusal: {text}"
+    );
 }
 
 #[test]
@@ -1806,7 +1819,7 @@ fn ess_conform_run_closes_the_loop_against_both_reference_implementations() {
     // The whole point of shipping the references: a person can watch a specification become a suite
     // and a suite become a verdict, in one command, against something that is known to be right.
     for (specification, target, scenarios) in [
-        (SPECIFICATION, "billing", "27 scenarios"),
+        (SPECIFICATION, "billing", "29 scenarios"),
         (ORACLE, "oracle-fixture", "31 scenarios"),
     ] {
         let output = protocol(&[
@@ -1840,7 +1853,7 @@ fn ess_conform_run_reads_the_committed_suite_rather_than_only_a_freshly_derived_
     ]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let text = stdout(&output);
-    assert!(text.contains("27 scenarios: 27 passed"), "{text}");
+    assert!(text.contains("29 scenarios: 29 passed"), "{text}");
     assert!(
         !text.contains("got no scenario"),
         "a written suite carries scenarios and not the refusals recorded when it was made, so \
@@ -1913,7 +1926,7 @@ fn an_observation_the_target_cannot_expose_is_unsupported_rather_than_skipped() 
         "{text}"
     );
     assert!(
-        text.contains("26 passed, 0 failed, 0 error, 1 unsupported"),
+        text.contains("28 passed, 0 failed, 0 error, 1 unsupported"),
         "the four words stay four words; flattening them loses the finding: {text}"
     );
 }
@@ -2127,7 +2140,7 @@ fn the_conformance_record_names_the_runner_as_its_producer_and_carries_the_spec_
     let document = stdout(&output);
     for required in [
         "kind: ess_conformance",
-        "spec_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5",
+        "spec_digest: 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
         "producer: verifier",
         "verifier: conformance-runner",
         "status: passed",
@@ -2250,13 +2263,13 @@ fn a_conformance_run_against_another_revision_of_the_model_does_not_close_the_ta
     let committed =
         std::fs::read_to_string(root().join(CONFORMANCE_ARTIFACTS)).expect("the manifest is there");
     assert!(
-        committed.contains("e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5"),
+        committed.contains("13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861"),
         "the fixture must pin the digest it is about to change, or it tests nothing"
     );
     write(
         &manifest,
         &committed.replace(
-            "e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5",
+            "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
             "0000000000000000000000000000000000000000000000000000000000000000",
         ),
     );
@@ -2269,7 +2282,7 @@ fn a_conformance_run_against_another_revision_of_the_model_does_not_close_the_ta
         "a passing run against yesterday's model must not close today's task: {text}"
     );
     assert!(
-        text.contains("e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5")
+        text.contains("13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861")
             && text.contains("0000000000000000000000000000000000000000000000000000000000000000"),
         "the refusal must name both revisions so a person knows what to re-run: {text}"
     );
@@ -2278,7 +2291,7 @@ fn a_conformance_run_against_another_revision_of_the_model_does_not_close_the_ta
 #[test]
 fn the_same_run_claimed_by_the_agent_that_wrote_the_code_does_not_close_the_task() {
     // What `independent: true` buys, checked by taking it away. Every number in the record is
-    // identical — the same passing run, the same digest, the same 27 scenarios — and only the
+    // identical — the same passing run, the same digest, the same 29 scenarios — and only the
     // producer changes. The requirement stops being satisfied, which is design §32's whole point:
     // an agent's report that its own implementation conforms is not a conformance run.
     let directory = scratch("aep-cli-agent-conformance");
@@ -2830,8 +2843,8 @@ fn ess_impact_owes_the_whole_suite_when_the_specification_itself_moved() {
 #[test]
 fn ess_impact_narrows_the_committed_billing_suite_when_only_one_grant_moved() {
     // The claim the wave is for, against the suite this repository actually commits. Gate G19's
-    // answer to any change is all twenty-seven scenarios; moving one grant is seven of them, and
-    // the twenty that never act as that actor are not reached.
+    // answer to any change is all twenty-nine scenarios; moving one grant is seven of them, and
+    // the twenty-two that never act as that actor are not reached.
     let directory = copied_specification("ess-impact-billing-grant");
     let domain = directory.join("domains/invoice.yaml");
     let source = std::fs::read_to_string(&domain).expect("the example is readable");
@@ -2866,10 +2879,10 @@ fn ess_impact_narrows_the_committed_billing_suite_when_only_one_grant_moved() {
     let document: serde_json::Value =
         serde_json::from_str(&stdout(&output)).expect("the report is JSON");
 
-    assert_eq!(document["churn"]["conformance_scenarios_total"], 27);
+    assert_eq!(document["churn"]["conformance_scenarios_total"], 29);
     assert_eq!(
         document["churn"]["conformance_scenarios_invalidated"], 7,
-        "moving one grant is seven scenarios, where G19 alone is twenty-seven"
+        "moving one grant is seven scenarios, where G19 alone is twenty-nine"
     );
     let owed = document["invalidation"]["scenarios"]
         .as_object()

@@ -31,15 +31,15 @@ at evaluation time rather than guessed at when the profile resolves:
 ```yaml
   - id: ess:billing
     kind: executable-system-specification
-    model_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
+    model_digest: 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
 ```
 
 ## 1. Run the specification's own suite against the implementation
 
 ```console
 $ $B ess conform run --path examples/billing --target billing | tail -3
-  27 scenarios: 27 passed, 0 failed, 0 error, 0 unsupported
-  1 construct(s) of the specification got no scenario — run `protocol ess conform synthesize` to see which
+  passed notify-on-invoice-created/binding/on-failure
+  29 scenarios: 29 passed, 0 failed, 0 error, 0 unsupported
 conformant: every scenario the specification obliges passed (exit 0)
 ```
 
@@ -52,10 +52,10 @@ a different document: it carries who produced it.
 $ $B ess conform evidence --path examples/billing --target billing
 - kind: ess_conformance
   specification: billing/v3
-  spec_digest: e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5
+  spec_digest: 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
   implementation: billing-reference 0.1.0
   status: passed
-  scenarios_total: 27
+  scenarios_total: 29
   scenarios_failed: 0
   suite_version: ess-conformance/1
   compiler_version: 0.1.0
@@ -129,7 +129,7 @@ Task complete in `complete`:
 ## 4. And it refuses — the half that makes the rest mean anything
 
 Same task, same everything else. One implementation that accepts an invoice the specification
-refuses: `--inject accept-invalid-amount`, one of twelve deliberate faults.
+refuses: `--inject accept-invalid-amount`, one of thirteen deliberate faults.
 
 ```console
 $ $B ess conform run --path examples/billing --target billing --inject accept-invalid-amount
@@ -137,7 +137,7 @@ billing v3 against billing-reference-accept-invalid-amount 0.1.0 — failed
   ...
   failed billing.invoice.CreateInvoice/outcome/rejected
   ...
-  27 scenarios: 26 passed, 1 failed, 0 error, 0 unsupported
+  29 scenarios: 28 passed, 1 failed, 0 error, 0 unsupported
 injected fault: an input that satisfies no branch's guard is accepted by the guarded one — expected to be caught by `billing.invoice.CreateInvoice/outcome/rejected`
 not conformant: the implementation contradicted the specification (exit 1)
 $ echo $?

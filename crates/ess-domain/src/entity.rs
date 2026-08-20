@@ -1893,6 +1893,7 @@ lifecycle:
                 condition: crate::command::OutcomeCondition::Otherwise,
                 subject,
                 emits: vec![name("billing.invoice.Moved")],
+                payload: std::collections::BTreeMap::new(),
                 error: None,
                 summary: None,
             }],

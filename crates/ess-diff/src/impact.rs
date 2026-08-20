@@ -36,8 +36,9 @@
 //! | 3 | [`SemanticChange::subject`] returns `Option`, and the `None` arm — a change to the specification itself, which names no construct — is [`Whole`](Invalidation::Whole) | a change the graph cannot seed a closure from cannot fall through as *nothing* |
 //! | 4 | a suite whose dependency set names a construct **neither** revision's graph has a node for is [`Whole`](Invalidation::Whole) | an incomplete graph walk cannot silently make a scenario unreachable, which is the one way a narrowing could be wrong and look right |
 //! | 5 | [`impact()`] runs the comparison itself, from the same two [`EssIr`]s it builds the graph from, and refuses a suite whose digest is not the `before` revision's | a delta and a graph cannot be about different pairs, and a suite cannot be narrowed against a revision it was not produced from |
+//! | 6 | [`impact()`] compares the canonical form of the construct families the delta does **not** read — entities, commands, views, bindings, conversions, workloads — and any difference there is [`Whole`](Invalidation::Whole) | a change to an uncompared construct (an outcome's guard, a payload mapping, a lifecycle) cannot arrive as an empty delta narrowing to nothing, which would be a survival claim about a model that moved |
 //!
-//! `tests/impact.rs` breaks each of 3, 4 and 5 and watches it fail.
+//! `tests/impact.rs` breaks each of 3, 4, 5 and 6 and watches it fail.
 //!
 //! # Why there is no `RawEssImpact`
 //!
@@ -285,6 +286,17 @@ pub enum WholeSuite {
         /// What the suite named.
         construct: EssSemanticRef,
     },
+    /// The model moved in a family this comparison does not read.
+    ///
+    /// The delta compares six families; entities, commands, views, bindings, conversions and the
+    /// topology are deliberately not among them (wave 5's boundary, W7.2's work). For those, this
+    /// engine checks canonical **equality** only: equal means nothing there moved and the
+    /// narrowing stands, different means *something* moved that no change entry can name — an
+    /// outcome's guard, a payload mapping, a lifecycle — and a closure cannot be seeded at a
+    /// construct the delta does not know changed. So it is not narrowed at all. When W7.2 teaches
+    /// the delta a family, changes there start arriving as entries and stop landing here — the
+    /// arm shrinks by construction rather than by being remembered.
+    UncomparedFamilyChanged,
 }
 
 impl fmt::Display for WholeSuite {
@@ -300,6 +312,11 @@ impl fmt::Display for WholeSuite {
                 "a scenario depends on {construct}, which neither revision's dependency graph has a \
                  node for: no closure could ever reach it, and leaving it out of every answer is \
                  the one way a narrowing is wrong and looks right"
+            ),
+            Self::UncomparedFamilyChanged => f.write_str(
+                "the model moved in a family this delta does not compare — an entity, a command, \
+                 a view, a binding, a conversion or the topology — so no change entry can name \
+                 what moved, and no closure can be seeded at it",
             ),
         }
     }
@@ -510,7 +527,15 @@ pub fn impact(
     }
 
     let graph = SemanticDependencyGraph::of(before).merged(&SemanticDependencyGraph::of(after));
-    let (impacts, invalidation) = analyse(&delta, &graph, suite);
+    let (impacts, mut invalidation) = analyse(&delta, &graph, suite);
+    // Mechanism 6. The families the delta does not compare are checked for canonical equality, and
+    // any difference owes everything: an empty delta over two different models would otherwise be
+    // a narrowing to nothing, which is a survival claim nothing here is entitled to make.
+    if uncompared_families(before) != uncompared_families(after) {
+        invalidation = invalidation.joined(Invalidation::Whole {
+            because: WholeSuite::UncomparedFamilyChanged,
+        });
+    }
     let churn = churn(&delta, &impacts, &invalidation, suite);
 
     Ok(EssImpact {
@@ -520,6 +545,27 @@ pub fn impact(
         impacts,
         invalidation,
         churn,
+    })
+}
+
+/// The canonical form of everything the delta does not compare, for mechanism 6's equality check.
+///
+/// Serialisation is the comparison because equality is all that is asked: which construct differs
+/// and in which direction is exactly the question wave 5 deliberately does not answer for these
+/// families, and D-1 already settled that canonical equality is the decidable, cheap fragment. The
+/// keys and every map inside are ordered (`BTreeMap` throughout the IR), so two calls over equal
+/// models produce equal bytes.
+fn uncompared_families(ir: &EssIr) -> String {
+    serde_json::to_string(&serde_json::json!({
+        "bindings": ir.bindings,
+        "commands": ir.commands,
+        "conversions": ir.conversions,
+        "entities": ir.entities,
+        "views": ir.views,
+        "workloads": ir.workloads,
+    }))
+    .unwrap_or_else(|error| {
+        panic!("the IR serialises, as every projection already relies on: {error}")
     })
 }
 

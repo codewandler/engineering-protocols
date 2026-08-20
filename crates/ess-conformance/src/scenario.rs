@@ -417,6 +417,7 @@ impl<'de> serde::Deserialize<'de> for SuiteFormat {
 /// billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled
 /// billing.invoice.Invoice/state/Paid/refuses/billing.invoice.CancelInvoice
 /// billing.invoice.Invoice/invariant/after/billing.invoice.CreateInvoice/accepted
+/// billing.invoice.Money/invariant/at/billing.invoice.InvoiceById/total
 /// notify-on-invoice-created/binding/on-failure
 /// ```
 ///
@@ -491,6 +492,30 @@ pub enum ScenarioId {
         /// The branch after which they must hold.
         after: OutcomeRef,
     },
+    /// What must hold of a value object wherever observable state holds one (§20).
+    ///
+    /// `billing.invoice.Money/invariant/at/billing.invoice.InvoiceById/total`. The *type* is the
+    /// subject, because its invariants are a claim about every value of the type rather than about
+    /// one entity's rest state — and the id then names the **field position** the claim is read at,
+    /// because one type can surface at several positions and each is its own check: a projection
+    /// can corrupt `OutstandingInvoices.total` while `InvoiceById.total` stays right.
+    ///
+    /// The position is a view's field path (`total`, or `line.unit_price` through a struct), not a
+    /// command: which command arranges a row into the view is content, chosen deterministically by
+    /// synthesis, and re-keying the check when an unrelated command becomes the cheaper
+    /// arrangement would rot every stored result — the counter argument, one level up.
+    ///
+    /// The invariants do not name themselves here, for exactly the reason
+    /// [`Invariant`](Self::Invariant) gives: the model gives an invariant no name, and both a
+    /// position and the statement re-key a check whose meaning did not move.
+    ValueInvariant {
+        /// Whose invariants: the declared value object.
+        value: DeclaredTypeRef,
+        /// The view whose rows hold one.
+        at: ViewRef,
+        /// The field path within a row that reaches the value, dotted where it walks a struct.
+        field: String,
+    },
     /// A binding's observable behaviour: `notify-on-invoice-created/binding/flow`.
     Binding {
         /// Which binding.
@@ -551,6 +576,16 @@ impl ScenarioId {
                         .map_err(|_| reject("has a malformed outcome name"))?,
                 ),
             }),
+            [value, Self::INVARIANT, "at", view, field] => {
+                if field.is_empty() {
+                    return Err(reject("names no field position"));
+                }
+                Ok(Self::ValueInvariant {
+                    value: DeclaredTypeRef::new(name(value)?),
+                    at: ViewRef::new(name(view)?),
+                    field: (*field).to_owned(),
+                })
+            }
             [binding, Self::BINDING, aspect] => Ok(Self::Binding {
                 binding: BindingRef::new(
                     BindingName::new(binding)
@@ -567,7 +602,8 @@ impl ScenarioId {
                 "is not a scenario name; expected `<command>/outcome/<name>`, \
                  `<entity>/transition/<name>/by/<command>/<outcome>`, \
                  `<entity>/state/<state>/refuses/<command>`, \
-                 `<entity>/invariant/after/<command>/<outcome>` or `<binding>/binding/<aspect>`",
+                 `<entity>/invariant/after/<command>/<outcome>`, \
+                 `<type>/invariant/at/<view>/<field>` or `<binding>/binding/<aspect>`",
             )),
         }
     }
@@ -604,6 +640,9 @@ impl fmt::Display for ScenarioId {
                 after.command,
                 after.outcome
             ),
+            Self::ValueInvariant { value, at, field } => {
+                write!(f, "{value}/{}/at/{at}/{field}", Self::INVARIANT)
+            }
             Self::Binding { binding, aspect } => {
                 write!(f, "{binding}/{}/{aspect}", Self::BINDING)
             }
@@ -1021,18 +1060,19 @@ impl ScenarioValue {
 /// What the specification declares a payload is made of, flattened to the leaves that can be
 /// checked with nothing but the suite in hand.
 ///
-/// # Why a shape and not values
+/// # A shape is free, and a value is licensed
 ///
-/// An event declares its fields and their types; the command that publishes it declares its input.
-/// **Nothing in the model relates one to the other** — no construct says where a payload field's
-/// value comes from — so `InvoiceCreated.amount == CreateInvoice.amount` is a name match, and a name
-/// match is the inference this crate refuses everywhere else. Asserting a *value* would therefore be
-/// a guess dressed as a reading, and a suite that guesses fails correct implementations.
+/// An event declares its fields and their types; the command that publishes it declares its input;
+/// and the outcome's `payload:` declaration is what relates one to the other. Without that
+/// declaration, `InvoiceCreated.amount == CreateInvoice.amount` is a name match, and a name match
+/// is the inference this crate refuses everywhere else — a guess dressed as a reading, failing
+/// correct implementations. With it, the value is the specification's own claim.
 ///
-/// What survives that argument is the half the model does state: the payload's declared fields are
-/// present, and each holds a value of the type it was declared with. That is what this carries, and
-/// it is why [`ScenarioStep::ExpectEvent`] has both a `payload` (values, always a reading of
-/// something else the model said) and a `shape` (types, always available).
+/// So [`ScenarioStep::ExpectEvent`] carries both: a `payload` of values, one per field some
+/// declaration determines, and this `shape` — the payload's declared fields, present and of their
+/// declared types — which is available for every field, including the undetermined ones. Which
+/// fields appear in one and not the other is itself information: it is exactly the set the
+/// specification leaves the implementation to choose.
 ///
 /// # Flattened, and why the leaves are dotted paths
 ///
@@ -1353,10 +1393,11 @@ pub enum ScenarioStep {
     ///
     /// The only assertion that can catch a **swapped mapping**. `recipient: event.contact` and
     /// `recipient: event.alternate_contact` are the same document shape, the same types and two
-    /// different systems, and nothing downstream distinguishes them: the model relates a command's
-    /// input to no event payload, so the value handed to the command is observable only at the
-    /// invocation. Asserting a downstream event's field instead — because it happens to share the
-    /// input's *name* — is the inference this crate refuses everywhere else.
+    /// different systems, and nothing downstream distinguishes them: the invocation is the one
+    /// observation *attributed to the binding*, where a downstream event field — even one the
+    /// invoked outcome's `payload:` determines — says what some command was given and never which
+    /// binding filled it. Asserting a downstream event's field instead — because it happens to
+    /// share the input's *name* — is the inference this crate refuses everywhere else.
     ///
     /// # This is the one step §16 warns about, and why it is still here
     ///

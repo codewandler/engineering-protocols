@@ -1135,6 +1135,16 @@
             }
           ]
         },
+        "payload": {
+          "description": "Where the emitted events' payload fields come from, for the fields the author determines.\n\nKeyed by emitted event, then by that event's field, and sparse on both levels — see [`PayloadSource`] for why an absent field is a statement rather than an omission.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
         "summary": {
           "description": "One line for generated documentation.",
           "type": [

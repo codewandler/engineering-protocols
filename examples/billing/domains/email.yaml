@@ -36,6 +36,11 @@ commands:
       - name: sent
         emits:
           - billing.email.EmailSent
+        # The mail went to the address the caller gave, and nothing else about the announcement is
+        # determined: `message_id` is minted by the implementation, so it has no line here.
+        payload:
+          billing.email.EmailSent:
+            recipient: input.recipient
       - name: failed
         external: the provider rejects the recipient address
         error: billing.email.Undeliverable

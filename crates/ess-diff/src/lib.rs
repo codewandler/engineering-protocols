@@ -94,7 +94,7 @@
 //! **It fails closed.** A closure may narrow what has to be re-established and may never say a
 //! scenario survived: [`Invalidation`] has no vocabulary for a survival, its only combinator is a
 //! join whose top is "the whole suite", and a change the graph cannot seed a closure at owes
-//! everything. [`mod@crate::impact`] lists the five mechanisms and what each one forecloses.
+//! everything. [`mod@crate::impact`] lists the six mechanisms and what each one forecloses.
 //!
 //! # Determinism
 //!

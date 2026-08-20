@@ -47,15 +47,16 @@
 //! |---|---|---|
 //! | the declared fields are present | yes | the event declares them |
 //! | each holds a value of its declared type | yes | the event declares that too |
-//! | a field carries a particular *value* | **no** | nothing in the model relates a command's input to a payload field |
+//! | a field carries a particular *value* | where the outcome's `payload:` determines it | the declaration says which input or literal fills it |
 //! | no undeclared field is present | **no** | nothing in the model closes an event's payload |
 //!
-//! `InvoiceCreated.amount == CreateInvoice.amount` reads like a reading and is a match on a shared
-//! field name; a specification that called the input `total` would make the same suite wrong. §10's
-//! own worked suite asserts `→ InvalidAmount` and no field, and this produces exactly that. When the
-//! model gains a way to say where a payload field comes from — the shape a binding's `mapping:`
-//! already has for a command input — the values follow from *that* rather than from a name match.
-//! The same holds of a declared error's fields, which are asserted by name and never by value.
+//! `InvoiceCreated.amount == CreateInvoice.amount` reads like a reading and, without a
+//! declaration, is a match on a shared field name; a specification that called the input `total`
+//! would make the same suite wrong. So the values follow from the outcome's `payload:` — the
+//! shape a binding's `mapping:` already has for a command input — and from nothing else: a field
+//! with no declared source stays undetermined, covered by the shape and by no value, which is a
+//! fact about the specification this suite shows rather than an error. A declared error's fields
+//! have no such construct yet and are asserted by name and never by value.
 //!
 //! # A lifecycle scenario is a sequence over one instance
 //!
@@ -142,12 +143,12 @@ use std::fmt;
 
 use aep_domain::facts::{FactPath, FactSource, FactStore, FactValue};
 use aep_domain::node::Node;
-use aep_domain::predicate::{Predicate, Truth};
+use aep_domain::predicate::{Operand, Predicate, Truth};
 use ess_compiler::diagnostic::Code;
 use ess_compiler::ir::{
     Driver, EntityHandle, EssIr, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedCondition,
     ResolvedEffect, ResolvedFailure, ResolvedInstance, ResolvedMappingValue, ResolvedOutcome,
-    ResolvedSubject, ResolvedTypeRef, ResolvedView,
+    ResolvedPayloadValue, ResolvedSubject, ResolvedType, ResolvedTypeRef, ResolvedView,
 };
 use ess_domain::binding::Delivery;
 use ess_domain::command::{OutcomeName, TestStrategy};
@@ -387,6 +388,25 @@ pub enum RefusalCause {
         /// The command that is not honoured there.
         command: CommandRef,
     },
+    /// A value object's declared invariants, with nowhere observable to read them.
+    ///
+    /// The value-object reading of §20's "against observable entity/view state where possible",
+    /// and the cause that replaced this family's `NotSynthesisedYet` refusal when wave 6.5
+    /// delivered the slice: what remains refused is what genuinely has no witness. Two shapes land
+    /// here, told apart by [`at`](Self::ValueInvariantUnwitnessed::at) — no view publishes a field
+    /// position that can answer the type at all, or a position exists and no declared outcome can
+    /// put a row where the view shows one.
+    ValueInvariantUnwitnessed {
+        /// The type whose invariants they are.
+        value: DeclaredTypeRef,
+        /// The conditions, as the author wrote them.
+        invariants: Vec<String>,
+        /// The position that exists and cannot be arranged, where one does; `None` when no view
+        /// publishes an answerable position at all — including a value held only inside a list, a
+        /// map, a union or an `Optional`, none of which a fact path every row must answer can
+        /// reach.
+        at: Option<(ViewRef, String)>,
+    },
     /// Two scenarios claimed one id. A drift alarm: `ess-domain` refuses a duplicated declaration.
     DuplicateScenario,
     /// The outcome's strategy and its condition disagree about how a scenario reaches the branch.
@@ -433,6 +453,7 @@ impl RefusalCause {
                 Self::BindingUnobservable { .. } => 10,
                 Self::InvariantUnobservable { .. } => 11,
                 Self::RefusalUndeclared { .. } => 12,
+                Self::ValueInvariantUnwitnessed { .. } => 13,
             },
         )
     }
@@ -470,6 +491,15 @@ impl RefusalCause {
             Self::RefusalUndeclared { .. } => {
                 "give the command a `wrong_state:` outcome naming the error it reports; the states \
                  it answers in are already declared, as the states its transitions do not run from"
+            }
+            Self::ValueInvariantUnwitnessed { at: None, .. } => {
+                "publish a field that holds a value of this type in some view — outside a list, a \
+                 map, a union and an `Optional` — or state the claim as an entity invariant over \
+                 what a view already publishes"
+            }
+            Self::ValueInvariantUnwitnessed { at: Some(_), .. } => {
+                "declare an outcome that leaves an instance in a state this view's filter holds, \
+                 or widen the filter"
             }
             Self::DuplicateScenario => {
                 "two declarations produced one scenario id; rename one of them"
@@ -564,8 +594,38 @@ impl fmt::Display for RefusalCause {
                     Ok(())
                 }
             }
+            Self::ValueInvariantUnwitnessed {
+                value,
+                invariants,
+                at,
+            } => value_unwitnessed(f, value, invariants, at.as_ref()),
         }
     }
+}
+
+/// Renders [`RefusalCause::ValueInvariantUnwitnessed`], quoting the author's own conditions.
+fn value_unwitnessed(
+    f: &mut fmt::Formatter<'_>,
+    value: &DeclaredTypeRef,
+    invariants: &[String],
+    at: Option<&(ViewRef, String)>,
+) -> fmt::Result {
+    match at {
+        None => write!(
+            f,
+            "no view publishes a field position that can answer what `{value}` declares of every \
+             value"
+        )?,
+        Some((view, field)) => write!(
+            f,
+            "`{view}.{field}` holds a `{value}` and no declared outcome leaves a row there for \
+             its invariants to be read off"
+        )?,
+    }
+    for invariant in invariants {
+        write!(f, "\n  - `{invariant}`")?;
+    }
+    Ok(())
 }
 
 /// Why one clause of a binding has no scenario.
@@ -888,7 +948,7 @@ fn exercise(
     for event in &emitted {
         steps.push(ScenarioStep::ExpectEvent {
             event: event.clone(),
-            payload: BTreeMap::new(),
+            payload: determined_payload(outcome, event, &run.input),
             shape: payload_shape(ir, event),
         });
     }
@@ -932,6 +992,12 @@ struct Run {
     instance: Option<InstanceName>,
     /// The actor the command is invoked as, where the specification grants one.
     actor: Option<ActorRef>,
+    /// What the invocation supplied, by declared field name.
+    ///
+    /// Carried out of the arrangement because a payload assertion needs it: an event field the
+    /// outcome's `payload:` determines from an input is assertable exactly where this map holds
+    /// the literal the suite chose for that input.
+    input: BTreeMap<String, ScenarioValue>,
     /// What the arrangement depends on.
     source: BTreeSet<EssSemanticRef>,
 }
@@ -967,10 +1033,11 @@ fn run(
             force: outcome_ref.clone(),
         });
     }
+    let supplied = supply(&input, outcome.subject.as_ref(), setup.instance.as_ref());
     invoke.push(ScenarioStep::ExecuteCommand {
         command: command_ref,
         actor: actor.clone(),
-        input: supply(&input, outcome.subject.as_ref(), setup.instance.as_ref()),
+        input: supplied.clone(),
     });
     invoke.push(ScenarioStep::ExpectOutcome {
         outcome: outcome_ref,
@@ -982,6 +1049,7 @@ fn run(
         after: setup.after,
         instance: setup.instance,
         actor,
+        input: supplied,
         source: setup.source,
     })
 }
@@ -1459,6 +1527,53 @@ fn not_emitted(ir: &EssIr, emitted: &[EventRef]) -> Vec<EventRef> {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect()
+}
+
+/// The payload values this branch's `payload:` declaration determines, where the scenario knows
+/// them.
+///
+/// The other half of [`PayloadShape`]'s argument: a *value* is assertable exactly where some
+/// construct says where it comes from, and the outcome's declared payload is that construct. What
+/// survives here is narrower than what the declaration determines, because the assertion is a
+/// literal comparison:
+///
+/// * a **literal source** is the text the author wrote — `ess-domain` admits one only onto a field
+///   that is text or an enum underneath, so the text is the value;
+/// * an **input source** is assertable where the scenario supplied a literal for that input. An
+///   input that carries a bound instance is still determined, but its value is the target's to
+///   mint and the suite knows it only as a reference — [`ScenarioStep::CaptureInstance`] is how
+///   identity already crosses that gap, and a payload literal here would be a guess. The field
+///   stays covered by the shape, not by a value.
+///
+/// A declared conversion does not widen this: the model's conversions permit two types to meet and
+/// name no transformation, so the value that went in is the value that comes out — the same
+/// reading [`ScenarioStep::ExpectInvocation`] already makes of a binding's mapped field.
+fn determined_payload(
+    outcome: &ResolvedOutcome,
+    event: &EventRef,
+    supplied: &BTreeMap<String, ScenarioValue>,
+) -> BTreeMap<String, Node> {
+    let mut values = BTreeMap::new();
+    let Some(determined) = outcome
+        .payload
+        .iter()
+        .find(|payload| EventRef::from(&payload.event) == *event)
+    else {
+        return values;
+    };
+    for field in &determined.fields {
+        match &field.value {
+            ResolvedPayloadValue::Literal { value } => {
+                values.insert(field.target.clone(), Node::Text(value.clone()));
+            }
+            ResolvedPayloadValue::InputField { field: input, .. } => {
+                if let Some(ScenarioValue::Literal { value }) = supplied.get(input) {
+                    values.insert(field.target.clone(), value.clone());
+                }
+            }
+        }
+    }
+    values
 }
 
 /// What the specification declares an event carries, flattened to leaves a runner can check (§13).
@@ -2073,7 +2188,7 @@ fn invariants(
             insert(suite, id, scenario, refusals);
         }
     }
-    value_object_invariants(ir, refusals);
+    value_object_invariants(ir, actors, suite, refusals);
 }
 
 /// The scenario that runs one branch and then reads the entity's invariants off a view.
@@ -2127,7 +2242,7 @@ fn holds_after(
             continue;
         }
         for view in witnesses {
-            steps.extend(assert_invariant(view, invariant));
+            steps.extend(assert_satisfied(view, invariant.predicate.clone()));
             named.insert(ViewRef::new(view.name.clone()));
         }
     }
@@ -2157,16 +2272,16 @@ fn holds_after(
     Some(ConformanceScenario::new(clipped(&text), steps, source))
 }
 
-/// Requiring one invariant of one view, in the block that view's consistency decides.
+/// Requiring one condition of every row of one view, in the block that view's consistency decides.
 ///
 /// The style is read off [`ResolvedView::assertion_style`], exactly as §14 requires everywhere else:
 /// an invariant asserted immediately against an `eventual` projection races it, and the repair
-/// everyone reaches for is a sleep.
-fn assert_invariant(view: &ResolvedView, invariant: &Invariant) -> Vec<ScenarioStep> {
+/// everyone reaches for is a sleep. Takes the predicate rather than an [`Invariant`] because two
+/// families arrive here — an entity's invariant as written, and a value object's invariant rebased
+/// onto the field position that holds one — and the view does not care which.
+fn assert_satisfied(view: &ResolvedView, predicate: Predicate) -> Vec<ScenarioStep> {
     let name = ViewRef::new(view.name.clone());
-    let expectation = ViewExpectation::Satisfies {
-        predicate: invariant.predicate.clone(),
-    };
+    let expectation = ViewExpectation::Satisfies { predicate };
     match view.assertion_style {
         AssertionStyle::Expect => vec![
             ScenarioStep::QueryView { view: name.clone() },
@@ -2182,14 +2297,32 @@ fn assert_invariant(view: &ResolvedView, invariant: &Invariant) -> Vec<ScenarioS
     }
 }
 
-/// One refusal per value object that declares an invariant this build does not evaluate.
+/// §20 read on a value object: what a type declares of every value must hold at every field
+/// position observable state holds one.
 ///
-/// A value object's invariant is a claim about a *type* — every `Money` in the system — rather than
-/// about one instance at rest, so it is not what §20's "after a state-changing command" evaluates.
-/// Reading one off an entity means rebasing `amount >= 0` onto every path that reaches a `Money`,
-/// which this slice does not do. §36's rule is that the gap is visible rather than silent, so it is
-/// a refusal per type and not an omission a reader has to notice.
-fn value_object_invariants(ir: &EssIr, refusals: &mut Vec<Refusal>) {
+/// A value object's invariant is a claim about a *type* — every `Money` in the system — rather
+/// than about one instance at rest, so it is not keyed by an entity and an outcome the way the
+/// family above is. The observable surface a runner can hold it to is a **view field position**:
+/// `amount >= 0` on `Money`, read at `InvoiceById.total`, becomes `total.amount >= 0` over every
+/// row — the rebasing this function performs, and the one place a value object's own words are
+/// rewritten, so [`rebased`] carries the argument for why the rewrite is a reading and not an
+/// inference.
+///
+/// One scenario per (type, view, position), because two positions are two checks: a projection can
+/// corrupt `OutstandingInvoices.total` while `InvoiceById.total` stays right, and one id for both
+/// would report the first as the second. Which command arranges a row is content, not identity —
+/// the first declared outcome in name order that can put an instance where the view shows it.
+///
+/// A type nothing observable holds keeps a refusal, as it always had one — the cause just stopped
+/// being "not synthesised yet" and became the honest one: no view publishes a position that can
+/// answer it. A position that exists but that no declared outcome can put a row into is refused
+/// per position, under the scenario id that is missing.
+fn value_object_invariants(
+    ir: &EssIr,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+    suite: &mut ConformanceSuite,
+    refusals: &mut Vec<Refusal>,
+) {
     for declared in ir.types.values() {
         let invariants = match &declared.body {
             ResolvedBody::Newtype { invariants, .. } | ResolvedBody::Struct { invariants, .. } => {
@@ -2200,15 +2333,267 @@ fn value_object_invariants(ir: &EssIr, refusals: &mut Vec<Refusal>) {
         if invariants.is_empty() {
             continue;
         }
-        refusals.push(Refusal {
-            subject: DeclaredTypeRef::new(declared.name.clone()).into(),
-            scenario: None,
-            cause: RefusalCause::NotSynthesisedYet {
-                construct: "reading a value object's own invariants off the fields that hold one",
-                sections: "design §20",
-            },
-        });
+        let positions = positions_of(ir, declared, invariants);
+        if positions.is_empty() {
+            refusals.push(Refusal {
+                subject: DeclaredTypeRef::new(declared.name.clone()).into(),
+                scenario: None,
+                cause: RefusalCause::ValueInvariantUnwitnessed {
+                    value: DeclaredTypeRef::new(declared.name.clone()),
+                    invariants: invariants
+                        .iter()
+                        .map(|invariant| invariant.statement.clone())
+                        .collect(),
+                    at: None,
+                },
+            });
+            continue;
+        }
+        for (view, field) in positions {
+            let id = ScenarioId::ValueInvariant {
+                value: DeclaredTypeRef::new(declared.name.clone()),
+                at: ViewRef::new(view.name.clone()),
+                field: field.clone(),
+            };
+            match holds_at(ir, declared, invariants, view, &field, actors) {
+                Ok(scenario) => insert(suite, id, scenario, refusals),
+                Err(cause) => refusals.push(Refusal::about(&id, cause)),
+            }
+        }
     }
+}
+
+/// Every view field position that can answer this type's invariants: reached through newtypes and
+/// structs, and with every rebased path landing on a scalar.
+///
+/// What is deliberately *not* a position, and why each absence is a reading of the model rather
+/// than a shortcut:
+///
+/// * inside a `List` or a `Map` — a fact path has no index or key selector, the rule
+///   [`resolve_path`] already applies to every other surface;
+/// * inside a `Union` — which variant a row holds is the row's business, so no single path is one
+///   every row must answer;
+/// * under an `Optional` — a row may hold nothing there, the predicate would evaluate `Unknown`,
+///   and `Unknown` stops a runner rather than passing (invariant 5);
+/// * past [`MAX_TYPE_DEPTH`] — the bound every type walk in this workspace shares.
+fn positions_of<'a>(
+    ir: &'a EssIr,
+    declared: &ResolvedType,
+    invariants: &[Invariant],
+) -> Vec<(&'a ResolvedView, String)> {
+    let mut positions = Vec::new();
+    for view in ir.views.values() {
+        for field in &view.fields {
+            let mut found = Vec::new();
+            reaches(
+                ir,
+                &field.type_ref,
+                &declared.name,
+                vec![field.name.clone()],
+                0,
+                &mut found,
+            );
+            for prefix in found {
+                let answerable = invariants.iter().all(|invariant| {
+                    rebased(&invariant.predicate, &prefix, &declared.body)
+                        .fact_paths()
+                        .into_iter()
+                        .all(|path| resolve_path(ir, &view.fields, path).is_scalar())
+                });
+                if answerable {
+                    positions.push((view, prefix));
+                }
+            }
+        }
+    }
+    positions
+}
+
+/// Collects every dotted prefix under `at` that reaches the type named `wanted`.
+fn reaches(
+    ir: &EssIr,
+    type_ref: &ResolvedTypeRef,
+    wanted: &QualifiedName,
+    at: Vec<String>,
+    depth: usize,
+    found: &mut Vec<String>,
+) {
+    if depth > MAX_TYPE_DEPTH {
+        return;
+    }
+    match type_ref {
+        ResolvedTypeRef::Declared { name } if name.name() == wanted => found.push(at.join(".")),
+        ResolvedTypeRef::Declared { name } => match &ir.named_type(name).body {
+            // A newtype is transparent, exactly as every other walk reads one.
+            ResolvedBody::Newtype { of, .. } => reaches(ir, of, wanted, at, depth + 1, found),
+            ResolvedBody::Struct { fields, .. } => {
+                for field in fields {
+                    let mut deeper = at.clone();
+                    deeper.push(field.name.clone());
+                    reaches(ir, &field.type_ref, wanted, deeper, depth + 1, found);
+                }
+            }
+            ResolvedBody::Enum { .. } | ResolvedBody::Union { .. } => {}
+        },
+        ResolvedTypeRef::Optional { .. }
+        | ResolvedTypeRef::List { .. }
+        | ResolvedTypeRef::Map { .. }
+        | ResolvedTypeRef::Primitive { .. } => {}
+    }
+}
+
+/// The invariant's predicate, re-rooted at the field position that holds the value.
+///
+/// A reading, not an inference: the type's own declaration says what every value satisfies, the
+/// view's declaration says a value of the type sits at `prefix`, and composing the two is exactly
+/// what "its invariants hold wherever one is" means. A struct's invariant reads its own fields, so
+/// each path gains the prefix; a newtype's reads [`value`](ess_domain::types::NamedType::VALUE),
+/// the pseudo-field naming the representation it wraps, and at a position the position *is* the
+/// value — so `value` maps to the prefix itself.
+fn rebased(predicate: &Predicate, prefix: &str, body: &ResolvedBody) -> Predicate {
+    let strip_value = matches!(body, ResolvedBody::Newtype { .. });
+    let onto = |path: &FactPath| {
+        let mut segments: Vec<String> = prefix.split('.').map(str::to_owned).collect();
+        let tail = if strip_value {
+            &path.segments()[1..]
+        } else {
+            path.segments()
+        };
+        segments.extend(tail.iter().cloned());
+        FactPath::from_segments(segments)
+    };
+    map_paths(predicate, &onto)
+}
+
+/// One predicate with every fact path rewritten, and nothing else touched.
+fn map_paths(predicate: &Predicate, onto: &impl Fn(&FactPath) -> FactPath) -> Predicate {
+    let operand = |it: &Operand| match it {
+        Operand::Fact(path) => Operand::Fact(onto(path)),
+        Operand::Literal(value) => Operand::Literal(value.clone()),
+    };
+    match predicate {
+        Predicate::Always => Predicate::Always,
+        Predicate::Never => Predicate::Never,
+        Predicate::All(children) => Predicate::All(
+            children
+                .iter()
+                .map(|child| map_paths(child, onto))
+                .collect(),
+        ),
+        Predicate::Any(children) => Predicate::Any(
+            children
+                .iter()
+                .map(|child| map_paths(child, onto))
+                .collect(),
+        ),
+        Predicate::Not(inner) => Predicate::Not(Box::new(map_paths(inner, onto))),
+        Predicate::Compare { left, op, right } => Predicate::Compare {
+            left: operand(left),
+            op: *op,
+            right: operand(right),
+        },
+        Predicate::Truthy(path) => Predicate::Truthy(onto(path)),
+        Predicate::Defined(path) => Predicate::Defined(onto(path)),
+        Predicate::AnyOf { path, values } => Predicate::AnyOf {
+            path: onto(path),
+            values: values.clone(),
+        },
+        Predicate::NoneOf { path, values } => Predicate::NoneOf {
+            path: onto(path),
+            values: values.clone(),
+        },
+    }
+}
+
+/// The scenario that puts a row where the view shows it and reads the type's invariants off the
+/// position, or why none can be arranged.
+///
+/// The arranging branch is the first declared outcome, in (command, outcome) order, whose subject
+/// is the view's source entity, whose arrangement succeeds, and whose after-state the view shows —
+/// the same "first that the specification can actually reach" reading [`arrange_first`] takes, so
+/// an outcome that cannot be arranged is skipped rather than fatal. Which branch it is is content,
+/// not identity: see [`ScenarioId::ValueInvariant`].
+fn holds_at(
+    ir: &EssIr,
+    declared: &ResolvedType,
+    invariants: &[Invariant],
+    view: &ResolvedView,
+    field: &str,
+    actors: &BTreeMap<QualifiedName, ActorRef>,
+) -> Result<ConformanceScenario, RefusalCause> {
+    for command in ir.commands.values() {
+        for outcome in &command.outcomes {
+            let Some(subject) = &outcome.subject else {
+                continue;
+            };
+            if subject.entity != view.source {
+                continue;
+            }
+            let Ok(run) = run(ir, command, outcome, actors) else {
+                // That branch cannot be arranged, and carries its own refusal under its own id;
+                // the next declared branch may still put a row where this check needs one.
+                continue;
+            };
+            let Some(state) = run.after.clone() else {
+                continue;
+            };
+            if !matches!(shows(view, &state), Ok(true)) {
+                continue;
+            }
+
+            let mut steps = run.steps();
+            for invariant in invariants {
+                steps.extend(assert_satisfied(
+                    view,
+                    rebased(&invariant.predicate, field, &declared.body),
+                ));
+            }
+
+            let mut source: BTreeSet<EssSemanticRef> = run.source.clone();
+            let command_ref = CommandRef::new(command.name.clone());
+            source.insert(command_ref.clone().into());
+            source.insert(OutcomeRef::new(command_ref, outcome.name.clone()).into());
+            source.insert(EntityRef::from(&view.source).into());
+            source.insert(ViewRef::new(view.name.clone()).into());
+            if let Some(actor) = run.actor.clone() {
+                source.insert(actor.into());
+            }
+            source.extend(
+                input_types(ir, command)
+                    .into_iter()
+                    .map(EssSemanticRef::from),
+            );
+            // The value's own type closure: the subject itself, then what its body reaches —
+            // spelled out because a handle is mintable only by the compiler, and the subject is
+            // already a name.
+            let mut of_value: BTreeSet<DeclaredTypeRef> = BTreeSet::new();
+            of_value.insert(DeclaredTypeRef::new(declared.name.clone()));
+            match &declared.body {
+                ResolvedBody::Newtype { of, .. } => reachable_types(ir, of, &mut of_value),
+                ResolvedBody::Struct { fields, .. } => {
+                    for member in fields {
+                        reachable_types(ir, &member.type_ref, &mut of_value);
+                    }
+                }
+                ResolvedBody::Enum { .. } | ResolvedBody::Union { .. } => {}
+            }
+            source.extend(of_value.into_iter().map(EssSemanticRef::from));
+
+            let text = format!(
+                "every `{}` that `{}` publishes at `{field}` satisfies what the type declares",
+                declared.name, view.name
+            );
+            return Ok(ConformanceScenario::new(clipped(&text), steps, source));
+        }
+    }
+    Err(RefusalCause::ValueInvariantUnwitnessed {
+        value: DeclaredTypeRef::new(declared.name.clone()),
+        invariants: invariants
+            .iter()
+            .map(|invariant| invariant.statement.clone())
+            .collect(),
+        at: Some((ViewRef::new(view.name.clone()), field.to_owned())),
+    })
 }
 
 /// Every view that can answer this invariant about an instance resting in `state`.
@@ -2399,8 +2784,10 @@ fn flow(ir: &EssIr, invoked: &ResolvedCommand, trigger: &Run, event: &EventRef) 
 /// §16: each input receives the value the binding's mapping names for it.
 ///
 /// The one clause a document can get *silently* wrong, and the reason
-/// [`ScenarioStep::ExpectInvocation`] exists — a mapping's target is a command input, and the model
-/// relates a command's input to no observable fact afterwards. Every value here is read straight off
+/// [`ScenarioStep::ExpectInvocation`] exists — a mapping's target is a command input, and the only
+/// observation *attributed to the binding* is the invocation itself: a downstream event field,
+/// even one the invoked outcome's `payload:` determines, says what some command was given and
+/// never which binding filled it. Every value here is read straight off
 /// the resolved mapping: a field of the triggering event becomes
 /// [`ScenarioValue::Observed`], because no generator knows what the upstream implementation
 /// published there, and a literal becomes the text the binding wrote.
@@ -2780,6 +3167,7 @@ fn subject_of(id: &ScenarioId) -> EssSemanticRef {
         ScenarioId::Refusal { entity, .. } | ScenarioId::Invariant { entity, .. } => {
             entity.clone().into()
         }
+        ScenarioId::ValueInvariant { value, .. } => value.clone().into(),
         ScenarioId::Binding { binding, .. } => binding.clone().into(),
     }
 }

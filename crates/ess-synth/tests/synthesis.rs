@@ -852,8 +852,8 @@ fn the_transport_is_the_one_the_billing_binding_requires() {
 #[test]
 fn the_transport_records_its_invocations_and_can_deliver_an_occurrence_twice() {
     // The two observations a conformance run needs of a transport and nothing inside the system
-    // needs: what a binding actually passed (a mapping's target is a command input, which the
-    // model relates to no observable fact afterwards), and that an occurrence can reach its
+    // needs: what a binding actually passed (a mapping's target is a command input, and only the
+    // invocation attributes a value to the binding that filled it), and that an occurrence can reach its
     // bindings a second time (the only claim `at_least_once` makes). Both are the transport's to
     // expose — reading either out of a component would be instrumentation the specification never
     // asked of it.

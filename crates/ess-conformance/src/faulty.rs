@@ -15,38 +15,39 @@
 //! from the same lines as the variants, one designated check per fault, and a blast-radius allowance
 //! per fault that has to be updated *with a reason* rather than relaxed.
 //!
-//! # One of these is caught by nothing, and that is the finding
+//! # A fault caught by nothing is the finding, and every one recorded here has since been closed
 //!
 //! [`Caught::Nothing`] is not a gap in this module. A fault nobody catches is worth more than
 //! another passing row: it says the specification cannot express the property, or that synthesis
-//! does not ask for it. Three rows sat here; two have since been closed by teaching synthesis to ask
-//! for more, and the rows moved to the other side of the matrix rather than being deleted:
+//! does not ask for it. Three rows sat here; all three have since been closed and moved to the
+//! other side of the matrix rather than being deleted — two by teaching synthesis to ask for more,
+//! and the last by changing the **model**:
 //!
 //! | fault | what a client would see | what closed it |
 //! |---|---|---|
 //! | [`ExtraEvent`](Fault::ExtraEvent) | a cancelled invoice is announced as paid | every event the specification declares and this branch does not emit is now asserted absent |
 //! | [`DropConsistencyToken`](Fault::DropConsistencyToken) | a `read_your_writes` view is never actually held to it | a read with no token to demand is `unsupported`, not a weaker read at `Current` |
+//! | [`WrongEventPayload`](Fault::WrongEventPayload) | every consumer of `InvoicePaid` records an amount nobody paid | an outcome's `payload:` now says which input determines which event field, so the value stopped being a guess and became a reading |
 //!
-//! One is still uncaught, and it is the one that needs the **model** to change rather than the
-//! synthesizer:
+//! The last of the three sat here longest because it needed the **model** to change rather than
+//! the synthesizer: `999` is a well-formed `Money` in a field the event declares, and until wave
+//! 6.5 nothing in the model said where a payload field's *value* comes from — asserting
+//! `InvoicePaid.amount == PayInvoice.amount` would have been a match on a shared field name, the
+//! inference this crate refuses everywhere else. The `payload:` declaration on a command outcome
+//! is the construct that licenses it, and [`PartialEventPayload`](Fault::PartialEventPayload)
+//! remains the other half of the same coin: a *type* was always declared, so a declared field left
+//! out was already caught before any value could be.
 //!
-//! | fault | what a client would see | why nothing fails |
-//! |---|---|---|
-//! | [`WrongEventPayload`](Fault::WrongEventPayload) | every consumer of `InvoiceCreated` bills an amount nobody asked for | `999` is a well-formed `Money` in a field the event declares, and **nothing in the model says where a payload field's value comes from** |
-//!
-//! What synthesis *can* ask for, it now asks: [`PartialEventPayload`](Fault::PartialEventPayload) is
-//! the same event with a declared field left out, and that one is caught. The difference between the
-//! two rows is exactly the difference between a type, which the specification declares, and a value,
-//! which it does not — see `PayloadShape`.
-//!
-//! The uncaught row is in [`Fault::ALL`] and the matrix asserts it is *still* uncaught, so the day a
-//! later slice closes it, the row fails and has to be rewritten rather than forgotten.
+//! An event field with **no** declared source stays undetermined — `InvoiceCreated.invoice_id` is
+//! the implementation's to mint — and the suite shows that by asserting its presence and type and
+//! never a value. A fault perturbing only an undetermined field would still be caught by nothing,
+//! and that is the specification's decision rather than a gap here.
 //!
 //! # Boundary or implementation
 //!
-//! Nine of the eleven are [`Injection::Boundary`]: [`Faulty`] perturbs what goes into the target and
-//! what comes out of it, and never a broken internal, because that is the same position a real
-//! client is in.
+//! Eleven of the thirteen are [`Injection::Boundary`]: [`Faulty`] perturbs what goes into the
+//! target and what comes out of it, and never a broken internal, because that is the same position
+//! a real client is in.
 //!
 //! Two cannot be. [`DropBinding`](Fault::DropBinding) and [`WrongMapping`](Fault::WrongMapping) are
 //! defects *of a binding*, and the target interface deliberately does not attribute an observation
@@ -77,7 +78,7 @@ use aep_domain::node::Node;
 
 use crate::reference::{
     Billing, Oracle, CANCEL_INVOICE, CREATE_INVOICE, INVALID_AMOUNT, INVOICE_CANCELLED,
-    INVOICE_CREATED, INVOICE_ISSUED, INVOICE_PAID, ISSUE_INVOICE, PAY_INVOICE,
+    INVOICE_CREATED, INVOICE_ISSUED, INVOICE_PAID, ISSUE_INVOICE, OUTSTANDING, PAY_INVOICE,
 };
 use crate::scenario::{ErrorRef, EventRef, OutcomeRef, ViewRef};
 use crate::target::{
@@ -251,22 +252,17 @@ faults! {
 
     /// A published event carries a value the command was never given.
     ///
-    /// Not one of §25's seven, and the one row still caught by nothing. Every field
-    /// `billing.invoice.InvoiceCreated` declares is present and every one is of its declared type —
-    /// `999` is as well-formed a `Money` as the amount that was submitted. The check that would
-    /// catch it is `InvoiceCreated.amount == CreateInvoice.amount`, and **no construct in the model
-    /// licenses it**: an outcome says which events it emits and never what fills their fields, so
-    /// asserting it would be a match on a shared field name — the inference this crate refuses
-    /// everywhere else, and one that would fail an implementation naming the field differently.
-    ///
-    /// Closing it is a model change: some way for an outcome to say where a payload field comes
-    /// from, in the shape a binding's `mapping:` already says it for a command input.
+    /// Not one of §25's seven, and the row that was caught by nothing the longest — until wave 6.5
+    /// gave the model a `payload:` declaration on a command outcome. Every field
+    /// `billing.invoice.InvoicePaid` declares is present and every one is of its declared type —
+    /// `999` is as well-formed a `Money` as the amount that was submitted — so the only check that
+    /// can see it is `InvoicePaid.amount == PayInvoice.amount`, and that check is licensed exactly
+    /// where the specification declares `amount: input.amount`. `examples/billing/` declares it on
+    /// `settled`, so both scenarios that exercise the branch now assert the value; the matrix
+    /// designates the *transition* scenario because §10's outcome scenario already designates
+    /// [`PartialEventPayload`](Fault::PartialEventPayload), and one scenario names one fault.
     WrongEventPayload => "wrong-event-payload", System::Billing, Injection::Boundary,
-        Caught::Nothing(
-            "the amount it carries is declared, present and well-typed, so every check the model \
-             licenses passes; a payload field's *value* stays unassertable until some construct \
-             says where it comes from, and matching on a shared field name is not that construct",
-        ),
+        Caught::By("billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled"),
         "a published event carries an amount the command was never given";
 
     /// A published event leaves out a field its declaration says it carries.
@@ -297,6 +293,19 @@ faults! {
     DropConsistencyToken => "drop-consistency-token", System::Billing, Injection::Boundary,
         Caught::By("billing.invoice.Invoice/transition/issue/by/billing.invoice.IssueInvoice/issued"),
         "a command returns no consistency token, so no read is ever held to it";
+
+    /// A projection publishes a value the type it holds forbids.
+    ///
+    /// The wave 6.5 value-object family's row. `OutstandingInvoices.total` is a `Money` and `Money`
+    /// declares `amount >= 0` of every value; a projection that corrupts what it publishes breaks
+    /// that claim with **no command having done anything wrong** — the write side is untouched, so
+    /// every outcome, transition and refusal scenario passes, and the only checks positioned to see
+    /// it are the two that read a value object's own invariants off the field positions that hold
+    /// one. The designated scenario is the position the fault corrupts; the check at
+    /// `InvoiceById.total` stays green, which is exactly why two positions are two scenarios.
+    NegativeProjectedTotal => "negative-projected-total", System::Billing, Injection::Boundary,
+        Caught::By("billing.invoice.Money/invariant/at/billing.invoice.OutstandingInvoices/total"),
+        "the outstanding list reports a total below zero, which no Money admits";
 }
 
 // ---- the wrapper -----------------------------------------------------------------------------
@@ -429,9 +438,9 @@ impl<T: ConformanceTarget> ConformanceTarget for Faulty<T> {
                     }
                 }
             }
-            Fault::WrongEventPayload if command == CREATE_INVOICE => {
+            Fault::WrongEventPayload if command == PAY_INVOICE => {
                 for occurrence in &mut result.direct_events {
-                    if occurrence.event == event(INVOICE_CREATED) {
+                    if occurrence.event == event(INVOICE_PAID) {
                         occurrence.payload.insert("amount".to_owned(), money(999.0));
                     }
                 }
@@ -487,9 +496,24 @@ impl<T: ConformanceTarget> ConformanceTarget for Faulty<T> {
         // Only a read that *demanded* the write is perturbed: an eventual read asks at `Current` and
         // is allowed to be behind, so answering it late would be conformant rather than faulty.
         let demanded = request.consistency.token().is_some();
-        let fresh = self.inner.query_view(request)?;
+        let mut fresh = self.inner.query_view(request)?;
         if self.fault == Fault::StaleReadYourWrites && demanded {
             return Ok(self.one_read_behind(&view, fresh));
+        }
+        if self.fault == Fault::NegativeProjectedTotal && view.to_string() == OUTSTANDING {
+            // One view, every row, one field: the projection's own corruption, not the write's.
+            // `InvoiceById` answers untouched, which is what pins the two positions apart.
+            for row in &mut fresh.rows {
+                if let Some(Node::Map(fields)) = row.get_mut("total") {
+                    fields.insert(
+                        "amount".to_owned(),
+                        Node::Number(
+                            Number::new(-1.0)
+                                .unwrap_or_else(|error| panic!("-1 is finite: {error}")),
+                        ),
+                    );
+                }
+            }
         }
         Ok(fresh)
     }
@@ -641,7 +665,7 @@ mod tests {
         // The list is generated from the same lines as the variants, so what is left to check is
         // that no row was declared empty — a fault with no description is a row in a matrix nobody
         // can read.
-        assert_eq!(Fault::ALL.len(), 12);
+        assert_eq!(Fault::ALL.len(), 13);
         for fault in Fault::ALL {
             assert!(!fault.written().is_empty(), "{fault:?} has no written form");
             assert!(!fault.describe().is_empty(), "{fault:?} describes nothing");

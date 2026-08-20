@@ -30,9 +30,9 @@
 //!
 //! Beside the log, the pump keeps a second observable record: every command a binding invoked,
 //! with the input it passed, as a typed `BindingInvocation`. A mapping's target is a command
-//! input, and the model relates a command's input to no observable fact afterwards — so without
-//! this record, "the binding filled `recipient` from the field the document names" is a claim
-//! nothing can check. A conformance run reads it; nothing inside the system does.
+//! input, and the invocation is the only observation attributed to the binding that filled it —
+//! so without this record, "the binding filled `recipient` from the field the document names" is
+//! a claim nothing can check. A conformance run reads it; nothing inside the system does.
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;

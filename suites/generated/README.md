@@ -16,7 +16,7 @@ protocol ess conform run --suite suites/generated/billing/suite.json --target bi
 
 | suite | checks | scenarios | no scenario | generated from |
 | --- | --- | --- | --- | --- |
-| [`billing/suite.json`](billing/suite.json) | billing v3 (model digest e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5) | 27 | 1 | [`examples/billing`](../../examples/billing) |
+| [`billing/suite.json`](billing/suite.json) | billing v3 (model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861) | 29 | 0 | [`examples/billing`](../../examples/billing) |
 | [`oracle-fixture/suite.json`](oracle-fixture/suite.json) | oracle v1 (model digest 4288d50a003fa7d5b39743327880aa7e2f97ff6d9408f8a5ddb908c8b6af79ee) | 31 | 6 | [`examples/oracle-fixture`](../../examples/oracle-fixture) |
 
 ## What no scenario covers
@@ -29,13 +29,7 @@ in a diff instead.
 
 ### `billing`
 
-| code | element | the scenario that is missing |
-| --- | --- | --- |
-| `ESS-SYNTH-006` | `type billing.invoice.Money` | — |
-
-What would close them:
-
-* a later slice of `ess-conformance` synthesises this
+Every construct produced a scenario, and nothing is refused.
 
 ### `oracle-fixture`
 

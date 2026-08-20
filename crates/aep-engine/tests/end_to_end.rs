@@ -1166,7 +1166,7 @@ fn a_run_that_found_the_implementation_wrong_leaves_the_task_open_and_says_which
                 "spec_digest"
             ]))
             .map(|value| value.to_string()),
-        Some("e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5".to_owned()),
+        Some("13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861".to_owned()),
         "a failing run still attests which revision it was run against"
     );
 }

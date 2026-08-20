@@ -14,12 +14,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ess_compiler::diagnostic::{Code, Detail, Diagnostics};
-use ess_compiler::ir::{EssIr, ResolvedInstance, ResolvedMappingValue};
+use ess_compiler::ir::{EssIr, ResolvedInstance, ResolvedMappingValue, ResolvedPayloadValue};
 use ess_compiler::resolve::{codes, compile};
 use ess_compiler::source::SourceMap;
 use ess_domain::binding::{BindingName, BindingSpec, Delivery, Failure, MappingSource};
 use ess_domain::command::{
-    CommandSpec, ErrorSpec, EventSpec, Outcome, OutcomeCondition, OutcomeName,
+    CommandSpec, ErrorSpec, EventSpec, Outcome, OutcomeCondition, OutcomeName, PayloadSource,
 };
 use ess_domain::component::{ComponentName, ComponentSpec};
 use ess_domain::domain::DomainSpec;
@@ -80,6 +80,7 @@ fn outcome(label: &str, emits: &[&str], error: Option<&str>) -> Outcome {
         condition: OutcomeCondition::Otherwise,
         subject: None,
         emits: emits.iter().map(|event| name(event)).collect(),
+        payload: BTreeMap::new(),
         error: error.map(name),
         summary: None,
     }
@@ -408,6 +409,7 @@ fn acting(label: &str, subject: ess_domain::command::Subject) -> Outcome {
         condition: OutcomeCondition::Otherwise,
         subject: Some(subject),
         emits: Vec::new(),
+        payload: BTreeMap::new(),
         error: None,
         summary: None,
     }
@@ -879,6 +881,181 @@ fn a_literal_fills_an_input_and_is_recorded_as_unverified() {
     assert!(matches!(
         binding.mapping[1].value,
         ResolvedMappingValue::Literal { .. }
+    ));
+}
+
+// ---- an outcome's payload ------------------------------------------------------------------
+
+/// [`crossing`] turned inward: the command emits the event and declares where its payload comes
+/// from, and the binding is dropped so the one construct under test is the one that can refuse.
+fn determining(input: &str, payload: &[(&str, &str)]) -> Fixture {
+    let mut fixture = crossing(input);
+    fixture.bindings = Vec::new();
+    let mut sent = outcome("sent", &["shop.orders.Ordered"], None);
+    sent.payload.insert(
+        name("shop.orders.Ordered"),
+        payload
+            .iter()
+            .map(|(target, source)| ((*target).to_owned(), PayloadSource::parse(source)))
+            .collect(),
+    );
+    fixture.commands = vec![command(
+        "shop.orders.Notify",
+        vec![field("recipient", input)],
+        vec![sent],
+    )];
+    fixture
+}
+
+#[test]
+fn a_payload_filling_a_field_the_event_does_not_carry_is_refused_by_this_pass_too() {
+    // `ess-domain` refuses the same document; built field by field, nothing has checked it yet,
+    // which is the state the backstop exists for.
+    let diagnostics =
+        determining("shop.orders.Email", &[("customer_mail", "input.recipient")]).refused();
+    assert!(
+        diagnostics.contains(codes::PAYLOAD_FILLS_UNDECLARED_FIELD),
+        "{diagnostics}"
+    );
+}
+
+#[test]
+fn a_payload_between_two_distinct_types_with_no_conversion_is_refused() {
+    let diagnostics = determining(
+        "shop.orders.Address",
+        &[("customer_email", "input.recipient")],
+    )
+    .refused();
+    assert!(
+        diagnostics.contains(codes::COMMAND_TYPE_MISMATCH),
+        "{diagnostics}"
+    );
+
+    // Design §29's shape, exactly as the binding mapping's mismatch carries it: the two paths and
+    // the two types arrive as fields, so an agent repairing this does not parse a sentence.
+    let diagnostic = diagnostics
+        .as_slice()
+        .iter()
+        .find(|diagnostic| diagnostic.code == codes::COMMAND_TYPE_MISMATCH)
+        .expect("the mismatch");
+    let typed: Vec<(&str, &str, bool)> = diagnostic
+        .details
+        .iter()
+        .filter_map(|detail| match detail {
+            Detail::Typed {
+                subject,
+                type_ref,
+                requires,
+            } => Some((subject.as_str(), type_ref.as_str(), *requires)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        typed,
+        vec![
+            ("shop.orders.Notify.recipient", "shop.orders.Address", false),
+            (
+                "shop.orders.Ordered.customer_email",
+                "shop.orders.Email",
+                true
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_declared_conversion_makes_the_same_payload_legal_and_the_ir_records_why() {
+    let mut fixture = determining(
+        "shop.orders.Address",
+        &[("customer_email", "input.recipient")],
+    );
+    fixture.conversions = vec![Conversion {
+        from: TypeRef::Named(name("shop.orders.Address")),
+        to: TypeRef::Named(name("shop.orders.Email")),
+        because: "a deliverable address is written to the order as its email".to_owned(),
+    }];
+
+    let ir = fixture.resolved();
+    let sent = &ir.commands[&name("shop.orders.Notify")].outcomes[0];
+    assert_eq!(sent.payload.len(), 1);
+    assert_eq!(
+        sent.payload[0].fields[0].conversion.as_deref(),
+        Some("a deliverable address is written to the order as its email"),
+        "the reason someone wrote down is what a generator has to emit the conversion for"
+    );
+}
+
+#[test]
+fn a_payload_reading_an_input_the_command_does_not_take_is_refused() {
+    let diagnostics =
+        determining("shop.orders.Email", &[("customer_email", "input.recipint")]).refused();
+    assert!(
+        diagnostics.contains(codes::COMMAND_UNDECLARED_REFERENCE),
+        "{diagnostics}"
+    );
+}
+
+#[test]
+fn a_payload_for_an_event_the_branch_does_not_emit_is_refused_here_too() {
+    let mut fixture = determining("shop.orders.Email", &[]);
+    let mut sent = outcome("sent", &[], None);
+    sent.payload.insert(
+        name("shop.orders.Ordered"),
+        [(
+            "customer_email".to_owned(),
+            PayloadSource::parse("input.recipient"),
+        )]
+        .into(),
+    );
+    fixture.commands = vec![command(
+        "shop.orders.Notify",
+        vec![field("recipient", "shop.orders.Email")],
+        vec![sent],
+    )];
+
+    let diagnostics = fixture.refused();
+    assert!(
+        diagnostics.contains(codes::COMMAND_UNDECLARED_REFERENCE),
+        "{diagnostics}"
+    );
+}
+
+#[test]
+fn a_resolved_payload_is_in_the_events_declaration_order_and_a_literal_is_recorded_as_unverified() {
+    let mut fixture = determining(
+        "shop.orders.Email",
+        &[
+            ("note", "as ordered"),
+            ("customer_email", "input.recipient"),
+        ],
+    );
+    fixture.events = vec![event(
+        "shop.orders.Ordered",
+        vec![
+            field("customer_email", "shop.orders.Email"),
+            field("note", "String"),
+        ],
+    )];
+
+    let ir = fixture.resolved();
+    let sent = &ir.commands[&name("shop.orders.Notify")].outcomes[0];
+    let targets: Vec<&str> = sent.payload[0]
+        .fields
+        .iter()
+        .map(|entry| entry.target.as_str())
+        .collect();
+    assert_eq!(
+        targets,
+        vec!["customer_email", "note"],
+        "the event's declaration order, not the document's"
+    );
+    assert!(matches!(
+        sent.payload[0].fields[1].value,
+        ResolvedPayloadValue::Literal { .. }
+    ));
+    assert!(matches!(
+        &sent.payload[0].fields[0].value,
+        ResolvedPayloadValue::InputField { field, .. } if field == "recipient"
     ));
 }
 

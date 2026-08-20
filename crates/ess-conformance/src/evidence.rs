@@ -273,7 +273,7 @@ mod tests {
                 system: "billing".to_owned(),
                 specification_version: "v3".to_owned(),
                 spec_digest: SpecDigest::new(
-                    "e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5",
+                    "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
                 )
                 .expect("a digest"),
                 compiler_version: "0.1.0".to_owned(),
@@ -302,7 +302,7 @@ mod tests {
         let result = evidence.result();
         assert_eq!(
             result.spec_digest.as_str(),
-            "e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5"
+            "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861"
         );
         assert_eq!(result.specification, "billing/v3");
         assert_eq!(result.implementation, "billing-reference 0.1.0");
@@ -432,7 +432,7 @@ mod tests {
         );
         assert_eq!(
             facts.get("ess_conformance.spec_digest").map(String::as_str),
-            Some("e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5"),
+            Some("13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861"),
             "a failing run still names the revision it was run against"
         );
     }
@@ -455,7 +455,7 @@ mod tests {
         assert_eq!(json["specification"], "billing/v3");
         assert_eq!(
             json["spec_digest"],
-            "e19d384dac86219a38b673f7ac5a9775eba834643b4e19ddbdc61767fb8a46f5"
+            "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861"
         );
         assert_eq!(json["suite_version"], "ess-conformance/1");
         assert_eq!(json["producer"]["producer"], "verifier");

@@ -36,6 +36,33 @@ belongs in the commit message or in `docs/design/`.
   canonical JSON twice — no panic, no hang, no third outcome
   (`ess-compiler/tests/adversarial.rs`). Seeds are fixed so the gate cannot be flaky; raise
   `PROPTEST_CASES` to widen a local run.
+- **An outcome can declare where an emitted event's payload comes from** (wave 6.5 chunk B, gap
+  register). `payload:` on a command outcome maps an event's fields onto the command's input
+  (`amount: input.amount`) or a literal, with the binding mapping's own discipline read in the
+  other direction: target field checked against the event, types checked with the same
+  declared-conversion escape hatch (`ESS-COMMAND-002`, and the new `ESS-COMMAND-003` for a field
+  the event does not carry), duplicates refused while the document form can still show them. The
+  block is optional per field, and the absence is a statement: an undetermined field — a minted
+  identity — is asserted for presence and type and never for a value, and there is no
+  `unmapped_payload_field` refusal. Synthesis asserts the declared values, which closes the one
+  fault the matrix recorded as caught by nothing: `wrong-event-payload` is now caught by
+  `billing.invoice.Invoice/transition/settle/by/billing.invoice.PayInvoice/settled`, blast
+  radius 2.
+- **A value object's invariants are read at the field positions that hold one** (design §20's last
+  unsynthesised slice, wave 6.5 chunk B). New scenario family
+  `<type>/invariant/at/<view>/<field>`: the type's own predicate rebased onto each observable view
+  position — `Money`'s `amount >= 0` becomes `total.amount >= 0` — required of every row with at
+  least one row demanded. Billing's suite grows 27→29 and its refusal count drops to zero; what
+  has no witness keeps a refusal under the honest new cause (`ESS-SYNTH-013`) instead of "not
+  synthesised yet". A new deliberate fault, `negative-projected-total`, corrupts one projection's
+  rows and is caught by the scenario at exactly that position while the sibling position stays
+  green.
+- **`ess impact` fails closed on a change the delta cannot see** (mechanism 6). The construct
+  families wave 5 deliberately does not compare — entities, commands, views, bindings, conversions,
+  topology — are checked for canonical equality, and any difference owes the whole suite: a
+  payload-only change arrives as an empty delta and `Invalidation::Whole
+  { because: uncompared-family-changed }`, never as a narrowing to nothing. The arm shrinks by
+  construction as W7.2 teaches the delta each family.
 
 ## [0.6.0-ess-wave-6] — 2026-08-20
 

@@ -628,12 +628,75 @@ pub struct ResolvedOutcome {
     pub test_strategy: TestStrategy,
     /// The events it emits, in the order they happen.
     pub emits: Vec<EventHandle>,
+    /// Which of those events' payload fields this branch determines, and from what.
+    ///
+    /// One entry per emitted event the specification says anything about, in event name order.
+    /// Empty is the common case and a statement, not a gap: every payload field is then the
+    /// implementation's to choose, and a suite may assert presence and type but never a value.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub payload: Vec<ResolvedPayload>,
     /// The error it reports, if it reports one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ErrorHandle>,
     /// One line for generated documentation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+}
+
+/// Where a determined payload field's value comes from, resolved.
+///
+/// The mirror of [`ResolvedMappingValue`], one construct over: a binding fills a command's input
+/// from the triggering event, an outcome fills an emitted event's payload from the command's input,
+/// and in both the reference variant carries the source's type because the check that admitted it
+/// needed the type in hand.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ResolvedPayloadValue {
+    /// A field of the command's input.
+    InputField {
+        /// The field's name.
+        field: String,
+        /// Its type, which had to be assignable to the event field's or declared convertible.
+        type_ref: ResolvedTypeRef,
+    },
+    /// A value written in the outcome itself.
+    ///
+    /// Taken on trust past `ess-domain`'s representation check, exactly as a binding's literal is —
+    /// and a separate variant for the same reason: a reader can see which fields were verified.
+    Literal {
+        /// The value, as written.
+        value: String,
+    },
+}
+
+/// One event field an outcome determines, with both ends resolved.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedPayloadField {
+    /// The event field being filled.
+    pub target: String,
+    /// Its type.
+    pub target_type: ResolvedTypeRef,
+    /// Where the value comes from.
+    pub value: ResolvedPayloadValue,
+    /// Why the two types are allowed to meet, when they differ.
+    ///
+    /// `None` when the source type is already assignable — the same reading
+    /// [`ResolvedMapping::conversion`] gives the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conversion: Option<String>,
+}
+
+/// One emitted event's determined payload fields.
+///
+/// Only the fields some declaration determines are here; an event field absent from `fields` is
+/// **undetermined**, which is a fact about the specification a consumer may report and must not
+/// treat as a defect — `ess_domain::command::PayloadSource` carries the argument.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ResolvedPayload {
+    /// The event whose payload is being described.
+    pub event: EventHandle,
+    /// The determined fields, in the event's declaration order.
+    pub fields: Vec<ResolvedPayloadField>,
 }
 
 /// A command, with its input and every outcome resolved.

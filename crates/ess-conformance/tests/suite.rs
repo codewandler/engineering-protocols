@@ -727,6 +727,15 @@ fn every_scenario_id_the_billing_model_can_produce_reads_back() {
             binding: BindingRef::new(BindingName::new(binding.name.as_str()).expect("valid")),
             aspect: BindingAspect::OnFailure,
         },
+        ScenarioId::ValueInvariant {
+            value: ess_conformance::scenario::DeclaredTypeRef::new(
+                QualifiedName::new("billing.invoice.Money").expect("valid"),
+            ),
+            at: ess_conformance::scenario::ViewRef::new(
+                QualifiedName::new("billing.invoice.InvoiceById").expect("valid"),
+            ),
+            field: "total".to_owned(),
+        },
     ];
 
     for id in ids {

@@ -1163,7 +1163,10 @@ impl Ends<'_> {
 }
 
 /// What a literal would have to be, once `Optional` and newtype wrappers are removed.
-enum Representation<'a> {
+///
+/// Crate-visible because an outcome's `payload:` holds literals to the same rule a binding's
+/// `mapping:` does, and two copies of "what can text fill" would disagree eventually.
+pub(crate) enum Representation<'a> {
     /// Text. A literal fills it, and the model can say nothing further about the value.
     Text,
     /// A closed set of names. A literal has to be one of them, which is checked exactly.
@@ -1186,7 +1189,7 @@ const WRAPPER_LIMIT: usize = 32;
 ///
 /// `None` when the answer needs a type nothing declares, or when the wrappers run deeper than any
 /// real specification: both are somebody else's error, already reported.
-fn representation<'a>(
+pub(crate) fn representation<'a>(
     type_ref: &'a TypeRef,
     types: &'a TypeRegistry,
 ) -> Option<Representation<'a>> {
@@ -1230,14 +1233,14 @@ fn misspelt_event_prefix(value: &str) -> Option<(&str, &str)> {
 }
 
 /// `true` when `value` could be a field name — the same shape [`Field`] enforces.
-fn is_field_name(value: &str) -> bool {
+pub(crate) fn is_field_name(value: &str) -> bool {
     value.starts_with(|c: char| c.is_ascii_alphabetic())
         && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// `true` when `value` is `word` misspelt: a different case, one edit away, or the right letters in
 /// the wrong order.
-fn near_miss(value: &str, word: &str) -> bool {
+pub(crate) fn near_miss(value: &str, word: &str) -> bool {
     if value.eq_ignore_ascii_case(word) {
         return true;
     }
@@ -1284,8 +1287,8 @@ fn available<T: std::fmt::Display>(kind: &str, names: impl IntoIterator<Item = T
     }
 }
 
-/// What a mapping may read, for a hint.
-fn readable(event: &EventSpec) -> String {
+/// What a mapping may read, for a hint — and what a payload may fill, which is the same list.
+pub(crate) fn readable(event: &EventSpec) -> String {
     if event.fields.is_empty() {
         return format!(
             "`{}` records nothing, so no mapping can read it",

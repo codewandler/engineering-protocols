@@ -1,6 +1,6 @@
 //! Does the suite catch anything?
 //!
-//! `tests/execution.rs` shows that 27 generated scenarios pass against an implementation written by
+//! `tests/execution.rs` shows that 29 generated scenarios pass against an implementation written by
 //! hand from the same specification. That is the *satisfiability* claim, and it is the weaker half:
 //! a suite that asserted nothing would pass exactly as green.
 //!
@@ -19,20 +19,20 @@
 //! cargo test -p ess-conformance --test faults -- --nocapture a_faults_blast_radius_is_accounted_for
 //! ```
 //!
-//! # The rows worth reading are the ones nothing catches
+//! # The rows worth reading are the ones nothing catches, and every one recorded has been closed
 //!
 //! A fault in [`Fault::ALL`] marked [`Caught::Nothing`] is not a hole in this file; it is the
 //! finding, and [`a_fault_nothing_catches_is_recorded_rather_than_quietly_dropped`] asserts that a
 //! **correct** run still comes back for it — so the day the gap closes, the row fails here and has
-//! to be rewritten rather than forgotten. That is what happened to two of the three that were
-//! recorded: `extra-event` and `drop-consistency-token` are now caught, and their rows moved.
-//!
-//! One remains, and it is the one that separates what a specification *declares* from what it
-//! merely *names*. `wrong-event-payload` publishes `InvoiceCreated` with an amount nobody submitted;
-//! every field the event declares is present and every one is of its declared type, and nothing in
-//! the model says where a payload field's value comes from — so there is no check to make that is
-//! not a guess. `partial-event-payload` is the same event with a declared field missing, and that
-//! one is caught, because the type *is* declared. `crates/ess-conformance/src/faulty.rs` argues both.
+//! to be rewritten rather than forgotten. That is what happened to all three that were recorded:
+//! `extra-event` and `drop-consistency-token` were closed by teaching synthesis to ask for more,
+//! and `wrong-event-payload` — the one that separated what a specification *declares* from what it
+//! merely *names* — needed the model itself to change. It publishes `InvoicePaid` with an amount
+//! nobody submitted; every field the event declares is present and well-typed, and until an
+//! outcome could say `amount: input.amount` there was no check to make that was not a guess. The
+//! wave 6.5 `payload:` construct is that declaration, and the row moved. `partial-event-payload`
+//! is the same event with a declared field missing, caught all along, because the type was always
+//! declared. `crates/ess-conformance/src/faulty.rs` argues both.
 //!
 //! `wrong-refusal-error` is the row that arrived the other way round. It was uncatchable and is not
 //! recorded as such, because the repair landed in the same change: a command can now declare what it
@@ -147,7 +147,7 @@ fn each_specification_is_passed_in_full_by_the_implementation_written_from_it() 
     // matrix would be measuring the reference rather than the suite. Both references, because the
     // oracle fixture is where §26's second claim is made and a fixture nothing passes proves less
     // than nothing.
-    for (system, scenarios) in [(System::Billing, 27), (System::Oracle, 31)] {
+    for (system, scenarios) in [(System::Billing, 29), (System::Oracle, 31)] {
         let report = match system {
             System::Billing => run(system, &Billing::new()),
             System::Oracle => run(system, &Oracle::new()),
@@ -262,25 +262,31 @@ fn a_faults_blast_radius_is_accounted_for() {
     // scenario is over-reaching or the allowance needs updating with a reason. The default is one:
     // a new fault that touches anything beyond its own scenario has to say so here.
     //
-    //   WrongEvent            22  `InvoiceCreated` carries the identity 15 further scenarios are
-    //                             arranged from, so renaming it stops them being set up at all —
-    //                             see the test below, which pins that they come back as `error`
-    //                             rather than as 22 separate verdicts about the implementation.
+    //   WrongEvent            24  `InvoiceCreated` carries the identity 17 further scenarios are
+    //                             arranged from — including the two §20 value-object checks, whose
+    //                             rows are put in place by `CreateInvoice` — so renaming it stops
+    //                             them being set up at all; see the test below, which pins that
+    //                             they come back as `error` rather than as 24 separate verdicts
+    //                             about the implementation.
     //   DropBinding            4  the four aspects of the binding that stopped running: its flow,
     //                             its mapping, its delivery and its failure policy. The other two
     //                             bindings' seven scenarios stay green, which is the whole reason
     //                             `examples/oracle-fixture/` exists.
-    //   StaleReadYourWrites    3  every scenario whose read-your-writes assertion is *positive*.
-    //                             The four that assert a view `Excludes` a row pass, because a view
-    //                             answering from before the write legitimately excludes it.
+    //   StaleReadYourWrites    4  every scenario whose read-your-writes assertion is *positive* —
+    //                             now including the §20 value check at `OutstandingInvoices.total`,
+    //                             whose first stale read answers an empty view and "every row, and
+    //                             at least one" demands a row. The four that assert a view
+    //                             `Excludes` a row pass, because a view answering from before the
+    //                             write legitimately excludes it.
     //   AllowIllegalTransition 2  billing declares two states `cancel` must not run from, `Paid`
     //                             and `Cancelled`, so one missing guard is two refusals.
     //   IgnoreExternalOutcome  2  the forced failure is what makes the escalation reachable, so the
     //                             binding's failure policy has nothing to observe either.
-    //   DropConsistencyToken   8  every scenario that reads a `read_your_writes` view. The token is
-    //                             missing from *every* command result, so §14's demand can be made
-    //                             nowhere; the row designates one of the eight because a matrix row
-    //                             names a scenario, not because the other seven are collateral.
+    //   DropConsistencyToken   9  every scenario that reads a `read_your_writes` view — the ninth
+    //                             is the §20 value check at `OutstandingInvoices.total`. The token
+    //                             is missing from *every* command result, so §14's demand can be
+    //                             made nowhere; the row designates one of the nine because a matrix
+    //                             row names a scenario, not because the other eight are collateral.
     //   ExtraEvent             4  the four scenarios whose asserted command is `CancelInvoice`: its
     //                             own branch, the `cancel` move, and the two states that move may
     //                             not run from — where the stray `InvoicePaid` is now caught too,
@@ -288,20 +294,33 @@ fn a_faults_blast_radius_is_accounted_for() {
     //   PartialEventPayload    2  `PayInvoice/settled` is asserted twice, once as §10's branch and
     //                             once as §19's move, and an event missing a declared field fails
     //                             both.
+    //   WrongEventPayload      2  the same two scenarios, for the value where the other row is the
+    //                             field: `payload: amount: input.amount` is declared on `settled`,
+    //                             so both scenarios that run the branch hold the amount to what was
+    //                             submitted. The row designates the transition scenario because the
+    //                             outcome scenario already names `PartialEventPayload`, and one
+    //                             scenario names one fault.
+    //   NegativeProjectedTotal 2  the entity's own invariant reads the same words off the same
+    //                             view — `Invoice` declares `total.amount >= 0` too, so the §20
+    //                             entity check after `issue` fails beside the designated value
+    //                             check. The value check at `InvoiceById.total` stays green, which
+    //                             is the point of keying the family by position.
     //   WrongRefusalError      3  `issue` runs from `Draft` alone, so `IssueInvoice` answers its
     //                             `wrong_state:` branch in the other three declared states, and one
     //                             wrong error name is wrong in all three. Narrower is not available:
     //                             the injection sees a command and a result, not which invoice.
     let allowance: &[(Fault, usize)] = &[
-        (Fault::WrongEvent, 22),
-        (Fault::DropConsistencyToken, 8),
+        (Fault::WrongEvent, 24),
+        (Fault::DropConsistencyToken, 9),
         (Fault::DropBinding, 4),
         (Fault::ExtraEvent, 4),
-        (Fault::StaleReadYourWrites, 3),
+        (Fault::StaleReadYourWrites, 4),
         (Fault::WrongRefusalError, 3),
         (Fault::AllowIllegalTransition, 2),
         (Fault::IgnoreExternalOutcome, 2),
         (Fault::PartialEventPayload, 2),
+        (Fault::WrongEventPayload, 2),
+        (Fault::NegativeProjectedTotal, 2),
     ];
 
     for fault in Fault::ALL {
@@ -334,14 +353,14 @@ fn a_faults_blast_radius_is_accounted_for() {
 
 #[test]
 fn the_widest_blast_radius_is_scenarios_that_could_not_be_arranged_rather_than_extra_verdicts() {
-    // Why `WrongEvent`'s allowance is 22 and why that is a finding rather than a flaw, the way
+    // Why `WrongEvent`'s allowance is 24 and why that is a finding rather than a flaw, the way
     // `aep_conformance` records `DropAffected`'s 8. `billing.invoice.InvoiceCreated` is where a new
-    // invoice's identity is published, and `CaptureInstance` reads it in fifteen further scenarios;
-    // rename it and those scenarios cannot be set up at all.
+    // invoice's identity is published, and `CaptureInstance` reads it in seventeen further
+    // scenarios; rename it and those scenarios cannot be set up at all.
     //
     // §28's distinction is what keeps that readable: they come back as `error` — nobody found out —
     // and not as `failed`, which would claim the implementation contradicted the specification
-    // fifteen more times.
+    // nineteen more times.
     let report = injected(Fault::WrongEvent);
     let broken = not_passed(&report);
 
@@ -355,7 +374,7 @@ fn the_widest_blast_radius_is_scenarios_that_could_not_be_arranged_rather_than_e
         .count();
     assert_eq!(
         (failed, errored),
-        (5, 17),
+        (5, 19),
         "the split between a verdict about the implementation and a scenario nobody could arrange \
          is the whole reason §28 has four words rather than two: {broken:?}"
     );

@@ -272,6 +272,16 @@ impl Specification {
             &event_names,
         ));
 
+        // The payload construct's cross-declaration half, beside the binding's for the reason the
+        // two mirror each other: an outcome fills an event's fields from its command's input, and
+        // neither declaration can check the pair alone.
+        errors.extend(crate::command::validate_payloads(
+            &self.commands,
+            &self.events,
+            &registry,
+            &self.conversions,
+        ));
+
         errors.extend(crate::binding::validate_bindings(
             &self.bindings,
             &self.events,
