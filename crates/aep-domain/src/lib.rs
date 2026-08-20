@@ -90,7 +90,7 @@ pub use error::{ParseError, ValidationCode, ValidationError, ValidationErrors};
 pub use event::{EventEnvelope, ProtocolEvent};
 pub use evidence::{
     EssConformanceResult, Evidence, EvidenceEnvelope, EvidenceKind, EvidenceRecord, Producer,
-    Provenance, TestSuite,
+    Provenance, SpecDigest, TestSuite,
 };
 pub use facts::{FactPath, FactPattern, FactSource, FactStore, FactValue, Number, Scales};
 pub use ids::{
@@ -116,6 +116,6 @@ pub use requirement::{
 pub use review::{Finding, ReviewDisposition, ReviewResult, Reviewer, Severity};
 pub use task::{Constraints, Objective, Task, TaskKind};
 pub use time::Timestamp;
-pub use verification::{Counterexample, VerificationResult, VerificationStatus, Verifier};
+pub use verification::{Counterexample, Seed, VerificationResult, VerificationStatus, Verifier};
 pub use version::{MajorVersion, PrincipleRef, ProfileVersionedRef, ProtocolRef, WorkflowRef};
 pub use workflow::{State, StateKind, Transition, Workflow};

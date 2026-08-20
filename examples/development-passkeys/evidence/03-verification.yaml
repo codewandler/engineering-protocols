@@ -34,6 +34,7 @@
 - kind: property_test_result
   property: session-isolation
   cases: 10000
+  seed: "0x5f3a91c2"
   status: passed
   producer:
     producer: verifier

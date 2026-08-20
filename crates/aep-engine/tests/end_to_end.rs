@@ -11,15 +11,23 @@ use aep_domain::action::{Action, ActionRequest, ProductionMutate};
 use aep_domain::artifact::ArtifactGraph;
 use aep_domain::capability::{CapabilityDecision, PolicySource};
 use aep_domain::evidence::{
-    ChangeSet, ContractResult, Evidence, Producer, PropertyTestResult, SpecificationRecord,
-    StaticAnalysisResult, TestResult, TestSuite,
+    ChangeSet, ContractResult, Evidence, Producer, PropertyTestResult, SpecDigest,
+    SpecificationRecord, StaticAnalysisResult, TestResult, TestSuite,
 };
 use aep_domain::facts::FactSource;
 use aep_domain::review::{ReviewDisposition, ReviewResult, Reviewer};
 use aep_domain::task::Task;
-use aep_domain::verification::{VerificationStatus, Verifier};
+use aep_domain::verification::{Seed, VerificationStatus, Verifier};
 use aep_engine::engine::{EvidenceSubmission, ProtocolEngine, TransitionResult};
 use aep_engine::{load_tree, Engine, FixedClock, Registry};
+
+/// The digest of the resolved `billing/v3` model a conformance suite would be generated from.
+///
+/// A literal rather than a computed value, deliberately: `aep-engine` does not depend on `ess-gen`
+/// and should not, because the engine consumes evidence and never produces it. A real runner reads
+/// this from `ess_gen::Provenance::of` (`crates/ess-gen/src/provenance.rs:38`), which is the same
+/// digest every generated artifact already carries in its header.
+const BILLING_DIGEST: &str = "4e1d3f8a9b2c1d0e";
 
 /// The repository root.
 fn root() -> PathBuf {
@@ -252,12 +260,20 @@ fn a_specification_governed_task_is_not_finished_until_something_else_says_it_co
 
     let engine = engine();
     let mut graph = artifacts();
-    graph.insert(Artifact::new(
-        ArtifactId::new("ess:billing").expect("id"),
-        ArtifactKind::ExecutableSystemSpecification,
-        ArtifactStatus::Approved,
-        ArtifactLocation::Inline,
-    ));
+    // The artifact, the label on the evidence and the digest name one specification. They used to
+    // name two — an unversioned `ess:billing` in the graph against a `billing/v3` in the evidence,
+    // with nothing checking either against the other. The graph now also pins the *revision*: an
+    // ESS artifact with no `model_digest` is a specification no run can be checked against, and
+    // the requirement refuses rather than assumes — which is what the last assertion below shows.
+    graph.insert(
+        Artifact::new(
+            ArtifactId::new("ess:billing/v3").expect("id"),
+            ArtifactKind::ExecutableSystemSpecification,
+            ArtifactStatus::Approved,
+            ArtifactLocation::Inline,
+        )
+        .with_model_digest(SpecDigest::new(BILLING_DIGEST).expect("a digest")),
+    );
 
     let mut execution = engine
         .initialize_with_artifacts(task(Some("development.critical")), graph)
@@ -285,6 +301,7 @@ fn a_specification_governed_task_is_not_finished_until_something_else_says_it_co
             by_agent(Evidence::EssConformance(
                 aep_domain::evidence::EssConformanceResult {
                     specification: "billing/v3".to_owned(),
+                    spec_digest: SpecDigest::new(BILLING_DIGEST).expect("a digest"),
                     implementation: "invoice-service".to_owned(),
                     status: VerificationStatus::Passed,
                     scenarios_total: 24,
@@ -312,6 +329,7 @@ fn a_specification_governed_task_is_not_finished_until_something_else_says_it_co
             by_verifier(
                 Evidence::EssConformance(aep_domain::evidence::EssConformanceResult {
                     specification: "billing/v3".to_owned(),
+                    spec_digest: SpecDigest::new(BILLING_DIGEST).expect("a digest"),
                     implementation: "invoice-service".to_owned(),
                     status: VerificationStatus::Passed,
                     scenarios_total: 24,
@@ -331,6 +349,243 @@ fn a_specification_governed_task_is_not_finished_until_something_else_says_it_co
             .any(|item| item.contains("ess_conformance")),
         "a conformance run by a runner closes it: {:?}",
         outstanding(&execution)
+    );
+}
+
+#[test]
+fn a_conformance_run_against_an_older_revision_leaves_the_requirement_owed() {
+    // Gate G19. The evidence names the right specification, comes from a real conformance runner,
+    // reports every scenario green — and was produced against a resolution of `billing/v3` that no
+    // longer exists. Nothing about the record is malformed; it is a true statement about a model
+    // nobody is building against any more, and the task must not close on it.
+    //
+    // The engine half of `conformance_evidence_from_an_older_revision_does_not_satisfy_a_current_requirement`
+    // in `aep-domain`, and the same shape as an approval of version three not covering version
+    // seven, one flavour of requirement down.
+    use aep_domain::artifact::{
+        Artifact, ArtifactId, ArtifactKind, ArtifactLocation, ArtifactStatus,
+    };
+
+    /// The resolution the suite in this test was generated from, before the model moved on.
+    const YESTERDAY: &str = "0badc0ffee123456";
+
+    let engine = engine();
+    let mut graph = artifacts();
+    graph.insert(
+        Artifact::new(
+            ArtifactId::new("ess:billing/v3").expect("id"),
+            ArtifactKind::ExecutableSystemSpecification,
+            ArtifactStatus::Approved,
+            ArtifactLocation::Inline,
+        )
+        .with_model_digest(SpecDigest::new(BILLING_DIGEST).expect("a digest")),
+    );
+
+    let mut execution = engine
+        .initialize_with_artifacts(task(Some("development.critical")), graph)
+        .expect("initialises");
+
+    let run = |digest: &str| {
+        by_verifier(
+            Evidence::EssConformance(aep_domain::evidence::EssConformanceResult {
+                specification: "billing/v3".to_owned(),
+                spec_digest: SpecDigest::new(digest).expect("a digest"),
+                implementation: "invoice-service".to_owned(),
+                status: VerificationStatus::Passed,
+                scenarios_total: 24,
+                scenarios_failed: 0,
+                suite_version: Some("1".to_owned()),
+                compiler_version: Some("0.3.0".to_owned()),
+                generator_version: Some("0.3.0".to_owned()),
+                failed_scenarios: Vec::new(),
+            }),
+            Verifier::ConformanceRunner,
+        )
+    };
+
+    // The fixture has to reach the state the rule is about: the run is otherwise flawless, so if
+    // the assertion below holds it can only be the revision that made it hold.
+    assert_ne!(
+        YESTERDAY, BILLING_DIGEST,
+        "the fixture must name two different resolutions or it tests nothing"
+    );
+
+    engine
+        .submit_evidence(&mut execution, run(YESTERDAY))
+        .expect("recorded");
+    let owed = engine.explain_completion(&execution);
+    // Only the conformance lines: the completion explanation carries three dozen items here, and a
+    // failure message that prints all of them is a failure message nobody reads.
+    let conformance: Vec<&aep_engine::explain::ExplainedItem> = owed
+        .items
+        .iter()
+        .filter(|item| item.requirement.contains("ess_conformance"))
+        .collect();
+    let stale = conformance
+        .iter()
+        .find(|item| !item.satisfied && item.requirement.contains("evidence ess_conformance"))
+        .unwrap_or_else(|| {
+            panic!(
+                "a run against another revision must leave conformance owed, but every \
+                 conformance requirement is met: {conformance:#?}"
+            )
+        });
+    assert_eq!(
+        stale.truth,
+        aep_domain::predicate::Truth::False,
+        "an older revision is contradicted, not merely unobserved: {stale:?}"
+    );
+    assert!(
+        stale
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(YESTERDAY) && detail.contains(BILLING_DIGEST)),
+        "the refusal must name both revisions so a person knows what to re-run: {stale:?}"
+    );
+
+    // And the same suite re-run against the model that exists now closes it.
+    engine
+        .submit_evidence(&mut execution, run(BILLING_DIGEST))
+        .expect("recorded");
+    let settled = engine.explain_completion(&execution);
+    let still_owed: Vec<&aep_engine::explain::ExplainedItem> = settled
+        .outstanding()
+        .filter(|item| item.requirement.contains("ess_conformance"))
+        .collect();
+    assert!(
+        still_owed.is_empty(),
+        "a run against the current revision satisfies it: {still_owed:#?}"
+    );
+}
+
+/// A protocol, workflow and task for a task governed by one named specification.
+///
+/// Local to this test rather than reusing the repository tree, because the point is a completion
+/// condition that *pins a digest* — and no shipped profile does that yet. See the report on gate
+/// G11: making `principles/verification/ess-conformance.yaml` pin it is the remaining step.
+const GOVERNED_PROTOCOL: &str = r"
+id: aep
+version: 1
+title: Test protocol
+capabilities: [repository.read]
+evidence_kinds: [ess_conformance]
+verifiers: [conformance-runner]
+phases: [completion]
+observables:
+  - 'task.**'
+  - 'ess_conformance.**'
+  - 'evidence.**'
+";
+
+const GOVERNED_WORKFLOW: &str = r"
+id: test/linear
+title: Linear
+initial: implement
+states:
+  implement:
+    title: Implement
+  complete:
+    title: Complete
+    terminal: true
+    phases: [completion]
+transitions:
+  - from: implement
+    to: complete
+    when: ess_conformance.passed
+";
+
+const GOVERNED_TASK: &str = r"
+id: T-1
+kind: feature
+objective: implement the billing specification
+protocol: aep/1
+profile: test.governed
+";
+
+/// An engine whose only profile completes when the run names `digest`.
+fn engine_pinned_to(digest: &str) -> Engine<FixedClock> {
+    let profile = format!(
+        r#"
+id: test.governed
+title: Governed by a specification
+protocol: aep/1
+workflow: test/linear
+completion:
+  - ess_conformance.passed
+  - ess_conformance.spec_digest == "{digest}"
+"#
+    );
+    let mut registry = Registry::new();
+    registry
+        .insert_protocol(aep_schema::parse::protocol(GOVERNED_PROTOCOL, None).expect("protocol"))
+        .expect("unique");
+    registry
+        .insert_workflow(aep_schema::parse::workflow(GOVERNED_WORKFLOW, None).expect("workflow"))
+        .expect("unique");
+    registry
+        .insert_profile(aep_schema::parse::profile(&profile, None).expect("profile"))
+        .expect("unique");
+    Engine::with_clock(registry, FixedClock::new(1_700_000_000_000))
+}
+
+#[test]
+fn conformance_evidence_for_one_specification_does_not_satisfy_a_requirement_about_another() {
+    // The engine half of `conformance_evidence_for_one_specification_does_not_attest_another`.
+    // A profile pins the specification its work is governed by; a conformance run against a
+    // different resolution of `billing/v3` is a true report about a different model, and it must
+    // leave the requirement owed rather than close it. Same shape as the revision-bound approval:
+    // an approval of version three does not cover version seven.
+    let engine = engine_pinned_to(BILLING_DIGEST);
+    let mut execution = engine
+        .initialize(aep_schema::parse::task(GOVERNED_TASK, None).expect("task"))
+        .expect("initialises");
+
+    let run = |digest: &str| {
+        by_verifier(
+            Evidence::EssConformance(aep_domain::evidence::EssConformanceResult {
+                specification: "billing/v3".to_owned(),
+                spec_digest: SpecDigest::new(digest).expect("a digest"),
+                implementation: "invoice-service".to_owned(),
+                status: VerificationStatus::Passed,
+                scenarios_total: 24,
+                scenarios_failed: 0,
+                suite_version: Some("1".to_owned()),
+                compiler_version: Some("0.3.0".to_owned()),
+                generator_version: Some("0.3.0".to_owned()),
+                failed_scenarios: Vec::new(),
+            }),
+            Verifier::ConformanceRunner,
+        )
+    };
+
+    let outstanding = |execution: &aep_engine::Execution| {
+        engine
+            .explain_completion(execution)
+            .outstanding()
+            .map(|item| item.requirement.clone())
+            .collect::<Vec<_>>()
+    };
+
+    engine
+        .submit_evidence(&mut execution, run("0badc0ffee123456"))
+        .expect("recorded");
+    let owed = outstanding(&execution);
+    assert!(
+        owed.iter().any(|item| item.contains("spec_digest")),
+        "a green run against another specification must leave this one owed: {owed:?}"
+    );
+    assert!(
+        !owed.iter().any(|item| item.contains("passed")),
+        "and it must be the specification that is owed, not the passing: {owed:?}"
+    );
+
+    engine
+        .submit_evidence(&mut execution, run(BILLING_DIGEST))
+        .expect("recorded");
+    assert!(
+        outstanding(&execution).is_empty(),
+        "the run against the specification in front of us closes it:\n{}",
+        engine.explain_completion(&execution)
     );
 }
 
@@ -716,6 +971,7 @@ fn completion_is_refused_with_the_missing_requirements_named() {
                 Evidence::PropertyTestResult(PropertyTestResult {
                     property: "session-isolation".parse().expect("claim"),
                     cases: 10_000,
+                    seed: Some(Seed::new("17650292319862362387").expect("a seed")),
                     status: VerificationStatus::Passed,
                     counterexamples: Vec::new(),
                 }),

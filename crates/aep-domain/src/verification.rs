@@ -16,7 +16,9 @@
 //! | the change is permitted | [`Verifier::PolicyEngine`] |
 //!
 //! A failure is most useful when it hands back a [`Counterexample`]: an input the agent can
-//! act on, without being able to edit the criterion it failed.
+//! act on, without being able to edit the criterion it failed. Where the run that found it was
+//! generated rather than written, a [`Seed`] says how to generate it again — a counterexample that
+//! cannot be reproduced is a claim about a run nobody can repeat.
 
 use std::fmt;
 
@@ -212,6 +214,119 @@ impl fmt::Display for VerificationStatus {
     }
 }
 
+/// What a generated run has to be given to happen again.
+///
+/// A string, and opaque to this protocol, because every tool that produces one spells it
+/// differently: `proptest` and `quickcheck` hand out a 64-bit integer, Hypothesis a base64
+/// `@reproduce_failure` blob, `fast-check` a 32-bit integer, `go test -fuzz` a corpus entry, a
+/// fuzzer a file name. A `u64` would fit two of those and force the rest to encode something that
+/// *looks* like a seed and reproduces nothing — worse than leaving the field out, because an
+/// absent seed is visible and a lossy one is not.
+///
+/// So the protocol carries the token and never reads structure out of it, for the same reason an
+/// entity id is never parsed for meaning. What can be spelled back is a question for the tool, and
+/// the tool is already named: the evidence envelope records its producer and its provenance.
+///
+/// What *is* checked is only that a person could use it — non-empty, one line, and short enough to
+/// be a seed rather than a corpus. A failure whose reproduction needs a whole input file has that
+/// input in [`Counterexample::input`] or in an artifact; it does not belong in a field somebody is
+/// expected to paste after `--seed`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(transparent)]
+pub struct Seed(String);
+
+impl Seed {
+    /// The longest seed this protocol carries.
+    ///
+    /// Generous for every spelling above and far short of an input corpus, which is a different
+    /// thing recorded in a different place.
+    pub const MAX_LENGTH: usize = 256;
+
+    /// Builds a seed, refusing one nobody could act on.
+    pub fn new(value: impl Into<String>) -> Result<Self, ParseError> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(ParseError::reference(
+                "seed",
+                &value,
+                "a blank seed claims a run can be reproduced and does not say how",
+            ));
+        }
+        if value.chars().any(char::is_control) {
+            return Err(ParseError::reference(
+                "seed",
+                &value,
+                "a seed is one line: it is printed in a report and pasted into a command",
+            ));
+        }
+        if value.chars().count() > Self::MAX_LENGTH {
+            return Err(ParseError::reference(
+                "seed",
+                &value,
+                format!(
+                    "a seed is at most {} characters; an input this large is a corpus, and belongs \
+                     in the counterexample or an artifact",
+                    Self::MAX_LENGTH
+                ),
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    /// The seed as written by the tool that produced it.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for Seed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Seed {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // A number reads naturally in a document for the tools that use one, and quoting it would
+        // be a trap: `seed: 12345` must not become a shape error.
+        let node = crate::node::Node::deserialize(deserializer)?;
+        match &node {
+            Node::Text(text) => Self::new(text.clone()).map_err(serde::de::Error::custom),
+            Node::Number(number) => Self::new(number.to_string()).map_err(serde::de::Error::custom),
+            other => Err(serde::de::Error::custom(format!(
+                "expected a seed, found {}",
+                other.type_name()
+            ))),
+        }
+    }
+}
+
+impl schemars::JsonSchema for Seed {
+    fn schema_name() -> String {
+        "Seed".to_owned()
+    }
+
+    fn json_schema(_: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut schema = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        };
+        schema.string().min_length = Some(1);
+        schema.string().max_length =
+            Some(u32::try_from(Self::MAX_LENGTH).expect("the limit is small enough for a schema"));
+        schema.metadata().description = Some(
+            "Whatever the producing tool needs to generate the same run again, in that tool's own \
+             spelling. Never interpreted."
+                .to_owned(),
+        );
+        schema.metadata().examples = ["17650292319862362387", "AXicY2BkYGAAAAANAAI="]
+            .iter()
+            .map(|value| serde_json::Value::String((*value).to_owned()))
+            .collect();
+        schema.into()
+    }
+}
+
 /// A concrete input that breaks a claim.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -333,5 +448,41 @@ mod tests {
         assert!(!VerificationStatus::Inconclusive.is_pass());
         assert!(!VerificationStatus::Skipped.is_pass());
         assert!(!VerificationStatus::Failed.is_pass());
+    }
+
+    #[test]
+    fn a_seed_is_taken_in_whatever_spelling_its_tool_uses() {
+        // Four real spellings from four real tools. Any of them would be lost by a `u64` field, and
+        // a lost seed is a counterexample nobody can reproduce.
+        for spelling in [
+            "17650292319862362387",
+            "AXicY2BkYGAAAAANAAI=",
+            "0xdeadbeef",
+            "corpus/crash-6f1c2b",
+        ] {
+            let seed = Seed::new(spelling).expect("a usable seed");
+            assert_eq!(seed.as_str(), spelling, "the seed must survive verbatim");
+        }
+        let from_number: Seed = serde_json::from_str("12345").expect("a numeric seed");
+        assert_eq!(
+            from_number.as_str(),
+            "12345",
+            "`seed: 12345` is how half these tools write it, and quoting it must not be required"
+        );
+    }
+
+    #[test]
+    fn a_seed_nobody_could_act_on_is_refused() {
+        // The field exists so a failing run can be run again. A blank or unusable value would say
+        // "reproducible" and deliver nothing, which is worse than saying nothing at all.
+        for refused in ["", "   ", "seed\nwith a newline"] {
+            Seed::new(refused).expect_err(&format!("`{refused}` is not a usable seed"));
+        }
+        let corpus = "a".repeat(Seed::MAX_LENGTH + 1);
+        let error = Seed::new(corpus).expect_err("a corpus is not a seed");
+        assert!(
+            error.to_string().contains("corpus"),
+            "the reader has to be told where a large input goes instead: {error}"
+        );
     }
 }

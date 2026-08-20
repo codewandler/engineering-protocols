@@ -23,14 +23,14 @@
 
 use std::fmt;
 
-use crate::artifact::{ArtifactKind, ArtifactRef, Revision};
+use crate::artifact::{Artifact, ArtifactKind, ArtifactRef, Revision};
 use crate::capability::Environment;
 use crate::error::ParseError;
 use crate::facts::{FactPath, FactValue, Number};
 use crate::ids::{ApprovalId, ClaimId, EvidenceId, ServiceId, SubjectRef, ToolRef};
 use crate::review::ReviewResult;
 use crate::time::Timestamp;
-use crate::verification::{Counterexample, VerificationStatus, Verifier};
+use crate::verification::{Counterexample, Seed, VerificationStatus, Verifier};
 
 /// Which body of tests was run.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -280,7 +280,10 @@ pub struct ContractResult {
 
 /// The outcome of one property test.
 ///
-/// Facts: `property_test.<property>.{result,passed,cases}`.
+/// Facts: `property_test.<property>.{result,passed,cases,seed}`, plus
+/// `property_test.<property>.seed.exists` — which is the one a rule should read, because a policy
+/// can require that a failing property run be reproducible and cannot usefully compare a seed to a
+/// literal.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -291,11 +294,32 @@ pub struct PropertyTestResult {
     /// How many cases were generated.
     #[serde(default)]
     pub cases: usize,
+    /// What the run was generated from, when the tool that ran it has a seed.
+    ///
+    /// Optional, because not every property checker is randomised: an exhaustive or symbolic one
+    /// has nothing to seed and should not be made to invent one. But a randomised run that reports
+    /// a counterexample and no seed hands back a failure nobody can make happen again, and
+    /// reproducing the failure is the entire value of the report.
+    ///
+    /// On the run rather than on each [`Counterexample`] deliberately: the counterexample already
+    /// carries its own `input` verbatim, so the thing that cannot be recovered from the record is
+    /// not the failing case but the *search* that found it — and that is a property of the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seed: Option<Seed>,
     /// The outcome.
     pub status: VerificationStatus,
     /// Inputs that break the property.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub counterexamples: Vec<Counterexample>,
+}
+
+impl PropertyTestResult {
+    /// `true` when somebody handed this record could run it again.
+    ///
+    /// A failing run that is not reproducible names a defect and withholds the way to see it.
+    pub fn is_reproducible(&self) -> bool {
+        self.seed.is_some()
+    }
 }
 
 /// How a deployment ended.
@@ -656,6 +680,110 @@ pub struct SpecificationRecord {
     pub unsatisfied: Vec<String>,
 }
 
+/// A digest of the resolved specification a conformance suite was generated from.
+///
+/// Lower-case hexadecimal. `ess-gen` writes a 16-character truncated SHA-256 of the resolved model
+/// into every generated artifact's provenance header, so 16 is the length this workspace produces;
+/// a producer that records the whole hash is being more precise, not wrong, so anything from 16 to
+/// 64 characters is accepted.
+///
+/// Case is fixed rather than folded, for the reason this repository keeps arriving at: two
+/// spellings of one value are two documents that disagree in text and agree in meaning, and here
+/// the disagreement would be silent — an upper-case digest would simply fail to match a lower-case
+/// one and the record would read as evidence about a different specification.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(transparent)]
+pub struct SpecDigest(String);
+
+impl SpecDigest {
+    /// The shortest accepted digest: what `ess-gen` writes.
+    pub const MIN_LENGTH: usize = 16;
+
+    /// The longest accepted digest: a full SHA-256, in hex.
+    pub const MAX_LENGTH: usize = 64;
+
+    /// Builds a digest, refusing anything that is not one.
+    pub fn new(value: impl Into<String>) -> Result<Self, ParseError> {
+        let value = value.into();
+        if value
+            .chars()
+            .any(|character| character.is_ascii_uppercase())
+        {
+            return Err(ParseError::reference(
+                "specification digest",
+                &value,
+                "digests are written in lower case, so one model has one spelling",
+            ));
+        }
+        if !value.chars().all(|character| character.is_ascii_hexdigit()) {
+            return Err(ParseError::reference(
+                "specification digest",
+                &value,
+                "expected hexadecimal; a name such as `billing/v3` is not a digest",
+            ));
+        }
+        let length = value.chars().count();
+        if !(Self::MIN_LENGTH..=Self::MAX_LENGTH).contains(&length) {
+            return Err(ParseError::reference(
+                "specification digest",
+                &value,
+                format!(
+                    "expected {} to {} hexadecimal characters, found {length}",
+                    Self::MIN_LENGTH,
+                    Self::MAX_LENGTH
+                ),
+            ));
+        }
+        Ok(Self(value))
+    }
+
+    /// The digest as written.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for SpecDigest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SpecDigest {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for SpecDigest {
+    fn schema_name() -> String {
+        "SpecDigest".to_owned()
+    }
+
+    fn json_schema(_: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut schema = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        };
+        schema.string().pattern = Some(format!(
+            "^[0-9a-f]{{{},{}}}$",
+            Self::MIN_LENGTH,
+            Self::MAX_LENGTH
+        ));
+        schema.metadata().description = Some(
+            "A digest of the resolved specification a conformance suite was generated from, in \
+             lower-case hexadecimal."
+                .to_owned(),
+        );
+        schema.metadata().examples = ["4e1d3f8a9b2c1d0e"]
+            .iter()
+            .map(|value| serde_json::Value::String((*value).to_owned()))
+            .collect();
+        schema.into()
+    }
+}
+
 /// What a conformance run found when it checked an implementation against a specification.
 ///
 /// This is the join between the two halves of the project: a specification generates its own
@@ -664,7 +792,7 @@ pub struct SpecificationRecord {
 /// without them — "conformant" is a claim about one implementation against one specification,
 /// checked by one suite, and each of those moves independently.
 ///
-/// Facts: `ess_conformance.{status,passed,spec_version}`,
+/// Facts: `ess_conformance.{status,passed,spec_version,spec_digest}`,
 /// `ess_conformance.scenarios.{total,failed}`.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
@@ -672,7 +800,16 @@ pub struct SpecificationRecord {
 #[serde(deny_unknown_fields)]
 pub struct EssConformanceResult {
     /// Which specification, at which version, such as `billing/v3`.
+    ///
+    /// What a person reads. It is not what identifies the specification — see [`Self::spec_digest`].
     pub specification: String,
+    /// A digest of the resolved specification the suite was generated from.
+    ///
+    /// Required, and the reason the whole record is worth anything. Without it this says that
+    /// *some* implementation passed *some* suite; with it, the record names the exact model the
+    /// suite came from, and a reader can check that it is the model in front of them. `billing/v3`
+    /// is a label two different resolutions can share; a digest is not.
+    pub spec_digest: SpecDigest,
     /// Which implementation was checked.
     pub implementation: String,
     /// The outcome.
@@ -695,6 +832,50 @@ pub struct EssConformanceResult {
     /// Which scenarios failed, so a failure names something actionable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failed_scenarios: Vec<String>,
+}
+
+impl EssConformanceResult {
+    /// `true` when this run is evidence about the specification `digest` identifies.
+    ///
+    /// The digest, never the label. `billing/v3` names a version of a system; it does not name the
+    /// resolved model a suite was generated from, and two resolutions that differ by one field are
+    /// two specifications wearing one label. A run against a different digest is a true statement
+    /// about a different specification — which is exactly as useful here as an approval of version
+    /// three is to version seven.
+    pub fn attests(&self, digest: &SpecDigest) -> bool {
+        &self.spec_digest == digest
+    }
+
+    /// `true` when this run was produced against the revision `artifact` describes *now*.
+    ///
+    /// The conformance counterpart of
+    /// [`ReviewResult::covers`](crate::review::ReviewResult::covers), and the same defect it
+    /// refuses one layer down: an approval of version three does not cover version seven, and a
+    /// suite run against yesterday's model does not attest today's. Without this, a task closes
+    /// having proven conformance to a specification nobody is building against any more.
+    ///
+    /// # This fails closed, deliberately
+    ///
+    /// An artifact that records no digest returns `false`, not `true`. Evidence that *cannot
+    /// demonstrate* it was produced against the current revision does not satisfy the requirement;
+    /// it is not presumed current until something proves otherwise.
+    ///
+    /// That polarity is a decision, and the next reader will meet the opposite one:
+    /// `docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md` proposes an invalidation
+    /// model in which a record stays valid until a diff proves it stale — evidence failing *open*.
+    /// `docs/reviews/2026-08-20-semantic-diff-feasibility-review.md` (finding S1) concluded that
+    /// design had the polarity backwards and needs this rule as a precondition. Unproven is not
+    /// proven, here as everywhere else in this protocol: this is the same reasoning as
+    /// [`Truth::Unknown`](crate::predicate::Truth::Unknown) never collapsing to `true`.
+    ///
+    /// The one declared exception is the artifact's own
+    /// [`FreshnessPolicy::AlwaysValid`](crate::artifact::FreshnessPolicy::AlwaysValid), which is
+    /// applied by [`ArtifactGraph::governing_models`](crate::artifact::ArtifactGraph::governing_models)
+    /// rather than here, so that the opt-out is one written statement in a manifest rather than a
+    /// branch scattered through every check.
+    pub fn covers(&self, artifact: &Artifact) -> bool {
+        artifact.is_at_revision(&self.spec_digest)
+    }
 }
 
 /// What produced a piece of evidence.
@@ -1041,6 +1222,22 @@ impl Evidence {
         }
     }
 
+    /// The resolved-model digest this evidence was produced against, where it has one.
+    ///
+    /// The other half of the scoping on the revision binding: it applies where the evidence
+    /// carries a digest *and* the graph holds an artifact that pins one. Most evidence kinds
+    /// carry none — a unit-test run is not about a compiled model — and the binding must leave
+    /// them alone rather than refusing them for missing something they never had.
+    ///
+    /// A match arm rather than a downcast, so a new digest-carrying evidence kind opts in by
+    /// being listed here and cannot acquire the binding by accident.
+    pub fn spec_digest(&self) -> Option<&SpecDigest> {
+        match self {
+            Self::EssConformance(result) => Some(&result.spec_digest),
+            _ => None,
+        }
+    }
+
     /// A one-line description, for audit records.
     pub fn summary(&self) -> String {
         match self {
@@ -1200,6 +1397,16 @@ impl Evidence {
                     FactValue::bool(result.status.is_pass()),
                 ));
                 facts.push((base.child("cases"), FactValue::count(result.cases)));
+                // The seed itself is projected so a report can print it, but `seed.exists` is what
+                // a rule reads: "this run can be reproduced" is a decidable requirement, and
+                // comparing a seed to a literal is not.
+                if let Some(seed) = &result.seed {
+                    facts.push((base.child("seed"), FactValue::text(seed.as_str())));
+                }
+                facts.push((
+                    base.child("seed").child("exists"),
+                    FactValue::bool(result.is_reproducible()),
+                ));
                 facts.push((base.child("exists"), FactValue::bool(true)));
             }
             Self::DeploymentResult(result) => {
@@ -1387,6 +1594,12 @@ impl Evidence {
                 facts.push((
                     base.child("spec_version"),
                     FactValue::text(result.specification.clone()),
+                ));
+                // The digest, beside the label, so a rule can pin the specification a task is
+                // governed by rather than trusting a name two models can share.
+                facts.push((
+                    base.child("spec_digest"),
+                    FactValue::text(result.spec_digest.as_str()),
                 ));
                 facts.push((
                     base.child("scenarios").child("total"),
@@ -1611,9 +1824,65 @@ mod tests {
     }
 
     #[test]
+    fn a_property_run_hands_back_the_seed_that_reproduces_its_counterexample() {
+        // The point of a counterexample is that somebody can go and see it. A record that reports
+        // one and cannot say how the run was generated proves a defect exists and withholds the
+        // only way to look at it.
+        let evidence = Evidence::PropertyTestResult(PropertyTestResult {
+            property: "session-isolation".parse().expect("claim"),
+            cases: 10_000,
+            seed: Some(Seed::new("17650292319862362387").expect("a seed")),
+            status: VerificationStatus::Failed,
+            counterexamples: vec![Counterexample {
+                verifier: Verifier::PropertyTester,
+                property: Some("session-isolation".parse().expect("claim")),
+                note: Some("two sessions shared a cache key".to_owned()),
+                ..Counterexample::default()
+            }],
+        });
+        let facts = store(&evidence);
+
+        assert_eq!(
+            value(&facts, "property_test.session-isolation.seed"),
+            Some(FactValue::text("17650292319862362387")),
+            "the seed must survive verbatim: it is the tool's spelling, not ours"
+        );
+        assert_eq!(
+            value(&facts, "property_test.session-isolation.seed.exists"),
+            Some(FactValue::bool(true))
+        );
+    }
+
+    #[test]
+    fn a_property_run_without_a_seed_says_so_rather_than_looking_reproducible() {
+        // An exhaustive checker has nothing to seed and must not be made to invent one — but the
+        // difference has to be readable, so a rule can insist that a *randomised* failure carries
+        // one without banning the checkers that do not need it.
+        let evidence = Evidence::PropertyTestResult(PropertyTestResult {
+            property: "session-isolation".parse().expect("claim"),
+            cases: 10_000,
+            seed: None,
+            status: VerificationStatus::Passed,
+            counterexamples: Vec::new(),
+        });
+        let facts = store(&evidence);
+
+        assert_eq!(
+            value(&facts, "property_test.session-isolation.seed.exists"),
+            Some(FactValue::bool(false))
+        );
+        assert_eq!(
+            value(&facts, "property_test.session-isolation.seed"),
+            None,
+            "an absent seed must be absent, not an empty string that reads as one"
+        );
+    }
+
+    #[test]
     fn a_conformance_result_projects_a_fact_a_completion_condition_can_read() {
         let evidence = Evidence::EssConformance(EssConformanceResult {
             specification: "billing/v3".to_owned(),
+            spec_digest: SpecDigest::new("4e1d3f8a9b2c1d0e").expect("a digest"),
             implementation: "invoice-service@rev-4711".to_owned(),
             status: VerificationStatus::Passed,
             scenarios_total: 24,
@@ -1637,6 +1906,128 @@ mod tests {
             value(&facts, "ess_conformance.scenarios.total"),
             Some(FactValue::count(24))
         );
+        assert_eq!(
+            value(&facts, "ess_conformance.spec_digest"),
+            Some(FactValue::text("4e1d3f8a9b2c1d0e")),
+            "a rule has to be able to pin the specification, not just read its label"
+        );
+    }
+
+    #[test]
+    fn conformance_evidence_for_one_specification_does_not_attest_another() {
+        // The same shape as `an_approval_of_version_three_does_not_cover_version_seven`: a true
+        // statement about one thing is not a statement about the thing in front of you. Here both
+        // records say `billing/v3` and both are honest; they were produced against two different
+        // resolutions of it, and only the digest can tell anyone that.
+        let run = |digest: &str| EssConformanceResult {
+            specification: "billing/v3".to_owned(),
+            spec_digest: SpecDigest::new(digest).expect("a digest"),
+            implementation: "invoice-service@rev-4711".to_owned(),
+            status: VerificationStatus::Passed,
+            scenarios_total: 24,
+            scenarios_failed: 0,
+            suite_version: Some("1".to_owned()),
+            compiler_version: Some("0.3.0".to_owned()),
+            generator_version: Some("0.3.0".to_owned()),
+            failed_scenarios: Vec::new(),
+        };
+        let governing = SpecDigest::new("4e1d3f8a9b2c1d0e").expect("a digest");
+
+        assert!(run("4e1d3f8a9b2c1d0e").attests(&governing));
+        assert!(
+            !run("0badc0ffee123456").attests(&governing),
+            "a passing run against a different model must not read as conformance to this one"
+        );
+    }
+
+    #[test]
+    fn a_run_against_yesterdays_revision_does_not_cover_the_specification_in_the_graph() {
+        // `attests` compares a run with a digest somebody already found. `covers` is the question a
+        // requirement actually asks: is this run about the specification *as the graph holds it
+        // now*. The third case is the one the polarity argument turns on — an artifact recording no
+        // digest is covered by nothing, because unproven is not proven.
+        use crate::artifact::{ArtifactId, ArtifactKind, ArtifactLocation, ArtifactStatus};
+
+        let specification = |digest: Option<&str>| {
+            let mut artifact = crate::artifact::Artifact::new(
+                ArtifactId::new("ess:billing/v3").expect("id"),
+                ArtifactKind::ExecutableSystemSpecification,
+                ArtifactStatus::Approved,
+                ArtifactLocation::Inline,
+            );
+            artifact.model_digest = digest.map(|value| SpecDigest::new(value).expect("a digest"));
+            artifact
+        };
+        let run = |digest: &str| EssConformanceResult {
+            specification: "billing/v3".to_owned(),
+            spec_digest: SpecDigest::new(digest).expect("a digest"),
+            implementation: "invoice-service@rev-4711".to_owned(),
+            status: VerificationStatus::Passed,
+            scenarios_total: 24,
+            scenarios_failed: 0,
+            suite_version: Some("1".to_owned()),
+            compiler_version: Some("0.3.0".to_owned()),
+            generator_version: Some("0.3.0".to_owned()),
+            failed_scenarios: Vec::new(),
+        };
+
+        assert!(run("4e1d3f8a9b2c1d0e").covers(&specification(Some("4e1d3f8a9b2c1d0e"))));
+        assert!(
+            !run("0badc0ffee123456").covers(&specification(Some("4e1d3f8a9b2c1d0e"))),
+            "a green run against yesterday's resolution is not conformance to today's"
+        );
+        assert!(
+            !run("4e1d3f8a9b2c1d0e").covers(&specification(None)),
+            "a specification recording no digest is covered by nothing: this fails closed"
+        );
+    }
+
+    #[test]
+    fn only_evidence_that_was_produced_against_a_model_carries_a_digest() {
+        // The scope of the revision binding on the evidence side. A unit-test run is not about a
+        // compiled model, so the binding must not refuse it for lacking a digest it never had.
+        assert_eq!(
+            Evidence::EssConformance(EssConformanceResult {
+                specification: "billing/v3".to_owned(),
+                spec_digest: SpecDigest::new("4e1d3f8a9b2c1d0e").expect("a digest"),
+                implementation: "invoice-service".to_owned(),
+                status: VerificationStatus::Passed,
+                scenarios_total: 24,
+                scenarios_failed: 0,
+                suite_version: None,
+                compiler_version: None,
+                generator_version: None,
+                failed_scenarios: Vec::new(),
+            })
+            .spec_digest()
+            .map(SpecDigest::as_str),
+            Some("4e1d3f8a9b2c1d0e")
+        );
+        assert_eq!(
+            Evidence::TestResult(TestResult::passing(TestSuite::Unit, 12)).spec_digest(),
+            None
+        );
+    }
+
+    #[test]
+    fn a_conformance_record_that_cannot_name_its_specification_is_refused() {
+        // The field is required, and this is why: a record without it proves that some
+        // implementation passed some suite. Nobody can act on that.
+        let error = serde_yaml::from_str::<EssConformanceResult>(
+            r"
+specification: billing/v3
+implementation: invoice-service@rev-4711
+status: passed
+scenarios_total: 24
+",
+        )
+        .expect_err("no digest, no claim");
+        assert!(error.to_string().contains("spec_digest"), "{error}");
+
+        for refused in ["billing/v3", "4E1D3F8A9B2C1D0E", "4e1d", "zzzzzzzzzzzzzzzz"] {
+            SpecDigest::new(refused)
+                .expect_err(&format!("`{refused}` is not a specification digest"));
+        }
     }
 
     #[test]
@@ -1645,6 +2036,7 @@ mod tests {
         // the fact a completion condition reads must not take the optimistic half of that.
         let evidence = Evidence::EssConformance(EssConformanceResult {
             specification: "billing/v3".to_owned(),
+            spec_digest: SpecDigest::new("4e1d3f8a9b2c1d0e").expect("a digest"),
             implementation: "invoice-service@rev-4711".to_owned(),
             status: VerificationStatus::Passed,
             scenarios_total: 24,

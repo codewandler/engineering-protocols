@@ -270,30 +270,112 @@ impl EvidenceRequirement {
         true
     }
 
+    /// Why `record` cannot be shown to have been produced against the revision the graph pins
+    /// now — `None` when it can be, or when nothing pins one.
+    ///
+    /// This is the conformance half of the rule
+    /// [`ReviewRequirement::evaluate`] applies to approvals: an approval of version three does not
+    /// cover version seven, and a suite run against yesterday's specification does not attest
+    /// today's. Without it, evidence can name the right specification, carry a digest from an
+    /// older revision of it, and close a task having proven conformance to a model nobody is
+    /// building against any more.
+    ///
+    /// # It fails closed
+    ///
+    /// Evidence that cannot demonstrate it was produced against the current revision does not
+    /// satisfy the requirement. It is not presumed current until something proves it stale. The
+    /// distinction matters because the opposite polarity is written down in this repository:
+    /// `docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md` proposes invalidating
+    /// records only once a diff shows they are affected, and
+    /// `docs/reviews/2026-08-20-semantic-diff-feasibility-review.md` finding S1 concluded that had
+    /// it backwards and needs this rule first. A reader meeting that document should read this one
+    /// as the answer, not as a variant.
+    ///
+    /// So a governing artifact that records **no** digest yields a refusal rather than a pass: no
+    /// run can be shown current against it, and the detail names the artifact that owes a digest.
+    ///
+    /// # Where it does not apply, and why that is not a silent skip
+    ///
+    /// Two conditions scope it, each a named predicate rather than an inline `if let Some`:
+    ///
+    /// * [`Evidence::spec_digest`] — evidence that carries no digest is out of scope. A unit-test
+    ///   run is not about a compiled model and must not be refused for lacking one.
+    /// * [`ArtifactGraph::governing_models`] — a graph with nothing that pins a revision is out of
+    ///   scope. Twenty-five of the twenty-six artifact kinds have no compiled model, and a task
+    ///   whose graph holds only designs and runbooks owes nothing here.
+    ///
+    /// An artifact in scope with no digest is *in* the first list and fails; a kind out of scope
+    /// never enters it, and the manifest refuses a digest on one so the two cases cannot be
+    /// confused for each other.
+    fn unbound_revision(record: &EvidenceRecord, graph: &ArtifactGraph) -> Option<String> {
+        let digest = record.value.spec_digest()?;
+        let governing: Vec<&Artifact> = graph.governing_models().collect();
+        if governing.is_empty()
+            || governing
+                .iter()
+                .any(|artifact| artifact.is_at_revision(digest))
+        {
+            return None;
+        }
+        let pinned = governing
+            .iter()
+            .map(|artifact| match &artifact.model_digest {
+                Some(current) => format!("{} is at {current}", artifact.id),
+                None => format!("{} records no model digest", artifact.id),
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        Some(format!("the run attests {digest}, and {pinned}"))
+    }
+
     /// Checks this requirement.
     fn evaluate(&self, context: &dyn RequirementContext) -> RequirementOutcome {
-        let matching = context
+        let graph = context.artifacts();
+        let mut matching = 0_usize;
+        let mut unbound: Option<String> = None;
+
+        for record in context
             .evidence()
             .iter()
             .filter(|record| self.matches(record))
-            .count();
-        let truth = Truth::from_bool(matching >= self.at_least);
-        let outcome = RequirementOutcome::new(
-            RequirementFlavour::Evidence,
-            self.to_string(),
-            if truth.is_satisfied() {
-                Truth::True
-            } else {
-                Truth::Unknown
-            },
-        );
-        if truth.is_satisfied() {
-            outcome
-        } else {
-            outcome.with_detail(format!(
+        {
+            match Self::unbound_revision(record, graph) {
+                None => matching += 1,
+                Some(reason) => {
+                    if unbound.is_none() {
+                        unbound = Some(reason);
+                    }
+                }
+            }
+        }
+
+        if matching >= self.at_least {
+            return RequirementOutcome::new(
+                RequirementFlavour::Evidence,
+                self.to_string(),
+                Truth::True,
+            );
+        }
+        match unbound {
+            // `False`, not `Unknown`, and for the same reason a review given against another
+            // version is: something was observed and it contradicts the requirement. The
+            // distinction is what tells a person whether to wait or to go and do something — here,
+            // to re-run the suite against the model that exists now.
+            Some(reason) => RequirementOutcome::new(
+                RequirementFlavour::Evidence,
+                self.to_string(),
+                Truth::False,
+            )
+            .with_detail(reason),
+            None => RequirementOutcome::new(
+                RequirementFlavour::Evidence,
+                self.to_string(),
+                Truth::Unknown,
+            )
+            .with_detail(format!(
                 "{matching} of {} required record(s) submitted",
                 self.at_least
-            ))
+            )),
         }
     }
 }
@@ -1500,11 +1582,12 @@ pub fn structured_requirement_keys() -> &'static [&'static str] {
 mod tests {
     use super::*;
     use crate::artifact::{ArtifactId, ArtifactLocation};
-    use crate::evidence::{Producer, TestResult, TestSuite};
+    use crate::evidence::{EssConformanceResult, Producer, SpecDigest, TestResult, TestSuite};
     use crate::facts::{FactStore, FactValue, Scales};
     use crate::ids::EvidenceId;
     use crate::review::{ReviewResult, Reviewer};
     use crate::time::Timestamp;
+    use crate::verification::VerificationStatus;
 
     struct Context {
         facts: FactStore,
@@ -1563,9 +1646,156 @@ mod tests {
         )
     }
 
+    /// What `billing/v3` resolves to now.
+    const CURRENT: &str = "4e1d3f8a9b2c1d0e";
+
+    /// What it resolved to yesterday: a different model wearing the same label.
+    const YESTERDAY: &str = "0badc0ffee123456";
+
+    fn specification(digest: Option<&str>) -> Artifact {
+        let mut artifact = Artifact::new(
+            ArtifactId::new("ess:billing/v3").expect("id"),
+            ArtifactKind::ExecutableSystemSpecification,
+            ArtifactStatus::Approved,
+            ArtifactLocation::Inline,
+        );
+        artifact.model_digest = digest.map(|value| SpecDigest::new(value).expect("a digest"));
+        artifact
+    }
+
+    /// A flawless conformance run: green, complete, by a runner — and against `digest`.
+    fn conformance_run(digest: &str) -> Evidence {
+        Evidence::EssConformance(EssConformanceResult {
+            specification: "billing/v3".to_owned(),
+            spec_digest: SpecDigest::new(digest).expect("a digest"),
+            implementation: "invoice-service".to_owned(),
+            status: VerificationStatus::Passed,
+            scenarios_total: 24,
+            scenarios_failed: 0,
+            suite_version: Some("1".to_owned()),
+            compiler_version: Some("0.3.0".to_owned()),
+            generator_version: Some("0.3.0".to_owned()),
+            failed_scenarios: Vec::new(),
+        })
+    }
+
+    fn runner() -> Producer {
+        Producer::Verifier {
+            verifier: Verifier::ConformanceRunner,
+        }
+    }
+
     fn parse(yaml: &str) -> RequirementSet {
         let node: Node = serde_yaml::from_str(yaml).expect("yaml parses");
         RequirementSet::from_node(&node).expect("requirements parse")
+    }
+
+    #[test]
+    fn conformance_evidence_from_an_older_revision_does_not_satisfy_a_current_requirement() {
+        // Gate G19, and the state the rule is load-bearing in: the evidence names the *right*
+        // specification — G11 already refuses one that names a different one — comes from a real
+        // conformance runner, and reports twenty-four of twenty-four scenarios green. The only
+        // thing wrong with it is that the model it was produced against no longer exists.
+        //
+        // Same defect class as `an_approval_of_version_three_does_not_cover_version_seven`, one
+        // flavour of requirement down.
+        let requirement = parse("evidence:\n  - kind: ess_conformance");
+
+        let current = Context::new()
+            .with_artifact(specification(Some(CURRENT)))
+            .with_evidence(runner(), conformance_run(CURRENT));
+        assert!(
+            requirement.evaluate(&current).is_satisfied(),
+            "a run against the model in the graph satisfies it, or the refusal below proves nothing"
+        );
+
+        let stale = Context::new()
+            .with_artifact(specification(Some(CURRENT)))
+            .with_evidence(runner(), conformance_run(YESTERDAY));
+        let report = requirement.evaluate(&stale);
+        assert_eq!(
+            report.truth,
+            Truth::False,
+            "an older revision is contradicted, not merely unobserved: {report:?}"
+        );
+        let detail = report.items[0].detail.as_deref().expect("a reason");
+        assert!(
+            detail.contains(YESTERDAY) && detail.contains(CURRENT),
+            "the refusal names the revision that ran and the one that governs: {detail}"
+        );
+    }
+
+    #[test]
+    fn a_specification_with_no_recorded_digest_is_conformed_to_by_nothing() {
+        // The fail-closed half, and the decision this settles for later waves. The specification is
+        // in the graph and records no digest, so no run can be *shown* to have been produced
+        // against the revision that exists now. Unproven is not proven: the requirement refuses,
+        // and names the artifact that owes a digest rather than waving the evidence through.
+        let requirement = parse("evidence:\n  - kind: ess_conformance");
+        let context = Context::new()
+            .with_artifact(specification(None))
+            .with_evidence(runner(), conformance_run(CURRENT));
+
+        let report = requirement.evaluate(&context);
+        assert_eq!(
+            report.truth,
+            Truth::False,
+            "a specification recording no digest must refuse, not wave the run through: unproven \
+             is not proven, and the opposite polarity is what the semantic-diff review rejected: \
+             {report:?}"
+        );
+        let detail = report.items[0].detail.as_deref().expect("a reason");
+        assert!(
+            detail.contains("ess:billing/v3") && detail.contains("no model digest"),
+            "the refusal has to be actionable: {detail}"
+        );
+    }
+
+    #[test]
+    fn the_revision_binding_leaves_alone_what_it_says_nothing_about() {
+        // The scoping, asserted rather than assumed, because a rule this strict applied one kind
+        // too wide would refuse work that owes it nothing. Both halves have to hold.
+        let test_run = Evidence::TestResult(TestResult::passing(TestSuite::Unit, 12));
+
+        // Evidence that was never produced against a model: a unit-test run beside a specification
+        // whose digest it could not possibly carry.
+        let tests_beside_a_specification = parse("evidence:\n  - kind: test_result").evaluate(
+            &Context::new()
+                .with_artifact(specification(None))
+                .with_evidence(runner(), test_run),
+        );
+        assert!(
+            tests_beside_a_specification.is_satisfied(),
+            "a test run is not about a compiled model and must not be refused for lacking a \
+             digest: {tests_beside_a_specification:?}"
+        );
+
+        // A graph that pins no revision: nothing declares which model is current, so there is
+        // nothing for the run to be stale against.
+        let design_only = Context::new()
+            .with_artifact(design(ArtifactStatus::Approved))
+            .with_evidence(runner(), conformance_run(YESTERDAY));
+        assert!(
+            parse("evidence:\n  - kind: ess_conformance")
+                .evaluate(&design_only)
+                .is_satisfied(),
+            "with no specification in the graph there is no revision to be bound to"
+        );
+
+        // And the one declared opt-out: an artifact whose freshness policy says it is
+        // version-independent drops out of the governing set entirely.
+        let mut always_valid = specification(Some(CURRENT));
+        always_valid.freshness = crate::artifact::FreshnessPolicy::AlwaysValid;
+        assert!(
+            parse("evidence:\n  - kind: ess_conformance")
+                .evaluate(
+                    &Context::new()
+                        .with_artifact(always_valid)
+                        .with_evidence(runner(), conformance_run(YESTERDAY))
+                )
+                .is_satisfied(),
+            "`always_valid` is the declared escape hatch, and it is written in the manifest"
+        );
     }
 
     #[test]

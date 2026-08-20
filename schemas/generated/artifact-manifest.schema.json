@@ -70,6 +70,17 @@
             }
           ]
         },
+        "model_digest": {
+          "description": "The digest of the resolved model this record describes, for a kind that has one.\n\nThe content identity of a compiled specification, as distinct from [`Self::version`], which is a label a person reads: `billing/v3` is a name two resolutions can share, and a digest is not. Only kinds for which [`ArtifactKind::carries_model_digest`] holds may record one; the manifest refuses it on any other kind, because a digest nothing will ever compare against reads as a guarantee and is not one.\n\n**Written from outside this crate.** `ess-compiler` computes it and `ess-gen` stamps it into every generated file's provenance header as `model digest <hex>`; whoever writes the manifest copies it across, the same copy a person makes recording a commit SHA in [`ArtifactProvenance::revision`].\n\n**Absent means unverifiable, not fine.** Conformance evidence about a specification that records no digest does not satisfy a requirement — see [`ArtifactGraph::governing_models`].",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SpecDigest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "provenance": {
           "description": "Who made it and from what.",
           "anyOf": [
@@ -551,6 +562,14 @@
           }
         }
       ]
+    },
+    "SpecDigest": {
+      "description": "A digest of the resolved specification a conformance suite was generated from, in lower-case hexadecimal.",
+      "examples": [
+        "4e1d3f8a9b2c1d0e"
+      ],
+      "type": "string",
+      "pattern": "^[0-9a-f]{16,64}$"
     },
     "ToolRef": {
       "description": "tool identifier.",

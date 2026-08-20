@@ -23,7 +23,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use crate::error::{ParseError, ValidationCode, ValidationError, ValidationErrors};
-use crate::evidence::Producer;
+use crate::evidence::{Producer, SpecDigest};
 use crate::facts::{FactPath, FactStore, FactValue};
 use crate::ids::{ProviderId, RepositoryRef};
 use crate::node::Node;
@@ -520,6 +520,23 @@ impl ArtifactKind {
             self,
             Self::ArchitectureDesign | Self::ArchitectureDecisionRecord
         )
+    }
+
+    /// `true` when this kind's content identity is a digest, and not only a version label.
+    ///
+    /// The scoping of the revision binding on [`Artifact::model_digest`], written down as one
+    /// predicate rather than left implicit in an `if let Some`. Most of the kinds in this
+    /// vocabulary have no digest concept at all: a runbook is prose, and asking whether a
+    /// postmortem is at the revision some evidence was produced against is not a question. So the
+    /// binding must not apply to them, and the place that decides which kinds it *does* apply to
+    /// is here — one list, greppable, extended deliberately rather than by accident.
+    ///
+    /// Today that is exactly [`ArtifactKind::ExecutableSystemSpecification`]: a compiled model
+    /// whose resolved content is hashed by `ess-compiler` and stamped into every artifact
+    /// `ess-gen` writes. When a second compiled kind arrives it is added here, and every rule that
+    /// reads this predicate picks it up.
+    pub fn carries_model_digest(&self) -> bool {
+        matches!(self, Self::ExecutableSystemSpecification)
     }
 
     /// The entity type this artifact kind corresponds to, such as `aep.design/v1`.
@@ -1236,6 +1253,31 @@ pub struct Artifact {
     /// How long it stays valid.
     #[serde(default, skip_serializing_if = "is_default_freshness")]
     pub freshness: FreshnessPolicy,
+    /// The digest of the resolved model this record describes, for a kind that has one.
+    ///
+    /// The content identity of a compiled specification, as distinct from [`Self::version`], which
+    /// is a label a person reads: `billing/v3` is a name two resolutions can share, and a digest is
+    /// not. Only kinds for which [`ArtifactKind::carries_model_digest`] holds may record one; the
+    /// manifest refuses it on any other kind, because a digest nothing will ever compare against
+    /// reads as a guarantee and is not one.
+    ///
+    /// **Written from outside this crate.** `ess-compiler` computes it and `ess-gen` stamps it into
+    /// every generated file's provenance header as `model digest <hex>`; whoever writes the
+    /// manifest copies it across, the same copy a person makes recording a commit SHA in
+    /// [`ArtifactProvenance::revision`].
+    ///
+    /// **Absent means unverifiable, not fine.** Conformance evidence about a specification that
+    /// records no digest does not satisfy a requirement — see
+    /// [`ArtifactGraph::governing_models`].
+    //
+    // Why the value cannot simply be computed here: `aep-domain` does not depend on the ESS crates
+    // and must not. The protocol is the substrate the specification layer is built on, so the
+    // dependency runs ESS → AEP; reversing it would make the protocol unusable without a
+    // specification compiler, and every consumer of AEP would build one. Hence a field that is
+    // populated rather than derived, said out loud here rather than left for the next reader to
+    // discover by trying it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_digest: Option<SpecDigest>,
 }
 
 /// Whether metadata is empty, for output suppression.
@@ -1269,6 +1311,7 @@ impl Artifact {
             metadata: ArtifactMetadata::default(),
             provenance: None,
             freshness: FreshnessPolicy::default(),
+            model_digest: None,
         }
     }
 
@@ -1276,6 +1319,16 @@ impl Artifact {
     #[must_use]
     pub fn with_relation(mut self, kind: RelationKind, target: ArtifactRef) -> Self {
         self.relations.push(ArtifactRelation::new(kind, target));
+        self
+    }
+
+    /// Records the digest of the resolved model this artifact describes, builder-style.
+    ///
+    /// The value comes from the specification compiler, never from here — see
+    /// [`Self::model_digest`].
+    #[must_use]
+    pub fn with_model_digest(mut self, digest: SpecDigest) -> Self {
+        self.model_digest = Some(digest);
         self
     }
 
@@ -1290,6 +1343,19 @@ impl Artifact {
     /// `true` when this artifact satisfies a requirement for `kind`, following the hierarchy.
     pub fn is_kind(&self, kind: &ArtifactKind) -> bool {
         self.kind.is_a(kind)
+    }
+
+    /// `true` when `digest` is the resolved model this record describes.
+    ///
+    /// The one comparison the revision binding is made of, so that there is one place to read and
+    /// one place to break. It **fails closed**: an artifact that records no digest is at no
+    /// revision anything can be checked against, and answers `false` to every digest rather than
+    /// waving them all through. See [`Self::model_digest`] for why the value has to arrive from
+    /// outside this crate, and
+    /// [`EssConformanceResult::covers`](crate::evidence::EssConformanceResult::covers) for the
+    /// polarity argument.
+    pub fn is_at_revision(&self, digest: &SpecDigest) -> bool {
+        self.model_digest.as_ref() == Some(digest)
     }
 }
 
@@ -1468,6 +1534,29 @@ impl ArtifactGraph {
         self.artifacts.is_empty()
     }
 
+    /// Every artifact that pins a revision evidence must have been produced against.
+    ///
+    /// The scope of the revision binding, as one query rather than as a condition repeated at each
+    /// call site. An artifact is in it when both hold:
+    ///
+    /// * its kind [carries a model digest](ArtifactKind::carries_model_digest) — the binding says
+    ///   nothing about a runbook or a postmortem, and must not block work that owes neither; and
+    /// * its [`FreshnessPolicy`] is not [`FreshnessPolicy::AlwaysValid`] — the one declared,
+    ///   version-controlled opt-out, the same one
+    ///   [`ReviewResult::covers`](crate::review::ReviewResult::covers) honours for an approval.
+    ///
+    /// An artifact **in scope that records no digest is still returned**, and that is the point.
+    /// It is what makes the rule fail closed: it contributes no accepted digest, so every
+    /// conformance run measured against it is unverifiable and therefore unsatisfying, and the
+    /// requirement's detail names the artifact that owes a digest. The alternative — skipping it —
+    /// would make forgetting to record a digest indistinguishable from checking one.
+    pub fn governing_models(&self) -> impl Iterator<Item = &Artifact> {
+        self.artifacts.values().filter(|artifact| {
+            artifact.kind.carries_model_digest()
+                && artifact.freshness != FreshnessPolicy::AlwaysValid
+        })
+    }
+
     /// Every artifact of `kind`, including kinds that specialise it.
     pub fn of_kind<'a>(&'a self, kind: &'a ArtifactKind) -> impl Iterator<Item = &'a Artifact> {
         self.artifacts
@@ -1518,6 +1607,28 @@ impl ArtifactGraph {
         let mut errors = ValidationErrors::new();
 
         for artifact in self.artifacts.values() {
+            // The revision binding is scoped to kinds that have a model. A digest recorded on a
+            // kind that has none would never be compared against anything, and an unread guarantee
+            // is worse than none: a reader seeing `model_digest` on a runbook concludes that
+            // something checks it.
+            if artifact.model_digest.is_some() && !artifact.kind.carries_model_digest() {
+                errors.push(
+                    ValidationError::new(
+                        ValidationCode::ConflictingDeclaration,
+                        format!("artifacts.{}.model_digest", artifact.id),
+                        format!(
+                            "{} is a {}, which has no compiled model, so a model digest on it \
+                             names nothing",
+                            artifact.id, artifact.kind
+                        ),
+                    )
+                    .with_hint(
+                        "record a digest only on a kind compiled from a model, such as \
+                         `executable-system-specification`; for a commit SHA use \
+                         `provenance.revision`",
+                    ),
+                );
+            }
             for (index, relation) in artifact.relations.iter().enumerate() {
                 let location = format!("artifacts.{}.relations[{index}]", artifact.id);
                 if !self.artifacts.contains_key(relation.target.id()) {
@@ -1867,6 +1978,82 @@ mod tests {
         ))
         .expect_err("provider without reference");
         assert!(error.to_string().contains("reference"), "{error}");
+    }
+
+    #[test]
+    fn a_model_digest_is_refused_on_a_kind_that_has_no_model() {
+        // The scoping of the revision binding, enforced rather than merely documented. Twenty-five
+        // of the twenty-six kinds have no compiled model, so a digest on one would be a field
+        // nothing ever compares — and an unread guarantee reads to the next person as a checked
+        // one.
+        let digest = SpecDigest::new("4e1d3f8a9b2c1d0e").expect("a digest");
+
+        let permitted = ArtifactGraph::build([artifact(
+            "ess:billing/v3",
+            "executable-system-specification",
+            ArtifactStatus::Approved,
+        )
+        .with_model_digest(digest.clone())])
+        .expect("a specification may record the model it resolved to");
+        assert!(
+            permitted
+                .get(&ArtifactId::new("ess:billing/v3").expect("id"))
+                .expect("present")
+                .is_at_revision(&digest),
+            "the fixture must actually carry the digest, or the refusal below proves nothing"
+        );
+
+        let refused = ArtifactGraph::build([artifact(
+            "runbook:failover",
+            "runbook",
+            ArtifactStatus::Approved,
+        )
+        .with_model_digest(digest)])
+        .expect_err("a runbook has no compiled model to digest");
+        assert!(
+            refused.contains(ValidationCode::ConflictingDeclaration),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn only_a_revision_bound_model_is_governing() {
+        // `governing_models` is the scope of the whole rule, so what it does and does not return is
+        // the rule. A specification with no digest stays in — that is what makes the binding fail
+        // closed — and one declared version-independent drops out, which is the single declared
+        // opt-out.
+        let with_digest = artifact(
+            "ess:billing/v3",
+            "executable-system-specification",
+            ArtifactStatus::Approved,
+        )
+        .with_model_digest(SpecDigest::new("4e1d3f8a9b2c1d0e").expect("a digest"));
+        let without_digest = artifact(
+            "ess:email/v1",
+            "executable-system-specification",
+            ArtifactStatus::Approved,
+        );
+        let mut version_independent = artifact(
+            "ess:legacy/v1",
+            "executable-system-specification",
+            ArtifactStatus::Approved,
+        );
+        version_independent.freshness = FreshnessPolicy::AlwaysValid;
+        let design = artifact("design:passkeys", "design", ArtifactStatus::Approved);
+
+        let graph =
+            ArtifactGraph::build([with_digest, without_digest, version_independent, design])
+                .expect("a valid graph");
+
+        let governing: Vec<String> = graph
+            .governing_models()
+            .map(|artifact| artifact.id.to_string())
+            .collect();
+        assert_eq!(
+            governing,
+            vec!["ess:billing/v3".to_owned(), "ess:email/v1".to_owned()],
+            "a specification with no digest is still governing — it is the case that fails closed"
+        );
     }
 
     #[test]

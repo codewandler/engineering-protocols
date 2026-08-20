@@ -34,6 +34,26 @@ requires:
               # conformance run, and the requirement says so mechanically rather than in a comment.
               independent: true
               verifier: conformance-runner
+              #
+              # This line now also binds the run to the specification *revision*, and nothing here
+              # says so because nothing here can: the rule lives in the type. Where the artifact
+              # graph holds an executable system specification, a run only counts if its
+              # `spec_digest` is the `model_digest` that specification records — so a suite run
+              # against yesterday's model no longer closes a task built against today's.
+              #
+              # It fails closed, which is the part worth reading before you hit it: if the
+              # specification artifact records **no** `model_digest`, no run can be shown to be
+              # current and this requirement can never be satisfied. That is deliberate — evidence
+              # that cannot demonstrate which revision produced it is not assumed to be fresh — and
+              # the fix is to record the digest, which `ess-gen` already stamps into every
+              # generated file's header as `model digest <hex>`.
+              #
+              # Nothing was added to `predicates:` for this on purpose. The obvious candidate,
+              # `ess_conformance.spec_digest.exists`, passes on every well-formed record — the
+              # field has been required since gate G11 — and a check that cannot fail is worse than
+              # no check, because it reads as protection. The declared way out is on the artifact,
+              # not here: `freshness: always_valid` says a specification is version-independent, in
+              # the manifest, under review, where a person can see it.
           artifacts:
             - kind: executable-system-specification
 
