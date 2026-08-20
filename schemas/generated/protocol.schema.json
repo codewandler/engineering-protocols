@@ -3,6 +3,26 @@
   "title": "RawProtocol",
   "description": "A protocol document, as parsed.",
   "type": "object",
+  "allOf": [
+    {
+      "description": "`approval_floor` and `approval_required` are one field; give one or the other, not both.",
+      "not": {
+        "required": [
+          "approval_floor",
+          "approval_required"
+        ]
+      }
+    },
+    {
+      "description": "`default_failure_policy` and `on_failure` are one field; give one or the other, not both.",
+      "not": {
+        "required": [
+          "default_failure_policy",
+          "on_failure"
+        ]
+      }
+    }
+  ],
   "required": [
     "id",
     "title"
@@ -10,6 +30,15 @@
   "properties": {
     "approval_floor": {
       "description": "Capabilities no profile may grant outright.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Capability"
+      },
+      "uniqueItems": true
+    },
+    "approval_required": {
+      "description": "An accepted spelling of `approval_floor`; give one or the other, not both.",
       "default": [],
       "type": "array",
       "items": {
@@ -83,6 +112,18 @@
       "items": {
         "$ref": "#/definitions/FactPattern"
       }
+    },
+    "on_failure": {
+      "description": "An accepted spelling of `default_failure_policy`; give one or the other, not both.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FailurePolicy"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "phases": {
       "description": "Phases workflows are expected to declare.",

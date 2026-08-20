@@ -3,11 +3,43 @@
   "title": "RawPrinciple",
   "description": "A principle document, as parsed.",
   "type": "object",
+  "allOf": [
+    {
+      "description": "`applies_when` and `applicability` are one field; give one or the other, not both.",
+      "not": {
+        "required": [
+          "applicability",
+          "applies_when"
+        ]
+      }
+    },
+    {
+      "description": "`on_failure` and `failure_policy` are one field; give one or the other, not both.",
+      "not": {
+        "required": [
+          "failure_policy",
+          "on_failure"
+        ]
+      }
+    }
+  ],
   "required": [
     "id",
     "title"
   ],
   "properties": {
+    "applicability": {
+      "description": "An accepted spelling of `applies_when`; give one or the other, not both.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Predicate"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "applies_when": {
       "description": "When it applies; omitted means always.",
       "default": null,
@@ -36,6 +68,18 @@
       "items": {
         "$ref": "#/definitions/EvidenceRequirement"
       }
+    },
+    "failure_policy": {
+      "description": "An accepted spelling of `on_failure`; give one or the other, not both.",
+      "default": null,
+      "anyOf": [
+        {
+          "$ref": "#/definitions/FailurePolicy"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "id": {
       "description": "Its identifier.",
@@ -435,6 +479,17 @@
     "RawObligation": {
       "description": "An explicitly identified obligation, as parsed.",
       "type": "object",
+      "allOf": [
+        {
+          "description": "`requires` and `require` are one field; give one or the other, not both.",
+          "not": {
+            "required": [
+              "require",
+              "requires"
+            ]
+          }
+        }
+      ],
       "required": [
         "id"
       ],
@@ -479,6 +534,15 @@
         "id": {
           "description": "Its identifier within the principle.",
           "type": "string"
+        },
+        "require": {
+          "description": "An accepted spelling of `requires`; give one or the other, not both.",
+          "default": {},
+          "allOf": [
+            {
+              "$ref": "#/definitions/RequirementSet"
+            }
+          ]
         },
         "requires": {
           "description": "What must hold.",

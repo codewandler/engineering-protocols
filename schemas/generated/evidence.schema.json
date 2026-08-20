@@ -30,7 +30,8 @@
         "kind": {
           "type": "string",
           "enum": [
-            "test_result"
+            "test_result",
+            "test_execution"
           ]
         },
         "passed": {
@@ -188,6 +189,17 @@
           "allOf": [
             {
               "$ref": "#/definitions/ClaimId"
+            }
+          ]
+        },
+        "seed": {
+          "description": "What the run was generated from, when the tool that ran it has a seed.\n\nOptional, because not every property checker is randomised: an exhaustive or symbolic one has nothing to seed and should not be made to invent one. But a randomised run that reports a counterexample and no seed hands back a failure nobody can make happen again, and reproducing the failure is the entire value of the report.\n\nOn the run rather than on each [`Counterexample`] deliberately: the counterexample already carries its own `input` verbatim, so the thing that cannot be recovered from the record is not the failing case but the *search* that found it — and that is a property of the run.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Seed"
+            },
+            {
+              "type": "null"
             }
           ]
         },
@@ -430,7 +442,8 @@
         "kind": {
           "type": "string",
           "enum": [
-            "diff"
+            "diff",
+            "source_diff"
           ]
         },
         "lines_added": {
@@ -713,6 +726,7 @@
       "required": [
         "implementation",
         "kind",
+        "spec_digest",
         "specification",
         "status"
       ],
@@ -762,8 +776,16 @@
           "format": "uint",
           "minimum": 0.0
         },
+        "spec_digest": {
+          "description": "A digest of the resolved specification the suite was generated from.\n\nRequired, and the reason the whole record is worth anything. Without it this says that *some* implementation passed *some* suite; with it, the record names the exact model the suite came from, and a reader can check that it is the model in front of them. `billing/v3` is a label two different resolutions can share; a digest is not.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SpecDigest"
+            }
+          ]
+        },
         "specification": {
-          "description": "Which specification, at which version, such as `billing/v3`.",
+          "description": "Which specification, at which version, such as `billing/v3`.\n\nWhat a person reads. It is not what identifies the specification — see [`Self::spec_digest`].",
           "type": "string"
         },
         "status": {
@@ -1312,6 +1334,16 @@
         }
       ]
     },
+    "Seed": {
+      "description": "Whatever the producing tool needs to generate the same run again, in that tool's own spelling. Never interpreted.",
+      "examples": [
+        "17650292319862362387",
+        "AXicY2BkYGAAAAANAAI="
+      ],
+      "type": "string",
+      "maxLength": 256,
+      "minLength": 1
+    },
     "ServiceId": {
       "description": "service identifier.",
       "type": "string",
@@ -1356,6 +1388,14 @@
           ]
         }
       ]
+    },
+    "SpecDigest": {
+      "description": "A digest of the resolved specification a conformance suite was generated from, in lower-case hexadecimal.",
+      "examples": [
+        "4e1d3f8a9b2c1d0e"
+      ],
+      "type": "string",
+      "pattern": "^[0-9a-f]{16,64}$"
     },
     "SubjectRef": {
       "description": "Subject of evidence, written `<kind>:<id>`.",

@@ -39,16 +39,23 @@ impl GeneratedSchema {
 }
 
 /// Builds one entry.
+///
+/// Every schema goes through [`crate::alias`] on the way out, because `schemars` cannot see
+/// `#[serde(alias = "…")]`: a derived schema describes the canonical spelling only, and with
+/// `deny_unknown_fields` beside it that turns the other accepted spelling into an editor error on a
+/// document the parser reads without complaint.
 fn entry<T: JsonSchema>(
     name: &'static str,
     slug: &str,
     describes: &'static str,
 ) -> GeneratedSchema {
+    let mut schema = schema_for!(T);
+    crate::alias::publish(&mut schema);
     GeneratedSchema {
         name,
         filename: format!("{slug}.schema.json"),
         describes,
-        schema: schema_for!(T),
+        schema,
     }
 }
 

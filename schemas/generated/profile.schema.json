@@ -3,6 +3,17 @@
   "title": "RawProfile",
   "description": "A profile document, as parsed.",
   "type": "object",
+  "allOf": [
+    {
+      "description": "`without_principles` and `remove_principles` are one field; give one or the other, not both.",
+      "not": {
+        "required": [
+          "remove_principles",
+          "without_principles"
+        ]
+      }
+    }
+  ],
   "required": [
     "id",
     "protocol",
@@ -70,6 +81,14 @@
           "$ref": "#/definitions/ProtocolRef"
         }
       ]
+    },
+    "remove_principles": {
+      "description": "An accepted spelling of `without_principles`; give one or the other, not both.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/PrincipleId"
+      }
     },
     "summary": {
       "description": "What it is for.",

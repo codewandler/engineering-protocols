@@ -166,6 +166,26 @@
   },
   "additionalProperties": false,
   "definitions": {
+    "BindingFailure": {
+      "description": "What happens when the invoked command does not run: `retry`, `drop`, or an `escalate:` block naming the event the escalation emits.",
+      "oneOf": [
+        {
+          "$ref": "#/definitions/Failure"
+        },
+        {
+          "type": "object",
+          "required": [
+            "escalate"
+          ],
+          "properties": {
+            "escalate": {
+              "$ref": "#/definitions/RawEscalation"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
     "Consistency": {
       "description": "How soon a view reflects a command that has already returned.\n\nThis decides whether a generated scenario asserts the view with `expect` or with `eventually` — which is the entire reason the field exists. Getting it wrong in the model is how a generated suite acquires a sleep.",
       "oneOf": [
@@ -230,24 +250,24 @@
       ]
     },
     "Failure": {
-      "description": "What happens when the command does not run.",
+      "description": "What happens when the command does not run.\n\nThe word only. What an [`Escalate`](Self::Escalate) publishes is beside it — on [`RawFailure::emits`] as a document writes it, on [`BindingSpec::escalation`] once validated — so that this stays the one token every projection prints as \"the word an author wrote\".",
       "oneOf": [
         {
-          "description": "Try again, on whatever schedule the transport provides.",
+          "description": "Try again, on whatever schedule the transport provides.\n\nObservable without anything further being declared: a retry is another invocation of the command, which [`Delivery::AtLeastOnce`] already obliges the handler to survive.",
           "type": "string",
           "enum": [
             "retry"
           ]
         },
         {
-          "description": "Surface it to a person.",
+          "description": "Surface it to a person, and publish the declared event that says so.\n\nThe event is required — see [`BindingSpec::escalation`]. Surfacing something to a person is an effect outside the system, and a specification that names one without saying how the system shows it happened has written a requirement no oracle can check.",
           "type": "string",
           "enum": [
             "escalate"
           ]
         },
         {
-          "description": "Give up silently.\n\nLegal, and never a default: a system that loses work is a decision, and the decision has to be findable in the document that made it.",
+          "description": "Give up silently.\n\nLegal, and never a default: a system that loses work is a decision, and the decision has to be findable in the document that made it.\n\nDeliberately the one policy with nothing to observe. Publishing an event here would make it a notification, which is a different decision that already has a word.",
           "type": "string",
           "enum": [
             "drop"
@@ -641,10 +661,26 @@
     "RawBindingSpec": {
       "description": "A binding, as a document says it.",
       "type": "object",
+      "allOf": [
+        {
+          "description": "Exactly one of `name` and `id` is required.",
+          "oneOf": [
+            {
+              "required": [
+                "name"
+              ]
+            },
+            {
+              "required": [
+                "id"
+              ]
+            }
+          ]
+        }
+      ],
       "required": [
         "delivery",
         "invoke",
-        "name",
         "on_failure",
         "when"
       ],
@@ -656,6 +692,10 @@
               "$ref": "#/definitions/Delivery"
             }
           ]
+        },
+        "id": {
+          "description": "An accepted spelling of `name`; give one or the other, not both.",
+          "type": "string"
         },
         "invoke": {
           "description": "What it does.",
@@ -690,7 +730,7 @@
           "description": "What happens when it does not run. Required.",
           "allOf": [
             {
-              "$ref": "#/definitions/Failure"
+              "$ref": "#/definitions/BindingFailure"
             }
           ]
         },
@@ -771,8 +811,22 @@
     "RawComponentSpec": {
       "description": "What a component is made of, as a document says it.",
       "type": "object",
-      "required": [
-        "name"
+      "allOf": [
+        {
+          "description": "Exactly one of `name` and `component` is required.",
+          "oneOf": [
+            {
+              "required": [
+                "name"
+              ]
+            },
+            {
+              "required": [
+                "component"
+              ]
+            }
+          ]
+        }
       ],
       "properties": {
         "accepts": {
@@ -782,6 +836,10 @@
               "$ref": "#/definitions/RawComponentSurface"
             }
           ]
+        },
+        "component": {
+          "description": "An accepted spelling of `name`; give one or the other, not both.",
+          "type": "string"
         },
         "name": {
           "description": "Its name — a single segment, like `invoice-service`.",
@@ -938,6 +996,25 @@
       },
       "additionalProperties": false
     },
+    "RawEscalation": {
+      "description": "What an `escalate:` block says, as a document says it.\n\nOne key, so that adding a second way to observe an escalation later is a key beside `emits:` rather than a change to the shape of `on_failure:`.",
+      "type": "object",
+      "properties": {
+        "emits": {
+          "description": "The event the system publishes when it escalates.\n\nOptional here and required by [`BindingSpec::validate`], so that `escalate:` with an empty block is refused by the same rule as `escalate` written bare.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
     "RawEventSpec": {
       "description": "An event as written in a document, before validation.",
       "type": "object",
@@ -990,12 +1067,23 @@
       "additionalProperties": false
     },
     "RawOutcome": {
-      "description": "One outcome as written in a document, before validation.\n\n`when` and `external` are the two spellings of a condition; writing neither is the default branch, and writing both is refused.",
+      "description": "One outcome as written in a document, before validation.\n\n`when` and `external` are the two spellings of a condition; writing neither is the default branch, and writing both is refused.\n\n`creates`, `moves` and `updates` are the three spellings of a [`Subject`], and follow the same shape for the same reason: three keys an author writes at most one of, rather than one key whose value is sometimes a keyword and sometimes a name. Writing none of them says the outcome changes no entity, which is the honest answer for `SendEmail`.",
       "type": "object",
       "required": [
         "name"
       ],
       "properties": {
+        "creates": {
+          "description": "The entity a new instance of which this outcome brings into existence.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "emits": {
           "description": "The events it emits.",
           "type": "array",
@@ -1021,6 +1109,17 @@
             "null"
           ]
         },
+        "moves": {
+          "description": "The transition this outcome takes, written as the entity's name followed by the transition's own — `billing.invoice.Invoice.settle`.\n\nOne name rather than an entity and a transition written separately, because a transition is declared *inside* an entity: `billing.invoice.Invoice.State` is already spelt this way by [`EntitySpec::state_type`](crate::entity::EntitySpec::state_type), and two keys that only mean something together are two keys an author can write half of.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "name": {
           "description": "What this outcome is called.",
           "allOf": [
@@ -1034,6 +1133,17 @@
           "type": [
             "string",
             "null"
+          ]
+        },
+        "updates": {
+          "description": "The entity this outcome changes without moving along its lifecycle.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/QualifiedName"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "when": {
@@ -1256,7 +1366,7 @@
       "pattern": "^[A-Z][A-Za-z0-9]*$"
     },
     "Transition": {
-      "description": "A named move between states.\n\nThe name is the transition's own, unqualified: the entity's namespace plus this name is the qualified name a command of the same name resolves against, so `IssueInvoice` on `billing.invoice.Invoice` is `billing.invoice.IssueInvoice`.\n\n`from` is a set because one move can start in several states — §4.7's `CancelInvoice` leaves both `Draft` and `Issued` — and `to` is one state because a move with two destinations is two moves with different guards.",
+      "description": "A named move between states.\n\nThe name is the transition's own, unqualified, and it is a name *inside the entity*: the entity's own name plus this one is what an outcome writes to say it takes this move, so `settle` on `billing.invoice.Invoice` is written `moves: billing.invoice.Invoice.settle`. It is not a command name, and no command is found by matching one — inferring the driving command from a transition's spelling is exactly the invention the conformance design §19 refuses, which is why the link is declared on the outcome ([`Subject`](crate::command::Subject)) rather than guessed here.\n\n`from` is a set because one move can start in several states — §4.7's `CancelInvoice` leaves both `Draft` and `Issued` — and `to` is one state because a move with two destinations is two moves with different guards.",
       "type": "object",
       "required": [
         "from",
@@ -1310,6 +1420,7 @@
         },
         {
           "type": "integer",
+          "maximum": 4294967295.0,
           "minimum": 1.0
         }
       ]

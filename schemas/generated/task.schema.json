@@ -3,14 +3,56 @@
   "title": "RawTask",
   "description": "A task document, as parsed.",
   "type": "object",
+  "allOf": [
+    {
+      "description": "Exactly one of `kind` and `type` is required.",
+      "oneOf": [
+        {
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "required": [
+            "type"
+          ]
+        }
+      ]
+    },
+    {
+      "description": "`manifest` and `artifact_manifest` are one field; give one or the other, not both.",
+      "not": {
+        "required": [
+          "artifact_manifest",
+          "manifest"
+        ]
+      }
+    },
+    {
+      "description": "`principle_overrides` and `principles` are one field; give one or the other, not both.",
+      "not": {
+        "required": [
+          "principle_overrides",
+          "principles"
+        ]
+      }
+    }
+  ],
   "required": [
     "id",
-    "kind",
     "objective",
     "profile",
     "protocol"
   ],
   "properties": {
+    "artifact_manifest": {
+      "description": "An accepted spelling of `manifest`; give one or the other, not both.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "constraints": {
       "description": "Its limits and declared inputs.",
       "default": {},
@@ -80,6 +122,15 @@
         }
       ]
     },
+    "principles": {
+      "description": "An accepted spelling of `principle_overrides`; give one or the other, not both.",
+      "default": {},
+      "allOf": [
+        {
+          "$ref": "#/definitions/PrincipleOverrides"
+        }
+      ]
+    },
     "profile": {
       "description": "Which profile it uses.",
       "allOf": [
@@ -93,6 +144,14 @@
       "allOf": [
         {
           "$ref": "#/definitions/ProtocolRef"
+        }
+      ]
+    },
+    "type": {
+      "description": "An accepted spelling of `kind`; give one or the other, not both.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/TaskKind"
         }
       ]
     }
