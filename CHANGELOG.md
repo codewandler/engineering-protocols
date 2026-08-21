@@ -110,6 +110,18 @@ belongs in the commit message or in `docs/design/`.
   the artifacts, statuses and edges rather than on the model's wording; it is deliberately not a step
   of `task check`, because the gate reaches no network and this calls a model.
 
+  The eval runs **hermetically**: a scratch `CLAUDE_CONFIG_DIR` carrying only the login
+  credentials, so the operator's own plugins, skills and output style cannot leak into the run —
+  asserted, not assumed, from the session's init event, alongside eight other mechanical checks.
+  Every report also carries run metrics (tool traffic in bytes and tokens, failing and repeated
+  calls, per-step `gen`/`exec` timing derived from recorded timestamps, cache use, rate-limit
+  state) and an **adversarial review**: a second, independent session reads the task, the verdict,
+  the metrics, a timing-annotated timeline and the created artifacts verbatim, and reports what
+  assertions cannot see. The review is advisory by design and never moves the exit code — and it
+  has already earned its place once: it caught the agent re-typing machine-owned frontmatter via
+  whole-file writes, the skill's guardrail was tightened in response, and the next runs switched
+  to targeted edits and a clean advisory.
+
 ## [0.7.1-infra-waves-1-4] — 2026-08-21
 
 ### Added

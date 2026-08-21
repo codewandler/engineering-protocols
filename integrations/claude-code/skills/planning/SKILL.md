@@ -50,9 +50,12 @@ $ protocol artifact move story:credential-store --to proposed
 story:credential-store moved draft -> proposed (revision 2)
 ```
 
-**2. The body is edited directly.** The CLI owns frontmatter; it does not own content. Open the
-file and write the markdown — context, acceptance, notes, open questions — with the ordinary editing
-tools. There is no CLI verb for prose, and there should not be one.
+**2. The body is edited directly — and only the body.** The CLI owns frontmatter; it does not own
+content. Open the file and write the markdown — context, acceptance, notes, open questions — with
+the ordinary editing tools. There is no CLI verb for prose, and there should not be one. Use a
+**targeted edit below the closing `---`**, never a whole-file rewrite: reading a file and writing
+it back re-types the frontmatter by hand, and a faithfully-copied frontmatter is
+indistinguishable from a silently-altered one until something downstream breaks.
 
 **3. After a batch of edits, run `protocol artifact validate`, and relay its output verbatim.** It
 accumulates every problem rather than stopping at the first, and exits 1 if any remain. Do not

@@ -63,6 +63,9 @@ one is not a story, it is a title.
    what you drafted, say so in your report and leave the file alone.
 3. **Never hand-edit frontmatter.** Relations are set with `--relate` at creation or with
    `protocol artifact relate` afterwards. `status`, `id`, `kind` and `revision` are the CLI's.
+   That includes whole-file rewrites: fill a story's body with a targeted edit below the closing
+   `---`, never by reading the file and writing all of it back — re-typing the frontmatter is
+   hand-editing it, however faithful the copy.
 4. **Finish with `protocol artifact validate`.** Always, even when you believe nothing can be wrong.
 
 ## Report
