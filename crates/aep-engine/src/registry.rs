@@ -84,17 +84,34 @@ impl Registry {
     }
 
     /// Adds an artifact lifecycle.
+    ///
+    /// A document with no `kind:` registers the tree's **fallback** lifecycle: the one every kind
+    /// with no nearer lifecycle is held to. That is how a rule binds kinds nobody enumerated —
+    /// without it, a team's own artifact kinds are governed by nothing at all, and a status
+    /// misspelling in one of them is not a refusal but a shrug.
+    ///
+    /// At most one fallback per tree. A second is refused rather than silently overwriting the
+    /// first, because which of two files wins would otherwise depend on the order the directory
+    /// was walked in.
     pub fn insert_lifecycle(
         &mut self,
         lifecycle: ArtifactLifecycle,
     ) -> Result<(), ValidationError> {
         let Some(kind) = lifecycle.kind.clone() else {
-            return Err(ValidationError::new(
-                ValidationCode::EmptyDeclaration,
-                "lifecycle.kind",
-                "a lifecycle document must name the artifact kind it governs",
-            )
-            .with_hint("add `kind: design`"));
+            if self.lifecycles.fallback().is_some() {
+                return Err(ValidationError::new(
+                    ValidationCode::DuplicateDeclaration,
+                    "lifecycle.kind",
+                    "a second lifecycle document declares no `kind`, and a tree has one fallback \
+                     lifecycle at most",
+                )
+                .with_hint(
+                    "give this one the `kind` it governs, or fold it into the fallback that is \
+                     already there",
+                ));
+            }
+            self.lifecycles.set_fallback(lifecycle);
+            return Ok(());
         };
         if self.lifecycles.for_kind_exact(&kind).is_some() {
             return Err(duplicate("lifecycle", kind.as_str()));

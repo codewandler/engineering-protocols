@@ -65,13 +65,14 @@ neither has to move for the protocol to reason about them.
 
 ## Where the documents live
 
-The loader walks five directories under one root, recursively, skipping anything dot-prefixed. So
-your documents and the protocol's live in the same tree, in separate subdirectories:
+The loader walks six directories under one root, recursively, skipping anything dot-prefixed:
+`protocols/`, `principles/`, `workflows/`, `profiles/`, `artifacts/lifecycles/` and `drivers/`. That
+root is a **document tree**, and everything below is about which tree your documents are in.
 
 ```text
 your-repo/
   protocols/                        vendored, unchanged — the declared vocabulary
-  workflows/                        vendored, unchanged — unless you write your own state machine
+  workflows/                        vendored, plus any state machine of your own
   principles/
     upstream/                       vendored
     migration-has-a-way-back.yaml   yours
@@ -90,6 +91,78 @@ choosing costs nothing.
 | `protocols/` — the vocabulary. Extending it is a protocol change, not a configuration change | your principles |
 | `principles/`, `workflows/`, `profiles/` — the defaults, worth reading before replacing | your profiles, usually `extends:` one of theirs |
 | `artifacts/lifecycles/` — what statuses each artifact kind may hold | your `task.yaml` and `artifacts.yaml`, per task |
+
+## Two shapes of adoption, and the one thing that decides between them
+
+You can point at somebody else's tree instead of owning one. A project does that with a small file,
+`.engineering/project.yaml`, which every command finds by walking up from where it is run:
+
+```yaml
+protocol: adp/1
+profile: acme.service
+protocols: ../engineering-protocols   # the tree, relative to .engineering/
+```
+
+(The directory is called `.engineering` by default. If that name is taken, or your team calls it
+something else, set `AEP_PROJECT_DIR=.workflow` and discovery looks for that instead — read once per
+process, so it cannot change mid-run.)
+
+**Pointing at a tree merges two of the six document kinds, and only two.** Documents in
+`.engineering/principles/` and `.engineering/profiles/` are loaded *over* the tree's. Nothing else
+is: a workflow, a protocol, a lifecycle or a driver step map placed under `.engineering/` is not
+read at all, and the failure surfaces where the workflow is named rather than where the file sits:
+
+```console
+$ $B resolve
+error: 1 document problem(s):
+  - [unknown_workflow] workflow knowledge/curation: no workflow document declares
+    `knowledge/curation` (hint: available: adp/default, incident/standard,
+    migration/forward-only, release/progressive)
+```
+
+The file is right there in `.engineering/workflows/`. It was never read.
+
+| What you want to add | Enough to point at a tree? |
+|---|---|
+| A principle of your own | **Yes** — `.engineering/principles/` |
+| A profile of your own, usually `extends:` one of theirs | **Yes** — `.engineering/profiles/` |
+| A state machine your work actually has — different states, different phases | No. Own a tree |
+| A lifecycle for an artifact kind of your own | No. Own a tree |
+| A protocol declaring facts, capabilities or evidence kinds nobody upstream declared | No. Own a tree |
+
+So: **a new state machine means owning a tree.** Vendor the upstream documents into it, put yours
+beside them, and point the project at it. The shortest form of that is `protocols: .`, which makes
+the project directory itself the tree:
+
+```yaml
+protocol: adp/1
+profile: acme.knowledge
+protocols: .                # the tree is .engineering/ itself
+principles: local/principles
+profiles: local/profiles
+```
+
+```text
+your-repo/.engineering/
+  project.yaml
+  protocols/      principles/      workflows/      profiles/      artifacts/lifecycles/
+  ^ one tree, yours, with the upstream documents vendored into it and yours beside them
+```
+
+The last two lines of that `project.yaml` are load-bearing and easy to miss. `principles:` and
+`profiles:` default to `principles/` and `profiles/` under `.engineering/` — which, once the tree
+*is* `.engineering/`, are directories the tree loader has already read. Every file in them would be
+loaded twice and refused as a duplicate id:
+
+```console
+$ $B resolve
+error: 6 document problem(s):
+  - .engineering/profiles/development-standard.yaml: [duplicate_principle] profile
+    development.standard: a second profile document declares the id `development.standard`
+```
+
+Point the two merge paths at directories the tree does not contain — they need not exist — and the
+project-local merge stays out of the way, because with your own tree you no longer need it.
 
 ## Choosing a profile
 

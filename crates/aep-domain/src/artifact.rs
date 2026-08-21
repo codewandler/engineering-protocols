@@ -321,8 +321,10 @@ impl schemars::JsonSchema for ArtifactRef {
 /// this vocabulary does not name, because no fixed ontology survives contact with a second
 /// organisation.
 ///
-/// Design kinds form a hierarchy — a requirement for a `design` is satisfied by an
-/// `architecture-design` — see [`ArtifactKind::is_a`].
+/// Kinds form a hierarchy by name: a requirement for a `design` is satisfied by an
+/// `architecture-design`, because the last hyphen segment names the parent. The rule is applied to
+/// [`ArtifactKind::Other`] too, so a team's own family of kinds shares one ladder rather than
+/// needing a lifecycle document each — see [`ArtifactKind::parent`] and [`ArtifactKind::is_a`].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ArtifactKind {
@@ -477,6 +479,34 @@ impl ArtifactKind {
     }
 
     /// The kind this one specialises, if any.
+    ///
+    /// # The rule, which is one rule and not two
+    ///
+    /// **A hyphenated kind's parent is the kind its last segment names.** `feature-design`,
+    /// `architecture-design` and `api-design` are all a `design`, and the reason is not that they
+    /// are listed here: it is that the suffix is the noun and everything before it narrows it. The
+    /// named variants above are that rule spelled out for the vocabulary this crate ships; an
+    /// organisation-specific [`Other`](ArtifactKind::Other) kind gets the same rule applied to its
+    /// own name, so `observation-log` *is a* `log` and `weekly-digest` *is a* `digest` without this
+    /// crate having to have heard of either.
+    ///
+    /// That matters because the hierarchy is what makes one ladder serve a family: a lifecycle
+    /// registered for `log` governs every `*-log` a team invents (see
+    /// [`LifecycleRegistry::for_kind`]), and a requirement for a `log` is satisfied by one. Without
+    /// it a team's own kinds are each an island, and every one of them needs its own lifecycle
+    /// document saying the same thing.
+    ///
+    /// # What it deliberately does not do
+    ///
+    /// * A single-segment custom kind has **no** parent — `log` is the top of its own family, and
+    ///   there is nothing above it to invent.
+    /// * The last segment is matched against the **canonical** kind names only, never the aliases
+    ///   [`parse`](ArtifactKind::parse) accepts, so `openapi-spec` is a custom `spec` and not a
+    ///   [`Specification`](ArtifactKind::Specification). An alias is a spelling of a name a person
+    ///   typed, not a claim about lineage.
+    /// * Lineage always terminates: a parent derived this way has no hyphen left in it, so it is
+    ///   either a single-word named kind (none of which has a parent) or a single-segment custom
+    ///   kind (which has none by the rule above). One step, then the top.
     pub fn parent(&self) -> Option<Self> {
         match self {
             Self::FeatureDesign
@@ -484,14 +514,36 @@ impl ArtifactKind {
             | Self::ArchitectureDesign
             | Self::ApiDesign
             | Self::DataDesign => Some(Self::Design),
+            Self::Other(name) => Self::suffix_parent(name),
             _ => None,
         }
     }
 
+    /// The kind a custom kind's last hyphen segment names, if it names one at all.
+    ///
+    /// Split out so the one place the rule lives is greppable, and so the guarantee that matters —
+    /// that what comes back can never contain a hyphen, and therefore can never lead back here —
+    /// is readable in six lines rather than inferred from [`parent`](ArtifactKind::parent).
+    fn suffix_parent(name: &str) -> Option<Self> {
+        let (_, suffix) = name.rsplit_once('-')?;
+        if suffix.is_empty() {
+            return None;
+        }
+        Some(
+            Self::NAMED
+                .iter()
+                .find(|kind| kind.as_str() == suffix)
+                .cloned()
+                .unwrap_or_else(|| Self::Other(suffix.to_owned())),
+        )
+    }
+
     /// `true` when this kind satisfies a requirement for `other`.
     ///
-    /// Reflexive, and follows the design hierarchy upwards: an `architecture-design` *is a*
-    /// `design`, so a principle requiring a design is satisfied by one.
+    /// Reflexive, and follows the hierarchy upwards: an `architecture-design` *is a* `design`, so
+    /// a principle requiring a design is satisfied by one — and an `observation-log` *is a* `log`
+    /// for the same reason, by the same rule, without either name being known here. See
+    /// [`parent`](ArtifactKind::parent).
     pub fn is_a(&self, other: &Self) -> bool {
         let mut current = Some(self.clone());
         while let Some(kind) = current {
@@ -504,6 +556,10 @@ impl ArtifactKind {
     }
 
     /// This kind and every kind it specialises, nearest first.
+    ///
+    /// `architecture-design` gives `[architecture-design, design]`; `observation-log` gives
+    /// `[observation-log, log]`. The list is finite for every kind, including one nobody here has
+    /// seen — [`parent`](ArtifactKind::parent) says why.
     pub fn lineage(&self) -> Vec<Self> {
         let mut lineage = vec![self.clone()];
         let mut current = self.parent();
@@ -1379,6 +1435,11 @@ impl Artifact {
 /// `draft → in_review → approved → implemented` — and validation rejects a status a kind does
 /// not have, which catches the copy-paste error that would otherwise make a requirement
 /// silently unsatisfiable.
+///
+/// A document that names **no** kind is the tree's fallback: the lifecycle every kind with no
+/// nearer one is held to, and the only way to make a rule bind kinds nobody has enumerated. One
+/// tree may declare at most one. A lifecycle registered for the kind itself, or for a kind it
+/// specialises, always wins over it.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
@@ -1430,10 +1491,12 @@ impl ArtifactLifecycle {
     }
 }
 
-/// Lifecycles by artifact kind, with hierarchy fallback.
+/// Lifecycles by artifact kind, with hierarchy fallback and one kind-less fallback.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 pub struct LifecycleRegistry {
     lifecycles: BTreeMap<ArtifactKind, ArtifactLifecycle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fallback: Option<ArtifactLifecycle>,
 }
 
 impl LifecycleRegistry {
@@ -1447,29 +1510,58 @@ impl LifecycleRegistry {
         self.lifecycles.insert(kind, lifecycle);
     }
 
-    /// The lifecycle governing `kind`, falling back along the kind hierarchy.
+    /// Registers the kind-less fallback, replacing any earlier one.
+    ///
+    /// Whoever calls this decides what a *second* fallback document means; a registry cannot see
+    /// two files. The document loader refuses the second one rather than letting the last file read
+    /// win, because which file that is depends on directory order.
+    pub fn set_fallback(&mut self, lifecycle: ArtifactLifecycle) {
+        self.fallback = Some(lifecycle);
+    }
+
+    /// The kind-less fallback, if one is registered.
+    pub fn fallback(&self) -> Option<&ArtifactLifecycle> {
+        self.fallback.as_ref()
+    }
+
+    /// The lifecycle governing `kind`.
+    ///
+    /// Three chances, in this order, and the first one that answers wins:
+    ///
+    /// 1. a lifecycle registered for exactly this kind;
+    /// 2. one registered for a kind it specialises — so `observation-log` is governed by `log`'s,
+    ///    and a family of kinds shares one ladder (see [`ArtifactKind::parent`]);
+    /// 3. the kind-less fallback, if the tree declares one.
+    ///
+    /// `None` means the tree said nothing about this kind at all, and a caller that has to have a
+    /// lifecycle uses [`ArtifactLifecycle::permissive`]. That is a different answer from the
+    /// fallback: permissive is this crate shrugging, the fallback is a document somebody wrote.
     pub fn for_kind(&self, kind: &ArtifactKind) -> Option<&ArtifactLifecycle> {
         kind.lineage()
             .iter()
             .find_map(|candidate| self.lifecycles.get(candidate))
+            .or(self.fallback.as_ref())
     }
 
-    /// The lifecycle registered for exactly this kind, without hierarchy fallback.
+    /// The lifecycle registered for exactly this kind, without hierarchy or fallback.
     pub fn for_kind_exact(&self, kind: &ArtifactKind) -> Option<&ArtifactLifecycle> {
         self.lifecycles.get(kind)
     }
 
-    /// How many lifecycles are registered.
+    /// How many lifecycles are registered, counting the fallback as one.
     pub fn len(&self) -> usize {
-        self.lifecycles.len()
+        self.lifecycles.len() + usize::from(self.fallback.is_some())
     }
 
-    /// `true` when nothing is registered.
+    /// `true` when nothing is registered, fallback included.
     pub fn is_empty(&self) -> bool {
-        self.lifecycles.is_empty()
+        self.lifecycles.is_empty() && self.fallback.is_none()
     }
 
-    /// Every registered lifecycle.
+    /// Every lifecycle registered for a named kind.
+    ///
+    /// The fallback is not here — it has no kind to be keyed by, which is what it is for. Read it
+    /// with [`fallback`](Self::fallback).
     pub fn iter(&self) -> impl Iterator<Item = (&ArtifactKind, &ArtifactLifecycle)> {
         self.lifecycles.iter()
     }
@@ -1950,6 +2042,118 @@ mod tests {
         assert!(ArtifactKind::Design.is_a(&ArtifactKind::Design));
         assert!(!ArtifactKind::Design.is_a(&ArtifactKind::ArchitectureDesign));
         assert!(!ArtifactKind::Runbook.is_a(&ArtifactKind::Design));
+    }
+
+    #[test]
+    fn a_custom_kinds_parent_is_the_kind_its_last_segment_names() {
+        let observation_log = ArtifactKind::parse("observation-log").expect("kind");
+        assert_eq!(
+            observation_log.parent(),
+            Some(ArtifactKind::Other("log".to_owned()))
+        );
+        assert!(observation_log.is_a(&ArtifactKind::Other("log".to_owned())));
+        assert_eq!(
+            observation_log.lineage(),
+            vec![
+                observation_log.clone(),
+                ArtifactKind::Other("log".to_owned())
+            ],
+            "two rungs and no more: `log` has no hyphen left to derive a third from"
+        );
+
+        // The same rule reaching the named vocabulary, which is where it came from.
+        assert_eq!(
+            ArtifactKind::parse("threat-design").expect("kind").parent(),
+            Some(ArtifactKind::Design)
+        );
+    }
+
+    #[test]
+    fn a_single_segment_custom_kind_is_the_top_of_its_own_family() {
+        let log = ArtifactKind::parse("log").expect("kind");
+        assert_eq!(log.parent(), None);
+        assert_eq!(log.lineage(), vec![log.clone()]);
+        assert!(!log.is_a(&ArtifactKind::Other("observation-log".to_owned())));
+    }
+
+    #[test]
+    fn lineage_never_reads_an_alias_as_a_parent() {
+        // `parse` accepts `spec` as a spelling of `specification`; lineage does not, because a
+        // suffix is a claim about what the kind *is*, and inheriting a governed kind's lifecycle
+        // by abbreviation is not something anybody asked for.
+        assert_eq!(
+            ArtifactKind::parse("openapi-spec").expect("kind").parent(),
+            Some(ArtifactKind::Other("spec".to_owned()))
+        );
+        assert!(!ArtifactKind::parse("openapi-spec")
+            .expect("kind")
+            .is_a(&ArtifactKind::Specification));
+    }
+
+    #[test]
+    fn one_lifecycle_on_a_custom_parent_kind_governs_the_whole_family() {
+        // A2's consequence: a team's family of kinds shares one ladder instead of needing a
+        // lifecycle document each.
+        let mut registry = LifecycleRegistry::new();
+        registry.insert(
+            ArtifactKind::Other("log".to_owned()),
+            ArtifactLifecycle {
+                kind: Some(ArtifactKind::Other("log".to_owned())),
+                initial: ArtifactStatus::Draft,
+                transitions: [(ArtifactStatus::Draft, [ArtifactStatus::Active].into())].into(),
+            },
+        );
+
+        let observation_log = ArtifactKind::parse("observation-log").expect("kind");
+        assert!(
+            registry.for_kind_exact(&observation_log).is_none(),
+            "nothing is registered for this kind itself"
+        );
+        let governing = registry
+            .for_kind(&observation_log)
+            .expect("the parent kind's lifecycle governs it");
+        assert!(governing.permits_transition(ArtifactStatus::Draft, ArtifactStatus::Active));
+        assert!(!governing.permits(ArtifactStatus::Rejected));
+
+        // A kind outside the family is untouched, so the ladder is shared and not global.
+        assert!(registry
+            .for_kind(&ArtifactKind::parse("weekly-digest").expect("kind"))
+            .is_none());
+    }
+
+    #[test]
+    fn the_fallback_is_consulted_last_and_only_when_nothing_nearer_answers() {
+        let mut registry = LifecycleRegistry::new();
+        let logs = ArtifactLifecycle {
+            kind: Some(ArtifactKind::Other("log".to_owned())),
+            initial: ArtifactStatus::Draft,
+            transitions: [(ArtifactStatus::Draft, [ArtifactStatus::Active].into())].into(),
+        };
+        let fallback = ArtifactLifecycle {
+            kind: None,
+            initial: ArtifactStatus::Proposed,
+            transitions: [(ArtifactStatus::Proposed, [ArtifactStatus::Accepted].into())].into(),
+        };
+        registry.insert(ArtifactKind::Other("log".to_owned()), logs.clone());
+        registry.set_fallback(fallback.clone());
+
+        assert_eq!(registry.len(), 2, "the fallback counts as a lifecycle");
+        assert_eq!(
+            registry.for_kind(&ArtifactKind::parse("observation-log").expect("kind")),
+            Some(&logs),
+            "the kind hierarchy is nearer than the fallback"
+        );
+        assert_eq!(
+            registry.for_kind(&ArtifactKind::parse("weekly-digest").expect("kind")),
+            Some(&fallback),
+            "and a kind with nothing nearer reaches it"
+        );
+        assert!(
+            registry
+                .for_kind_exact(&ArtifactKind::parse("weekly-digest").expect("kind"))
+                .is_none(),
+            "the exact lookup never falls back — that is what it is for"
+        );
     }
 
     #[test]

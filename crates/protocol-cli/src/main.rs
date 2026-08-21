@@ -3093,9 +3093,10 @@ fn inputs(args: &ExecutionArgs) -> Result<Inputs> {
     }
 
     let here = std::env::current_dir().context("reading the working directory")?;
+    let directory = aep_engine::project::project_directory();
     let root = aep_engine::project::discover(&here).with_context(|| {
         format!(
-            "no `.engineering/project.yaml` in {} or any parent, and no --task was given",
+            "no `{directory}/project.yaml` in {} or any parent, and no --task was given",
             here.display()
         )
     })?;

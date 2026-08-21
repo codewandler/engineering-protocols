@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "ArtifactLifecycle",
-  "description": "The legal statuses and status transitions for one artifact kind.\n\nLifecycles differ by kind — an ADR goes `proposed → accepted → superseded`, a design goes `draft → in_review → approved → implemented` — and validation rejects a status a kind does not have, which catches the copy-paste error that would otherwise make a requirement silently unsatisfiable.",
+  "description": "The legal statuses and status transitions for one artifact kind.\n\nLifecycles differ by kind — an ADR goes `proposed → accepted → superseded`, a design goes `draft → in_review → approved → implemented` — and validation rejects a status a kind does not have, which catches the copy-paste error that would otherwise make a requirement silently unsatisfiable.\n\nA document that names **no** kind is the tree's fallback: the lifecycle every kind with no nearer one is held to, and the only way to make a rule bind kinds nobody has enumerated. One tree may declare at most one. A lifecycle registered for the kind itself, or for a kind it specialises, always wins over it.",
   "type": "object",
   "required": [
     "initial"

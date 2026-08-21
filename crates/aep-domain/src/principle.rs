@@ -297,6 +297,61 @@ pub enum FailurePolicy {
 }
 
 impl FailurePolicy {
+    /// Every action, and the parameters it takes beside `action` itself.
+    ///
+    /// # Why this is a closed register rather than a mapping of anything
+    ///
+    /// A parameter nobody reads is worse than a parameter nobody wrote. `{action: retry, retry:
+    /// {to: write}}` used to parse: the `retry` key named nothing, was dropped on the floor, and
+    /// what remained was a bare `retry` that hands off to `block` after one attempt. The document
+    /// then said one thing, the engine did another, and a reviewer reading the document had no way
+    /// to tell — a policy that validates and does nothing is a gate that cannot fire.
+    ///
+    /// Both spellings of the rollback precondition are here deliberately: `rollback: {require: …}`
+    /// nests it and `require: …` does not, and [`from_node`](Self::from_node) reads either.
+    const ACTIONS: &'static [(&'static str, &'static [&'static str])] = &[
+        ("block", &[]),
+        ("abort", &[]),
+        ("retry", &["max_attempts", "then"]),
+        ("rollback", &["require", "rollback"]),
+        ("escalate", &["to"]),
+    ];
+
+    /// The parameters an action takes, or `None` when it is not one of the actions.
+    fn parameters(action: &str) -> Option<&'static [&'static str]> {
+        Self::ACTIONS
+            .iter()
+            .find(|(name, _)| *name == action)
+            .map(|(_, parameters)| *parameters)
+    }
+
+    /// Every key `action` does not take, in sorted order, nested keys written in dotted form.
+    ///
+    /// Returns all of them rather than the first, because a document with two invented parameters
+    /// deserves one round of correction and not two.
+    fn unknown_parameters(action: &str, entries: &BTreeMap<String, Node>) -> Vec<String> {
+        let Some(parameters) = Self::parameters(action) else {
+            return Vec::new();
+        };
+        let mut unknown: Vec<String> = entries
+            .keys()
+            .filter(|key| key.as_str() != "action" && !parameters.contains(&key.as_str()))
+            .cloned()
+            .collect();
+        // The nested spelling has a closed key set of its own, and an invented key one level down
+        // is the same defect: `rollback: {to: write}` leaves the precondition unstated, which the
+        // workflow checks then read as a rollback that says nothing about what makes it possible.
+        if let Some(Node::Map(nested)) = entries.get("rollback") {
+            unknown.extend(
+                nested
+                    .keys()
+                    .filter(|key| key.as_str() != "require")
+                    .map(|key| format!("rollback.{key}")),
+            );
+        }
+        unknown
+    }
+
     /// `true` when this policy, or one it falls back to, rolls back.
     pub fn involves_rollback(&self) -> bool {
         match self {
@@ -317,8 +372,13 @@ impl FailurePolicy {
 
     /// Parses the document form.
     ///
-    /// Accepts a bare action name (`block`, `abort`, `rollback`, `escalate`) or a mapping with
-    /// an `action` key and the action's parameters.
+    /// Accepts a bare action name (`block`, `abort`, `retry`, `rollback`, `escalate`) or a mapping
+    /// with an `action` key carrying **only** that action's parameters: `max_attempts` and `then`
+    /// for `retry`, `require` or the nested `rollback.require` for `rollback`, `to` for `escalate`.
+    ///
+    /// Anything else is **refused, not ignored**. A parameter nobody reads leaves a document saying
+    /// one thing and the engine doing another, and a policy that validates and does nothing is a
+    /// gate that cannot fire.
     pub fn from_node(node: &Node) -> Result<Self, ParseError> {
         match node {
             Node::Text(action) => Self::from_action(action, &BTreeMap::new()),
@@ -340,6 +400,29 @@ impl FailurePolicy {
     }
 
     fn from_action(action: &str, entries: &BTreeMap<String, Node>) -> Result<Self, ParseError> {
+        if let Some(parameters) = Self::parameters(action) {
+            let unknown = Self::unknown_parameters(action, entries);
+            if !unknown.is_empty() {
+                let expected = if parameters.is_empty() {
+                    format!("`action: {action}` to carry no parameters")
+                } else {
+                    format!(
+                        "only the parameters `action: {action}` takes ({})",
+                        parameters.join(", ")
+                    )
+                };
+                return Err(ParseError::shape(
+                    "on_failure",
+                    expected,
+                    format!(
+                        "`{}`, which nothing reads — a policy that validates and does nothing is \
+                         a gate that cannot fire",
+                        unknown.join("`, `")
+                    ),
+                ));
+            }
+        }
+
         match action {
             "block" => Ok(Self::Block),
             "abort" => Ok(Self::Abort),
@@ -463,18 +546,111 @@ impl schemars::JsonSchema for FailurePolicy {
         "FailurePolicy".to_owned()
     }
 
+    /// One form per action, each closed, rather than "a string or a mapping of anything".
+    ///
+    /// The parser refuses a parameter the action does not take; a schema that still accepted
+    /// `{action: retry, retry: {…}}` would give an editor the opposite answer from the engine, and
+    /// the author would find out from the engine — which is the round trip the schema exists to
+    /// remove.
     fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut forms = vec![schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            enum_values: Some(
+                Self::ACTIONS
+                    .iter()
+                    .map(|(action, _)| serde_json::Value::String((*action).to_owned()))
+                    .collect(),
+            ),
+            ..Default::default()
+        }
+        .into()];
+
+        for (action, parameters) in Self::ACTIONS {
+            let mut form = schemars::schema::SchemaObject {
+                instance_type: Some(schemars::schema::InstanceType::Object.into()),
+                ..Default::default()
+            };
+            let object = form.object();
+            object.additional_properties = Some(Box::new(schemars::schema::Schema::Bool(false)));
+            object.required.insert("action".to_owned());
+            object.properties.insert(
+                "action".to_owned(),
+                schemars::schema::SchemaObject {
+                    instance_type: Some(schemars::schema::InstanceType::String.into()),
+                    enum_values: Some(vec![serde_json::Value::String((*action).to_owned())]),
+                    ..Default::default()
+                }
+                .into(),
+            );
+            for parameter in *parameters {
+                object.properties.insert(
+                    (*parameter).to_owned(),
+                    failure_parameter_schema(parameter, generator),
+                );
+            }
+            forms.push(form.into());
+        }
+
         let mut schema = schemars::schema::SchemaObject::default();
-        schema.subschemas().any_of = Some(vec![
-            <String>::json_schema(generator),
-            <BTreeMap<String, Node>>::json_schema(generator),
-        ]);
+        schema.subschemas().any_of = Some(forms);
         schema.metadata().description = Some(
             "What to do when a requirement is not met: `block`, `abort`, or a mapping with \
-             `action: retry|rollback|escalate` and that action's parameters."
+             `action: retry|rollback|escalate` carrying that action's parameters and no others."
                 .to_owned(),
         );
         schema.into()
+    }
+}
+
+/// The schema of one [`FailurePolicy`] parameter.
+///
+/// Beside the impl rather than inside it so the shapes read as a list. `then` refers back to the
+/// policy itself — a retry falls back to another policy — which `schemars` resolves as a reference
+/// rather than by unrolling.
+fn failure_parameter_schema(
+    parameter: &str,
+    generator: &mut schemars::gen::SchemaGenerator,
+) -> schemars::schema::Schema {
+    match parameter {
+        "max_attempts" => {
+            let mut attempts = schemars::schema::SchemaObject {
+                instance_type: Some(schemars::schema::InstanceType::Integer.into()),
+                ..Default::default()
+            };
+            attempts.number().minimum = Some(1.0);
+            attempts.metadata().description =
+                Some("How many attempts in total; at least one.".to_owned());
+            attempts.into()
+        }
+        "then" => generator.subschema_for::<FailurePolicy>(),
+        "to" => {
+            let mut to = schemars::schema::SchemaObject {
+                instance_type: Some(schemars::schema::InstanceType::String.into()),
+                ..Default::default()
+            };
+            to.metadata().description = Some("Who the failure is handed to.".to_owned());
+            to.into()
+        }
+        "require" => generator.subschema_for::<Predicate>(),
+        "rollback" => {
+            let mut nested = schemars::schema::SchemaObject {
+                instance_type: Some(schemars::schema::InstanceType::Object.into()),
+                ..Default::default()
+            };
+            let require = generator.subschema_for::<Predicate>();
+            let object = nested.object();
+            object.additional_properties = Some(Box::new(schemars::schema::Schema::Bool(false)));
+            object.properties.insert("require".to_owned(), require);
+            nested.metadata().description = Some(
+                "The nested spelling of the rollback precondition: `rollback: {require: …}`."
+                    .to_owned(),
+            );
+            nested.into()
+        }
+        // Unreachable while every name in `ACTIONS` has an arm above, and the test below is what
+        // holds that true: a parameter added to the register with no shape here would otherwise
+        // publish as "anything goes", which is the defect this whole impl exists to remove.
+        _ => schemars::schema::Schema::Bool(true),
     }
 }
 
@@ -1061,6 +1237,91 @@ rollback:
             }
         );
         assert!(!retry.involves_rollback());
+
+        let escalate: FailurePolicy =
+            serde_yaml::from_str("action: escalate\nto: oncall").expect("parses");
+        assert_eq!(
+            escalate,
+            FailurePolicy::Escalate {
+                to: "oncall".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn a_parameter_the_action_does_not_take_is_refused_rather_than_ignored() {
+        // The reported repro. It used to parse as a bare retry: the `retry` key named nothing, was
+        // dropped, and the document went on saying something the engine never did.
+        let error = serde_yaml::from_str::<FailurePolicy>("action: retry\nretry:\n  to: write")
+            .expect_err("an invented parameter is a refusal");
+        let message = error.to_string();
+        assert!(message.contains("`retry`"), "{message}");
+        assert!(message.contains("max_attempts, then"), "{message}");
+
+        // One level down, where the rollback precondition lives.
+        let nested =
+            serde_yaml::from_str::<FailurePolicy>("action: rollback\nrollback:\n  to: previous")
+                .expect_err("an invented nested parameter is a refusal too");
+        assert!(nested.to_string().contains("`rollback.to`"), "{nested}");
+    }
+
+    #[test]
+    fn every_invented_parameter_is_named_at_once() {
+        // Accumulated rather than first-one-wins: two invented parameters are one round of
+        // correction, not two.
+        let entries: BTreeMap<String, Node> = [
+            ("action".to_owned(), Node::from("rollback")),
+            ("attempts".to_owned(), Node::from("3")),
+            ("to".to_owned(), Node::from("oncall")),
+            (
+                "rollback".to_owned(),
+                Node::Map([("unless".to_owned(), Node::from(true))].into()),
+            ),
+        ]
+        .into();
+
+        let unknown = FailurePolicy::unknown_parameters("rollback", &entries);
+        assert_eq!(
+            unknown,
+            vec!["attempts", "to", "rollback.unless"],
+            "three invented parameters, all three named"
+        );
+
+        // The guard, broken: the same call for the action that does take them says nothing.
+        assert_eq!(
+            FailurePolicy::unknown_parameters(
+                "escalate",
+                &[("to".to_owned(), Node::from("oncall"))].into()
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn every_action_in_the_register_is_known_to_the_parser_and_published_with_a_shape() {
+        // What keeps the register honest: an action or a parameter added to `ACTIONS` with no
+        // constructor and no schema arm would otherwise publish as "anything goes", which is the
+        // defect the register exists to remove.
+        let mut generator = schemars::gen::SchemaGenerator::default();
+        for (action, parameters) in FailurePolicy::ACTIONS {
+            // `escalate` still needs its `to`, so the assertion is not that every bare name
+            // parses — it is that no name in the register is rejected as *not an action*, which is
+            // how the register and the constructor below it would drift apart.
+            if let Err(error) = FailurePolicy::from_node(&Node::from(*action)) {
+                let message = error.to_string();
+                assert!(
+                    !message.contains("on_failure.action"),
+                    "`{action}` is in the register and unknown to the parser: {message}"
+                );
+            }
+            for parameter in *parameters {
+                assert_ne!(
+                    super::failure_parameter_schema(parameter, &mut generator),
+                    schemars::schema::Schema::Bool(true),
+                    "`{parameter}` is published without a shape"
+                );
+            }
+        }
     }
 
     #[test]

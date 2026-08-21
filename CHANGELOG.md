@@ -9,7 +9,63 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **Four things the documents invited an adopter to declare, which the engine then refused, ignored
+  or could not reach.** All four came from the first adopter's report — the first document tree
+  written against this specification that is not this repository's own — and all four were found by
+  writing a tree rather than by reading the guide, which is the only way this class of defect gets
+  found at all. The report is a repo-local review, held and unpublished
+  (`docs/reviews/2026-08-21-first-adopter-report.md`); what follows is what changed in the code, and
+  stands on its own.
+
+  **A lifecycle document may leave out `kind:`, and it becomes the tree's fallback.** The field had
+  been documented as "absent for the fallback lifecycle" since it was written, and a document that
+  left it out was refused — so the sentence described a mechanism that did not exist, and a team's
+  own artifact kinds were governed by nothing: every status legal, a misspelt one a shrug rather
+  than a refusal. A kind-less document now registers the lifecycle every kind with no nearer one is
+  held to. A tree may declare **at most one**, and a second is refused by name rather than
+  overwriting the first, because which of two files won would otherwise depend on the order the
+  directory was walked in.
+
+  **A kind's parent is the kind its last hyphen segment names — for every kind, not just the ones
+  this repository ships.** `architecture-design` is a `design` because the suffix is the noun and
+  what precedes it narrows it; that rule was written out as a list of five variants, so
+  `observation-log` was *not* a `log` and an organisation's own family of kinds could not share one
+  ladder. Each of them needed its own lifecycle document saying the same thing. The rule is now the
+  rule: a custom kind's parent is the kind its last segment names, aliases excluded (`openapi-spec`
+  is a custom `spec`, not a `specification` — an alias is a spelling somebody typed, not a claim
+  about lineage), and a single-segment kind is the top of its own family. One lifecycle registered
+  on `log` now governs every `*-log` a team invents.
+
+  **`on_failure` refuses a parameter its action does not take.** `{action: retry, retry: {to:
+  write}}` used to validate: the `retry` key named nothing, was dropped, and what remained was a
+  bare retry falling back to `block`. The document said one thing, the engine did another, and a
+  reviewer had no way to tell — a policy that validates and does nothing is a gate that cannot fire.
+  Each action now has a closed parameter set, every invented key is named at once rather than one
+  per round, and the published JSON Schema says the same: one closed form per action, in place of
+  "a string or a mapping of anything". Every committed document still parses unchanged.
+
+  **The project directory's name is a default, not a constant.** `.engineering` was fixed at compile
+  time, so a repository that spends that name on something else, or whose team calls this
+  `.workflow`, could not be discovered at all. `AEP_PROJECT_DIR` renames it, honoured by walk-up
+  discovery and by everything the CLI resolves against a project. It is read **once per process** —
+  a value that could change between two reads would give one run two different projects — and it is
+  read in the engine, at the edge that touches the filesystem, never in `aep-domain`, which stays
+  free of the environment, the clock and the disk.
+
+### Changed
+
+- **`docs/guide/adopting.md` now says which documents a project may add without owning a tree, and
+  which oblige it to own one.** The page showed a repository with `workflows/` and `protocols/` in
+  it and left the reader to assume that a project pointing at somebody else's tree could do the
+  same. It cannot: the project-local merge covers **principles and profiles**, and nothing else — a
+  workflow under `.engineering/` is not read at all, and the failure surfaces where the workflow is
+  named rather than where the file sits. The guide now states that plainly, with the refusal it
+  produces, a table of what needs a tree of your own, and the `protocols: .` layout written out —
+  including the two lines of `project.yaml` that keep the tree from being loaded twice, which is the
+  part that is easy to miss and refuses with a duplicate id. The merge is not being extended here;
+  that is tracked as a gap.
 
 ## [0.9.0-harness-waves-2-3] — 2026-08-21
 

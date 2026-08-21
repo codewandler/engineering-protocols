@@ -40,12 +40,12 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, SystemTime};
 
 use aep_domain::ids::StateId;
-use aep_domain::project::PROJECT_DIRECTORY;
 use aep_domain::workflow::Workflow;
 use aep_domain::WorkflowRef;
 use aep_driver::run::RunDirectory;
 use aep_driver_spec::cursor::{DriverCursor, RunId, RunStatus as DriverStatus};
 use aep_engine::execution::Snapshot;
+use aep_engine::project::project_directory;
 use aep_render::run::{RunStatus, RunView};
 use aep_render::{ansi, html, scene::Scene, svg};
 use anyhow::{bail, Context, Result};
@@ -195,9 +195,10 @@ fn run_directory(args: &RenderArgs, run: &str) -> Result<RunDirectory> {
         given.clone()
     } else {
         let here = std::env::current_dir().context("reading the working directory")?;
+        let directory = project_directory();
         aep_engine::project::discover(&here).with_context(|| {
             format!(
-                "no `--project` was given and no `{PROJECT_DIRECTORY}/project.yaml` was found in \
+                "no `--project` was given and no `{directory}/project.yaml` was found in \
                  {} or any parent",
                 here.display()
             )
@@ -205,7 +206,7 @@ fn run_directory(args: &RenderArgs, run: &str) -> Result<RunDirectory> {
     };
     let [task, ordinal] = id.segments();
     let path = project
-        .join(PROJECT_DIRECTORY)
+        .join(project_directory())
         .join(RUNS_DIRECTORY)
         .join(task)
         .join(ordinal);

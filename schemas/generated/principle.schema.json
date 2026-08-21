@@ -433,16 +433,117 @@
       ]
     },
     "FailurePolicy": {
-      "description": "What to do when a requirement is not met: `block`, `abort`, or a mapping with `action: retry|rollback|escalate` and that action's parameters.",
+      "description": "What to do when a requirement is not met: `block`, `abort`, or a mapping with `action: retry|rollback|escalate` carrying that action's parameters and no others.",
       "anyOf": [
         {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "block",
+            "abort",
+            "retry",
+            "rollback",
+            "escalate"
+          ]
         },
         {
           "type": "object",
-          "additionalProperties": {
-            "$ref": "#/definitions/Node"
-          }
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "block"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "abort"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "retry"
+              ]
+            },
+            "max_attempts": {
+              "description": "How many attempts in total; at least one.",
+              "type": "integer",
+              "minimum": 1.0
+            },
+            "then": {
+              "$ref": "#/definitions/FailurePolicy"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "rollback"
+              ]
+            },
+            "require": {
+              "$ref": "#/definitions/Predicate"
+            },
+            "rollback": {
+              "description": "The nested spelling of the rollback precondition: `rollback: {require: …}`.",
+              "type": "object",
+              "properties": {
+                "require": {
+                  "$ref": "#/definitions/Predicate"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "escalate"
+              ]
+            },
+            "to": {
+              "description": "Who the failure is handed to.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },

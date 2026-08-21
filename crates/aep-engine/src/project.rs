@@ -20,8 +20,17 @@
 //! tree's. They are documents in the same format, validated by the same rules — not a second
 //! mechanism, and not an escape hatch: a project-local profile still cannot grant a capability the
 //! protocol's approval floor keeps behind approval.
+//!
+//! # The directory's name is not a constant here
+//!
+//! `.engineering` is the default and nothing more. A repository that already spends its dot
+//! directory on something else, or whose team calls this `.workflow`, sets `AEP_PROJECT_DIR` and
+//! everything below finds it — see [`project_directory`]. The name is read here, at the edge that
+//! touches the filesystem, and not in `aep-domain`: the domain crate reads no environment, no clock
+//! and no filesystem, so that what a document means never depends on where it is being read.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
 use aep_domain::artifact::ArtifactGraph;
 use aep_domain::project::{ProjectConfig, ProjectPaths, PROJECT_DIRECTORY, PROJECT_FILE};
@@ -35,6 +44,32 @@ use crate::registry::Registry;
 /// Deep enough for a monorepo, shallow enough that a stray `.engineering` in a home directory does
 /// not silently govern unrelated work.
 const MAX_ASCENT: usize = 12;
+
+/// The environment variable that renames the project directory.
+pub const PROJECT_DIRECTORY_ENV: &str = "AEP_PROJECT_DIR";
+
+/// The directory a project keeps its metadata in: `.engineering`, or whatever `AEP_PROJECT_DIR`
+/// says.
+///
+/// **Read once per process.** Discovery walks up to twelve directories and the loader consults this
+/// several times more; a value that could change between two of those reads would give one run two
+/// different projects, and the failure would look like a filesystem race rather than an edited
+/// environment. So the first call decides and every later one agrees.
+///
+/// An empty or blank value is treated as absent, because `AEP_PROJECT_DIR=` in a shell profile is
+/// how a variable gets unset by hand and reading it as "the project lives in the current directory"
+/// would be a surprising way to find that out.
+pub fn project_directory() -> &'static str {
+    static DIRECTORY: OnceLock<String> = OnceLock::new();
+    DIRECTORY
+        .get_or_init(|| {
+            std::env::var(PROJECT_DIRECTORY_ENV)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| PROJECT_DIRECTORY.to_owned())
+        })
+        .as_str()
+}
 
 /// A loaded project: its configuration, its documents, and what it is working on.
 #[derive(Debug)]
@@ -54,9 +89,9 @@ pub struct Project {
 }
 
 impl Project {
-    /// The `.engineering` directory.
+    /// The project directory: `.engineering`, or what [`project_directory`] resolved to.
     pub fn engineering(&self) -> PathBuf {
-        self.root.join(PROJECT_DIRECTORY)
+        self.root.join(project_directory())
     }
 
     /// The task, or an explanation of why there is none.
@@ -84,7 +119,7 @@ pub fn discover(from: &Path) -> Option<PathBuf> {
     for _ in 0..MAX_ASCENT {
         let candidate = current.as_ref()?;
         if candidate
-            .join(PROJECT_DIRECTORY)
+            .join(project_directory())
             .join(PROJECT_FILE)
             .is_file()
         {
@@ -110,7 +145,7 @@ pub fn load(root: &Path) -> Result<Project, LoadErrors> {
 // project's own documents, check the pairing, read the manifest, read the task.
 #[allow(clippy::too_many_lines)]
 fn load_report(root: &Path) -> Result<Project, Vec<LoadFailure>> {
-    let engineering = root.join(PROJECT_DIRECTORY);
+    let engineering = root.join(project_directory());
     let config_path = engineering.join(PROJECT_FILE);
 
     let text = match std::fs::read_to_string(&config_path) {
@@ -318,7 +353,7 @@ mod tests {
     fn scratch(name: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("aep-project-{name}"));
         std::fs::remove_dir_all(&root).ok();
-        std::fs::create_dir_all(root.join(PROJECT_DIRECTORY)).expect("the tree is writable");
+        std::fs::create_dir_all(root.join(project_directory())).expect("the tree is writable");
         root
     }
 
@@ -358,6 +393,17 @@ mod tests {
         assert_eq!(discover(&nested), Some(root.clone()));
         assert_eq!(discover(&root), Some(root.clone()));
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn without_the_environment_variable_the_directory_is_the_one_it_always_was() {
+        // No test in this binary sets `AEP_PROJECT_DIR`, so this is the absent-variable case, and
+        // every other test here is the same case exercised end to end. The override's own tree
+        // lives in `tests/project_directory_env.rs`, which is a separate process for exactly that
+        // reason.
+        assert!(std::env::var(PROJECT_DIRECTORY_ENV).is_err());
+        assert_eq!(project_directory(), PROJECT_DIRECTORY);
+        assert_eq!(project_directory(), ".engineering");
     }
 
     #[test]

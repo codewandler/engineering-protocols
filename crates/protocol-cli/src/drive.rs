@@ -51,7 +51,6 @@ use aep_domain::evidence::{
     TestResult, TestSuite,
 };
 use aep_domain::ids::{StateId, TaskId, ToolRef};
-use aep_domain::project::PROJECT_DIRECTORY;
 use aep_domain::task::Task;
 use aep_domain::verification::Verifier;
 use aep_driver::executor::{
@@ -63,6 +62,7 @@ use aep_driver_spec::cursor::{DriverCursor, RunId, RunStatus, StolenLock};
 use aep_driver_spec::map::{CommandStep, EvidenceMapping, LlmStep, OperatorStep, Step, StepMap};
 use aep_driver_spec::tool::ToolConfig;
 use aep_engine::engine::EvidenceSubmission;
+use aep_engine::project::project_directory;
 use aep_engine::{Engine, Registry};
 use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand};
@@ -215,9 +215,10 @@ pub(crate) fn run(command: DriveCommand) -> Result<ExitCode> {
 /// The project this was run in, or a refusal naming what to pass instead.
 fn discover_project() -> Result<PathBuf> {
     let here = std::env::current_dir().context("reading the working directory")?;
+    let directory = project_directory();
     aep_engine::project::discover(&here).with_context(|| {
         format!(
-            "no `--project` was given and no `{PROJECT_DIRECTORY}/project.yaml` was found in {} or \
+            "no `--project` was given and no `{directory}/project.yaml` was found in {} or \
              any parent",
             here.display()
         )
@@ -274,7 +275,7 @@ impl DriveLocation {
 
         let store = MarkdownStore::open(match &self.store {
             Some(path) => path.clone(),
-            None => project.join(PROJECT_DIRECTORY).join("planning"),
+            None => project.join(project_directory()).join("planning"),
         });
 
         let (map, map_origin) = self.step_map(&registry, &task)?;
@@ -497,7 +498,7 @@ fn status(args: &StatusArgs) -> Result<ExitCode> {
         Some(path) => path.clone(),
         None => discover_project()?,
     };
-    let runs = project.join(PROJECT_DIRECTORY).join(RUNS_DIRECTORY);
+    let runs = project.join(project_directory()).join(RUNS_DIRECTORY);
     if !runs.is_dir() {
         outln!("no runs in {}", runs.display());
         return Ok(ExitCode::SUCCESS);
@@ -667,7 +668,7 @@ fn reachable_states(workflow: &aep_domain::workflow::Workflow) -> BTreeSet<State
 
 /// The `.engineering/runs/` directory, created if it is not there.
 fn runs_directory(project: &Path) -> Result<PathBuf> {
-    let runs = project.join(PROJECT_DIRECTORY).join(RUNS_DIRECTORY);
+    let runs = project.join(project_directory()).join(RUNS_DIRECTORY);
     fs::create_dir_all(&runs).with_context(|| format!("creating {}", runs.display()))?;
     Ok(runs)
 }
@@ -903,7 +904,7 @@ impl CliExecutors {
             run_directory: self.run_directory.clone(),
             store: self
                 .working_directory
-                .join(PROJECT_DIRECTORY)
+                .join(project_directory())
                 .join("planning"),
             state: context.state.to_string(),
             step_index: context.index,

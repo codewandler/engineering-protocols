@@ -30,7 +30,7 @@ use aep_domain::artifact::{
     ArtifactGraph, ArtifactId, ArtifactKind, ArtifactLifecycle, ArtifactRef, ArtifactStatus,
     RelationKind,
 };
-use aep_domain::project::PROJECT_DIRECTORY;
+use aep_engine::project::project_directory;
 use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
 
@@ -93,15 +93,16 @@ impl StoreLocation {
             return Ok(MarkdownStore::open(path.clone()));
         }
         let here = std::env::current_dir().context("reading the working directory")?;
+        let directory = project_directory();
         let project = aep_engine::project::discover(&here).with_context(|| {
             format!(
-                "no `--store` was given and no `{PROJECT_DIRECTORY}/project.yaml` was found in {} \
+                "no `--store` was given and no `{directory}/project.yaml` was found in {} \
                  or any parent; pass `--store <dir>` to say where the plan is",
                 here.display()
             )
         })?;
         Ok(MarkdownStore::open(
-            project.join(PROJECT_DIRECTORY).join(PLANNING_DIRECTORY),
+            project.join(directory).join(PLANNING_DIRECTORY),
         ))
     }
 
