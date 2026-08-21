@@ -9,17 +9,16 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-### Changed
+### Fixed
 
-- **The guard-efficacy review's last two loose ends, closed.** Every substantive finding of
-  `docs/reviews/2026-08-20-guard-efficacy-review.md` was fixed by later waves — the refusal that
-  authorised, the unenforced `Deserialize` ban, the one-directional approval floor, the untested
-  Kleene negation, the audit disjunct, the Decimal rejection test, proptest phase 1 — and two small
-  ones were not: the two guards the review caught reporting a bare `left == right` now say what
-  broke and why it matters (`kleene_conjunction_keeps_false_ahead_of_unknown`, the Decimal
-  structural assertions), and the `identity` conformance suite's module doc records the mutation-11
-  efficacy evidence the review's D5 accepted in place of an in-CI fault, so the one suite whose
-  efficacy CI cannot verify carries its measured proof where a reader of the suite looks.
+- **`protocol evidence inspect` no longer refuses a record the day it is written.** The reference
+  is a civil date, and the future check compared wall-clock milliseconds against the day's first
+  millisecond — so a record stamped 14:07 today read as "has not happened yet at" today, and the
+  verb's primary use was its failing case. The check now runs at the reference's own granularity:
+  an observation is future only when its civil date is after the reference date. A planned check
+  dated tomorrow is still refused. Found by the docs overhaul re-running every quoted command.
+
+### Changed
 
 - **The horizons corpus is ground truth now, and the scanner reads two more positions.** The
   adopter fixed their reference implementation against the vendored corpus and re-issued

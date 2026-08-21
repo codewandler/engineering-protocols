@@ -4306,10 +4306,14 @@ fn evidence_inspect(
         let inputs = aep_schema::parse::evidence_list(&text, Some(&origin))?;
         for input in inputs {
             let observed = input.observed_at;
-            if observed.is_after(now) {
+            // The reference is a civil date, so the future test runs at civil granularity: a
+            // record stamped 14:07 today is not "in the future" of today, and `at.to_timestamp()`
+            // is the start of the day — comparing millis against it would refuse every record the
+            // day it is written, which is the verb's primary use.
+            let observed_date = aep_domain::time::CivilDate::from_timestamp(observed.timestamp());
+            if observed_date > at {
                 future.push(format!(
-                    "{origin}: an observation on {} has not happened yet at {at}",
-                    aep_domain::time::CivilDate::from_timestamp(observed.timestamp())
+                    "{origin}: an observation on {observed_date} has not happened yet at {at}"
                 ));
             }
             records.push(InspectedRecord {

@@ -4064,6 +4064,40 @@ fn inspect_refuses_an_observation_that_has_not_happened_yet() {
 }
 
 #[test]
+fn inspect_accepts_a_record_observed_on_the_reference_date_itself() {
+    // The reference is a civil date and the check runs at civil granularity. A record stamped with
+    // wall-clock milliseconds — `now_observed`, the default for a record the writer produced in
+    // this process — is dated *inside* the reference day, and `--at <that day>` used to refuse it
+    // as future because the day's own timestamp is its first millisecond. The primary use of the
+    // verb is reading a record the day it was written; that must not be the failing case.
+    let directory = scratch("protocol-cli-evidence-inspect-today");
+    let file = directory.join("today.yaml");
+    // 2026-09-01T14:07 as epoch milliseconds: inside REFERENCE_DATE, after its first millisecond.
+    write(
+        &file,
+        "- kind: test_result\n  observed_at: 1788271620000\n  suite: unit\n  passed: 12\n  failed: 0\n  producer:\n    producer: verifier\n    verifier: test-runner\n",
+    );
+    let output = protocol(&[
+        "evidence",
+        "inspect",
+        printable(&file),
+        "--at",
+        REFERENCE_DATE,
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "an observation made during the reference day has happened: {}",
+        stderr(&output)
+    );
+    assert!(
+        !stderr(&output).contains("has not happened yet"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
 fn an_evidence_document_without_an_observation_time_is_refused_by_name() {
     // The field is required, and the refusal has to say which field — a harness author who omits it
     // is the person the rule exists for, and "invalid document" would send them reading YAML.
