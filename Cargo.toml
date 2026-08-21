@@ -18,6 +18,7 @@ members = [
     "crates/infra-analyze",
     "crates/infra-compiler",
     "crates/infra-domain",
+    "crates/infra-project",
     "crates/infra-spec",
     "crates/protocol-cli",
     "examples/billing-realization",
@@ -65,6 +66,7 @@ ess-synth = { path = "crates/ess-synth", version = "0.1.0" }
 infra-analyze = { path = "crates/infra-analyze", version = "0.1.0" }
 infra-compiler = { path = "crates/infra-compiler", version = "0.1.0" }
 infra-domain = { path = "crates/infra-domain", version = "0.1.0" }
+infra-project = { path = "crates/infra-project", version = "0.1.0" }
 infra-spec = { path = "crates/infra-spec", version = "0.1.0" }
 aep-schema = { path = "crates/aep-schema", version = "0.1.0" }
 adp-domain = { path = "crates/adp-domain", version = "0.1.0" }

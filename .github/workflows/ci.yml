@@ -122,10 +122,14 @@ jobs:
   # to certifies a cluster state nobody observed. Since IW3 the same job also owns
   # `simulation.json` and `drift.json` — the three-valued report and the snapshot comparison — and
   # they are here for a sharper version of the same reason: a rule that quietly starts answering
-  # `false` where it answered `unknown` moves those bytes and nothing else. The fix is
-  # `cargo xtask infra`.
+  # `false` where it answered `unknown` moves those bytes and nothing else. Since IW4 it owns the
+  # `projection/` tree as well, where the same argument is sharpest: those files are *changes to a
+  # cluster* that a reader is meant to review and apply, so a rule that starts writing a patch
+  # where it used to write an obligation has to arrive as a diff of the patch, not as a silent
+  # widening. That output is a tree and gets an orphan scan with it — a patch nothing generates
+  # any more still reads like a proposal. The fix is `cargo xtask infra`.
   infra:
-    name: Observation IR, simulation and drift up to date
+    name: Observation IR, simulation, drift and projection up to date
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -135,7 +139,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check the committed observation IR, simulation and drift
+      - name: Check the committed observation IR, simulation, drift and projection
         run: cargo xtask infra --check
 
   # Its own job for the same reason again, and it is the reason that matters most here: a conformance

@@ -85,7 +85,7 @@ passing one.
   command surface is an `OpenAPI` document. `generated/` holds the committed projections and all
   three synthesised trees, `suites/generated/` the committed conformance suites; all drift-checked
   in the gate.
-* **Infra — observed infrastructure as a second instance of the ESS pattern.** Four crates:
+* **Infra — observed infrastructure as a second instance of the ESS pattern.** Five crates:
   `infra-domain` (the k8s observation subset, raw→validated, eleven `INFRA-*` refusal codes,
   secrets only ever as digests — IW1), `infra-compiler` (the content-addressed `infra-ir/1`
   with unresolved references as typed facts, plus the validating read-back of a persisted
@@ -93,8 +93,12 @@ passing one.
   twenty `INFRA-DIAG-*` diagnosis rules with registered severities, workload properties,
   invariant candidates and directions — IW2) and `infra-spec` (the authored desired state:
   twelve expectation kinds evaluated three-valued against a snapshot, where a False without a
-  gap or an Unknown without a reason is unrepresentable — IW3).
-  `protocol infra validate|compile|inspect|graph|diagnose|view|simulate|diff` is the surface;
+  gap or an Unknown without a reason is unrepresentable — IW3) and `infra-project` (a gap
+  becomes a reviewable patch tree where a patch is mechanically safe, an obligation where a
+  value is a human's to choose, and a refusal where the gap is not a field — with the
+  round-trip asserted: applying the tree closes what it claims and moves nothing else — IW4).
+  `protocol infra validate|compile|inspect|graph|diagnose|view|simulate|diff|project` is the
+  surface;
   the scanner (`infra-scout`) is a separate repository holding the credentials, and nothing
   here reaches a network. Plan pages: `docs/plan/infra-wave-1-observe.md`,
   `docs/plan/infra-wave-2-analyze.md`.
@@ -167,7 +171,7 @@ enforcement here that you cannot point at.
    `SystemTime::now` is allowed to live, behind the `Clock` trait.
 9. **Determinism.** Same validated state plus same evidence set ⇒ same decision. Iterate over
    `BTreeMap`/`BTreeSet`, never `HashMap`, so output ordering is stable.
-   *Enforced by* banned-token scans over nine crates that claim the property or feed one that
+   *Enforced by* banned-token scans over ten crates that claim the property or feed one that
    does — `ess-compiler` (`tests/billing.rs`), `ess-diff` (`tests/canonical.rs`), `ess-synth`
    (`tests/synthesis.rs`), `aep-domain`, `ess-gen`, `infra-domain`, `infra-compiler` and
    `infra-analyze` (`tests/determinism.rs` in each) — beside tests that compile, diff, generate
@@ -184,11 +188,11 @@ enforcement here that you cannot point at.
     clippy-pedantic clean.
     *Enforced by* `missing_docs` and `clippy::pedantic` in `[workspace.lints]`, raised to errors by
     the `clippy` step's `-D warnings`, plus the `doc-check` step (`RUSTDOCFLAGS=-D warnings`) for
-    broken intra-doc links. All fifteen workspace members opt in with `[lints] workspace = true`; a
+    broken intra-doc links. All sixteen workspace members opt in with `[lints] workspace = true`; a
     new crate that omits that line is outside every lint here.
 12. **No `unsafe`** (`unsafe_code = "forbid"`).
     *Enforced by* that lint in `[workspace.lints.rust]`. `forbid` cannot be lifted by an inner
-    `allow`, so this one is closed rather than merely checked — again, for the fourteen members that
+    `allow`, so this one is closed rather than merely checked — again, for the fifteen members that
     opt in. **One crate cannot declare it and says so**: a `WebAssembly` export is a `#[no_mangle]`
     item, which rustc's own `unsafe_code` lint flags, so the emitted browser bridge under
     `generated/web/` and the host that links a realization into it (`examples/billing-web`, excluded

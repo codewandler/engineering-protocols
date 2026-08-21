@@ -337,7 +337,156 @@ impl fmt::Display for ExpectationKind {
     }
 }
 
-/// One expectation: an id a report names it by, what it is about, and where it applies.
+/// A port, as a manifest spells one: a number, or the name of a declared container port.
+///
+/// The API's `IntOrString`, cut to the two things it means here. Serialized untagged, so `8080`
+/// stays a number and `http` stays a string — a quoted number would name a port called `"8080"`,
+/// which is why validation refuses one (`INFRA-SPEC-010`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
+pub enum Port {
+    /// A port number.
+    Number(u16),
+    /// A named port the container declares.
+    Name(String),
+}
+
+impl fmt::Display for Port {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Number(number) => write!(f, "{number}"),
+            Self::Name(name) => f.write_str(name),
+        }
+    }
+}
+
+/// What a stated probe does, cut to the two handlers a manifest can be written from.
+///
+/// `exec` and `grpc` are deliberately absent: [`ProbeHandler::Exec`](infra_domain::workload::ProbeHandler::Exec)
+/// does not model the command, so a projection could not write one back out, and a remedy that
+/// cannot be written is a value nobody can act on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "handler", rename_all = "snake_case")]
+pub enum ProbeHandlerRemedy {
+    /// An HTTP GET.
+    HttpGet {
+        /// The request path; the API's default is `/` when absent.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+        /// The port to request.
+        port: Port,
+    },
+    /// A TCP connect.
+    TcpSocket {
+        /// The port to connect to.
+        port: Port,
+    },
+}
+
+/// One probe an expectation states, for a projection to write where the snapshot found none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ProbeRemedy {
+    /// What the probe does.
+    #[serde(flatten)]
+    pub handler: ProbeHandlerRemedy,
+    /// Seconds before the first check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_delay_seconds: Option<u32>,
+    /// Seconds between checks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub period_seconds: Option<u32>,
+    /// Seconds before a check times out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u32>,
+    /// Failures before the probe is considered failed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_threshold: Option<u32>,
+}
+
+/// The empty map [`Remedy::resource_quantities`] hands back for a remedy that states no
+/// quantities. A `const` rather than a fresh allocation, so the accessor can borrow from it.
+static EMPTY_QUANTITIES: BTreeMap<String, String> = BTreeMap::new();
+
+/// The value a projection writes into a field this expectation found empty.
+///
+/// # Not evaluated, ever
+///
+/// A remedy changes no verdict. [`simulate`](crate::simulate::simulate) never reads one, and
+/// `tests/spec.rs` asserts that a specification with remedies and the same specification without
+/// them produce byte-identical simulations. That is the whole point of it being a field of
+/// [`Expectation`] rather than a parameter of [`ExpectationKind`]: `resources_declared` means
+/// "every container declares requests and limits" and nothing else, whatever quantities somebody
+/// wrote beside it.
+///
+/// # Why the value comes from the document at all
+///
+/// Because the alternative is a tool choosing it. A projection derives a replica count from the
+/// gap — the range says what the nearest acceptable number is — but nothing in "this container
+/// declares no limits" says *which* limits, and a generator that picks `500m` has made an
+/// engineering decision on somebody's behalf and hidden it in a patch file. So the split is:
+/// a gap whose remedy the specification states gets a patch, and a gap whose remedy nobody
+/// stated gets an obligation naming the decision. Both are honest; only one of them is silent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "remedy", rename_all = "snake_case")]
+pub enum Remedy {
+    /// The resource envelope to write where a container declares none.
+    ///
+    /// Each half is written only where the snapshot is missing that half, so a container that
+    /// declares requests and no limits keeps the requests it has.
+    Resources {
+        /// Requested quantities, as the API spells them: `{cpu: 25m, memory: 64Mi}`.
+        requests: BTreeMap<String, String>,
+        /// Limit quantities.
+        limits: BTreeMap<String, String>,
+    },
+    /// The probes to write where a container declares none the expectation asks for.
+    Probes {
+        /// The liveness probe.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        liveness: Option<ProbeRemedy>,
+        /// The readiness probe.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        readiness: Option<ProbeRemedy>,
+    },
+}
+
+impl Remedy {
+    /// The remedy's wire discriminant, which is also what a refusal names.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Resources { .. } => "resources",
+            Self::Probes { .. } => "probes",
+        }
+    }
+
+    /// The two quantity maps a resources remedy states, or two empty ones for any other shape.
+    ///
+    /// A total accessor rather than a `match` at every call site, for the reason the IR's handle
+    /// lookups are total: the caller that already knows which variant it holds should not have to
+    /// spell an unreachable arm to read it.
+    pub fn resource_quantities(&self) -> (&BTreeMap<String, String>, &BTreeMap<String, String>) {
+        match self {
+            Self::Resources { requests, limits } => (requests, limits),
+            Self::Probes { .. } => (&EMPTY_QUANTITIES, &EMPTY_QUANTITIES),
+        }
+    }
+
+    /// The expectation kinds a remedy of this shape can ever be written for.
+    ///
+    /// Consulted by validation (`INFRA-SPEC-009`) rather than by the projection: a remedy that
+    /// could never be written is refused when the document is read, not ignored when a report is
+    /// produced.
+    pub fn applies_to(&self, kind: &ExpectationKind) -> bool {
+        matches!(
+            (self, kind),
+            (Self::Resources { .. }, ExpectationKind::ResourcesDeclared)
+                | (Self::Probes { .. }, ExpectationKind::ProbesDeclared { .. })
+        )
+    }
+}
+
+/// One expectation: an id a report names it by, what it is about, where it applies, and what to
+/// write when it does not hold.
 ///
 /// Validated: the only way to hold one is through
 /// [`TryFrom<RawInfraSpec>`](crate::raw::RawInfraSpec), so an [`Expectation`] whose scope cannot
@@ -355,6 +504,10 @@ pub struct Expectation {
     /// What it decides about each of them.
     #[serde(flatten)]
     pub kind: ExpectationKind,
+    /// What a projection writes where this expectation finds a field empty. Never evaluated —
+    /// see [`Remedy`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remedy: Option<Remedy>,
 }
 
 /// A desired-state specification: expectations over one observed cluster.
@@ -389,6 +542,24 @@ impl InfraSpec {
         self.expectations
             .iter()
             .find(|expectation| expectation.id == id)
+    }
+
+    /// The content digest: the full SHA-256 over this specification's canonical JSON.
+    ///
+    /// Through [`serde_json::Value`] and [`infra_compiler::digest_of_canonical`], both
+    /// deliberately: the value's maps are key-sorted, so any reader of a serialized
+    /// specification can recompute the same 64 characters, and there is one implementation of
+    /// the algorithm in the infrastructure family rather than one per document kind.
+    ///
+    /// A report that names a specification by name alone cannot tell two revisions of it apart,
+    /// which is the whole reason a projection carries this beside the snapshot digest: the tree
+    /// it wrote is a function of exactly these two inputs.
+    #[must_use]
+    pub fn digest(&self) -> String {
+        let value =
+            serde_json::to_value(self).expect("a specification has no unserializable state");
+        let canonical = serde_json::to_vec(&value).expect("a value serializes");
+        infra_compiler::digest_of_canonical(&canonical)
     }
 }
 

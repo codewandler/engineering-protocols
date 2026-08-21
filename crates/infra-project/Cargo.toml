@@ -1,0 +1,37 @@
+[package]
+name = "infra-project"
+description = "The manifest projection: per-object patches that would close a simulation's gaps, the obligations that refuse a mechanical one, and the reviewable tree both are written to."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+# The desired state and its three-valued evaluation. A projection is a function of a *simulation*,
+# never a second reading of the same specification: `simulate` decides what a gap is, and this
+# crate decides only what to do about one. A second evaluator here would be a second opinion about
+# whether the cluster is wrong.
+infra-spec.workspace = true
+
+# `InfraIr`: the observed side, and — cloned — the hypothetical side. Applying a generated change
+# to a copy of the model is how this crate re-simulates its own effect without inventing a second
+# way to describe a cluster.
+infra-compiler.workspace = true
+
+# `WorkloadKind`, `Identity`, `PodDisruptionBudget`: the observed types a generated object is
+# built out of, and the spellings a manifest uses.
+infra-domain.workspace = true
+
+# `pdb_covers` — one definition of "does this budget cover this workload", shared with diagnosis
+# rather than respelled here.
+infra-analyze.workspace = true
+
+# A merge patch *is* a JSON document, so this is the model and not a serialization detail.
+# `serde_json::Map` is key-sorted by default, which is what makes an emitted patch byte-stable.
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

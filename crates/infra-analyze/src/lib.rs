@@ -40,7 +40,9 @@ pub mod invariants;
 pub mod properties;
 
 pub use code::{DiagCode, Severity};
-pub use diagnose::{diagnose, diagnose_with, Diagnosis, Finding, HIGH_RESTART_THRESHOLD};
+pub use diagnose::{
+    diagnose, diagnose_with, pdb_covers, Diagnosis, Finding, HIGH_RESTART_THRESHOLD,
+};
 pub use directions::{directions, directions_to_json, directions_to_text, Direction};
 pub use graph::{
     EdgeRelation, GraphDocument, GraphEdge, GraphNode, InfraGraph, NodeKind, UnderivedOwner,

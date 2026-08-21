@@ -48,6 +48,12 @@ infra-domain.workspace = true
 # prints — which is what lets `cargo xtask infra` drift-check the CLI's own output.
 infra-spec.workspace = true
 
+# `protocol infra project`. The projection, its patches and the tree it writes all live in the
+# library, so the command line is a shell over it: a harness calling `infra_project::project(&spec,
+# &ir)` gets the same patches, and `Projection::artifacts` is the one producer of the bytes this
+# verb writes and `cargo xtask infra` drift-checks.
+infra-project.workspace = true
+
 # `protocol ess synthesize`. The plan and the emitters live in the library, so the command line is
 # a shell over it: `ess_synth::synthesize(&ir)` from a harness produces the same plan and the same
 # bytes, and `cargo xtask synth` compares the committed tree against what this verb prints.

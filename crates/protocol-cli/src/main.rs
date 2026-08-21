@@ -3862,6 +3862,35 @@ enum InfraCommand {
         #[arg(long, value_enum, default_value_t = DiagnoseFormat::Text)]
         format: DiagnoseFormat,
     },
+    /// Project a specification's gaps into the patches that would close them.
+    ///
+    /// Reads the same two documents `simulate` does and answers the question its report leaves
+    /// open: *so what would I change?* Every gap gets one of three dispositions — a patch or a
+    /// manifest this command wrote, an obligation naming a decision nobody can take for you, or a
+    /// refusal. Nothing is applied and nothing reaches a cluster: the output is a directory of
+    /// files to read, edit, commit and apply with your own hands.
+    ///
+    /// A value in a patch comes from the gap itself or from a `remedy:` block in the
+    /// specification, never from a default this build chose. `OBLIGATIONS.md` is where everything
+    /// else goes, and it is a separate file so a tree that closed nothing does not read like a
+    /// tree that closed everything.
+    ///
+    /// Exit 0 whatever it found, exactly as `simulate` and `diagnose` do. Exit 1 means the input
+    /// could not be projected at all.
+    Project {
+        /// The desired-state specification, an `infra-spec/1` document in YAML or JSON.
+        #[arg(long)]
+        spec: PathBuf,
+        /// A bundle or a persisted IR document to project against.
+        #[arg(long)]
+        path: PathBuf,
+        /// Where to write the tree. Without it the projection is printed and nothing is written.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// How to render the report. `json` carries the whole projection, artifacts included.
+        #[arg(long, value_enum, default_value_t = DiagnoseFormat::Text)]
+        format: DiagnoseFormat,
+    },
     /// Report what moved between two compiled snapshots of one cluster.
     ///
     /// Typed changes over the *declared* state — membership, replicas, images, resources,
@@ -3961,6 +3990,12 @@ fn run_infra(command: &InfraCommand) -> Result<ExitCode> {
             *directions,
         ),
         InfraCommand::Simulate { spec, path, format } => infra_simulate(spec, path, *format),
+        InfraCommand::Project {
+            spec,
+            path,
+            out,
+            format,
+        } => infra_project(spec, path, out.as_deref(), *format),
         InfraCommand::Diff { from, to, format } => infra_diff(from, to, *format),
     }
 }
@@ -4227,6 +4262,120 @@ fn infra_simulate(spec_path: &Path, path: &Path, format: DiagnoseFormat) -> Resu
         DiagnoseFormat::Json => out!("{}", simulation.to_json()),
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// `protocol infra project`
+///
+/// Exit 0 whatever it found, for `simulate`'s reason: a projection is a proposal, and a cluster
+/// with sixteen decisions owed has been successfully projected. Exit 1 is an input that could not
+/// be projected at all.
+fn infra_project(
+    spec_path: &Path,
+    path: &Path,
+    out: Option<&Path>,
+    format: DiagnoseFormat,
+) -> Result<ExitCode> {
+    let spec = match infra_spec_at(spec_path)? {
+        Ok(spec) => spec,
+        Err(errors) => {
+            match format {
+                DiagnoseFormat::Text => infra_refusals(&errors),
+                DiagnoseFormat::Json => print_serialised(&errors, Format::Json)?,
+            }
+            return Ok(exit_code(false));
+        }
+    };
+    let ir = match infra_ir_at(path)? {
+        InfraIrLoaded::Ir(ir) => ir,
+        InfraIrLoaded::Refused(errors) => {
+            match format {
+                DiagnoseFormat::Text => infra_refusals(&errors),
+                DiagnoseFormat::Json => print_serialised(&errors, Format::Json)?,
+            }
+            return Ok(exit_code(false));
+        }
+    };
+    let projection = infra_project::project(&spec, &ir);
+    let artifacts = projection.artifacts();
+
+    if let Some(out) = out {
+        for (relative, contents) in &artifacts {
+            let target = out.join(relative);
+            if let Some(parent) = target.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+            std::fs::write(&target, contents)
+                .with_context(|| format!("writing {}", target.display()))?;
+        }
+        // Named, never deleted. A projection is written into a directory somebody owns, and a
+        // verb that removes files it did not write is a verb that eats a hand-edited patch
+        // somebody was about to commit. `cargo xtask infra --check` is where the committed tree
+        // is held to having no extra files, because there the owner is this repository.
+        let stale = stale_files(out, &artifacts)?;
+        if !stale.is_empty() {
+            eprintln!(
+                "note: {} file(s) under {} are not part of this projection and were left alone: {}",
+                stale.len(),
+                out.display(),
+                stale.join(", ")
+            );
+        }
+    }
+
+    match format {
+        DiagnoseFormat::Text => {
+            out!("{}", infra_project::projection_to_text(&projection));
+            if let Some(out) = out {
+                outln!("wrote {} file(s) to {}", artifacts.len(), out.display());
+            }
+        }
+        // The library's own canonical bytes, not a re-serialisation here: one producer, so the
+        // drift check in `cargo xtask infra` can never disagree with the CLI about what a
+        // projection looks like.
+        DiagnoseFormat::Json => out!("{}", projection.to_json()),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Every file already under `root` that this projection does not produce.
+fn stale_files(
+    root: &Path,
+    artifacts: &std::collections::BTreeMap<String, String>,
+) -> Result<Vec<String>> {
+    let mut found = Vec::new();
+    walk(root, "", &mut found)?;
+    found.retain(|relative| !artifacts.contains_key(relative));
+    found.sort();
+    Ok(found)
+}
+
+/// Collects every file under `directory`, as paths relative to the walk's root.
+fn walk(directory: &Path, prefix: &str, into: &mut Vec<String>) -> Result<()> {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        // A directory that is not there holds no stale files, which is a different answer from
+        // one that could not be read.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error).with_context(|| format!("reading {}", directory.display()))
+        }
+    };
+    for entry in entries {
+        let entry = entry.with_context(|| format!("reading {}", directory.display()))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let relative = if prefix.is_empty() {
+            name
+        } else {
+            format!("{prefix}/{name}")
+        };
+        if entry.file_type()?.is_dir() {
+            walk(&entry.path(), &relative, into)?;
+        } else {
+            into.push(relative);
+        }
+    }
+    Ok(())
 }
 
 /// `protocol infra diff`

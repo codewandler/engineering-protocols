@@ -11,6 +11,67 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`protocol infra project --spec <file> --path <bundle|ir> --out <dir>` — the gaps, handed back
+  as a diff you can read (infra wave 4).** `simulate` tells you a container declares no limits.
+  This writes the patch that would declare them, into a directory you review, edit and apply with
+  your own hands. Nothing is applied and nothing reaches a cluster — the output is files.
+
+  **Every value in a generated file came from the gap or from you.** A replica count outside
+  `[2, 4]` has one nearest acceptable number and the range says which, so that one is written. An
+  image tagged `latest` has no mechanically-nearest replacement, so it is not: you get an
+  obligation naming the decision — *choose the version of `registry.local/flaky-agent` that
+  container `agent` should run* — instead of a patch containing a version somebody's generator
+  picked. Resources and probes sit on both sides of that line: state the values once as a
+  `remedy:` on the expectation and they are written; state nothing and they are owed.
+
+  **A patch is against the object that was observed**, not a rewritten manifest — a whole manifest
+  regenerated from a snapshot silently drops every field the observation model does not keep.
+  Container-level changes are emitted as *strategic* merge patches and say so in the filename,
+  because an RFC 7386 patch naming one container deletes every container it does not mention.
+
+  **The projection closes what it opens.** Raising a workload from one replica to two satisfies
+  "replicas within [2, 4]" and immediately breaks "a disruption budget covers every multi-replica
+  workload" — so it simulates its own changes, sees the gap it opened, marks it *induced* and
+  writes the budget in the same tree. Applying the whole directory leaves more expectations holding
+  and none newly broken; the test suite applies the emitted files to the bundle, recompiles and
+  re-simulates to prove exactly that, including that no unrelated verdict moved.
+
+  **`OBLIGATIONS.md` is a file of its own**, because a tree that closed nine gaps and quietly left
+  sixteen decisions unmade reads, in a pull request, exactly like a tree that closed everything.
+  `SUMMARY.md` carries the counts and the digests of both inputs it was computed from — a name is
+  not an identity, and two revisions of your specification share a name.
+
+  Two expectations that disagree are not silently reconciled: the one the emitted patch does not
+  satisfy comes back **refused**, naming the expectation that contradicts it. Exit 0 whatever it
+  finds, as `simulate` and `diagnose` already behave.
+
+- **`infra-spec/1` expectations may carry a `remedy:`** — the value a projection writes where the
+  expectation finds a field empty:
+
+  ```yaml
+  - id: shop-resources
+    scope: {namespace: shop}
+    expect: resources_declared
+    remedy:
+      resources:
+        requests: {cpu: 25m, memory: 64Mi}
+        limits: {cpu: 500m, memory: 256Mi}
+  ```
+
+  **A remedy never changes a verdict.** Nothing evaluates it; `resources_declared` still means
+  "declares requests and limits" and nothing else, so adding one to a specification you already
+  committed cannot move a simulation you already reviewed. Two new refusals guard it: a remedy
+  beside a kind that can never write it is `INFRA-SPEC-009`, and one that states nothing, names a
+  probe the expectation never asks for, or writes a port as `"8080"` in quotes is
+  `INFRA-SPEC-010`.
+
+- **`examples/k3d-dev-cluster/projection/` — a real patch tree in the repository.** Seven committed
+  files for the committed specification and observation: two strategic patches, three generated
+  disruption budgets, `SUMMARY.md` and `OBLIGATIONS.md`. Twenty-three gaps go in; nine come back as
+  changes, sixteen as decisions nobody can take for you. Drift-checked by `cargo xtask infra
+  --check` with an orphan scan, so a patch file nothing generates any more cannot sit there looking
+  like a proposal somebody still stands behind.
+
 - **`protocol infra simulate --spec <file> --path <bundle|ir>` — what you expected, against what
   was observed, with a third answer beside yes and no (infra wave 3).** You write an
   `infra-spec/1` document saying how the cluster ought to be, and every expectation in it comes

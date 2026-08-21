@@ -1,0 +1,17 @@
+{
+  "apiVersion": "policy/v1",
+  "kind": "PodDisruptionBudget",
+  "metadata": {
+    "name": "storefront-server",
+    "namespace": "shop"
+  },
+  "spec": {
+    "maxUnavailable": 1,
+    "selector": {
+      "matchLabels": {
+        "app.kubernetes.io/instance": "storefront-server",
+        "app.kubernetes.io/name": "storefront-server"
+      }
+    }
+  }
+}

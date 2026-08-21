@@ -66,7 +66,12 @@ pub fn simulation_to_text(simulation: &Simulation) -> String {
 }
 
 /// One sentence saying what a subject has and what the expectation wanted.
-fn describe_gap(gap: &crate::simulate::Gap) -> String {
+///
+/// Public because it is the *one* rendering of a gap. `infra-project` names every gap it refuses
+/// a mechanical patch for, and a second sentence for the same fact is how a report and an
+/// obligations list come to describe one cluster differently.
+#[must_use]
+pub fn describe_gap(gap: &crate::simulate::Gap) -> String {
     use crate::simulate::Gap;
     match gap {
         Gap::WorkloadAbsent {

@@ -76,9 +76,12 @@ pub use drift::{
 };
 pub use facts::{workload_facts, WorkloadFacts, WORKLOAD_FACTS};
 pub use raw::{read_spec, RawInfraSpec};
-pub use render::{drift_counts, drift_to_text, simulation_to_text};
+pub use render::{describe_gap, drift_counts, drift_to_text, simulation_to_text};
 pub use simulate::{
     simulate, ExpectationReport, Gap, Outcome, Simulation, SnapshotRef, SubjectOutcome, Summary,
     UnknownReason, SIMULATION_FORMAT,
 };
-pub use spec::{Expectation, ExpectationKind, InfraSpec, Scope, SubjectClass, SPEC_FORMAT};
+pub use spec::{
+    Expectation, ExpectationKind, InfraSpec, Port, ProbeHandlerRemedy, ProbeRemedy, Remedy, Scope,
+    SubjectClass, SPEC_FORMAT,
+};

@@ -45,9 +45,19 @@ expectations:
       workload_selector: {app.kubernetes.io/name: storefront-server}
     expect: resources_declared
 
+  # The one expectation in this file that carries a `remedy:` — the value a projection writes
+  # where the snapshot found nothing. A namespace-wide default envelope is a real practice (it is
+  # what a `LimitRange` states), so one pair of quantities for every container in `shop` is a
+  # decision somebody can actually take. `shop-probes` below deliberately carries none, because a
+  # liveness probe is per-container and one probe for four unrelated containers would be a guess
+  # dressed as a specification.
   - id: shop-resources
     scope: {namespace: shop}
     expect: resources_declared
+    remedy:
+      resources:
+        requests: {cpu: 25m, memory: 64Mi}
+        limits: {cpu: 500m, memory: 256Mi}
 
   # Nothing was observed in `payments`, which is not the same as nothing being there.
   - id: payments-resources

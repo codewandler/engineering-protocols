@@ -416,7 +416,14 @@ What has shipped, as a second instance of the ESS pattern rather than as that de
 | IW1 | [`infra-wave-1-observe.md`](infra-wave-1-observe.md) | `infra-domain` and `infra-compiler`: a scanned bundle validated, refused with stable `INFRA-*` codes, compiled into the content-addressed `infra-ir/1` |
 | IW2 (+2.5) | [`infra-wave-2-analyze.md`](infra-wave-2-analyze.md) | `infra-analyze`: the typed dependency graph, twenty `INFRA-DIAG-*` rules, workload properties, invariant candidates, directions, the HTML view |
 | IW3 | [`infra-wave-3-desired-state.md`](infra-wave-3-desired-state.md) | `infra-spec`: an authored desired state, its three-valued simulation against a snapshot, and typed drift between two snapshots |
-| IW4 | — | not started: manifests projected *from* a desired-state model |
+| IW4 | [`infra-wave-4-project-back.md`](infra-wave-4-project-back.md) | `infra-project`: every gap projected back as a reviewable diff — per-object merge and strategic patches, generated manifests, and an obligation for every gap whose value is a decision |
+
+**IW4 delivered ends the scheduled infrastructure waves.** IW5 — *propose* and *apply*, the verbs
+that consult a registry and reach a cluster — stays unscheduled and adapter-side: both need a
+network and a credential, which is the boundary `docs/VISION.md` draws and the reason the scanner
+lives in its own repository. What this workspace ships is the whole non-acting half: observe,
+analyze, measure against a declared state, and hand back a diff a person applies with their own
+hands.
 
 The two ideas the review harvested are both honoured in IW3 rather than in the design's own shape.
 Its §2.7 rule — "a fact that cannot be established is not a pass" — is invariant 5, and `simulate`
@@ -426,8 +433,10 @@ stated as `now() − t < D`, is refused outright: no expectation compares a time
 duration vocabulary to write one in, and a banned-token test in `infra-spec` keeps it that way
 (review finding I7).
 
-Worth taking from it now, without any infrastructure: its required / permitted / observed split is a
-better answer than `Truth::Unknown` for *"we looked and saw nothing"*, and it is portable into wave 4.
+Worth taking from it if the vocabulary ever grows: its required / permitted / observed split is a
+better answer than `Truth::Unknown` for *"we looked and saw nothing"*. IW4 did not need it — a
+projection reads gaps, and a gap is already the `False` arm — so it stays an idea rather than a
+debt.
 And its freshness model is stated as `now() − t < D`, which this repository cannot express — the domain
 is clock-free, nothing here compares two timestamps, and the existing `FreshnessPolicy` variants are all
 causal. `BoundToDependencySet` already exists, already means what both designs need, and currently has

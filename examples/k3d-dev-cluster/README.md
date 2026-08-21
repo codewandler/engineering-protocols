@@ -10,10 +10,13 @@ A small, deterministic `infra-observation/1` bundle and the `infra-ir/1` documen
 | `cluster.ir.json` | output: what `protocol infra compile` produces from `observation.json` |
 | `simulation.json` | output: what `protocol infra simulate --spec expected.yaml --path observation.json` produces |
 | `drift.json` | output: what `protocol infra diff --from observation.json --to observation.drifted.json` produces |
+| `projection/` | output: what `protocol infra project --spec expected.yaml --path observation.json --out projection` writes |
 
-The three outputs are committed and drift-checked by `cargo xtask infra --check`. Never edit one by
-hand; regenerate all three with `cargo xtask infra`. The three inputs *are* hand-maintained — they
-are fixtures, not outputs.
+The four outputs are committed and drift-checked by `cargo xtask infra --check`. Never edit one by
+hand; regenerate all four with `cargo xtask infra`. The three inputs *are* hand-maintained — they
+are fixtures, not outputs. `projection/` is checked with an orphan scan as well: a patch file for an
+object nothing patches any more would sit here looking like a proposal somebody still stands
+behind.
 
 ## Derivation
 
@@ -119,6 +122,39 @@ scans all seventeen. It is covered by
 `a_bundle_that_never_scanned_disruption_budgets_is_undecidable_and_not_uncovered`.
 
 The report is `11 hold, 12 gaps, 5 undecidable`, and `simulation.json` holds those bytes.
+
+One expectation carries a **`remedy:`** — `shop-resources` states the requests and limits a
+projection writes where a container declares none. A remedy is never evaluated: it changes no
+verdict, and `simulation.json` is byte-identical with and without it
+(`the_committed_example_specification_simulates_identically_with_and_without_its_remedies`). It is
+what makes `shop-resources` a patch below where `shop-probes` is an obligation.
+
+## `projection/` — what would have to change
+
+The tree `protocol infra project` writes from the same two documents `simulate` reads. **Nothing in
+it has been applied**; it is a diff a person reviews, edits and applies with their own credentials.
+
+| file | what it is |
+|---|---|
+| `SUMMARY.md` | the counts, the two digests it was computed from, and one row per change |
+| `OBLIGATIONS.md` | every gap that got no change, and the decision each one needs |
+| `patches/shop.deployment.flaky-agent.strategic.json` | replicas 1 → 2 and the container's resource envelope |
+| `patches/shop.deployment.queue-redis.strategic.json` | the same two changes for `queue-redis` |
+| `objects/shop.poddisruptionbudget.storefront-server.json` | a budget for the multi-replica workload that had none |
+| `objects/shop.poddisruptionbudget.flaky-agent.json` | a budget for a workload the replica patch *made* multi-replica |
+| `objects/shop.poddisruptionbudget.queue-redis.json` | the same, for `queue-redis` |
+
+The last two are the part worth reading twice. Raising `flaky-agent` from one replica to two
+satisfies `shop-replicas` and immediately breaks `shop-pdb`, which held before only because the
+workload had a single replica. The projection simulates its own changes, sees the gap it opened,
+marks it **induced**, and closes it in the same tree — so applying the whole directory leaves the
+cluster with more expectations holding and none newly broken. `crates/infra-project/tests/round_trip.rs`
+applies these files to `observation.json`, recompiles and re-simulates to prove it.
+
+Seven of the twenty-three gaps get a change; sixteen are decisions this build refuses to take for
+you — which image replaces `:latest`, what makes a container healthy, which secret the cluster is
+missing, where a workload in the wrong namespace should be recreated. `OBLIGATIONS.md` names every
+one.
 
 ## `observation.drifted.json` — the derivation
 

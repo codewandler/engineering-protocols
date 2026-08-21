@@ -28,11 +28,18 @@
 //! | every scope can select its expectation's subjects | `INFRA-SPEC-006` |
 //! | every kind's own parameters can decide something | `INFRA-SPEC-005` |
 //! | every predicate reads facts the projection produces | `INFRA-SPEC-008` |
+//! | every remedy belongs to a kind that can write it | `INFRA-SPEC-009` |
+//! | every remedy states something writable | `INFRA-SPEC-010` |
 //!
-//! The last one is the specification-side twin of the IR's dangling-handle check: a predicate over
-//! `workload.replica` would evaluate `Unknown` on every workload forever, and the report would say
-//! "the snapshot cannot decide" about a typo. Refusing it at validation is the only place the
+//! `INFRA-SPEC-008` is the specification-side twin of the IR's dangling-handle check: a predicate
+//! over `workload.replica` would evaluate `Unknown` on every workload forever, and the report would
+//! say "the snapshot cannot decide" about a typo. Refusing it at validation is the only place the
 //! difference is still visible.
+//!
+//! The last two are the same argument about a *remedy* — the value a projection writes where an
+//! expectation found a field empty. A remedy nothing can ever write is not a harmless extra key:
+//! it is a specification claiming a patch it will never get, and the difference between "nobody
+//! stated a value" and "somebody stated one in the wrong place" is only visible here.
 //!
 //! # Errors accumulate
 //!
@@ -45,7 +52,10 @@ use infra_domain::code::{InfraCode, ValidationErrors};
 use infra_domain::workload::WorkloadKind;
 
 use crate::facts::{is_projected, WORKLOAD_FACTS};
-use crate::spec::{Expectation, ExpectationKind, InfraSpec, Scope, SPEC_FORMAT};
+use crate::spec::{
+    Expectation, ExpectationKind, InfraSpec, Port, ProbeHandlerRemedy, ProbeRemedy, Remedy, Scope,
+    SPEC_FORMAT,
+};
 
 /// Reads a specification's text — YAML or JSON — through its validation.
 ///
@@ -101,6 +111,104 @@ pub struct RawExpectation {
     pub scope: RawScope,
     /// What it decides about each of them.
     pub expect: RawExpectationKind,
+    /// What a projection writes where this expectation finds a field empty. Never evaluated.
+    #[serde(default)]
+    pub remedy: Option<RawRemedy>,
+}
+
+/// A remedy as written: `{resources: {...}}` or `{probes: {...}}`.
+///
+/// Externally tagged for [`RawExpectationKind`]'s reason: a remedy shape this build does not
+/// implement is refused by name, and `deny_unknown_fields` on each variant refuses a misspelt
+/// parameter rather than defaulting it.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RawRemedy {
+    /// `{resources: {requests: {...}, limits: {...}}}`
+    Resources(RawResourcesRemedy),
+    /// `{probes: {liveness: {...}, readiness: {...}}}`
+    Probes(RawProbesRemedy),
+}
+
+/// The parameters of a `resources` remedy.
+///
+/// Quantities are strings, exactly as `RawResources` reads them on the observed side: `cpu: 1`
+/// is a number in YAML and a quantity in Kubernetes, and accepting both spellings here would
+/// make a remedy and the container it is written into disagree about what was declared.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawResourcesRemedy {
+    /// Requested quantities per resource.
+    #[serde(default)]
+    pub requests: BTreeMap<String, String>,
+    /// Limit quantities per resource.
+    #[serde(default)]
+    pub limits: BTreeMap<String, String>,
+}
+
+/// The parameters of a `probes` remedy.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawProbesRemedy {
+    /// The liveness probe to write.
+    #[serde(default)]
+    pub liveness: Option<RawProbeRemedy>,
+    /// The readiness probe to write.
+    #[serde(default)]
+    pub readiness: Option<RawProbeRemedy>,
+}
+
+/// One probe as written.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawProbeRemedy {
+    /// An HTTP GET handler.
+    #[serde(default)]
+    pub http_get: Option<RawHttpGetRemedy>,
+    /// A TCP connect handler.
+    #[serde(default)]
+    pub tcp_socket: Option<RawTcpSocketRemedy>,
+    /// Seconds before the first check.
+    #[serde(default)]
+    pub initial_delay_seconds: Option<u32>,
+    /// Seconds between checks.
+    #[serde(default)]
+    pub period_seconds: Option<u32>,
+    /// Seconds before a check times out.
+    #[serde(default)]
+    pub timeout_seconds: Option<u32>,
+    /// Failures before the probe is considered failed.
+    #[serde(default)]
+    pub failure_threshold: Option<u32>,
+}
+
+/// An HTTP GET handler as written.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawHttpGetRemedy {
+    /// The request path.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// The port, a number or a declared port name.
+    pub port: RawPort,
+}
+
+/// A TCP handler as written.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RawTcpSocketRemedy {
+    /// The port, a number or a declared port name.
+    pub port: RawPort,
+}
+
+/// A port as written: `8080` or `http`.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(untagged)]
+pub enum RawPort {
+    /// A number.
+    Number(u16),
+    /// A name — or a quoted number, which validation refuses.
+    Name(String),
 }
 
 /// A scope as written: `cluster`, `{namespace: shop}` or `{workload_selector: {app: shop}}`.
@@ -259,11 +367,16 @@ impl TryFrom<RawInfraSpec> for InfraSpec {
                 );
             }
 
+            let remedy = written
+                .remedy
+                .and_then(|written| remedy_of(written, &kind, &location, &mut errors));
+
             expectations.push(Expectation {
                 id: written.id,
                 statement: written.statement,
                 scope,
                 kind,
+                remedy,
             });
         }
 
@@ -428,6 +541,202 @@ fn workload_exists(
         kind,
         name: written.name,
     })
+}
+
+/// Validates a remedy against the kind it accompanies.
+///
+/// `None` when the remedy cannot be written, in which case a refusal has already been recorded.
+/// Dropping it rather than keeping it is deliberate: a projection reads `Expectation::remedy` and
+/// writes what it finds, so a remedy that survived validation is one that can be written.
+fn remedy_of(
+    raw: RawRemedy,
+    kind: &ExpectationKind,
+    location: &str,
+    errors: &mut ValidationErrors,
+) -> Option<Remedy> {
+    let at = |field: &str| format!("{location}.remedy.{field}");
+    match raw {
+        RawRemedy::Resources(written) => {
+            let remedy = Remedy::Resources {
+                requests: written.requests,
+                limits: written.limits,
+            };
+            if !remedy.applies_to(kind) {
+                errors.refuse(
+                    InfraCode::SpecRemedyNotApplicable,
+                    at("resources"),
+                    format!(
+                        "`{}` never finds a container's `resources` empty, so a resources remedy \
+                         beside it is a value nothing will ever write",
+                        kind.as_str()
+                    ),
+                );
+                return None;
+            }
+            let (requests, limits) = remedy.resource_quantities();
+            if requests.is_empty() && limits.is_empty() {
+                errors.refuse(
+                    InfraCode::SpecInvalidRemedy,
+                    at("resources"),
+                    "a resources remedy that states neither requests nor limits leaves the gap \
+                     exactly where it was",
+                );
+                return None;
+            }
+            if requests
+                .values()
+                .chain(limits.values())
+                .any(|value| is_blank(value))
+            {
+                errors.refuse(
+                    InfraCode::SpecInvalidRemedy,
+                    at("resources"),
+                    "a blank quantity is not a quantity",
+                );
+                return None;
+            }
+            Some(remedy)
+        }
+        RawRemedy::Probes(written) => {
+            let ExpectationKind::ProbesDeclared {
+                liveness: wants_liveness,
+                readiness: wants_readiness,
+            } = kind
+            else {
+                errors.refuse(
+                    InfraCode::SpecRemedyNotApplicable,
+                    at("probes"),
+                    format!(
+                        "`{}` never finds a container's probes empty, so a probes remedy beside \
+                         it is a value nothing will ever write",
+                        kind.as_str()
+                    ),
+                );
+                return None;
+            };
+            // A probe the expectation does not ask for cannot become a gap, so it cannot become a
+            // patch either. Refusing it keeps the remedy readable as "what this expectation
+            // writes" rather than as a bag of probes somebody might have meant.
+            for (stated, wanted, half) in [
+                (written.liveness.is_some(), *wants_liveness, "liveness"),
+                (written.readiness.is_some(), *wants_readiness, "readiness"),
+            ] {
+                if stated && !wanted {
+                    errors.refuse(
+                        InfraCode::SpecInvalidRemedy,
+                        at(&format!("probes.{half}")),
+                        format!(
+                            "this expectation does not ask for a {half} probe, so a {half} \
+                             remedy would never be written"
+                        ),
+                    );
+                    return None;
+                }
+            }
+            if written.liveness.is_none() && written.readiness.is_none() {
+                errors.refuse(
+                    InfraCode::SpecInvalidRemedy,
+                    at("probes"),
+                    "a probes remedy that states no probe leaves the gap exactly where it was",
+                );
+                return None;
+            }
+            // Both halves are validated before either refusal is propagated: invariant 3, a
+            // document with two broken probes reports two refusals in one run.
+            let liveness = written
+                .liveness
+                .map(|raw| probe_of(raw, &at("probes.liveness"), errors));
+            let readiness = written
+                .readiness
+                .map(|raw| probe_of(raw, &at("probes.readiness"), errors));
+            if matches!(liveness, Some(None)) || matches!(readiness, Some(None)) {
+                return None;
+            }
+            Some(Remedy::Probes {
+                liveness: liveness.flatten(),
+                readiness: readiness.flatten(),
+            })
+        }
+    }
+}
+
+/// Validates one written probe. `None` is a refusal, already recorded.
+fn probe_of(
+    raw: RawProbeRemedy,
+    location: &str,
+    errors: &mut ValidationErrors,
+) -> Option<ProbeRemedy> {
+    let handler = match (raw.http_get, raw.tcp_socket) {
+        (Some(http), None) => ProbeHandlerRemedy::HttpGet {
+            path: http.path,
+            port: port_of(http.port, &format!("{location}.http_get.port"), errors)?,
+        },
+        (None, Some(tcp)) => ProbeHandlerRemedy::TcpSocket {
+            port: port_of(tcp.port, &format!("{location}.tcp_socket.port"), errors)?,
+        },
+        (None, None) => {
+            errors.refuse(
+                InfraCode::SpecInvalidRemedy,
+                location.to_owned(),
+                "a probe states what it does: `http_get` or `tcp_socket`. `exec` and `grpc` are \
+                 not remedies this build writes, because the observation model does not carry \
+                 what they run",
+            );
+            return None;
+        }
+        (Some(_), Some(_)) => {
+            errors.refuse(
+                InfraCode::SpecInvalidRemedy,
+                location.to_owned(),
+                "a probe does one thing; `http_get` and `tcp_socket` together state two",
+            );
+            return None;
+        }
+    };
+    Some(ProbeRemedy {
+        handler,
+        initial_delay_seconds: raw.initial_delay_seconds,
+        period_seconds: raw.period_seconds,
+        timeout_seconds: raw.timeout_seconds,
+        failure_threshold: raw.failure_threshold,
+    })
+}
+
+/// Validates a port: a number, or a name that is not a number in quotes.
+fn port_of(raw: RawPort, location: &str, errors: &mut ValidationErrors) -> Option<Port> {
+    match raw {
+        RawPort::Number(number) => Some(Port::Number(number)),
+        RawPort::Name(name) => {
+            if name.trim().is_empty() {
+                errors.refuse(
+                    InfraCode::SpecInvalidRemedy,
+                    location.to_owned(),
+                    "a blank port is not a port",
+                );
+                return None;
+            }
+            // `"8080"` is a *named* port in the API's `IntOrString`, and a container that
+            // declares no port of that name never becomes ready. A quoted number is almost
+            // always a YAML accident, and the two spellings are indistinguishable afterwards.
+            if name.chars().all(|character| character.is_ascii_digit()) {
+                errors.refuse(
+                    InfraCode::SpecInvalidRemedy,
+                    location.to_owned(),
+                    format!(
+                        "`{name}` in quotes is the *name* of a port, not port {name}; write it \
+                         unquoted, or name a port the container declares"
+                    ),
+                );
+                return None;
+            }
+            Some(Port::Name(name))
+        }
+    }
+}
+
+/// `true` for a value that is empty or only whitespace.
+fn is_blank(value: &str) -> bool {
+    value.trim().is_empty()
 }
 
 /// Validates an allowlist: present, non-empty, no blank entries.

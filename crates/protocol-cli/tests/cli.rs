@@ -3738,3 +3738,171 @@ fn infra_diff_of_one_snapshot_with_itself_reports_no_change() {
         stdout(&output)
     );
 }
+
+// -------------------------------------------------------------------------------------------
+// `protocol infra project` — the manifest projection (IW4).
+// -------------------------------------------------------------------------------------------
+
+/// The committed projection tree, which `cargo xtask infra --check` holds to the CLI's own output.
+const COMMITTED_PROJECTION: &str = "examples/k3d-dev-cluster/projection";
+
+#[test]
+fn infra_project_writes_the_committed_tree_and_exits_zero_because_it_is_a_proposal() {
+    let out = scratch("protocol-cli-projection");
+    let output = protocol(&[
+        "infra",
+        "project",
+        "--spec",
+        EXPECTED,
+        "--path",
+        OBSERVATION,
+        "--out",
+        printable(&out),
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "a cluster with sixteen decisions owed has still been projected: {}",
+        stderr(&output)
+    );
+
+    let committed = root().join(COMMITTED_PROJECTION);
+    for relative in [
+        "SUMMARY.md",
+        "OBLIGATIONS.md",
+        "patches/shop.deployment.flaky-agent.strategic.json",
+        "objects/shop.poddisruptionbudget.storefront-server.json",
+    ] {
+        let written = std::fs::read_to_string(out.join(relative))
+            .unwrap_or_else(|error| panic!("{relative} was written: {error}"));
+        let expected = std::fs::read_to_string(committed.join(relative))
+            .unwrap_or_else(|error| panic!("{relative} is committed: {error}"));
+        assert_eq!(
+            written, expected,
+            "{relative} differs from the committed tree; run `cargo xtask infra` and review the \
+             diff"
+        );
+    }
+    assert!(
+        stdout(&output).contains("wrote 7 file(s)"),
+        "the text form says what it wrote:\n{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn infra_project_from_the_bundle_and_from_the_committed_ir_render_identical_bytes() {
+    let from_bundle = protocol(&[
+        "infra",
+        "project",
+        "--spec",
+        EXPECTED,
+        "--path",
+        OBSERVATION,
+        "--format",
+        "json",
+    ]);
+    let from_ir = protocol(&[
+        "infra",
+        "project",
+        "--spec",
+        EXPECTED,
+        "--path",
+        COMMITTED_IR,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&from_bundle), 0, "{}", stderr(&from_bundle));
+    assert_eq!(code(&from_ir), 0, "{}", stderr(&from_ir));
+    assert_eq!(
+        stdout(&from_bundle),
+        stdout(&from_ir),
+        "reading a persisted IR back must be indistinguishable from a fresh compile"
+    );
+}
+
+#[test]
+fn infra_project_names_both_digests_it_was_computed_from() {
+    // Provenance discipline: a tree derived from "the specification" and "the cluster" is not
+    // reviewable, because a name is not an identity. The document and the summary both carry the
+    // two digests, and they are the same two.
+    let output = protocol(&[
+        "infra",
+        "project",
+        "--spec",
+        EXPECTED,
+        "--path",
+        OBSERVATION,
+        "--format",
+        "json",
+    ]);
+    let document: serde_json::Value = serde_json::from_str(&stdout(&output)).expect("JSON");
+    let provenance = &document["provenance"];
+    let specification = provenance["specification_digest"]
+        .as_str()
+        .expect("a specification digest");
+    let snapshot = provenance["snapshot_digest"]
+        .as_str()
+        .expect("a snapshot digest");
+    assert_eq!(specification.len(), 64);
+    assert_eq!(snapshot.len(), 64);
+
+    let summary = std::fs::read_to_string(root().join(COMMITTED_PROJECTION).join("SUMMARY.md"))
+        .expect("the committed summary");
+    assert!(
+        summary.contains(specification) && summary.contains(snapshot),
+        "the summary a reviewer opens names the same two inputs the document does"
+    );
+}
+
+#[test]
+fn infra_project_refuses_a_broken_specification_with_stable_codes_and_exit_1() {
+    let path = scratch("protocol-cli-projection-refusal").join("broken.yaml");
+    write(
+        &path,
+        "format: infra-spec/1\nname: broken\nexpectations:\n  - id: a\n    expect: \
+         image_tag_not_latest\n    remedy:\n      resources:\n        limits: {cpu: 500m}\n",
+    );
+    let output = protocol(&[
+        "infra",
+        "project",
+        "--spec",
+        printable(&path),
+        "--path",
+        OBSERVATION,
+    ]);
+    assert_eq!(code(&output), 1, "an unusable input is exit 1");
+    assert!(
+        stdout(&output).contains("INFRA-SPEC-009"),
+        "a remedy no kind can write is refused by code:\n{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn infra_project_leaves_a_file_it_did_not_write_alone_and_says_so() {
+    // A projection is written into a directory somebody owns. A verb that deleted what it did not
+    // produce would eat a hand-edited patch on its way to being committed, so it names it instead.
+    let out = scratch("protocol-cli-projection-stale");
+    write(&out.join("patches/hand-written.json"), "{}\n");
+    let output = protocol(&[
+        "infra",
+        "project",
+        "--spec",
+        EXPECTED,
+        "--path",
+        OBSERVATION,
+        "--out",
+        printable(&out),
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        out.join("patches/hand-written.json").exists(),
+        "the file this command did not write is still there"
+    );
+    assert!(
+        stderr(&output).contains("patches/hand-written.json"),
+        "and the command said so:\n{}",
+        stderr(&output)
+    );
+}

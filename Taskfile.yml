@@ -9,8 +9,9 @@ tasks:
   check:
     desc: >-
       Format check, lint, test, doc check, schema check, projection check, suite check,
-      observation check and synthesis check — everything CI runs. The last one needs the Go
-      toolchain, the wasm32-unknown-unknown Rust target and Node beside Rust's own.
+      observation check and synthesis check — everything CI runs. The observation check now also
+      covers the committed manifest projection. The last one needs the Go toolchain, the
+      wasm32-unknown-unknown Rust target and Node beside Rust's own.
     cmds:
       - task: fmt-check
       - task: clippy
@@ -95,22 +96,25 @@ tasks:
     cmds:
       - cargo xtask synth --check
 
-  # Three named files rather than a tree with an orphan scan: the task owns exactly
-  # `cluster.ir.json`, `simulation.json` and `drift.json`, and every input beside them —
+  # Three named files and one tree: the task owns exactly `cluster.ir.json`, `simulation.json`,
+  # `drift.json` and everything under `projection/`, and every input beside them —
   # `observation.json`, `observation.drifted.json`, `expected.yaml` — is a reviewed, hand-written
-  # fixture. `xtask/src/main.rs` documents the pairing.
+  # fixture. The fourth output gets an orphan scan the other three do not need, because a patch
+  # file for an object nothing patches any more would sit in the repository looking like a
+  # proposal somebody still stands behind. `xtask/src/main.rs` documents the pairing.
   infra:
     desc: >-
-      Regenerate the example cluster's three committed documents: the compiled IR, the
-      three-valued simulation of expected.yaml against it, and the drift between the two
-      observations.
+      Regenerate the example cluster's four committed outputs: the compiled IR, the three-valued
+      simulation of expected.yaml against it, the drift between the two observations, and the
+      projection tree — the patches, manifests and obligations that would close the simulation's
+      gaps.
     cmds:
       - cargo xtask infra
 
   infra-check:
     desc: >-
-      Fail if the committed observation IR, simulation or drift differs from what its inputs
-      produce.
+      Fail if the committed observation IR, simulation, drift or projection tree differs from what
+      its inputs produce — including a projection file nothing generates any more.
     cmds:
       - cargo xtask infra --check
 

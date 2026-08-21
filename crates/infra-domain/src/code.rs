@@ -13,7 +13,7 @@
 //!
 //! The registry is wider than this crate's own documents, deliberately, and it already was:
 //! `INFRA-IR-001`…`004` refuse a *persisted IR document*, which `infra-compiler` reads and this
-//! crate never sees. `INFRA-SPEC-001`…`008` join them for the *desired-state specification*
+//! crate never sees. `INFRA-SPEC-001`…`010` join them for the *desired-state specification*
 //! `infra-spec` reads. One enum, one `ALL`, one accumulator across the family — because the
 //! alternative is three parallel code registries and three parallel `ValidationErrors`, and a
 //! consumer that has to know which one a refusal came from before it can print it.
@@ -156,6 +156,18 @@ infra_codes! {
     /// `workload.replicas` would otherwise evaluate `Unknown` forever and read as "the snapshot
     /// cannot decide", which is a lie about a typo.
     SpecUnknownFact => "INFRA-SPEC-008",
+
+    /// An expectation carries a remedy its kind can never write.
+    ///
+    /// A remedy is the value a projection puts into a field the expectation found empty, so it
+    /// belongs only to the kinds that *name* such a field. A `resources:` remedy beside
+    /// `image_tag_not_latest` is data nothing will ever read, and carrying it silently would let
+    /// a specification claim a projection it does not get.
+    SpecRemedyNotApplicable => "INFRA-SPEC-009",
+
+    /// A remedy's own parameters cannot be written: it states nothing, it states a half the
+    /// expectation never asks for, or a port that is a quoted number.
+    SpecInvalidRemedy => "INFRA-SPEC-010",
 }
 
 impl fmt::Display for InfraCode {
@@ -282,9 +294,9 @@ mod tests {
     fn every_code_renders_in_the_infra_namespace_and_the_generated_list_holds_them_all() {
         assert_eq!(
             InfraCode::ALL.len(),
-            23,
-            "the catalogue is twenty-three codes: eleven observation refusals, four IR-document \
-             ones and eight desired-state-specification ones"
+            25,
+            "the catalogue is twenty-five codes: eleven observation refusals, four IR-document \
+             ones and ten desired-state-specification ones"
         );
         for code in InfraCode::ALL {
             assert!(

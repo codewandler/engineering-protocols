@@ -1,0 +1,24 @@
+{
+  "spec": {
+    "replicas": 2,
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "agent",
+            "resources": {
+              "limits": {
+                "cpu": "500m",
+                "memory": "256Mi"
+              },
+              "requests": {
+                "cpu": "25m",
+                "memory": "64Mi"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

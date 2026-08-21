@@ -251,3 +251,191 @@ fn a_specification_reads_from_json_too_because_json_is_yaml() {
     assert_eq!(spec.expectations.len(), 1);
     assert!(spec.expectation("a").is_some());
 }
+
+// -------------------------------------------------------------------------------------------
+// Remedies — `INFRA-SPEC-009` and `INFRA-SPEC-010`, and the rule that a remedy decides nothing.
+// -------------------------------------------------------------------------------------------
+
+#[test]
+fn a_remedy_beside_a_kind_that_never_finds_an_empty_field_is_refused_rather_than_carried() {
+    let refused = refusals(&document(
+        "  - id: a\n    expect: image_tag_not_latest\n    remedy:\n      resources:\n        \
+         limits: {cpu: 500m}\n",
+    ));
+    assert!(
+        refused.contains(InfraCode::SpecRemedyNotApplicable),
+        "a resources remedy on an image expectation is a patch that will never be written: \
+         {refused}"
+    );
+}
+
+#[test]
+fn a_probes_remedy_for_a_probe_the_expectation_never_asks_for_is_refused() {
+    let refused = refusals(&document(
+        "  - id: a\n    expect:\n      probes_declared: {liveness: true}\n    remedy:\n      \
+         probes:\n        readiness:\n          http_get: {path: /ready, port: 8080}\n",
+    ));
+    assert!(
+        refused.contains(InfraCode::SpecInvalidRemedy),
+        "an unasked-for probe can never become a gap, so it can never become a patch: {refused}"
+    );
+}
+
+#[test]
+fn a_remedy_that_states_nothing_is_refused_because_it_leaves_the_gap_where_it_was() {
+    for body in [
+        "  - id: a\n    expect: resources_declared\n    remedy:\n      resources: {}\n",
+        "  - id: a\n    expect:\n      probes_declared: {liveness: true}\n    remedy:\n      \
+         probes: {}\n",
+    ] {
+        let refused = refusals(&document(body));
+        assert!(
+            refused.contains(InfraCode::SpecInvalidRemedy),
+            "an empty remedy is not a remedy: {refused}"
+        );
+    }
+}
+
+#[test]
+fn a_probe_remedy_states_exactly_one_handler_and_neither_is_refused_the_same_way_as_both() {
+    for handlers in [
+        "          initial_delay_seconds: 5\n",
+        "          http_get: {path: /healthz, port: 8080}\n          tcp_socket: {port: 8080}\n",
+    ] {
+        let refused = refusals(&document(&format!(
+            "  - id: a\n    expect:\n      probes_declared: {{liveness: true}}\n    remedy:\n      \
+             probes:\n        liveness:\n{handlers}"
+        )));
+        assert!(
+            refused.contains(InfraCode::SpecInvalidRemedy),
+            "a probe does one thing: {refused}"
+        );
+    }
+}
+
+#[test]
+fn a_quoted_number_is_refused_as_a_port_name_because_it_is_one() {
+    let refused = refusals(&document(
+        "  - id: a\n    expect:\n      probes_declared: {liveness: true}\n    remedy:\n      \
+         probes:\n        liveness:\n          tcp_socket: {port: \"8080\"}\n",
+    ));
+    assert!(
+        refused.contains(InfraCode::SpecInvalidRemedy),
+        "`\"8080\"` names a port called `8080`, and a container that declares none never becomes \
+         ready: {refused}"
+    );
+}
+
+#[test]
+fn a_remedy_that_validates_is_carried_on_the_expectation_and_a_document_without_one_carries_none() {
+    let with = read_spec(&document(
+        "  - id: a\n    expect: resources_declared\n    remedy:\n      resources:\n        \
+         requests: {cpu: 25m}\n        limits: {cpu: 500m, memory: 256Mi}\n",
+    ))
+    .expect("the document is valid");
+    let stated = with.expectations[0]
+        .remedy
+        .as_ref()
+        .expect("the remedy survived validation");
+    let (requests, limits) = stated.resource_quantities();
+    assert_eq!(requests["cpu"], "25m");
+    assert_eq!(limits["memory"], "256Mi");
+
+    let without = read_spec(&document("  - id: a\n    expect: resources_declared\n"))
+        .expect("the document is valid");
+    assert!(
+        without.expectations[0].remedy.is_none(),
+        "a remedy is never invented for an expectation that states none"
+    );
+}
+
+#[test]
+fn a_remedy_changes_no_verdict_because_nothing_evaluates_one() {
+    // The rule that makes a remedy safe to add to a committed specification: it is written into a
+    // patch, never read by the evaluator. Two documents differing only in remedies must simulate
+    // to the same bytes, or `simulation.json` has started depending on a projection's input.
+    let ir = support::example_ir();
+    let bare = read_spec(&document(
+        "  - id: a\n    scope: {namespace: shop}\n    expect: resources_declared\n",
+    ))
+    .expect("valid");
+    let remedied = read_spec(&document(
+        r"  - id: a
+    scope: {namespace: shop}
+    expect: resources_declared
+    remedy:
+      resources:
+        requests: {cpu: 25m}
+        limits: {cpu: 500m}
+",
+    ))
+    .expect("valid");
+
+    assert_ne!(
+        bare.digest(),
+        remedied.digest(),
+        "the two specifications differ, so their digests must too — otherwise this test compares \
+         one document with itself"
+    );
+    assert_eq!(
+        infra_spec::simulate(&bare, &ir).to_json(),
+        infra_spec::simulate(&remedied, &ir).to_json(),
+        "a remedy is what a projection writes, never what an evaluator reads"
+    );
+}
+
+#[test]
+fn the_committed_example_specification_simulates_identically_with_and_without_its_remedies() {
+    // The same rule, on the document the gate drift-checks: `simulation.json` must not move
+    // because somebody added a remedy to `expected.yaml`.
+    let ir = support::example_ir();
+    let spec = support::example_spec();
+    assert!(
+        spec.expectations
+            .iter()
+            .any(|expectation| expectation.remedy.is_some()),
+        "the committed fixture is meant to carry remedies; without one this test compares two \
+         identical documents"
+    );
+
+    let text = support::read("examples/k3d-dev-cluster/expected.yaml");
+    let stripped = strip_remedies(&text);
+    let without = read_spec(&stripped).expect("the stripped specification is still valid");
+    assert!(
+        without
+            .expectations
+            .iter()
+            .all(|expectation| expectation.remedy.is_none()),
+        "the strip left a remedy behind, so this test proves nothing"
+    );
+    assert_eq!(
+        infra_spec::simulate(&spec, &ir).to_json(),
+        infra_spec::simulate(&without, &ir).to_json()
+    );
+}
+
+/// Removes every `remedy:` block from a specification's text, by indentation.
+///
+/// Textual because the point is to compare the *committed file* with itself minus one feature; a
+/// structural strip would go through the validated type this test is checking.
+fn strip_remedies(text: &str) -> String {
+    let mut kept = Vec::new();
+    let mut dropping = None;
+    for line in text.lines() {
+        let indent = line.len() - line.trim_start().len();
+        if let Some(depth) = dropping {
+            if line.trim().is_empty() || indent > depth {
+                continue;
+            }
+            dropping = None;
+        }
+        if line.trim_start().starts_with("remedy:") {
+            dropping = Some(indent);
+            continue;
+        }
+        kept.push(line);
+    }
+    let mut rendered = kept.join("\n");
+    rendered.push('\n');
+    rendered
+}

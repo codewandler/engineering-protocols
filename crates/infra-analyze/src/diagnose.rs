@@ -487,10 +487,13 @@ fn rule_orphaned_claim(ir: &InfraIr, graph: &InfraGraph, findings: &mut Vec<Find
 /// Whether a disruption budget's selector covers a label set, per `policy/v1`: an empty
 /// selector selects everything in the budget's namespace, a non-empty one is an AND over its
 /// `matchLabels`.
-pub(crate) fn pdb_covers(
-    selector: &BTreeMap<String, String>,
-    labels: &BTreeMap<String, String>,
-) -> bool {
+///
+/// Public because coverage has exactly one definition in this workspace. Diagnosis reads it,
+/// the property sheet reads it, the invariant miner reads it, and `infra-project` reads it before
+/// writing a budget — a second spelling there could emit a manifest that this one says covers
+/// nothing.
+#[must_use]
+pub fn pdb_covers(selector: &BTreeMap<String, String>, labels: &BTreeMap<String, String>) -> bool {
     selector
         .iter()
         .all(|(label, value)| labels.get(label) == Some(value))
