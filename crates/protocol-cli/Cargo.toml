@@ -13,6 +13,11 @@ name = "protocol"
 path = "src/main.rs"
 
 [dependencies]
+
+# `protocol artifact`. The store, the frontmatter and the lifecycle-checked status move all live in
+# the library, so the command line is a shell over it: a harness calling `MarkdownStore::open(dir)`
+# and `PlanningDocument::move_status` gets the same refusal, naming the same legal targets.
+aep-backend-markdown.workspace = true
 aep-backend-memory.workspace = true
 aep-conformance.workspace = true
 aep-contract.workspace = true

@@ -10,6 +10,12 @@ authors.workspace = true
 
 [dependencies]
 aep-domain.workspace = true
+
+# The planning store's frontmatter is published as a schema from here, the way every other document
+# schema is: one generator, one drift check, one index. The dependency runs schema → backend rather
+# than the reverse, because a backend that had to know about schema generation could not be swapped
+# out — and the frontmatter is that backend's private format, deliberately absent from `aep-domain`.
+aep-backend-markdown.workspace = true
 ess-domain.workspace = true
 serde.workspace = true
 serde_json.workspace = true

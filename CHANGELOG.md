@@ -33,6 +33,56 @@ belongs in the commit message or in `docs/design/`.
   § 4 is the design, which is architecture with six named open problems and is explicitly **not**
   accepted for build.
 
+### Added
+
+- **`protocol artifact` — planning artifacts live in your repository, and a status move is checked
+  before it happens (harness wave 1).** Epics, stories, tasks and initiatives are markdown files
+  under `.engineering/planning/<kind>/<slug>.md`: frontmatter the CLI owns, a body you own. Ten
+  verbs — `new`, `move`, `relate`, `list`, `board`, `graph`, `validate`, `kinds`, `relations`,
+  `lifecycle`.
+
+  **A refused move tells you where you can actually go.** `move story:credential-store --to
+  implemented` from `draft` does not print "illegal transition"; it prints that `implemented` is not
+  reachable from `draft` and names the statuses that are. A refusal that sends you off to read a
+  lifecycle file is a refusal that gets guessed around, which is the one outcome a validated
+  lifecycle exists to prevent.
+
+  **`validate` reports everything, not the first thing.** A store with four unresolvable relation
+  targets reports four, each naming the artifact and the edge, and exits 1. Run it after a batch of
+  edits; it is also what catches a status somebody hand-edited into a file, which a file store
+  cannot prevent and this is honest about.
+
+  **An id is declared and never allocated.** An artifact's id is `<kind>:<slug>` and must agree with
+  its path. There is no counter, because two branches that both ask a counter for the next number
+  both get it, both merge cleanly, and the store then holds two artifacts with one id — a corruption
+  git cannot see, because nothing was in conflict. Slugs collide only when two people meant the same
+  thing, and then git conflicts on the path. A consequence worth having: `story:dev-399` is a legal
+  id, so a team whose tickets are named elsewhere can keep the name.
+
+  **No timestamps in the file.** Git already knows when the file changed and who changed it, and it
+  cannot be made to say otherwise by editing a line. The cost is real and stated: "how long has this
+  been in draft" has no answer inside the store, and `git log` is the answer until the journal
+  milestone.
+
+  The on-disk format, `aep.planning-md/1`, belongs to `aep-backend-markdown` — `aep-domain` gained
+  no types for it, and no other backend is obliged to store anything this way. It is described all
+  the same: `schemas/generated/planning-document.schema.json` is generated from the parser's own
+  type, so the published description of the format cannot drift from the code that refuses a bad
+  one. The `format:` line is optional and defaults to `aep.planning-md/1`, so a file you write by
+  hand does not need it. Unknown frontmatter keys are preserved rather than stripped, so another
+  tool writing into the same file does not lose its fields.
+
+  This is a store and **not** an implementation of the storage contract: it writes through its own
+  functions rather than through `CommandService`, so the sixteen conformance suites do not run
+  against it and it has no journal or audit trail yet. Both facts, and what closes them, are in
+  [`docs/plan/gap-register.md`](docs/plan/gap-register.md).
+
+- **Three new artifact lifecycles: `epic`, `task` and `initiative`.** Each mirrors the ladder
+  `story` already had — `draft → proposed → active → implemented`, with `rejected` and `archived`
+  where they belong — so all four planning kinds move by one set of rules that an operator learns
+  once. Every status word already existed in the vocabulary, so nothing else changed to make room
+  for them.
+
 ## [0.7.1-infra-waves-1-4] — 2026-08-21
 
 ### Added

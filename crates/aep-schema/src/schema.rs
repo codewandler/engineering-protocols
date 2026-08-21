@@ -5,6 +5,7 @@
 //! Rust types the engine executes, so a schema cannot describe a document the engine would
 //! reject on structure — the two cannot drift.
 
+use aep_backend_markdown::frontmatter::RawPlanningFrontmatter;
 use aep_domain::action::ActionRequest;
 use aep_domain::artifact::ArtifactLifecycle;
 use aep_domain::event::EventEnvelope;
@@ -99,6 +100,11 @@ pub fn generated_schemas() -> Vec<GeneratedSchema> {
             "ess",
             "one file of an executable system specification",
         ),
+        entry::<RawPlanningFrontmatter>(
+            "RawPlanningFrontmatter",
+            "planning-document",
+            "the frontmatter of one markdown planning document",
+        ),
     ]
 }
 
@@ -129,6 +135,7 @@ mod tests {
             "action-request.schema.json",
             "event.schema.json",
             "ess.schema.json",
+            "planning-document.schema.json",
         ] {
             assert!(filenames.contains(&expected), "{expected} is not published");
         }

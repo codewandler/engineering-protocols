@@ -551,7 +551,21 @@ impl ArtifactKind {
 
     /// `true` when this kind belongs to intent decomposition rather than to engineering output.
     ///
-    /// AEP models these but does not own them: they usually live in a planning system.
+    /// A vision, a PRD, an initiative, an epic, a story and a task are the layer where somebody
+    /// decides *what should happen*; everything else in this vocabulary is a record of engineering
+    /// having happened. That is the distinction, and it is the whole of it.
+    ///
+    /// **It is no longer an ownership boundary.** This used to say AEP models these kinds but does
+    /// not own them, because they usually live in a planning system — and that sentence stopped
+    /// being true when `aep-backend-markdown` gave AEP a first-party store for them: a directory of
+    /// markdown files under `.engineering/planning/`, with the same lifecycles, the same graph and
+    /// the same validation as everything else. A team can now keep its epics and stories here.
+    ///
+    /// A team can equally keep them in Linear or Jira and point at them from a manifest —
+    /// `examples/development-passkeys` is that arrangement and stays that way deliberately. Which
+    /// is why the predicate is still useful and still means only what it says: it marks a layer, so
+    /// a caller can ask "is this intent or is this output?" without a hard-coded list. It does not
+    /// say where the document lives, and nothing should read it as though it did.
     pub fn is_planning(&self) -> bool {
         matches!(
             self,

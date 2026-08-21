@@ -181,16 +181,32 @@ struct ExecutionArgs {
 
 /// What the entity and audit surface needs in order to answer.
 ///
-/// The manifest is required because the backend is in-memory: without one there is nothing to
-/// answer about.
+/// A source of artifacts is required because the backend is in-memory: without one there is
+/// nothing to answer about. There are two, and exactly one must be given.
+///
+/// * `--artifacts` — a manifest, which is how a project that keeps its planning somewhere else
+///   points at what exists. `examples/development-passkeys` is that arrangement: the stories live
+///   in Linear and the manifest names them.
+/// * `--planning` — a markdown planning store, which is how a project that keeps its planning
+///   *here* says the same thing. The store is read, every document becomes an artifact located at
+///   its own file, and the graph that comes out is fed to exactly the same seeder.
+///
+/// Neither is privileged, and the entity surface cannot tell them apart once seeded — which is the
+/// point of routing both through [`ArtifactGraph`] rather than teaching this command two sources.
 #[derive(Debug, Args)]
+#[command(group(
+    clap::ArgGroup::new("artifact-source").required(true).args(["artifacts", "planning"])
+))]
 struct BackendArgs {
-    /// The document tree; a relative `--artifacts` path is resolved against it.
+    /// The document tree; a relative `--artifacts` or `--planning` path is resolved against it.
     #[arg(long, default_value = ".")]
     root: PathBuf,
     /// The artifact manifest to seed the in-memory backend from.
     #[arg(long)]
-    artifacts: PathBuf,
+    artifacts: Option<PathBuf>,
+    /// A markdown planning store to seed the in-memory backend from, instead of a manifest.
+    #[arg(long)]
+    planning: Option<PathBuf>,
     /// The organisation the seeded locators live under.
     #[arg(long, default_value = "local")]
     organisation: String,
@@ -256,7 +272,36 @@ enum Command {
         #[arg(long)]
         action: Option<String>,
     },
-    /// Ask the reference backend about the entities an artifact manifest describes.
+    /// Plan work in the markdown planning store: epics, stories, tasks and how they relate.
+    ///
+    /// The store is a directory of markdown files — one artifact per file, YAML frontmatter, free
+    /// markdown body — under `.engineering/planning/` by default. It is the first durable store in
+    /// this repository, and it is durable in the way that matters for a plan: the diff of a status
+    /// move is one line, and `git log` already knows who made it.
+    ///
+    /// # These verbs write, and they have no `--out`
+    ///
+    /// A deliberate departure from `ess generate`, `ess synthesize` and `ess conform synthesize`,
+    /// which all refuse to write without `--out` because a verb that scatters files over a working
+    /// tree the first time somebody tries it is a verb nobody tries twice. That argument does not
+    /// reach here, and the difference is worth stating rather than leaving as an inconsistency:
+    ///
+    /// * those verbs write a **tree** whose shape the caller cannot predict; these write **exactly
+    ///   one file**, at a path the id determines — `story:passkey-login` is
+    ///   `story/passkey-login.md`, always;
+    /// * they write into whatever directory is passed; these write inside a directory that was
+    ///   **opted into**, either by `--store` or by the project's own `.engineering/planning/`;
+    /// * and `protocol artifact new` is not a preview of anything. A plan item you did not want is
+    ///   deleted with `rm`, which is not true of a synthesised workspace.
+    ///
+    /// `new` still refuses to overwrite an existing document, which is the part of the `--out`
+    /// argument that does apply.
+    Artifact {
+        /// What to do with the plan.
+        #[command(subcommand)]
+        command: planning::ArtifactCommand,
+    },
+    /// Ask the reference backend about the entities an artifact manifest or planning store holds.
     Entity {
         /// Which question to ask about them.
         #[command(subcommand)]
@@ -264,10 +309,10 @@ enum Command {
     },
     /// Show the audit trail, oldest first.
     ///
-    /// The backend is in-memory, so this run seeds it from `--artifacts` and then reads: what you
-    /// see is the seeding itself, not a durable past.
+    /// The backend is in-memory, so this run seeds it from `--artifacts` or `--planning` and then
+    /// reads: what you see is the seeding itself, not a durable past.
     Audit {
-        /// Where the manifest is and how to render.
+        /// Where the artifacts come from and how to render.
         #[command(flatten)]
         backend: BackendArgs,
         /// Only records from this activity; the seeding run is `seed-manifest`.
@@ -282,10 +327,10 @@ enum Command {
     },
     /// Describe an entity type: what it is, whether it may change, and what may target it.
     ///
-    /// This is how a harness asks what a design *is* rather than hard-coding it. The manifest is
+    /// This is how a harness asks what a design *is* rather than hard-coding it. The source is
     /// still seeded, because the answer comes from the same backend that holds the entities.
     Describe {
-        /// Where the manifest is and how to render.
+        /// Where the artifacts come from and how to render.
         #[command(flatten)]
         backend: BackendArgs,
         /// The type to describe, such as `aep.design/v1`.
@@ -329,17 +374,19 @@ enum Command {
 
 /// The questions the entity surface answers.
 ///
-/// Every one of them seeds an in-memory backend from `--artifacts` and then reads it back. Nothing
+/// Every one of them seeds an in-memory backend from `--artifacts` or `--planning` and then reads
+/// it back. Whichever source is given, the artifacts arrive as one [`ArtifactGraph`] and nothing
+/// downstream can tell which it was. Nothing
 /// here is durable: `protocol entity history` shows this run's seeding, and running it again
 /// produces the same answer rather than a longer history.
 #[derive(Debug, Subcommand)]
 enum EntityCommand {
-    /// List every entity the manifest seeds, with its type, locator and revision.
+    /// List every entity the source seeds, with its type, locator and revision.
     ///
-    /// The backend is in-memory: this run seeds it from `--artifacts` and then answers. Every
-    /// entity here was created moments ago by this process.
+    /// The backend is in-memory: this run seeds it from `--artifacts` or `--planning` and then
+    /// answers. Every entity here was created moments ago by this process.
     List {
-        /// Where the manifest is and how to render.
+        /// Where the artifacts come from and how to render.
         #[command(flatten)]
         backend: BackendArgs,
         /// Only entities of this type, such as `aep.design/v1`.
@@ -348,10 +395,10 @@ enum EntityCommand {
     },
     /// Print one entity, addressed by locator or by identity.
     ///
-    /// The backend is in-memory: this run seeds it from `--artifacts` and then answers. Exits 1
-    /// when nothing the manifest seeds is addressed by what was asked for.
+    /// The backend is in-memory: this run seeds it from `--artifacts` or `--planning` and then
+    /// answers. Exits 1 when nothing the source seeds is addressed by what was asked for.
     Get {
-        /// Where the manifest is and how to render.
+        /// Where the artifacts come from and how to render.
         #[command(flatten)]
         backend: BackendArgs,
         /// A locator such as `ep://local/manifest/design/passkeys-auth`, or an entity identity.
@@ -362,7 +409,7 @@ enum EntityCommand {
     /// The backend is in-memory: what this shows is *the seeding*, not a durable past. Every
     /// entity is therefore at revision 1, and running the command again does not lengthen it.
     History {
-        /// Where the manifest is and how to render.
+        /// Where the artifacts come from and how to render.
         #[command(flatten)]
         backend: BackendArgs,
         /// A locator or an entity identity.
@@ -370,10 +417,10 @@ enum EntityCommand {
     },
     /// Show what an entity points at, or — with `--incoming` — what points at it.
     ///
-    /// The backend is in-memory: this run seeds it from `--artifacts` and then answers. The edges
-    /// are the manifest's own `relations`, stored as relation commands.
+    /// The backend is in-memory: this run seeds it from `--artifacts` or `--planning` and then
+    /// answers. The edges are the source's own `relations`, stored as relation commands.
     Relations {
-        /// Where the manifest is and how to render.
+        /// Where the artifacts come from and how to render.
         #[command(flatten)]
         backend: BackendArgs,
         /// A locator or an entity identity.
@@ -409,15 +456,26 @@ fn write_out(text: &str, newline: bool) {
 }
 
 /// `println!`, but a closed pipe ends the program quietly.
+///
+/// Written `crate::write_out` rather than `write_out` so the macro works from a submodule too. A
+/// `macro_rules!` macro is textually scoped: it is in scope for everything declared after it,
+/// including [`planning`], and an unqualified call inside it would resolve against *that* module's
+/// namespace rather than this one's.
 macro_rules! outln {
-    () => { write_out("", true) };
-    ($($arg:tt)*) => { write_out(&format!($($arg)*), true) };
+    () => { crate::write_out("", true) };
+    ($($arg:tt)*) => { crate::write_out(&format!($($arg)*), true) };
 }
 
 /// `print!`, but a closed pipe ends the program quietly.
 macro_rules! out {
-    ($($arg:tt)*) => { write_out(&format!($($arg)*), false) };
+    ($($arg:tt)*) => { crate::write_out(&format!($($arg)*), false) };
 }
+
+// Declared here, below the macros, and not at the top with the `use` statements: `macro_rules!` is
+// textually scoped, so a module declared above this point could not call `outln!`. The first module
+// split of this file, and the criterion for the next one is the same as this one's — a verb family
+// with its own store, its own vocabulary and no shared state with the rest.
+mod planning;
 
 fn main() -> ExitCode {
     match run() {
@@ -448,6 +506,7 @@ fn run() -> Result<ExitCode> {
         } => inspect(&root, reference.as_deref(), format),
         Command::Evaluate(args) => evaluate(&args, None),
         Command::Explain { execution, action } => evaluate(&execution, action.as_deref()),
+        Command::Artifact { command } => planning::run(command),
         Command::Entity { command } => entity(&command),
         Command::Audit {
             backend,
@@ -3466,12 +3525,26 @@ fn describe(args: &BackendArgs, entity_type: &str) -> Result<ExitCode> {
 /// Every invocation starts from nothing: the backend keeps no state between runs, which is why the
 /// seeding is visible in the history and the audit trail rather than hidden.
 fn seeded(args: &BackendArgs) -> Result<MemoryBackend> {
-    let path = if args.artifacts.is_absolute() {
-        args.artifacts.clone()
-    } else {
-        args.root.join(&args.artifacts)
+    let (source, graph) = match (&args.artifacts, &args.planning) {
+        (Some(manifest), None) => {
+            let path = resolved(&args.root, manifest);
+            let graph = read_artifacts(&path)?;
+            (path, graph)
+        }
+        (None, Some(store)) => {
+            let path = resolved(&args.root, store);
+            let graph = planning::graph_at(&path)?;
+            (path, graph)
+        }
+        // Unreachable through the command line: the `artifact-source` group makes clap refuse both
+        // and neither. Spelled out rather than `unreachable!`, because the group and this match are
+        // two declarations of one rule and nothing checks that they agree.
+        _ => bail!(
+            "give exactly one of `--artifacts <manifest>` and `--planning <store>`: the backend \
+             is in-memory, so it needs one source of artifacts and cannot merge two"
+        ),
     };
-    let graph = read_artifacts(&path)?;
+
     let actor: ActorRef = SEED_ACTOR
         .parse()
         .map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -3486,8 +3559,17 @@ fn seeded(args: &BackendArgs) -> Result<MemoryBackend> {
         &actor,
     )
     .map_err(|error| anyhow::anyhow!("{error}"))
-    .with_context(|| format!("seeding the backend from {}", path.display()))?;
+    .with_context(|| format!("seeding the backend from {}", source.display()))?;
     Ok(backend)
+}
+
+/// Resolves a relative path against the document tree, and leaves an absolute one alone.
+fn resolved(root: &Path, path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        root.join(path)
+    }
 }
 
 /// Resolves a locator or a raw identity to an entity that exists.

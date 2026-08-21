@@ -1,0 +1,255 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawPlanningFrontmatter",
+  "description": "The frontmatter of a planning document, as parsed.\n\nDeliberately permissive about *shape* and strict about nothing: every rule this format has is checked by the [`TryFrom`] into [`PlanningFrontmatter`], so a document with two problems is reported once with both.",
+  "type": "object",
+  "required": [
+    "id",
+    "kind",
+    "status"
+  ],
+  "properties": {
+    "format": {
+      "description": "The format version. Defaults to [`PLANNING_FORMAT`]; any other value is refused.",
+      "default": "aep.planning-md/1",
+      "type": "string"
+    },
+    "id": {
+      "description": "The artifact's identifier, such as `story:passkey-login`.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ArtifactId"
+        }
+      ]
+    },
+    "kind": {
+      "description": "What kind of artifact it is. Aliases such as `adr` are accepted.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ArtifactKind"
+        }
+      ]
+    },
+    "owner": {
+      "description": "Who owns it.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "relations": {
+      "description": "Its outgoing edges, each a single-entry mapping such as `{derived_from: epic:passwordless}`.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ArtifactRelation"
+      }
+    },
+    "revision": {
+      "description": "Which revision of this document this is. Bumped by every mutating operation.",
+      "default": 1,
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "status": {
+      "description": "Where its lifecycle has got to.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ArtifactStatus"
+        }
+      ]
+    },
+    "summary": {
+      "description": "One-line summary.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tags": {
+      "description": "Free-form labels.",
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "title": {
+      "description": "Its title, for a listing.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "definitions": {
+    "ArtifactId": {
+      "description": "Artifact identifier, written `<namespace>:<name>`.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "ArtifactKind": {
+      "description": "Artifact kind in kebab-case; the named vocabulary is listed in `examples`, and any other kebab-case name is accepted as an organisation-specific kind.",
+      "examples": [
+        "vision",
+        "product-requirements",
+        "initiative",
+        "epic",
+        "story",
+        "task",
+        "specification",
+        "acceptance-criteria",
+        "design",
+        "feature-design",
+        "component-design",
+        "architecture-design",
+        "api-design",
+        "data-design",
+        "architecture-decision-record",
+        "test-plan",
+        "evaluation-plan",
+        "verification-report",
+        "review-result",
+        "approval-record",
+        "release-plan",
+        "migration-plan",
+        "runbook",
+        "incident-report",
+        "postmortem",
+        "executable-system-specification"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ArtifactRelation": {
+      "description": "A single-entry mapping from a relation name to an artifact reference, such as `{designs: spec:passkeys-auth}`.",
+      "examples": [
+        {
+          "informed_by": "design:passkeys-auth"
+        },
+        {
+          "derived_from": "design:passkeys-auth"
+        },
+        {
+          "decomposes": "design:passkeys-auth"
+        },
+        {
+          "specifies": "design:passkeys-auth"
+        },
+        {
+          "designs": "design:passkeys-auth"
+        },
+        {
+          "implements": "design:passkeys-auth"
+        },
+        {
+          "decides": "design:passkeys-auth"
+        },
+        {
+          "reviews": "design:passkeys-auth"
+        },
+        {
+          "verifies": "design:passkeys-auth"
+        },
+        {
+          "blocks": "design:passkeys-auth"
+        },
+        {
+          "depends_on": "design:passkeys-auth"
+        },
+        {
+          "supersedes": "design:passkeys-auth"
+        },
+        {
+          "delivers": "design:passkeys-auth"
+        }
+      ],
+      "type": "object",
+      "maxProperties": 1,
+      "minProperties": 1
+    },
+    "ArtifactStatus": {
+      "description": "Where an artifact's lifecycle has got to.\n\nThis is independent of workflow state: a design can be `approved` while the task that consumes it is still in `implement`.",
+      "oneOf": [
+        {
+          "description": "Being written.",
+          "type": "string",
+          "enum": [
+            "draft"
+          ]
+        },
+        {
+          "description": "Put forward for a decision.",
+          "type": "string",
+          "enum": [
+            "proposed"
+          ]
+        },
+        {
+          "description": "Under review.",
+          "type": "string",
+          "enum": [
+            "in_review"
+          ]
+        },
+        {
+          "description": "Reviewed and agreed.",
+          "type": "string",
+          "enum": [
+            "approved"
+          ]
+        },
+        {
+          "description": "Decided and in force; the ADR spelling of `approved`.",
+          "type": "string",
+          "enum": [
+            "accepted"
+          ]
+        },
+        {
+          "description": "Reviewed and turned down.",
+          "type": "string",
+          "enum": [
+            "rejected"
+          ]
+        },
+        {
+          "description": "Current and in use.",
+          "type": "string",
+          "enum": [
+            "active"
+          ]
+        },
+        {
+          "description": "Realised in the system.",
+          "type": "string",
+          "enum": [
+            "implemented"
+          ]
+        },
+        {
+          "description": "Replaced by a later artifact.",
+          "type": "string",
+          "enum": [
+            "superseded"
+          ]
+        },
+        {
+          "description": "Kept for the record only.",
+          "type": "string",
+          "enum": [
+            "archived"
+          ]
+        }
+      ]
+    },
+    "Node": {
+      "description": "Any JSON/YAML value: null, boolean, number, string, array or object."
+    }
+  }
+}

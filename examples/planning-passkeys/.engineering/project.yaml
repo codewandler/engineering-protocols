@@ -1,0 +1,12 @@
+version: aep.project/1
+
+# The protocol tree is this repository itself, three levels up from `.engineering`. A real adopting
+# project points at a sibling checkout or a vendored copy; only `protocols` may leave the project,
+# which is why it is the only path here that goes upwards.
+protocol: adp/1
+profile: development.standard
+protocols: ../../..
+
+summary: >-
+  The passkeys work, planned in the repository: one initiative, one epic, three stories and two
+  tasks, kept as markdown under .engineering/planning/.

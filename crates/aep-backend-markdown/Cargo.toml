@@ -1,0 +1,19 @@
+[package]
+name = "aep-backend-markdown"
+description = "A markdown planning store for AEP artifacts: one file per artifact, YAML frontmatter, git as the log."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+aep-domain.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+schemars.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
