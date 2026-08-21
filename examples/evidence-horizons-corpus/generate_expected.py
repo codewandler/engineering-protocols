@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Generate expected.json by running a KNOWN-GOOD parser over the corpus.
 
-The expectations are not hand-written. They are produced by the implementation that has been in
-production against a real corpus for weeks and has had four separate blind spots beaten out of it —
-wrapping, quote blocks, `<br>` in table cells, and prose-in-the-token. Hand-writing them would encode
-my reading of the rules rather than the rules.
+The expectations are not hand-written. They are produced by an implementation that has been in
+production against a real corpus for months and has had SEVEN separate blind spots beaten out of it —
+three found in production, four found by this corpus. Hand-writing them would encode one reading of
+the rules rather than the rules.
 
   python3 generate_expected.py --impl /path/to/check-verify.py [--today 2026-09-01]
 
@@ -45,9 +45,24 @@ def main():
     today = datetime.date.fromisoformat(args.today)
 
     # A lower bound on what a human would call an annotation, independent of any parser. Comparing
-    # this against what the parser returned is the whole reason the reference's three remaining blind
-    # spots were found at all — so it is emitted per file, not just totalled.
+    # this against what the parser returned is the whole reason four blind spots were found at all —
+    # so it is emitted per file, not just totalled. `missed_by_reference: 0` everywhere is the target.
     raw_pattern = __import__("re").compile(r"Verify:\s*(\d{4}-\d{2}-\d{2})\s*—")
+    fence_pattern = __import__("re").compile(r"^\s*```")
+
+    def strip_fences(text):
+        """Blank fenced blocks, keeping line count. Implemented HERE rather than imported from the
+        implementation under test: the fixture must be able to judge an implementation that has not
+        thought about fences yet, and one that counts its own examples as claims should fail this
+        corpus rather than agree with itself."""
+        out, inside = [], False
+        for line in text.split("\n"):
+            if fence_pattern.match(line):
+                inside = not inside
+                out.append("")
+                continue
+            out.append("" if inside else line)
+        return "\n".join(out)
 
     records = []
     coverage = {}
@@ -55,7 +70,7 @@ def main():
         name = os.path.basename(path)
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
-        raw_hits = len(raw_pattern.findall(text))
+        raw_hits = len(raw_pattern.findall(strip_fences(text)))
         verifies = impl.parse_verifies(text)
         coverage[name] = {
             "raw_occurrences": raw_hits,
@@ -102,25 +117,23 @@ def main():
         "warn_days": WARN_DAYS,
         "default_horizon_when_malformed": impl.DEFAULT_HORIZON,
         "generated_by": "generate_expected.py against a reference implementation",
-        # READ THIS BEFORE USING `records` AS A TARGET. The records below are what the reference
-        # implementation produces, which is NOT the same as what a correct implementation should
-        # produce. `corpus/06-reference-gaps.md` holds four well-formed annotations the reference
-        # finds none of; `01-forms.md` holds one deliberate near-miss it correctly rejects. Treat
-        # `records` as a differential baseline and `coverage` as the conformance target.
-        "reference_is_not_ground_truth": True,
+        # Was True while the reference had four blind spots this corpus found. It now parses all
+        # of them, so these records ARE the target — but the flag is kept as a field rather than
+        # deleted, because the next position nobody has thought of will flip it back.
+        "reference_is_not_ground_truth": False,
         "known_reference_gaps": {
-            "corpus/06-reference-gaps.md": (
-                "4 well-formed annotations, 1 found by the reference. Three mechanisms: (1) a "
-                "`Verify:` ending a table cell with no preceding `<br>`; (2) the second of two "
-                "consecutive table rows each carrying `<br>Verify:`, absorbed into the first's body "
-                "with its date and horizon both lost; (3) an annotation wrapped in inline-code "
-                "backticks."
+            "status": (
+                "None outstanding. Four positions were found by this corpus and fixed upstream on "
+                "2026-08-21: (1) a `Verify:` ending a table cell with no preceding `<br>`; (2) the "
+                "second of two consecutive table rows each carrying `<br>Verify:`, absorbed into the "
+                "first's body with its date and horizon both lost; (3) an annotation wrapped in "
+                "inline-code backticks; (4) the same, mid-line after prose. A fifth rule came with "
+                "them: an annotation inside a fenced code block is an example and is excluded from "
+                "both parsing and the coverage count."
             ),
-            "corpus/03-hidden-positions.md": (
-                "7 well-formed annotations, 5 found. The two misses are mechanisms (1) and (2) "
-                "above, occurring incidentally in a file written to test the three positions the "
-                "reference already handles. That is the point worth taking: the gaps were not "
-                "sought, they fell out of writing a realistic table."
+            "why_this_field_stays": (
+                "Positions 1-3 of the same class were each found in production, fixed, and believed "
+                "complete before 4-7 turned up. Assume there is another one."
             ),
         },
         "coverage": coverage,

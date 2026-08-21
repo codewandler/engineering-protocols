@@ -1,13 +1,17 @@
-# Widget Foundry — three positions a production parser was still blind to
+# Widget Foundry — four positions a production parser was blind to, and one it must ignore
 
-> ⚠️ All four annotations in this file are well-formed and SHOULD be found. The reference
-> implementation this fixture's expectations were generated from finds exactly ONE — the first row of
-> Gap 2, whose neighbour it then swallows.
+> Every `Verify:` in this file outside the fenced block is well-formed and MUST be found. The one
+> inside the fence MUST NOT be — it is an example, not a claim.
 >
-> These are not invented edge cases. All three were discovered by running that implementation over
-> this fixture, and then confirmed against its real corpus: **15 of 160 live-state annotations —
-> 9.4% — were invisible to the gate whose entire job is to make an unchecked claim visible.**
-> That gate had already been fixed three times for three other positions in the same class.
+> These are not invented edge cases. All four positions were discovered by running a production
+> implementation over this fixture, and then confirmed against its real corpus: **15 of 160 live-state
+> annotations — 9.4% — were invisible to the gate whose entire job is to make an unchecked claim
+> visible.** That gate had already been fixed three times for three other positions in the same class,
+> and was believed complete each time.
+>
+> **They are fixed upstream now** — the reference finds all 42 annotations in this corpus. The file is
+> kept as the regression that stops them coming back, which is the only reason positions 1–3 are worth
+> having written down too.
 > Last updated: 2026-08-30
 
 ## Gap 1 — a `Verify:` at the end of a long table cell, with no `<br>` before it
@@ -48,6 +52,30 @@ it to stand out. The two are indistinguishable to the parser, which sees a line 
 backtick and moves on.
 
 `Verify: 2026-08-30 — the escapement rework is enabled in atlas; read from the deployment. (horizon: 3d)`
+
+## Gap 4 — a backticked annotation MID-LINE, after prose
+
+Found the same day as Gap 3 and by the same means. A fix that allows a backtick only at the start of a
+line still misses this, and the real instance was a live claim with a one-day horizon:
+
+- ⚠️ Tag existence for the mainspring build is asserted by the scheduler notice only — the tag list not
+  re-read tonight. `Verify: 2026-08-30 — mainspring 3.0.1 and 3.0.2 exist as tags; atlas pods carry
+  sprocket-api 4.2.1 if the evening window ran. (horizon: 1d)`
+
+## The one that must NOT be found
+
+An annotation inside a **fenced code block** is a document showing a reader what the convention looks
+like. It must not be read as a claim, and it must not count toward coverage either — otherwise every
+document that explains the convention reports a permanent, unfixable coverage gap.
+
+```
+Verify: 2026-01-01 — this is an EXAMPLE of the annotation form, not an assertion about anything.
+  (horizon: 1d)
+```
+
+Inline backticks cannot carry that meaning: Gaps 3 and 4 are both real claims written in them. So the
+rule is one-directional and worth stating in an adopter's guide — **fence it if you are illustrating,
+and anything else parses.** This corpus is the test that the distinction holds.
 
 ## What a conforming implementation must do
 

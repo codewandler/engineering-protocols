@@ -16,7 +16,7 @@ maintained over several months; the content is not. Free to commit anywhere, inc
 | `corpus/03-hidden-positions.md` | 7 annotations in positions a line-anchored parser cannot see: quote blocks, wrapped quote blocks, table cells |
 | `corpus/04-classification.md` | 8 arithmetic cases at a fixed reference date, including the `age == horizon` boundary |
 | `corpus/05-traps.md` | 4 rows encoding the two limits: false-within-horizon, and re-check-versus-extend |
-| `corpus/06-reference-gaps.md` | 4 well-formed annotations the reference implementation misses — see below |
+| `corpus/06-reference-gaps.md` | 5 annotations in the four positions this corpus discovered, plus one fenced example that must NOT be counted |
 | `expected.json` | Generated, not hand-written. Records + per-file coverage + known reference gaps |
 | `generate_expected.py` | Regenerates `expected.json` from a reference implementation |
 
@@ -24,18 +24,24 @@ Reference date is **2026-09-01**, warning window 2 days, default horizon when ma
 
 ```console
 $ python3 generate_expected.py --impl /path/to/check-verify.py
-expected.json: 37 record(s) — 14 ok, 16 expiring, 7 expired, 8 malformed
+expected.json: 43 record(s) — 16 ok, 17 expiring, 10 expired, 8 malformed
 ```
 
-## ⚠️ `expected.json` is a baseline, not ground truth
+## `expected.json` — how to read it
 
 The expectations were produced by running a real implementation over the corpus, deliberately, so they
-encode rules that survived months of contact with human-written documents rather than my reading of a
-spec. But that implementation is **not correct**, and the fixture says so in `known_reference_gaps`:
+encode rules that survived months of contact with human-written documents rather than one person's
+reading of a spec.
 
-- **42 raw annotations in the corpus, 37 parsed.** The five-record gap is the conformance target.
-- A correct implementation finds all 42 and still rejects the two deliberate negatives in
-  `01-forms.md` (a hyphen separator, and a space between `(` and `horizon:`).
+When this fixture was first built that implementation was **wrong**, and the corpus found four blind
+spots in it on the first run. They were fixed on 2026-08-21, so:
+
+- **43 raw annotations, 43 parsed, `missed_by_reference: 0` in every file.** That is the target.
+- A conforming implementation also rejects the two deliberate negatives in `01-forms.md` (a hyphen
+  instead of an em-dash; a space between `(` and `horizon:`) and the fenced example in
+  `06-reference-gaps.md`.
+- `reference_is_not_ground_truth` is kept as a field rather than deleted. Positions 1–3 were each found
+  in production, fixed, and believed complete before 4–7 turned up. Assume there is another one.
 
 ## What the corpus is actually for
 
@@ -64,8 +70,14 @@ idea of "a line" disagrees with the document's:
 | 4 | Annotation ending a table cell with **no** `<br>` | this fixture |
 | 5 | Second of two consecutive `<br>` table rows — absorbed into the first's body, date **and** horizon lost | this fixture |
 | 6 | Annotation wrapped in inline-code backticks | this fixture |
+| 7 | The same, **mid-line after prose** — a backtick-at-line-start fix still misses it | this fixture |
 
-Positions 1–3 were each found in production, fixed, and believed complete. Positions 4–6 were found in
+Plus one rule in the other direction: an annotation inside a **fenced code block** is an example, and
+must be excluded from parsing *and* from the coverage count — otherwise every document that explains
+the convention reports a permanent, unfixable gap. Inline backticks cannot carry that meaning, because
+positions 6 and 7 are both real claims written in them.
+
+Positions 1–3 were each found in production, fixed, and believed complete. Positions 4–7 were found in
 an afternoon by writing this fixture and comparing raw occurrences against parsed records — on a corpus
 where the same comparison then showed **15 of 160 annotations (9.4%) unwatched by the gate whose whole
 job is to make an unchecked claim visible.**

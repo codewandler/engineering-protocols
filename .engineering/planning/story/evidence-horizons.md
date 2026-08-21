@@ -77,6 +77,19 @@ story may land first on the narrowest clock read it needs, which is why the edge
 - Calibration: 42/42 on the vendored corpus is the target; the adopter's corrected reference
   reaches 158/160 on their live corpus and is explicitly not a completeness claim.
 
+## Post-implementation, 2026-08-21 (same evening)
+
+The adopter re-pulled the corpus after fixing their reference against it: `expected.json` is now
+**ground truth** — 43 raw, 43 parsed, `missed_by_reference: 0` — with `reference_is_not_ground_truth`
+kept as a field, `false`, and the reason beside it (positions 1–3 were each believed complete before
+4–7 turned up; assume there is another). The revision added **position 7** (a backticked annotation
+mid-line, after prose) and the inverse rule: an annotation inside a **fenced code block** is an
+illustration and is excluded from parsing *and* from the coverage denominator — fence it if you are
+illustrating, anything else parses. The scanner and this repository's vendored copy follow;
+`aep-backend-markdown` finds 43/43. Re-verification on their side also produced trap 1 for real —
+a claim false inside its horizon within 48 hours of the fixture row for that trap being written —
+and the durable-fact consequence is `story:claim-retirement`, not an amendment here.
+
 ## Out of Scope
 
 Whether a *verifier* can be trusted to state its own observation time honestly, which is § C5's

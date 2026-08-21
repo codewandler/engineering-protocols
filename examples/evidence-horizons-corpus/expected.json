@@ -3,10 +3,10 @@
  "warn_days": 2,
  "default_horizon_when_malformed": 14,
  "generated_by": "generate_expected.py against a reference implementation",
- "reference_is_not_ground_truth": true,
+ "reference_is_not_ground_truth": false,
  "known_reference_gaps": {
-  "corpus/06-reference-gaps.md": "4 well-formed annotations, 1 found by the reference. Three mechanisms: (1) a `Verify:` ending a table cell with no preceding `<br>`; (2) the second of two consecutive table rows each carrying `<br>Verify:`, absorbed into the first's body with its date and horizon both lost; (3) an annotation wrapped in inline-code backticks.",
-  "corpus/03-hidden-positions.md": "7 well-formed annotations, 5 found. The two misses are mechanisms (1) and (2) above, occurring incidentally in a file written to test the three positions the reference already handles. That is the point worth taking: the gaps were not sought, they fell out of writing a realistic table."
+  "status": "None outstanding. Four positions were found by this corpus and fixed upstream on 2026-08-21: (1) a `Verify:` ending a table cell with no preceding `<br>`; (2) the second of two consecutive table rows each carrying `<br>Verify:`, absorbed into the first's body with its date and horizon both lost; (3) an annotation wrapped in inline-code backticks; (4) the same, mid-line after prose. A fifth rule came with them: an annotation inside a fenced code block is an example and is excluded from both parsing and the coverage count.",
+  "why_this_field_stays": "Positions 1-3 of the same class were each found in production, fixed, and believed complete before 4-7 turned up. Assume there is another one."
  },
  "coverage": {
   "01-forms.md": {
@@ -21,8 +21,8 @@
   },
   "03-hidden-positions.md": {
    "raw_occurrences": 7,
-   "parsed_by_reference": 5,
-   "missed_by_reference": 2
+   "parsed_by_reference": 7,
+   "missed_by_reference": 0
   },
   "04-classification.md": {
    "raw_occurrences": 8,
@@ -35,27 +35,27 @@
    "missed_by_reference": 0
   },
   "06-reference-gaps.md": {
-   "raw_occurrences": 4,
-   "parsed_by_reference": 1,
-   "missed_by_reference": 3
+   "raw_occurrences": 5,
+   "parsed_by_reference": 5,
+   "missed_by_reference": 0
   }
  },
  "summary": {
-  "total": 37,
+  "total": 43,
   "malformed": 8,
-  "expired": 7,
-  "expiring": 16,
-  "ok": 14,
+  "expired": 10,
+  "expiring": 17,
+  "ok": 16,
   "per_file": {
    "01-forms.md": 12,
    "02-malformed.md": 7,
-   "03-hidden-positions.md": 5,
+   "03-hidden-positions.md": 7,
    "04-classification.md": 8,
    "05-traps.md": 4,
-   "06-reference-gaps.md": 1
+   "06-reference-gaps.md": 5
   },
-  "raw_occurrences_all_files": 42,
-  "missed_by_reference": 5
+  "raw_occurrences_all_files": 43,
+  "missed_by_reference": 0
  },
  "records": [
   {
@@ -259,11 +259,29 @@
   {
    "file": "03-hidden-positions.md",
    "date": "2026-08-30",
+   "horizon": 7,
+   "malformed": false,
+   "state": "ok",
+   "days": 5,
+   "what": "pin read from the environment's values file."
+  },
+  {
+   "file": "03-hidden-positions.md",
+   "date": "2026-08-30",
    "horizon": 3,
    "malformed": false,
    "state": "expiring",
    "days": 1,
-   "what": "pin confirmed against the running image.  | | grommet-index | rebuilt | rebuilt overnight<br>Verify: 2026-08-29 — row counts match the primary store.  |"
+   "what": "pin confirmed against the running image."
+  },
+  {
+   "file": "03-hidden-positions.md",
+   "date": "2026-08-29",
+   "horizon": 2,
+   "malformed": false,
+   "state": "expired",
+   "days": 1,
+   "what": "row counts match the primary store."
   },
   {
    "file": "03-hidden-positions.md",
@@ -272,7 +290,7 @@
    "malformed": false,
    "state": "expired",
    "days": 1,
-   "what": "pin confirmed against the running image; horizon cut to 1d because this claim was falsified within hours on a previous reading.  |"
+   "what": "pin confirmed against the running image; horizon cut to 1d because this claim was falsified within hours on a previous reading."
   },
   {
    "file": "04-classification.md",
@@ -385,11 +403,47 @@
   {
    "file": "06-reference-gaps.md",
    "date": "2026-08-30",
+   "horizon": 5,
+   "malformed": false,
+   "state": "ok",
+   "days": 3,
+   "what": "read from the environment's running image and the open review."
+  },
+  {
+   "file": "06-reference-gaps.md",
+   "date": "2026-08-30",
    "horizon": 7,
    "malformed": false,
    "state": "ok",
    "days": 5,
-   "what": "pin read from the running image.  | | balance-wheel | pinned 1.9.4 | notes<br>Verify: 2026-08-29 — pin read from the running image; horizon shortened because this component redeploys daily.  |"
+   "what": "pin read from the running image."
+  },
+  {
+   "file": "06-reference-gaps.md",
+   "date": "2026-08-29",
+   "horizon": 2,
+   "malformed": false,
+   "state": "expired",
+   "days": 1,
+   "what": "pin read from the running image; horizon shortened because this component redeploys daily."
+  },
+  {
+   "file": "06-reference-gaps.md",
+   "date": "2026-08-30",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expiring",
+   "days": 1,
+   "what": "the escapement rework is enabled in atlas; read from the deployment. `"
+  },
+  {
+   "file": "06-reference-gaps.md",
+   "date": "2026-08-30",
+   "horizon": 1,
+   "malformed": false,
+   "state": "expired",
+   "days": 1,
+   "what": "mainspring 3.0.1 and 3.0.2 exist as tags; atlas pods carry sprocket-api 4.2.1 if the evening window ran. `"
   }
  ]
 }

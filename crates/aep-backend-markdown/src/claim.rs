@@ -28,10 +28,18 @@
 //! | 4 | ending a table cell with no `<br>` at all | never watched |
 //! | 5 | the second of two consecutive `<br>` rows, absorbed into the first's body | date **and** horizon lost |
 //! | 6 | wrapped in inline-code backticks | never watched |
+//! | 7 | in inline-code backticks **mid-line, after prose** | never watched |
 //!
 //! So a document is read as physical lines *and* as the smaller pieces a reader sees inside one:
 //! a quote marker is scaffolding, a `<br>` and a cell boundary each start a new line, and an
 //! inline-code span ends one.
+//!
+//! One position runs the other way: an annotation inside a **fenced code block** is a document
+//! showing a reader what the convention looks like, and is excluded from parsing *and* from
+//! [`raw_occurrences`] — otherwise every document that explains the convention reports a
+//! permanent, unfixable coverage gap. Inline backticks cannot carry that meaning, because
+//! positions 6 and 7 are real claims written in them; the rule is one-directional — fence it if
+//! you are illustrating, and anything else parses.
 //!
 //! # Where a claim's body ends
 //!
@@ -366,6 +374,23 @@ pub fn scan_at(text: &str, now: CivilDate) -> ClaimScan {
 /// coverage claim. It is deliberately the crudest thing that works: the moment it shares code with
 /// the parser it stops being independent evidence and starts agreeing with it by construction.
 pub fn raw_occurrences(text: &str) -> usize {
+    // Fence-stripping is implemented here *again* rather than shared with the parser, for the
+    // same reason the function exists at all: a denominator that borrows the parser's reading
+    // agrees with it by construction.
+    let mut fenced = false;
+    let mut kept = String::with_capacity(text.len());
+    for line in text.lines() {
+        let bare = line.trim_start().trim_start_matches(['>', ' ']).trim_start();
+        if bare.starts_with("```") {
+            fenced = !fenced;
+            continue;
+        }
+        if !fenced {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    let text = kept.as_str();
     let mut count = 0;
     for (at, _) in text.match_indices(KEYWORD) {
         let rest = text[at + KEYWORD.len()..].trim_start();
@@ -607,15 +632,23 @@ fn record(date: CivilDate, span: &Span, line: usize) -> ClaimRecord {
 
 /// Splits a document into lines, each stripped of its quote markers and cut at its boundaries.
 fn read_lines(text: &str) -> Vec<Line<'_>> {
+    let mut fenced = false;
     text.lines()
         .enumerate()
         .map(|(index, raw)| {
             let (stripped, quoted) = strip_quote(raw);
+            let marker = stripped.trim().starts_with("```");
+            let excluded = fenced || marker;
+            if marker {
+                fenced = !fenced;
+            }
             Line {
                 number: index + 1,
                 quoted,
-                stops_a_body: is_stop_line(stripped),
-                segments: split_segments(stripped),
+                // A fence stops a body on the way in, and nothing inside one may start or
+                // continue a claim: a fenced annotation is an illustration, not an assertion.
+                stops_a_body: excluded || is_stop_line(stripped),
+                segments: if excluded { Vec::new() } else { split_segments(stripped) },
             }
         })
         .collect()

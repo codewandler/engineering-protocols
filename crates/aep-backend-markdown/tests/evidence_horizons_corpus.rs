@@ -1,19 +1,22 @@
 //! The conformance run against `examples/evidence-horizons-corpus/`.
 //!
-//! The corpus holds **42** raw annotations. The adopter's own reference implementation finds 37 and
-//! says so in `expected.json` (`reference_is_not_ground_truth: true`), naming its five gaps. So the
-//! fixture is used in two directions here:
+//! The corpus holds **43** raw annotations, and since the corpus revision of 2026-08-21
+//! `expected.json` is **ground truth**: the reference implementation it was generated from was
+//! fixed against this very corpus and now finds every annotation (`missed_by_reference: 0`).
+//! The `reference_is_not_ground_truth` field is deliberately kept, `false`, with its reason
+//! recorded beside it — the first three positions were each believed complete before the next
+//! four turned up, so the standing assumption is that there is another one. Two properties bind:
 //!
-//! * `expected.json` is a **differential baseline**: every record the reference also finds must
-//!   agree with it on `date`, `horizon`, `malformed`, `state` and `days`.
-//! * the raw count is the **conformance target**: all 42, and a divergence of zero per file.
+//! * every record must agree with `expected.json` on `date`, `horizon`, `malformed`, `state` and
+//!   `days`, with nothing left over;
+//! * the raw count is the **conformance target**: all 43, a divergence of zero per file, and the
+//!   fenced example counted by neither side.
 //!
-//! `what` — the body text — is deliberately not compared. Two of the reference's records carry a
-//! corrupted body, having swallowed a neighbouring table row along with its date and horizon
-//! (`03-hidden-positions.md` record 4 and `06-reference-gaps.md` record 1, each ending in an
-//! embedded `<br>Verify: 2026-08-29 — …  |`). Binding on that text would pin the bug. What is
-//! asserted instead is the positive form of the same property: no record's claim contains the
-//! keyword, because a claim that contains one has eaten another annotation.
+//! `what` — the body text — is deliberately not compared: the reference historically shipped
+//! records that had swallowed a neighbouring table row, and binding on body text would have
+//! pinned that bug. What is asserted instead is the positive form of the same property: no
+//! record's claim contains the keyword, because a claim that contains one has eaten another
+//! annotation.
 //!
 //! Reference date **2026-09-01**, warning window **2 days**, default horizon when malformed
 //! **14 days** — the three constants `expected.json` states.
@@ -40,7 +43,7 @@ const FILES: &[(&str, usize)] = &[
     ("03-hidden-positions.md", 7),
     ("04-classification.md", 8),
     ("05-traps.md", 4),
-    ("06-reference-gaps.md", 4),
+    ("06-reference-gaps.md", 5),
 ];
 
 /// One row of `expected.json`'s `records`, on the fields that bind:
@@ -50,8 +53,8 @@ const FILES: &[(&str, usize)] = &[
 /// a table.
 type Expected = (&'static str, &'static str, u32, bool, &'static str, u32);
 
-/// The reference implementation's 37 records, transcribed from
-/// `examples/evidence-horizons-corpus/expected.json`.
+/// All 43 records of `examples/evidence-horizons-corpus/expected.json` — ground truth since the
+/// corpus revision of 2026-08-21 — transcribed.
 ///
 /// Transcribed rather than parsed: this crate has no JSON parser among its dependencies, and a
 /// fixture is not worth a dependency. Regenerate with `generate_expected.py` and re-transcribe if
@@ -81,7 +84,9 @@ const REFERENCE_RECORDS: &[Expected] = &[
     ("03-hidden-positions.md", "2026-08-30", 7, false, "ok", 5),
     ("03-hidden-positions.md", "2026-08-29", 3, false, "expiring", 0),
     ("03-hidden-positions.md", "2026-08-28", 5, false, "expiring", 1),
+    ("03-hidden-positions.md", "2026-08-30", 7, false, "ok", 5),
     ("03-hidden-positions.md", "2026-08-30", 3, false, "expiring", 1),
+    ("03-hidden-positions.md", "2026-08-29", 2, false, "expired", 1),
     ("03-hidden-positions.md", "2026-08-30", 1, false, "expired", 1),
     ("04-classification.md", "2026-08-30", 7, false, "ok", 5),
     ("04-classification.md", "2026-08-25", 7, false, "expiring", 0),
@@ -95,7 +100,11 @@ const REFERENCE_RECORDS: &[Expected] = &[
     ("05-traps.md", "2026-08-30", 3, false, "expiring", 1),
     ("05-traps.md", "2026-08-30", 7, false, "ok", 5),
     ("05-traps.md", "2026-08-04", 60, false, "ok", 32),
+    ("06-reference-gaps.md", "2026-08-30", 5, false, "ok", 3),
     ("06-reference-gaps.md", "2026-08-30", 7, false, "ok", 5),
+    ("06-reference-gaps.md", "2026-08-29", 2, false, "expired", 1),
+    ("06-reference-gaps.md", "2026-08-30", 3, false, "expiring", 1),
+    ("06-reference-gaps.md", "2026-08-30", 1, false, "expired", 1),
 ];
 
 /// The reference date as a value.
@@ -181,9 +190,9 @@ fn every_annotation_in_the_corpus_is_found() {
     }
 
     assert_eq!(
-        total, 42,
-        "42 is the corpus's own count of raw annotations, and the conformance target the \
-         reference's 37 is measured against"
+        total, 43,
+        "43 is the corpus's own count of raw annotations, and since 2026-08-21 the fixed \
+         reference finds all of them too — the target did not move, the reference caught up"
     );
 }
 
@@ -271,24 +280,19 @@ fn every_record_the_reference_also_finds_agrees_with_expected_json() {
             mine.remove(at);
         }
 
-        let missed_by_reference = match *file {
-            "03-hidden-positions.md" => 2,
-            "06-reference-gaps.md" => 3,
-            _ => 0,
-        };
-        assert_eq!(
-            mine.len(),
-            missed_by_reference,
-            "{file}: `known_reference_gaps` says the reference misses {missed_by_reference} here; \
-             the surplus this scan found is {mine:#?}"
+        assert!(
+            mine.is_empty(),
+            "{file}: `expected.json` is ground truth and `missed_by_reference` is 0, so a record \
+             it does not carry is a record this scan invented: {mine:#?}"
         );
     }
 }
 
 #[test]
 fn no_record_swallowed_a_neighbouring_annotation() {
-    // The bug the reference has in `03-hidden-positions.md` record 4 and `06-reference-gaps.md`
-    // record 1: a table row absorbed the row below it, whose date and horizon are then both lost.
+    // The bug the reference had (fixed upstream 2026-08-21) in `03-hidden-positions.md` record 4
+    // and `06-reference-gaps.md` record 1: a table row absorbed the row below it, whose date and
+    // horizon are then both lost.
     // Its signature is a claim carrying a second keyword, and it is checkable without comparing
     // any body text.
     for (file, _) in FILES {
@@ -313,8 +317,9 @@ fn no_record_swallowed_a_neighbouring_annotation() {
 
 #[test]
 fn the_positions_the_reference_is_blind_to_are_found() {
-    // Six well-formed annotations in the two files, of which the reference finds exactly one
-    // (`06-reference-gaps.md`'s mainspring row, whose neighbour it then swallows).
+    // Six well-formed annotations in the two files. When this test was written the reference
+    // found exactly one of them; it finds all six since 2026-08-21, and the cases stay because
+    // they are the regression that stops the positions coming back.
     let cases = [
         (
             "03-hidden-positions.md",
@@ -382,6 +387,32 @@ fn the_positions_the_reference_is_blind_to_are_found() {
         backticked.claim,
         "the escapement rework is enabled in atlas; read from the deployment."
     );
+}
+
+#[test]
+fn a_backticked_annotation_after_prose_is_found_and_a_fenced_one_is_not() {
+    // The corpus revision of 2026-08-21 added position 7 and its inverse together. The mid-line
+    // backtick is a real claim — the live instance behind it had a one-day horizon and was
+    // already stale — while an annotation inside a fenced code block is a document showing a
+    // reader the convention, and must be counted by neither the parser nor the raw denominator:
+    // otherwise every document that explains the convention reports a permanent coverage gap.
+    let record = record_about("06-reference-gaps.md", "2026-08-30", 1, "mainspring 3.0.1");
+    let state = record.state(reference_date(), WARN_DAYS);
+    assert!(!record.malformed, "position 7 is well-formed");
+    assert_eq!(state.label(), "expired", "a 1d horizon observed 2026-08-30, read 2026-09-01");
+
+    let scan = scan_file("06-reference-gaps.md");
+    assert!(
+        scan.records.iter().all(|found| !found.claim.contains("EXAMPLE")),
+        "the fenced example was parsed as a claim: {:#?}",
+        scan.records
+    );
+    assert_eq!(
+        scan.raw_occurrences, 5,
+        "the fenced example is outside the denominator too, or the file reports a permanent, \
+         unfixable divergence"
+    );
+    assert_eq!(scan.divergence(), 0);
 }
 
 #[test]
@@ -482,8 +513,8 @@ fn every_well_formed_record_survives_a_round_trip() {
     }
 
     assert_eq!(
-        round_tripped, 34,
-        "34 of the 42 are well-formed; the other 8 are the normalisation refusal below"
+        round_tripped, 35,
+        "35 of the 43 are well-formed; the other 8 are the normalisation refusal below"
     );
 }
 

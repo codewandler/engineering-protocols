@@ -9,7 +9,23 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **The horizons corpus is ground truth now, and the scanner reads two more positions.** The
+  adopter fixed their reference implementation against the vendored corpus and re-issued
+  `expected.json` as ground truth: 43 raw annotations, 43 parsed, `missed_by_reference: 0`, with
+  `reference_is_not_ground_truth` kept as a field and the reason recorded beside it. The revision
+  adds position 7 — a backticked annotation mid-line, after prose, whose live instance had a
+  one-day horizon and was already stale — and the rule in the other direction: an annotation
+  inside a fenced code block is an illustration, excluded from parsing and from the coverage
+  denominator both, because otherwise every document that explains the convention reports a
+  permanent, unfixable coverage gap. Inline backticks cannot carry that meaning — positions 6 and
+  7 are real claims written in them — so the rule is one-directional: fence it if you are
+  illustrating, anything else parses. `aep-backend-markdown` finds 43/43 with divergence 0; the
+  fence-stripping in the raw counter is implemented separately from the parser's on purpose, so
+  the denominator stays independent evidence. The durable-fact lesson from the same evening — an
+  answered question must not leave a permanent re-check obligation behind it — is
+  `story:claim-retirement`, not a code change here.
 
 ## [0.10.0-horizons-dogfood-lab] — 2026-08-21
 
