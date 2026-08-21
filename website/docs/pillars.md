@@ -91,8 +91,11 @@ component. Every artifact carries its provenance — specification version, a di
 model, compiler and generator versions — and a check fails the build when committed output no longer
 matches the specification.
 
-**Not yet the tests.** A generated conformance suite is ESS wave 4 and Rust structural synthesis is
-wave 5; neither has started. What exists today is the model, the compiler, and four projections.
+**And, since this page was written, the tests and the structural code.** A generated conformance
+suite arrived as ESS wave 4, structural synthesis as wave 6, and wave 7 grew the latter to three
+targets and a running HTTP application per compiled emitter. Behaviour is still never generated —
+every algorithm is a typed obligation someone has to implement.
+[Where this stands](./status/where-this-stands.md) keeps the current numbers.
 
 ---
 

@@ -82,12 +82,14 @@ cannot demonstrate which revision produced it is not assumed to be fresh.
 
 ## What is honest about this today
 
-The rule works. The runner it asks for does not exist yet — generating a conformance suite from a
-specification is ESS wave 4, and it has not started. Until it does, a person produces that evidence
-by hand.
+The rule works, and since ESS wave 4 the runner it asks for exists: a specification generates its
+own conformance suite, `protocol ess conform run` executes it, and the evidence record is minted in
+the same process that ran the suite — so no caller can author its own verdict. When the runner
+arrived, nothing on the protocol side changed, which is what the shape being right was for.
 
-The point is that the *shape* is already right: when the runner arrives, nothing on the protocol side
-changes.
+What is still honest to say: the runner reaches only in-process implementations. Holding an external
+system to a specification means depending on the conformance crate from that system's own tests —
+see [where this stands](./status/where-this-stands.md).
 
 ---
 

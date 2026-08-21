@@ -279,8 +279,12 @@ generated document's own description rather than left for a reader to infer.
 
 ## What is not generated
 
-No tests, and no code. A generated conformance suite is ESS wave 4; Rust structural synthesis is
-wave 5. Neither has started. The generated OpenAPI and AsyncAPI *envelopes* are checked structurally
+Behaviour. Since this page was written the specification has also come to generate its own
+conformance suite (ESS wave 4) and the structural part of its own implementation — Rust, Go and a
+browser realization, and since wave 7 a running HTTP application per compiled target — but every
+algorithm remains a typed obligation someone still has to implement; see
+[where this stands](../status/where-this-stands.md). The generated OpenAPI and AsyncAPI *envelopes*
+are checked structurally
 rather than against the OpenAPI 3.1 and AsyncAPI 3.0 meta-schemas — every schema those documents
 embed is validated against the real JSON Schema 2020-12 meta-schema, so what is unchecked is the
 envelope, not the types.

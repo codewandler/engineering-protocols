@@ -77,16 +77,18 @@ purpose, and the reason generalises past this file:
 > the field has been required since gate G11 — and a check that cannot fail is worse than no check,
 > because it reads as protection.
 
-## What does not exist yet
+## What exists now, and what still does not
 
-The `conformance-runner` this principle asks for. Generating a conformance suite from a specification
-is ESS wave 4, which has not started; the suite, the runner and the deliberately wrong implementation
-that proves the suite bites are all part of it.
+The `conformance-runner` this principle asks for arrived as ESS wave 4: the generated suite, the
+runner, and the deliberately wrong implementations that prove the suite bites.
+`protocol ess conform evidence` mints the record in the same process that ran the suite, and the
+repository's `examples/billing-conformance/` walks both directions — a passing run completes the
+task, a failing one leaves it blocked and names the principle that refused. When the runner arrived,
+nothing on the protocol side changed, which is what the shape being right was for. What still does
+not exist is a runner that reaches an out-of-process implementation: proving your own system means
+depending on the conformance crate from your own tests.
 
-Until then a person produces that evidence by hand. The shape is already right: when the runner
-arrives, nothing on the protocol side changes.
-
-The acceptance criterion wave 4 is held to is worth quoting, because it is the lesson the protocol's
+The acceptance criterion wave 4 was held to is worth quoting, because it is the lesson the protocol's
 own conformance work already cost this project once:
 
 > **The suite must fail the specific check each fault exists to break** — not merely fail. A

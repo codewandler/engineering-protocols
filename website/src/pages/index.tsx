@@ -138,16 +138,19 @@ function HonestStatus() {
           <div className="col col--8 col--offset-2">
             <Heading as="h2">What is built, and what is not</Heading>
             <p>
-              The protocol is implemented and gated: <strong>41 suites and 953 tests</strong>, with 0
-              clippy warnings and 0 rustdoc warnings, as of the tag <code>0.3.2-ess-wave-3</code>. A
-              specification compiles into documentation, JSON Schema, OpenAPI 3.1 and AsyncAPI 3.0,
-              and the output is drift-checked.
+              The protocol is implemented and gated: <strong>94 suites and 1693 tests</strong>, with
+              0 clippy warnings and 0 rustdoc warnings, as of the tag <code>0.7.0-ess-wave-7</code>.
+              A specification compiles into documentation, JSON Schema, OpenAPI 3.1 and AsyncAPI 3.0;
+              generates its own conformance suite; and synthesises the structural part of its own
+              implementation in three targets — the same specification runs as a Rust and a Go
+              application, both started and held to one behaviour in every CI run. All of it is
+              drift-checked.
             </p>
             <p>
-              It does <strong>not</strong> yet generate tests or code — that is the next two waves.
-              There is no durable backend. No team has been governed by this yet. And one thing you
-              still have to trust: nothing binds a verifier&apos;s identity to the evidence it
-              submits.
+              It does <strong>not</strong> generate behaviour — every algorithm is a typed
+              obligation someone still has to implement. There is no durable backend. No team has
+              been governed by this yet. And one thing you still have to trust: nothing binds a
+              verifier&apos;s identity to the evidence it submits.
             </p>
             <p>
               <Link to="/docs/status/where-this-stands">Where this stands →</Link>

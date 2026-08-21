@@ -1,7 +1,7 @@
 ---
 title: Proposed, not accepted
 sidebar_position: 3
-description: Four designs proposed extending this. One has been built, one was absorbed into the thesis by a deliberate amendment, one is delivered in its first slice — and the fourth is planned only as a scoped subset, with its adapter kept outside the boundary.
+description: Four designs proposed extending this. One has been built, one was absorbed into the thesis by a deliberate amendment, one is now delivered through its third wave — and the fourth is being built only as a scoped subset, with its adapter kept outside the boundary.
 ---
 
 # Proposed, not accepted
@@ -11,29 +11,31 @@ reading like the plan. It is not, and the repository is explicit about it — a 
 order, however long and however recent it is.
 
 Four designs proposed extending this project. **Three have since been taken up** — one built, one
-absorbed into the thesis by an amendment somebody had to argue for and write down, and one delivered
-in its first slice with its remaining sections named rather than implied. **The fourth is planned
-only as a scoped subset**, and the page still exists for the same reason it always did: nothing in
-that directory should be mistaken for what has been agreed.
+absorbed into the thesis by an amendment somebody had to argue for and write down, and one now
+delivered through three waves of its programme with its remaining section named rather than implied.
+**The fourth is being built only as a scoped subset**, two waves of it so far, and the page still
+exists for the same reason it always did: nothing in that directory should be mistaken for what has
+been agreed.
 
 | What it would add | Status |
 |---|---|
 | **Closed-loop execution and conformance** — the specification becomes an *oracle*: a verdict on an implementation, not only a projection of a model | **built.** Delivered as ESS wave 4, `0.4.0-ess-wave-4`. Its four open decisions were each taken at the default the design named |
-| **Semantic diff, impact and evolution** — the system changing over time, impact closure, what a revision invalidates | **core implemented** as ESS wave 5 (`0.5.0-ess-wave-5`), after being accepted as a stated amendment to the thesis. Two of its seventy-eight sections were rejected outright rather than deferred, being a different product |
-| **Structural synthesis, obligations and realizations** — generated applications, and human or agent work carried as typed obligations | **delivered in part** as ESS wave 6 (`0.6.0-ess-wave-6`), hardened by wave 6.5. The review read the design as four waves rather than one, and the first is built: the plan, the Rust emission, obligations as plan entries. §36's behavioural synthesis, §41's agent loop and §28's obligation-derived grants were rejected outright; `Realization`, topology synthesis and formal verification stay proposed with the design; obligations-as-artifacts is sequenced as W7.4 and deferred by decision |
-| **Infrastructure discovery and multi-cloud realization** — a fourth domain, with infrastructure specified and checked beside the existing pair | the design as written stays deferred — roughly eleven waves at this repository's measured rate, and it would put cloud discovery adapters inside this workspace, which the vision refuses. What changed: **a k8s-scoped subset is now planned as infrastructure waves**, with the discovery adapter external to this workspace, per that same vision boundary |
+| **Semantic diff, impact and evolution** — the system changing over time, impact closure, what a revision invalidates | **core implemented** as ESS wave 5 (`0.5.0-ess-wave-5`), after being accepted as a stated amendment to the thesis, and **extended** by wave 7: ten construct families compared, and the closure narrowed down to the generated artifact through `contract_digest` (§33 of the design, executed under gate G19's polarity where the two disagreed). Two of its seventy-eight sections were rejected outright rather than deferred, being a different product |
+| **Structural synthesis, obligations and realizations** — generated applications, and human or agent work carried as typed obligations | **delivered through wave 7** (`0.6.0-ess-wave-6`, hardened by 6.5, extended by `0.7.0-ess-wave-7`): the language-neutral plan, three emitters behind it — Rust, Go, a browser realization — and the dual-target demonstration, two applications from one specification held to one behaviour in every gate run. §36's behavioural synthesis, §41's agent loop and §28's obligation-derived grants were rejected outright; `Realization`, topology synthesis and formal verification stay proposed with the design; obligations-as-artifacts (W7.4) stays **deferred by decision**, its precondition now met |
+| **Infrastructure discovery and multi-cloud realization** — a fourth domain, with infrastructure specified and checked beside the existing pair | the design as written stays deferred whole — it would put cloud discovery adapters inside this workspace, which the vision refuses. What changed: **a Kubernetes-scoped subset is being built as infrastructure waves, and its first two are delivered** — observation compiled to a content-addressed IR (IW1), graph, diagnosis, invariant candidates and directions (IW2) — with the discovery adapter external to this workspace, per that same vision boundary |
 
 ## What "accepted" had to cost
 
 The first and the third rows are horizons the thesis already implied: "specified once and compiled"
 promises the tests and the skeleton. Both halves are now delivered — the tests as wave 4, the
-skeleton as wave 6 — and it is worth being precise about what that bought, because a design is not
-the same thing as the code that came out of it. Four of the oracle design's constructs turned out to
-be untestable as written, and the repository's account of that wave says which four and how each was
-found. The synthesis design paid a different price: of its programme, wave 6 took exactly the slice
-whose criterion the existing oracle could execute — and the generated suite promptly caught a real
-defect in the code generator, a delivery policy that conflated a declared refusal with an unmet
-obligation, before any human reviewer did.
+skeleton as waves 6 and 7 — and it is worth being precise about what that bought, because a design
+is not the same thing as the code that came out of it. Four of the oracle design's constructs turned
+out to be untestable as written, and the repository's account of that wave says which four and how
+each was found. The synthesis design paid a different price: each wave took exactly the slice the
+previous machinery could execute a criterion for — and the machinery kept biting its makers: the
+generated suite caught a real defect in the code generator before any human reviewer did, and the
+dual-target demonstration caught two of the six mutations held against it by the two applications
+disagreeing with each other.
 
 The second row was **not** implied. "Specified once and compiled" describes a system in the present
 tense and says nothing about one *changing*, so absorbing it meant amending the thesis rather than
@@ -43,10 +45,10 @@ without a semantic delta a change to a comment in an unrelated domain sends ever
 requirement back to owed. Correct, and blunt.
 
 Infrastructure is still a second subject matter rather than a further projection of the first, and
-the design as written remains deferred whole. The change is narrower than an acceptance: a
-Kubernetes-scoped subset is planned as infrastructure waves, and the part the vision refuses — a
-discovery adapter making live API calls under a credential — stays outside this workspace. That is
-the fix the review named: move the design, not the boundary, because operating a system is the one
+the design as written remains deferred whole. What is built is narrower than an acceptance: the
+first two Kubernetes-scoped waves, with the part the vision refuses — a discovery adapter making
+live API calls under a credential — kept outside this workspace, in its own repository. That is the
+fix the review named: move the design, not the boundary, because operating a system is the one
 thing this project [says it does not do](../deliberately-not.md).
 
 ## What is actually sequenced
@@ -57,19 +59,22 @@ thing this project [says it does not do](../deliberately-not.md).
 | ESS wave 5 | two compiled specifications, and a typed answer to what moved between them | **delivered**, `0.5.0-ess-wave-5`. It moved ahead of code generation by decision, because wave 4 left everything derived from a single revision with no way to say what a change invalidates |
 | ESS wave 6 | a generated Rust workspace from the billing specification that compiles, and that passes the suite wave 4 generated — with a deliberately faulty implementation still failing it | **delivered**, `0.6.0-ess-wave-6`. On billing: 45 capabilities — 33 generated, 8 obligations, 4 refused — and the committed wave-4 suite, unchanged, passes 27 of 27 against the linked workspace while the corrupted linkage fails exactly the scenario that exists to catch it |
 | ESS wave 6.5 | no new capability — the existing claims made mechanical | **delivered**, `0.6.1-ess-wave-6.5`. Three invariants that were enforced by nothing now fail the build when violated, the model digest is the full SHA-256, `proptest` phase 1 landed, an event payload's declared provenance is asserted (closing the one fault caught by nothing), and value-object invariant scenarios grew the billing suite 27→29 |
-| ESS wave 7 | the loop closed over generated code: artifacts carry the digest of the model slice they derive from, and entities and commands join the delta | **scheduled** — W7.1 and W7.2. The wave's other two slices, W7.3 (a second emitter, Go) and W7.4 (obligations become artifacts and tasks), are **deferred by decision** |
-| infrastructure waves | a Kubernetes-scoped subset of the infrastructure design, specified and checked beside the existing pair, with the discovery adapter external to this workspace | **planned.** The fourth domain as a whole stays deferred |
+| ESS wave 7 | the loop closed over generated code: artifacts carry the digest of the model slice they derive from, four more construct families join the delta, a second emitter proves the plan language-neutral, and one specification runs as two applications | **delivered**, `0.7.0-ess-wave-7` — W7.1 (`contract_digest`, impact over generated artifacts), W7.2 (ten families, conservative predicate equality), W7.3 (the Go emitter) and its browser continuation W7.3b, and W7.5 (the dual-target demonstration, executed in every gate run). W7.3 was deferred once by the sequencing decision that pulled the infra waves forward, and revived the same night by the same authority. **W7.4** (obligations become artifacts and tasks) stays **deferred by decision** and unscheduled, its precondition — a contract digest that exists in code — now met |
+| infrastructure waves IW1–IW2 | a Kubernetes-scoped subset of the infrastructure design: a scanned cluster becomes a validated, content-addressed IR, then a typed graph, a coded diagnosis, invariant candidates and directions — with the discovery adapter external to this workspace | **delivered**, in `0.7.0-ess-wave-7` — `protocol infra validate\|compile\|inspect\|graph\|view\|diagnose`, twenty diagnosis rules, three invariant-candidate rules, a committed example cluster drift-checked in the gate. The fourth domain as a whole stays deferred |
+| infrastructure waves IW3–IW4 | desired state — a declared target model, semantic diff observed↔desired, simulation before anything applies — then manifests projected *from* the model | **next.** Named on the delivered waves' pages; not built |
 
 The ordering rule underneath all of them: **each wave must be falsifiable by the one before it.** A
 generated artifact nothing can check is a claim, not a deliverable. Generating code judged by an
 oracle nobody has seen fail is the exact mistake that ordering exists to prevent — the oracle was
-made to fail on purpose, once per fault, before wave 6 started, and wave 6's generated code was then
-judged by it on its first day.
+made to fail on purpose, once per fault, before wave 6 started; wave 6's generated code was judged
+by it on its first day; and wave 7's demonstration was held to six deliberate mutations before its
+green run was allowed to mean anything.
 
 ---
 
 **Sources.** `docs/VISION.md` § *Proposed, not accepted*; `AGENTS.md` § *Which documents are
 normative*; `docs/plan/ess-roadmap.md` (the wave sequence, the ordering rule, and the review outcomes
-for the proposals); `docs/plan/ess-wave-6-structural-synthesis.md` (the decisions taken, and what was
-rejected or deferred by name); `CHANGELOG.md` §§ *0.6.0* and *0.6.1*; `docs/reviews/` for the reviews
-the status column refers to.
+for the proposals); `docs/plan/ess-wave-7-closing-the-loop.md` (the re-scopings, W7.4's deferral, and
+what is deliberately not in the wave); `docs/plan/infra-wave-1-observe.md` and
+`infra-wave-2-analyze.md` (the delivered infra scope, and IW3/IW4 as what comes next);
+`CHANGELOG.md` § *0.7.0*; `docs/reviews/` for the reviews the status column refers to.

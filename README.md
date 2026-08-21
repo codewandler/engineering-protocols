@@ -38,9 +38,11 @@ implementation conforms to its specification. See [`docs/VISION.md`](docs/VISION
 Two halves is what exists. Four further designs in [`docs/design/`](docs/design/) proposed extending
 it. Three have been taken up: the specification as an oracle is **implemented** as ESS wave 4,
 semantic diff — what a revision invalidates — is **implemented** as ESS wave 5 after being accepted
-into the thesis as a stated amendment, and structural synthesis is **delivered in its first slice**
-as ESS wave 6. The fourth — infrastructure, a fourth domain — stays deferred as designed; a
-Kubernetes-scoped subset is planned as infrastructure waves, with the discovery adapter outside this
+into the thesis as a stated amendment and extended by wave 7 down to the generated artifact, and
+structural synthesis is **delivered through wave 7** — three emitters behind one plan, and one
+specification running as two applications held to one behaviour in every gate run. The fourth —
+infrastructure, a fourth domain — stays deferred as designed; a Kubernetes-scoped subset is being
+built as infrastructure waves, its first two delivered, with the discovery adapter outside this
 workspace, per the boundary the vision draws. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not
 accepted* is where their status is kept.
 
@@ -63,7 +65,7 @@ it implements the contract by running a suite against itself.
 | `aep-conformance` — black-box backend suites | 12% | 100% | 16 suites, 3 levels, a faulty backend that proves they bite |
 | `adp-domain`, `aop-domain` | 5% | 100% | 44 + 49 tests |
 
-### ESS — executable system specifications (six waves delivered, and the hardening batch behind the sixth)
+### ESS — executable system specifications (seven waves delivered)
 
 | Component | Done | State |
 |---|---:|---|
@@ -71,17 +73,20 @@ it implements the contract by running a suite against itself.
 | `ess-compiler` — resolution, IR, diagnostics | 100% | an unresolved reference is unrepresentable; codes, spans, byte-identical output |
 | `ess-gen` — four projections behind one `Generator` trait | 100% | Markdown + Mermaid, JSON Schema, OpenAPI 3.1, AsyncAPI 3.0; one shared type mapping, agreement asserted; 131 tests |
 | `ess-conformance` — the specification as an oracle | 100% | synthesis, a runner that owns its clock and id source, evidence, and twelve deliberately wrong implementations; 147 tests |
-| `ess-diff` — what moved, and what that invalidates | 45% | six construct families compared field by field, 65 typed changes; 208 changed text lines reduce to 4 semantic changes; impact closure over 21 typed relations, with the path recoverable and invalidation that can only narrow; 89 tests |
-| `protocol ess validate\|compile\|inspect\|graph\|generate\|conform` | 100% | one file or a directory; every problem in one run |
+| `ess-diff` — what moved, and what that invalidates | 60% | ten construct families compared field by field, with conservative canonical equality where a construct carries a predicate; impact closure with the path recoverable and invalidation that can only narrow, answering for the conformance suite and — via each artifact's `contract_digest` — for the generated artifacts; 142 tests. Conversions, workloads and domain naming still fall to whole-suite invalidation |
+| `protocol ess validate\|compile\|inspect\|generate\|synthesize\|graph\|diff\|impact\|conform` | 100% | one file or a directory; every problem in one run |
+| `protocol infra validate\|compile\|inspect\|graph\|view\|diagnose` | 100% | an observation bundle from an external scanner becomes a validated, content-addressed IR, a typed graph, a coded diagnosis with candidates and directions, and a self-contained HTML view; nothing in this workspace reaches a cluster |
 | The join — artifact kind, evidence kind, `ess-conformance` principle | 100% | a task can already be blocked until something proves conformance |
-| Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 100% | 27 artifacts plus a generated index, committed under `generated/`, provenance on each, drift-checked in CI |
+| Projections — documentation, JSON Schema, OpenAPI, AsyncAPI | 100% | 36 committed files under `generated/` (the projections and their generated indexes), provenance — model digest and contract digest — on each, drift-checked in CI |
 | [ESS wave 3.5 — reconciliation](docs/plan/ess-wave-3.5-reconciliation.md) | 100% | all 20 gates closed, `0.3.3-ess-wave-3.5` |
-| Generated conformance suites, committed and drift-checked | 100% | 29 scenarios from `examples/billing/` (27 at wave 4, grown by wave 6.5) and 31 from `examples/oracle-fixture/`, under `suites/generated/`, with every construct that got no scenario listed with its reason |
+| Generated conformance suites, committed and drift-checked | 100% | 29 scenarios from `examples/billing/` (27 at wave 4, grown by wave 6.5), 31 from `examples/oracle-fixture/` and 12 from `examples/gatepass/`, under `suites/generated/`, with every construct that got no scenario listed with its reason |
 | Semantic diff — what a revision invalidates | 100% | `ess diff` and `ess impact`, `0.5.0-ess-wave-5` — first slice as scoped: six construct families; predicate-bearing constructs fall back to whole-suite invalidation |
-| Rust structural synthesis (`ess-synth`) | 100% | wave 6 complete, `0.6.0-ess-wave-6` — for the delivered scope, `component-skeletons`: a language-neutral `SynthesisPlan` (every capability generated, owed or refused, with reasons), a committed zero-dependency workspace — semantic types, typestate lifecycles, component ports, one transport — and the executed criterion: the committed billing suite, unchanged, passes the workspace linked with `examples/billing-realization` (27 of 27) and fails the deliberately corrupted linkage at exactly the scenario that exists to catch it. Billing: 45 capabilities = 33 generated / 8 obligations / 4 refused; the linker never chooses (D-2) |
+| Structural synthesis (`ess-synth`) — the plan, and the first emitter behind it | 100% | wave 6 complete, `0.6.0-ess-wave-6` — for the delivered scope, `component-skeletons`: a language-neutral `SynthesisPlan` (every capability generated, owed or refused, with reasons), a committed zero-dependency workspace — semantic types, typestate lifecycles, component ports, one transport — and the executed criterion: the committed billing suite, unchanged, passes the workspace linked with `examples/billing-realization` (27 of 27) and fails the deliberately corrupted linkage at exactly the scenario that exists to catch it. Billing: 45 capabilities = 33 generated / 8 obligations / 4 refused; the linker never chooses (D-2) |
 | Wave 6.5 hardening — the gap register emptied by code | 100% | `0.6.1-ess-wave-6.5`: invariants 7, 8 and 14 now enforced by scans and a write-surface test, each with an inverse assertion; model digest widened to the full SHA-256 (D-4); `proptest` phase 1 landed, fixed-seed; the input→event-payload construct closes the one fault that was caught by nothing; value-object invariant scenarios grow the billing suite 27→29 with its refusal count at zero |
+| Three emitters behind one plan | 100% | Rust (wave 6), a standard-library-only Go module (W7.3) and a browser realization — a `WebAssembly` bridge and a page built at load time from an emitted catalogue (W7.3b). The plan gained not one line to admit either: `PLAN.md` and `plan.json` are byte-identical in all three trees, and what a target holds more weakly or cannot represent at all is in a `TARGET.md` beside the plan. All three committed under `generated/` and drift-checked, with `gofmt -l`, `go build`, `go vet`, `cargo build --target wasm32-unknown-unknown` and a Node-driven boundary test in the gate |
+| One specification, two applications, one surface (W7.5) | 100% | `examples/gatepass/` synthesised to Rust **and** Go, both binaries serving the same HTTP surface. The model gained one word — `reached_by: network` on a component — which states where a component's callers are and names no protocol; the transport is *derived*, because the one contract this repository projects for a command surface is the `OpenAPI` document. Seven routes from one mapping, `/openapi.json` and `/docs` serving the committed bytes, and a startup record identical outside a declared `runtime`. `cargo xtask synth` builds both, starts each on an ephemeral port and compares records, statuses, bodies and documents |
 
-`task check` passes 69 suites and 1397 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
+`task check` passes 94 suites and 1693 tests, with 0 clippy warnings and 0 rustdoc warnings. Weights
 are an effort estimate, not a measurement; verify the "done" column with `task check`. The ESS roadmap
 is [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md).
 
@@ -129,7 +134,8 @@ injected fault: a replayed command is applied a second time — expected to be c
 ```
 
 * **A specification generates its own tests, and they bite.** 29 scenarios from
-  [`examples/billing/`](examples/billing/) and 31 from [`examples/oracle-fixture/`](examples/oracle-fixture/),
+  [`examples/billing/`](examples/billing/), 31 from [`examples/oracle-fixture/`](examples/oracle-fixture/)
+  and 12 from [`examples/gatepass/`](examples/gatepass/),
   committed under [`suites/generated/`](suites/generated/) and drift-checked in CI. Thirteen
   deliberately wrong implementations are held against them, and the matrix asserts *which named
   scenario* catches each fault — plus a blast-radius allowance, so a suite that starts over-reaching
@@ -158,11 +164,12 @@ not conformant: the implementation contradicted the specification (exit 1)
 
 No durable backend — the only implementation is in memory. No federated artifact graphs across
 repositories. Generated code is structural, never behavioural: a specification synthesises types,
-typestate lifecycles, ports, one transport and a plan, and every algorithm remains a typed
-obligation someone still has to implement. The diff does not know about generated code yet, so a
-change to a specification owes the whole generated workspace; and entities, commands, views,
-bindings, conversions and topology are compared only for canonical equality, so any difference in
-them invalidates the whole suite rather than being narrowed. **The conformance runner cannot reach
+typestate lifecycles, ports, transports and a plan, and every algorithm remains a typed
+obligation someone still has to implement — and an obligation is a plan entry, not yet an artifact
+a task can own (W7.4, deferred by decision). The delta still has a fail-closed arm: conversions,
+workloads and a domain's naming have no compared construct family, so a change there owes the whole
+suite rather than being narrowed; and predicates are compared only for canonical equality, so a
+provably weaker rewrite still reads as *changed* — implication stays refused. **The conformance runner cannot reach
 an out-of-process implementation**: `ConformanceTarget` is a Rust trait, this binary runs only the
 reference implementations it was compiled with, and holding your own system to a specification means
 depending on `ess-conformance` from your own tests. The generated OpenAPI and AsyncAPI *envelopes*
@@ -211,15 +218,18 @@ crates/
   ess-gen/          deterministic projections: docs, JSON Schema, OpenAPI, AsyncAPI
   ess-conformance/  scenario synthesis, the runner, and the implementations that are wrong on purpose
   ess-diff/         the semantic delta between two revisions, and the impact closure over it
-  ess-synth/        the synthesis plan and the Rust emitter behind it
-  protocol-cli/     reference CLI: validate, resolve, inspect, evaluate, explain, schema, ess
+  ess-synth/        the language-neutral synthesis plan, and the Rust, Go and browser emitters behind it
+  infra-domain/     the typed model of an observed cluster (infra-observation/1)
+  infra-compiler/   validation, and the content-addressed infra-ir/1 document
+  infra-analyze/    the typed dependency graph, diagnosis, candidates, directions, the HTML view
+  protocol-cli/     reference CLI: validate, resolve, inspect, evaluate, explain, schema, ess, infra
 protocols/          protocol declarations: aep, adp, aop
 principles/         reusable enforceable rules
 workflows/          state machines: development, incidents, releases, migrations
 profiles/           bundles of protocol + workflow + principles + completion
 artifacts/          artifact kinds, relations, lifecycles and templates
 schemas/generated/  generated JSON Schema — do not edit by hand
-generated/          projections of examples/billing/, and under rust/ the synthesised workspaces — do not edit by hand
+generated/          projections of examples/billing/, and under rust/, go/ and web/ the synthesised trees — do not edit by hand
 suites/generated/   conformance suites, generated from the specifications — do not edit by hand
 conformance/        fixtures, scenarios and expected results
 docs/design/        the design specifications
@@ -231,20 +241,24 @@ xtask/              repository automation
 Requires a recent stable Rust and [go-task](https://taskfile.dev).
 
 ```console
-task check          # eight steps: format check, clippy, tests, rustdoc, schema, projections, suites, synthesis
+task check          # nine steps: format check, clippy, tests, rustdoc, schema, projections, suites, observation IR, synthesis
 task test
 task schema         # regenerate schemas/generated/
 task generate       # regenerate generated/ — the projections of examples/billing/
 task suite          # regenerate suites/generated/ — the conformance suites examples/ oblige
-task synth          # regenerate generated/rust/ — the workspaces the specifications determine
+task synth          # regenerate generated/rust/, go/ and web/, then run the dual-target demonstration
+task infra          # regenerate examples/k3d-dev-cluster/cluster.ir.json from its observation
 task doc
 task doc-check      # rustdoc with warnings as errors
 ```
 
+The synthesis step needs the Go toolchain, the `wasm32-unknown-unknown` Rust target and Node beside
+Rust's own, and says which is missing rather than skipping.
+
 Without `task`: `cargo xtask fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
 `cargo test --workspace`, `RUSTDOCFLAGS=-D warnings cargo doc --workspace --no-deps`,
 `cargo xtask schema --check`, `cargo xtask generate --check`, `cargo xtask suite --check`,
-`cargo xtask synth --check`.
+`cargo xtask infra --check`, `cargo xtask synth --check`.
 
 ## Documents
 
@@ -266,6 +280,8 @@ Without `task`: `cargo xtask fmt --check`, `cargo clippy --workspace --all-targe
 | [`docs/plan/ess-wave-4-the-oracle.md`](docs/plan/ess-wave-4-the-oracle.md) | ESS wave 4 — the oracle, the four model gaps it found, and the fault nothing catches (caught since wave 6.5) |
 | [`docs/plan/ess-wave-5-semantic-diff.md`](docs/plan/ess-wave-5-semantic-diff.md) | ESS wave 5 — the semantic delta and the impact closure, with what was accepted and what was rejected by name |
 | [`docs/plan/ess-wave-6-structural-synthesis.md`](docs/plan/ess-wave-6-structural-synthesis.md) | ESS wave 6 — structural synthesis: the decisions taken, and what is deliberately not in it |
+| [`docs/plan/ess-wave-7-closing-the-loop.md`](docs/plan/ess-wave-7-closing-the-loop.md) | ESS wave 7 — the loop closed over generated code, the second and third emitters, and the dual-target demonstration; W7.4 deferred |
+| [`docs/plan/infra-wave-1-observe.md`](docs/plan/infra-wave-1-observe.md) / [`infra-wave-2-analyze.md`](docs/plan/infra-wave-2-analyze.md) | the infrastructure waves delivered so far — observation and IR, then graph, diagnosis, candidates and directions — and IW3/IW4 as what comes next |
 | [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) | the ESS waves, and what is deliberately outside them |
 | [`docs/plan/wave-1-execution-core.md`](docs/plan/wave-1-execution-core.md) | the protocol's four waves, with their acceptance criteria |
 | [`docs/plan/document-authoring-brief.md`](docs/plan/document-authoring-brief.md) | how to write a valid principle, workflow, profile or lifecycle |
@@ -276,6 +292,8 @@ Without `task`: `cargo xtask fmt --check`, `cargo clippy --workspace --all-targe
 | [`examples/oracle-fixture/`](examples/oracle-fixture/) | a second specification, built to exercise what the oracle must prove |
 | [`examples/billing-conformance/`](examples/billing-conformance/) | the closed loop, both directions: a run that completes a task and one that refuses to |
 | [`examples/billing-realization/`](examples/billing-realization/) | the hand-written half of the synthesised workspace: one implementation per obligation in the generated plan |
+| [`examples/gatepass/`](examples/gatepass/) | the dual-target demonstration's specification — visitor passes, and the one component whose `reached_by: network` derives the HTTP surface |
+| [`examples/gatepass-realization/`](examples/gatepass-realization/), [`examples/gatepass-go-realization/`](examples/gatepass-go-realization/) | the hand-written halves of the two gatepass applications, written from the specification rather than from each other |
 | [`docs/design/archive/`](docs/design/archive/) | v0.1 draft and artifact-model extension, kept for provenance |
 | [`docs/guide/`](docs/guide/) | how to adopt the protocol, wire a harness, prove a backend, and specify a system |
 | [`AGENTS.md`](AGENTS.md) | working agreement for humans and agents contributing here |
