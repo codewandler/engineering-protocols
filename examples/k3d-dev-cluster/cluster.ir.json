@@ -1,0 +1,1698 @@
+{
+  "format": "infra-ir/1",
+  "provenance": {
+    "context": "k3d-dev-cluster",
+    "scanned_at": "2026-08-20T22:30:30Z",
+    "scout_version": "0.1.0",
+    "compiler_version": "0.1.0"
+  },
+  "digest": "9ed0e8608fd69c43c3b0405a7a5fd599fad61a6246b42e2cdd4cffd1e29c8e75",
+  "model": {
+    "namespaces": {
+      "kube-system": {
+        "identity": {
+          "namespace": null,
+          "name": "kube-system",
+          "uid": "31521f3b-6765-4333-ae15-b12f9d50422f"
+        },
+        "labels": {
+          "kubernetes.io/metadata.name": "kube-system"
+        }
+      },
+      "shop": {
+        "identity": {
+          "namespace": null,
+          "name": "shop",
+          "uid": "b07659bc-9e20-4501-8d30-97e4f1ddd087"
+        },
+        "labels": {
+          "kubernetes.io/metadata.name": "shop"
+        }
+      }
+    },
+    "nodes": {
+      "k3d-fixture-server-0": {
+        "identity": {
+          "namespace": null,
+          "name": "k3d-fixture-server-0",
+          "uid": "a38ef6dd-79e6-4177-99eb-a8fb0cedab49"
+        },
+        "labels": {
+          "beta.kubernetes.io/arch": "amd64",
+          "beta.kubernetes.io/instance-type": "k3s",
+          "beta.kubernetes.io/os": "linux",
+          "kubernetes.io/arch": "amd64",
+          "kubernetes.io/hostname": "k3d-fixture-server-0",
+          "kubernetes.io/os": "linux",
+          "node-role.kubernetes.io/control-plane": "true",
+          "node-role.kubernetes.io/master": "true",
+          "node.kubernetes.io/instance-type": "k3s"
+        },
+        "capacity": {
+          "cpu": "20",
+          "ephemeral-storage": "888795864Ki",
+          "hugepages-1Gi": "0",
+          "hugepages-2Mi": "0",
+          "memory": "65743360Ki",
+          "pods": "110"
+        },
+        "info": {
+          "architecture": "amd64",
+          "container_runtime": "containerd://1.7.23-k3s2",
+          "kernel": "6.6.144-3-MANJARO",
+          "kubelet": "v1.31.5+k3s1",
+          "operating_system": "linux",
+          "os_image": "K3s v1.31.5+k3s1"
+        }
+      }
+    },
+    "workloads": {
+      "kube-system/daemonset/svclb-traefik-2290261f": {
+        "kind": "daemon_set",
+        "identity": {
+          "namespace": "kube-system",
+          "name": "svclb-traefik-2290261f",
+          "uid": "783b4d40-5686-41fc-816e-c6afdc4fac74"
+        },
+        "labels": {
+          "objectset.rio.cattle.io/hash": "836fcbce022d5dae5b36694fe1eaf389c93af7dc",
+          "svccontroller.k3s.cattle.io/nodeselector": "false",
+          "svccontroller.k3s.cattle.io/svcname": "traefik",
+          "svccontroller.k3s.cattle.io/svcnamespace": "kube-system"
+        },
+        "replicas": null,
+        "selector": {
+          "app": "svclb-traefik-2290261f"
+        },
+        "governing_service": null,
+        "service_account": {
+          "state": "resolved",
+          "key": "kube-system/svclb"
+        },
+        "template_labels": {
+          "app": "svclb-traefik-2290261f",
+          "svccontroller.k3s.cattle.io/svcname": "traefik",
+          "svccontroller.k3s.cattle.io/svcnamespace": "kube-system"
+        },
+        "containers": [
+          {
+            "name": "lb-tcp-80",
+            "image": "rancher/klipper-lb:v0.4.9",
+            "env": [
+              {
+                "name": "SRC_PORT",
+                "source": {
+                  "kind": "literal",
+                  "value": "80"
+                }
+              },
+              {
+                "name": "SRC_RANGES",
+                "source": {
+                  "kind": "literal",
+                  "value": "0.0.0.0/0"
+                }
+              },
+              {
+                "name": "DEST_PROTO",
+                "source": {
+                  "kind": "literal",
+                  "value": "TCP"
+                }
+              },
+              {
+                "name": "DEST_PORT",
+                "source": {
+                  "kind": "literal",
+                  "value": "80"
+                }
+              },
+              {
+                "name": "DEST_IPS",
+                "source": {
+                  "kind": "literal",
+                  "value": "10.43.2.99"
+                }
+              }
+            ],
+            "env_from": [],
+            "volume_mounts": [],
+            "probes": {
+              "liveness": null,
+              "readiness": null,
+              "startup": null
+            },
+            "resources": {
+              "requests": {
+                "cpu": "10m",
+                "memory": "16Mi"
+              },
+              "limits": {
+                "cpu": "100m",
+                "memory": "32Mi"
+              }
+            }
+          },
+          {
+            "name": "lb-tcp-443",
+            "image": "rancher/klipper-lb:v0.4.9",
+            "env": [
+              {
+                "name": "SRC_PORT",
+                "source": {
+                  "kind": "literal",
+                  "value": "443"
+                }
+              },
+              {
+                "name": "SRC_RANGES",
+                "source": {
+                  "kind": "literal",
+                  "value": "0.0.0.0/0"
+                }
+              },
+              {
+                "name": "DEST_PROTO",
+                "source": {
+                  "kind": "literal",
+                  "value": "TCP"
+                }
+              },
+              {
+                "name": "DEST_PORT",
+                "source": {
+                  "kind": "literal",
+                  "value": "443"
+                }
+              },
+              {
+                "name": "DEST_IPS",
+                "source": {
+                  "kind": "literal",
+                  "value": "10.43.2.99"
+                }
+              }
+            ],
+            "env_from": [],
+            "volume_mounts": [],
+            "probes": {
+              "liveness": null,
+              "readiness": null,
+              "startup": null
+            },
+            "resources": {
+              "requests": {
+                "cpu": "10m",
+                "memory": "16Mi"
+              },
+              "limits": {
+                "cpu": "100m",
+                "memory": "32Mi"
+              }
+            }
+          }
+        ],
+        "volumes": []
+      },
+      "kube-system/deployment/coredns": {
+        "kind": "deployment",
+        "identity": {
+          "namespace": "kube-system",
+          "name": "coredns",
+          "uid": "f830f432-713a-4ece-87b3-f05f40fecb57"
+        },
+        "labels": {
+          "k8s-app": "kube-dns",
+          "kubernetes.io/name": "CoreDNS",
+          "objectset.rio.cattle.io/hash": "bce283298811743a0386ab510f2f67ef74240c57"
+        },
+        "replicas": 2,
+        "selector": {
+          "k8s-app": "kube-dns"
+        },
+        "governing_service": null,
+        "service_account": {
+          "state": "resolved",
+          "key": "kube-system/coredns"
+        },
+        "template_labels": {
+          "k8s-app": "kube-dns"
+        },
+        "containers": [
+          {
+            "name": "coredns",
+            "image": "rancher/mirrored-coredns-coredns:1.12.0",
+            "env": [],
+            "env_from": [],
+            "volume_mounts": [
+              {
+                "name": "config-volume",
+                "path": "/etc/coredns",
+                "read_only": true
+              },
+              {
+                "name": "custom-config-volume",
+                "path": "/etc/coredns/custom",
+                "read_only": true
+              }
+            ],
+            "probes": {
+              "liveness": {
+                "handler": {
+                  "kind": "http_get",
+                  "path": "/health",
+                  "port": "8080"
+                },
+                "initial_delay_seconds": 60,
+                "period_seconds": 10,
+                "timeout_seconds": 1,
+                "failure_threshold": 3
+              },
+              "readiness": {
+                "handler": {
+                  "kind": "http_get",
+                  "path": "/ready",
+                  "port": "8181"
+                },
+                "initial_delay_seconds": null,
+                "period_seconds": 2,
+                "timeout_seconds": 1,
+                "failure_threshold": 3
+              },
+              "startup": null
+            },
+            "resources": {
+              "requests": {
+                "cpu": "100m",
+                "memory": "70Mi"
+              },
+              "limits": {
+                "memory": "170Mi"
+              }
+            }
+          }
+        ],
+        "volumes": [
+          {
+            "name": "config-volume",
+            "source": {
+              "kind": "config_map",
+              "config_map": {
+                "state": "resolved",
+                "key": "kube-system/coredns"
+              },
+              "optional": false
+            }
+          },
+          {
+            "name": "custom-config-volume",
+            "source": {
+              "kind": "config_map",
+              "config_map": {
+                "state": "unresolved",
+                "name": "coredns-custom"
+              },
+              "optional": true
+            }
+          }
+        ]
+      },
+      "shop/deployment/flaky-agent": {
+        "kind": "deployment",
+        "identity": {
+          "namespace": "shop",
+          "name": "flaky-agent",
+          "uid": "synthetic-flaky-agent"
+        },
+        "labels": {
+          "app": "flaky-agent"
+        },
+        "replicas": 1,
+        "selector": {
+          "app": "flaky-agent"
+        },
+        "governing_service": null,
+        "service_account": {
+          "state": "resolved",
+          "key": "shop/default"
+        },
+        "template_labels": {
+          "app": "flaky-agent"
+        },
+        "containers": [
+          {
+            "name": "agent",
+            "image": "registry.local/flaky-agent",
+            "env": [
+              {
+                "name": "AGENT_TOKEN",
+                "source": {
+                  "kind": "secret_key",
+                  "secret": {
+                    "state": "unresolved",
+                    "name": "agent-credentials"
+                  },
+                  "key": "token",
+                  "optional": false
+                }
+              }
+            ],
+            "env_from": [],
+            "volume_mounts": [],
+            "probes": {
+              "liveness": null,
+              "readiness": null,
+              "startup": null
+            },
+            "resources": {
+              "requests": {},
+              "limits": {}
+            }
+          }
+        ],
+        "volumes": []
+      },
+      "shop/deployment/queue-redis": {
+        "kind": "deployment",
+        "identity": {
+          "namespace": "shop",
+          "name": "queue-redis",
+          "uid": "e5a4e66d-5776-4af0-ae9e-8fc2cce9af4f"
+        },
+        "labels": {},
+        "replicas": 1,
+        "selector": {
+          "app": "queue-redis"
+        },
+        "governing_service": null,
+        "service_account": {
+          "state": "resolved",
+          "key": "shop/default"
+        },
+        "template_labels": {
+          "app": "queue-redis"
+        },
+        "containers": [
+          {
+            "name": "redis",
+            "image": "redis:7-alpine",
+            "env": [],
+            "env_from": [],
+            "volume_mounts": [
+              {
+                "name": "data",
+                "path": "/data",
+                "read_only": false
+              }
+            ],
+            "probes": {
+              "liveness": null,
+              "readiness": null,
+              "startup": null
+            },
+            "resources": {
+              "requests": {},
+              "limits": {}
+            }
+          }
+        ],
+        "volumes": [
+          {
+            "name": "data",
+            "source": {
+              "kind": "claim",
+              "claim": {
+                "state": "resolved",
+                "key": "shop/queue-redis-data"
+              }
+            }
+          }
+        ]
+      },
+      "shop/deployment/storefront-server": {
+        "kind": "deployment",
+        "identity": {
+          "namespace": "shop",
+          "name": "storefront-server",
+          "uid": "878da52b-f5d0-419f-9a5d-877dc0c77225"
+        },
+        "labels": {
+          "app.kubernetes.io/component": "storefront-server",
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "storefront-server",
+          "app.kubernetes.io/part-of": "storefront",
+          "app.kubernetes.io/version": "0.3.0",
+          "helm.sh/chart": "storefront-server-0.1.0"
+        },
+        "replicas": 2,
+        "selector": {
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/name": "storefront-server"
+        },
+        "governing_service": null,
+        "service_account": {
+          "state": "resolved",
+          "key": "shop/default"
+        },
+        "template_labels": {
+          "app.kubernetes.io/component": "storefront-server",
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "storefront-server",
+          "app.kubernetes.io/part-of": "storefront",
+          "app.kubernetes.io/version": "0.3.0",
+          "com.example.monitoring-enabled": "true",
+          "helm.sh/chart": "storefront-server-0.1.0"
+        },
+        "containers": [
+          {
+            "name": "storefront-server",
+            "image": "localhost:31721/apps/storefront-server:AtqQlTV",
+            "env": [
+              {
+                "name": "BC_LOG_LEVEL",
+                "source": {
+                  "kind": "literal",
+                  "value": "debug"
+                }
+              },
+              {
+                "name": "BC_GRPC_LISTEN",
+                "source": {
+                  "kind": "literal",
+                  "value": ":7090"
+                }
+              },
+              {
+                "name": "BC_METRICS_LISTEN",
+                "source": {
+                  "kind": "literal",
+                  "value": ":2121"
+                }
+              },
+              {
+                "name": "BC_GRPCWEB_LISTEN",
+                "source": {
+                  "kind": "literal",
+                  "value": ":7091"
+                }
+              },
+              {
+                "name": "BC_WEB_ROOT",
+                "source": {
+                  "kind": "literal",
+                  "value": "/web"
+                }
+              },
+              {
+                "name": "BC_BACKEND_BASE",
+                "source": {
+                  "kind": "literal",
+                  "value": "http://backend:7777"
+                }
+              },
+              {
+                "name": "BC_INTROSPECT_URL",
+                "source": {
+                  "kind": "literal",
+                  "value": "http://backend:7777/oauth/introspect"
+                }
+              },
+              {
+                "name": "BC_FAYE_URL",
+                "source": {
+                  "kind": "literal",
+                  "value": "http://pusher:8000/faye"
+                }
+              },
+              {
+                "name": "BC_SIP_ENABLE",
+                "source": {
+                  "kind": "literal",
+                  "value": "true"
+                }
+              },
+              {
+                "name": "BC_SIP_UDP_LISTEN",
+                "source": {
+                  "kind": "literal",
+                  "value": ":5082"
+                }
+              },
+              {
+                "name": "BC_SIP_TCP_LISTEN",
+                "source": {
+                  "kind": "literal",
+                  "value": ":5082"
+                }
+              },
+              {
+                "name": "BC_SIP_CONTACT_PORT",
+                "source": {
+                  "kind": "literal",
+                  "value": "5082"
+                }
+              },
+              {
+                "name": "BC_MEDIA_BACKEND",
+                "source": {
+                  "kind": "literal",
+                  "value": "rtpengine"
+                }
+              },
+              {
+                "name": "BC_RTPENGINE_NG_ADDR",
+                "source": {
+                  "kind": "literal",
+                  "value": "172.18.0.2:2223"
+                }
+              },
+              {
+                "name": "BC_MEDIA_UDP_PORT_MIN",
+                "source": {
+                  "kind": "literal",
+                  "value": "41000"
+                }
+              },
+              {
+                "name": "BC_MEDIA_UDP_PORT_MAX",
+                "source": {
+                  "kind": "literal",
+                  "value": "41100"
+                }
+              },
+              {
+                "name": "BC_TURN_ENABLE",
+                "source": {
+                  "kind": "literal",
+                  "value": "true"
+                }
+              },
+              {
+                "name": "BC_TURN_LISTEN",
+                "source": {
+                  "kind": "literal",
+                  "value": ":3478"
+                }
+              },
+              {
+                "name": "BC_TURN_REALM",
+                "source": {
+                  "kind": "literal",
+                  "value": "example"
+                }
+              },
+              {
+                "name": "BC_TURN_RELAY_PORT_MIN",
+                "source": {
+                  "kind": "literal",
+                  "value": "41200"
+                }
+              },
+              {
+                "name": "BC_TURN_RELAY_PORT_MAX",
+                "source": {
+                  "kind": "literal",
+                  "value": "41300"
+                }
+              },
+              {
+                "name": "BC_TURN_CRED_TTL",
+                "source": {
+                  "kind": "literal",
+                  "value": "12h"
+                }
+              },
+              {
+                "name": "BC_TURN_SECRET",
+                "source": {
+                  "kind": "secret_key",
+                  "secret": {
+                    "state": "resolved",
+                    "key": "shop/storefront-server"
+                  },
+                  "key": "turn-secret",
+                  "optional": true
+                }
+              },
+              {
+                "name": "BC_TURN_CLIENT_URL",
+                "source": {
+                  "kind": "literal",
+                  "value": "turn:127.0.0.1:3478?transport=tcp"
+                }
+              }
+            ],
+            "env_from": [
+              {
+                "prefix": null,
+                "source": {
+                  "kind": "config_map",
+                  "config_map": {
+                    "state": "resolved",
+                    "key": "shop/storefront-env"
+                  },
+                  "optional": false
+                }
+              }
+            ],
+            "volume_mounts": [],
+            "probes": {
+              "liveness": null,
+              "readiness": null,
+              "startup": null
+            },
+            "resources": {
+              "requests": {
+                "cpu": "50m",
+                "memory": "128Mi"
+              },
+              "limits": {
+                "cpu": "2",
+                "memory": "512Mi"
+              }
+            }
+          }
+        ],
+        "volumes": []
+      },
+      "shop/statefulset/switchboard": {
+        "kind": "stateful_set",
+        "identity": {
+          "namespace": "shop",
+          "name": "switchboard",
+          "uid": "9542b207-ea6d-4bc3-b051-c88b4fe51cc6"
+        },
+        "labels": {
+          "app.kubernetes.io/component": "switchboard",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "devspace-app"
+        },
+        "replicas": 2,
+        "selector": {
+          "app.kubernetes.io/component": "switchboard",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "devspace-app"
+        },
+        "governing_service": {
+          "state": "resolved",
+          "key": "shop/switchboard-headless"
+        },
+        "service_account": {
+          "state": "resolved",
+          "key": "shop/default"
+        },
+        "template_labels": {
+          "app.kubernetes.io/component": "switchboard",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "devspace-app"
+        },
+        "containers": [
+          {
+            "name": "switchboard",
+            "image": "registry.example.com/services/switchboard-8:latest",
+            "env": [
+              {
+                "name": "AGI_HANDLER",
+                "source": {
+                  "kind": "literal",
+                  "value": "backend"
+                }
+              },
+              {
+                "name": "UPLOAD_URL",
+                "source": {
+                  "kind": "literal",
+                  "value": "http://backend:7777/api/core/internal/recording/upload"
+                }
+              }
+            ],
+            "env_from": [],
+            "volume_mounts": [
+              {
+                "name": "config",
+                "path": "/etc/switchboard",
+                "read_only": false
+              }
+            ],
+            "probes": {
+              "liveness": null,
+              "readiness": null,
+              "startup": null
+            },
+            "resources": {
+              "requests": {
+                "cpu": "0"
+              },
+              "limits": {
+                "cpu": "4"
+              }
+            }
+          }
+        ],
+        "volumes": []
+      }
+    },
+    "services": {
+      "kube-system/kube-dns": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "kube-dns",
+          "uid": "b1262157-7c80-4d39-89b9-c9de0ec22b21"
+        },
+        "labels": {
+          "k8s-app": "kube-dns",
+          "kubernetes.io/cluster-service": "true",
+          "kubernetes.io/name": "CoreDNS",
+          "objectset.rio.cattle.io/hash": "bce283298811743a0386ab510f2f67ef74240c57"
+        },
+        "service_type": "ClusterIP",
+        "selector": {
+          "k8s-app": "kube-dns"
+        },
+        "ports": [
+          {
+            "name": "dns",
+            "port": 53,
+            "target_port": "53",
+            "protocol": "UDP"
+          },
+          {
+            "name": "dns-tcp",
+            "port": 53,
+            "target_port": "53",
+            "protocol": "TCP"
+          },
+          {
+            "name": "metrics",
+            "port": 9153,
+            "target_port": "9153",
+            "protocol": "TCP"
+          }
+        ]
+      },
+      "shop/lost-lookup": {
+        "identity": {
+          "namespace": "shop",
+          "name": "lost-lookup",
+          "uid": "synthetic-0000-0000-0001"
+        },
+        "labels": {},
+        "service_type": "ClusterIP",
+        "selector": {
+          "app": "retired"
+        },
+        "ports": [
+          {
+            "name": null,
+            "port": 8080,
+            "target_port": "8080",
+            "protocol": "TCP"
+          }
+        ]
+      },
+      "shop/queue-redis-master": {
+        "identity": {
+          "namespace": "shop",
+          "name": "queue-redis-master",
+          "uid": "4e155239-a852-4472-8413-a7f497e1523a"
+        },
+        "labels": {},
+        "service_type": "ClusterIP",
+        "selector": {
+          "app": "queue-redis"
+        },
+        "ports": [
+          {
+            "name": null,
+            "port": 6379,
+            "target_port": "6379",
+            "protocol": "TCP"
+          }
+        ]
+      },
+      "shop/storefront-server": {
+        "identity": {
+          "namespace": "shop",
+          "name": "storefront-server",
+          "uid": "9866e67c-2d2c-4e9b-a007-9d3e30c25520"
+        },
+        "labels": {
+          "app.kubernetes.io/component": "storefront-server",
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "storefront-server",
+          "app.kubernetes.io/part-of": "storefront",
+          "app.kubernetes.io/version": "0.3.0",
+          "helm.sh/chart": "storefront-server-0.1.0"
+        },
+        "service_type": "ClusterIP",
+        "selector": {
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/name": "storefront-server"
+        },
+        "ports": [
+          {
+            "name": "grpc",
+            "port": 7090,
+            "target_port": "grpc",
+            "protocol": "TCP"
+          },
+          {
+            "name": "web",
+            "port": 7091,
+            "target_port": "web",
+            "protocol": "TCP"
+          },
+          {
+            "name": "sip-udp",
+            "port": 5082,
+            "target_port": "sip-udp",
+            "protocol": "UDP"
+          },
+          {
+            "name": "turn",
+            "port": 3478,
+            "target_port": "turn",
+            "protocol": "TCP"
+          }
+        ]
+      },
+      "shop/switchboard-client": {
+        "identity": {
+          "namespace": "shop",
+          "name": "switchboard-client",
+          "uid": "synthetic-switchboard-client"
+        },
+        "labels": {},
+        "service_type": "ClusterIP",
+        "selector": {
+          "app.kubernetes.io/component": "switchboard",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "devspace-app"
+        },
+        "ports": [
+          {
+            "name": null,
+            "port": 5060,
+            "target_port": "5060",
+            "protocol": "UDP"
+          }
+        ]
+      },
+      "shop/switchboard-headless": {
+        "identity": {
+          "namespace": "shop",
+          "name": "switchboard-headless",
+          "uid": "b4663a3e-0cf0-424c-b357-e32e62bdead6"
+        },
+        "labels": {
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "switchboard"
+        },
+        "service_type": "ClusterIP",
+        "selector": {
+          "app.kubernetes.io/component": "switchboard",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "devspace-app"
+        },
+        "ports": [
+          {
+            "name": "web",
+            "port": 80,
+            "target_port": "80",
+            "protocol": "TCP"
+          }
+        ]
+      }
+    },
+    "ingresses": {
+      "shop/edge": {
+        "identity": {
+          "namespace": "shop",
+          "name": "edge",
+          "uid": "synthetic-0000-0000-0002"
+        },
+        "labels": {},
+        "rules": [
+          {
+            "host": "bc.dev.local",
+            "paths": [
+              {
+                "path": "/",
+                "path_type": "Prefix",
+                "backend": {
+                  "service": {
+                    "state": "resolved",
+                    "key": "shop/storefront-server"
+                  },
+                  "port": "7091"
+                }
+              },
+              {
+                "path": "/legacy",
+                "path_type": "Prefix",
+                "backend": {
+                  "service": {
+                    "state": "unresolved",
+                    "name": "retired-api"
+                  },
+                  "port": "80"
+                }
+              }
+            ]
+          }
+        ],
+        "default_backend": null
+      }
+    },
+    "config_maps": {
+      "kube-system/coredns": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "coredns",
+          "uid": "5ad3dde6-ba0a-4b6d-b377-d01b06db6666"
+        },
+        "labels": {
+          "objectset.rio.cattle.io/hash": "bce283298811743a0386ab510f2f67ef74240c57"
+        },
+        "keys": {
+          "Corefile": {
+            "sha256": "ea2aa6b37e2897e178d410c6d137b7d6dc804c19a553dfb3ac17c4aeb193d6a1",
+            "length": 428
+          },
+          "NodeHosts": {
+            "sha256": "2c89469d8a3a5030ca2e49d8b16626c64ea195fc7eca8295280d621bcaa916ec",
+            "length": 32
+          }
+        }
+      },
+      "shop/abandoned-config": {
+        "identity": {
+          "namespace": "shop",
+          "name": "abandoned-config",
+          "uid": "synthetic-abandoned-config"
+        },
+        "labels": {},
+        "keys": {
+          "stale.conf": {
+            "sha256": "5852e6042a58896acf3bcc2b046645057a96fdecfe3de35eeaa92e1aafe69613",
+            "length": 13
+          }
+        }
+      },
+      "shop/storefront-env": {
+        "identity": {
+          "namespace": "shop",
+          "name": "storefront-env",
+          "uid": "synthetic-0000-0000-0003"
+        },
+        "labels": {},
+        "keys": {
+          "LOG_FORMAT": {
+            "sha256": "02bd175f329720378ce83dd56a1b6b1f5291a60182d6c54b5e0d1e8d248a267a",
+            "length": 4
+          },
+          "REGION": {
+            "sha256": "25bf8e1a2393f1108d37029b3df5593236c755742ec93465bbafa9b290bddcf6",
+            "length": 5
+          }
+        }
+      }
+    },
+    "secrets": {
+      "shop/devspace-cache-acd": {
+        "identity": {
+          "namespace": "shop",
+          "name": "devspace-cache-acd",
+          "uid": "e4e580c8-9978-4fca-8063-6f35f2a0468b"
+        },
+        "labels": {
+          "name": "acd",
+          "owner": "devspace"
+        },
+        "secret_type": "devspace.sh/remote-cache",
+        "keys": {
+          "cache": {
+            "sha256": "f4276be53bccb56fa4ea7e74402f401bb2db0b934359599d753443732d837cec",
+            "length": 1376
+          }
+        }
+      },
+      "shop/sa-token-legacy": {
+        "identity": {
+          "namespace": "shop",
+          "name": "sa-token-legacy",
+          "uid": "synthetic-sa-token"
+        },
+        "labels": {},
+        "secret_type": "kubernetes.io/service-account-token",
+        "keys": {
+          "token": {
+            "sha256": "1f7dbf1a0f5f2a9c4c8db1c65b1a1f6a2f9f0f4d3e2b1a0c9d8e7f6a5b4c3d2e",
+            "length": 942
+          }
+        }
+      },
+      "shop/storefront-server": {
+        "identity": {
+          "namespace": "shop",
+          "name": "storefront-server",
+          "uid": "48a65258-f9b2-4f9c-a051-2f81fa95eee0"
+        },
+        "labels": {
+          "app.kubernetes.io/component": "storefront-server",
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "storefront-server",
+          "app.kubernetes.io/part-of": "storefront",
+          "app.kubernetes.io/version": "0.3.0",
+          "helm.sh/chart": "storefront-server-0.1.0"
+        },
+        "secret_type": "Opaque",
+        "keys": {
+          "turn-secret": {
+            "sha256": "3baf68f596a73c1c95aea267e1974447cbe52355eecbdc62b4079466f1cebec8",
+            "length": 32
+          }
+        }
+      }
+    },
+    "service_accounts": {
+      "kube-system/coredns": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "coredns",
+          "uid": "d90c2b82-8bde-46ba-a56e-bc146fb333b0"
+        },
+        "labels": {
+          "objectset.rio.cattle.io/hash": "bce283298811743a0386ab510f2f67ef74240c57"
+        }
+      },
+      "kube-system/default": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "default",
+          "uid": "22715013-6146-4027-be28-8058aec28c15"
+        },
+        "labels": {}
+      },
+      "kube-system/svclb": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "svclb",
+          "uid": "5ccd9dce-45d0-4a88-af83-f9dedf5b07e2"
+        },
+        "labels": {}
+      },
+      "shop/default": {
+        "identity": {
+          "namespace": "shop",
+          "name": "default",
+          "uid": "91181542-f662-4c4f-8bf7-fea777d9268a"
+        },
+        "labels": {}
+      }
+    },
+    "claims": {
+      "shop/config-switchboard-0": {
+        "identity": {
+          "namespace": "shop",
+          "name": "config-switchboard-0",
+          "uid": "32bffc91-f75a-459a-a0af-9b6e35a58c3d"
+        },
+        "labels": {
+          "app.kubernetes.io/component": "switchboard",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "devspace-app"
+        },
+        "storage_class": "local-path",
+        "access_modes": [
+          "ReadWriteOnce"
+        ],
+        "requested_storage": "50Mi",
+        "phase": "bound"
+      },
+      "shop/orphan-cache": {
+        "identity": {
+          "namespace": "shop",
+          "name": "orphan-cache",
+          "uid": "synthetic-orphan-cache"
+        },
+        "labels": {},
+        "storage_class": "local-path",
+        "access_modes": [
+          "ReadWriteOnce"
+        ],
+        "requested_storage": "1Gi",
+        "phase": "pending"
+      },
+      "shop/queue-redis-data": {
+        "identity": {
+          "namespace": "shop",
+          "name": "queue-redis-data",
+          "uid": "54ddf450-ebc3-482b-89a6-8d5c9390c78f"
+        },
+        "labels": {},
+        "storage_class": "local-path",
+        "access_modes": [
+          "ReadWriteOnce"
+        ],
+        "requested_storage": "1Gi",
+        "phase": "bound"
+      }
+    },
+    "pods": {
+      "kube-system/coredns-ccb96694c-jkz7w": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "coredns-ccb96694c-jkz7w",
+          "uid": "da0bab33-a6b9-4b8d-ba2e-0e2b869a297e"
+        },
+        "labels": {
+          "k8s-app": "kube-dns",
+          "pod-template-hash": "ccb96694c"
+        },
+        "phase": "running",
+        "ready": true,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": {
+          "kind": "ReplicaSet",
+          "name": "coredns-ccb96694c"
+        },
+        "containers": [
+          {
+            "name": "coredns",
+            "ready": true,
+            "restart_count": 10,
+            "waiting_reason": null
+          }
+        ]
+      },
+      "kube-system/svclb-traefik-2290261f-xjx66": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "svclb-traefik-2290261f-xjx66",
+          "uid": "39d22fbc-f9e2-49d9-8312-f4143f813521"
+        },
+        "labels": {
+          "app": "svclb-traefik-2290261f",
+          "controller-revision-hash": "59d9646d9f",
+          "pod-template-generation": "1",
+          "svccontroller.k3s.cattle.io/svcname": "traefik",
+          "svccontroller.k3s.cattle.io/svcnamespace": "kube-system"
+        },
+        "phase": "running",
+        "ready": true,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": {
+          "kind": "DaemonSet",
+          "name": "svclb-traefik-2290261f"
+        },
+        "containers": [
+          {
+            "name": "lb-tcp-443",
+            "ready": true,
+            "restart_count": 38,
+            "waiting_reason": null
+          },
+          {
+            "name": "lb-tcp-80",
+            "ready": true,
+            "restart_count": 38,
+            "waiting_reason": null
+          }
+        ]
+      },
+      "shop/cache-warm-jc7dd": {
+        "identity": {
+          "namespace": "shop",
+          "name": "cache-warm-jc7dd",
+          "uid": "synthetic-job-pod"
+        },
+        "labels": {
+          "job-name": "cache-warm"
+        },
+        "phase": "succeeded",
+        "ready": false,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": {
+          "kind": "Job",
+          "name": "cache-warm"
+        },
+        "containers": [
+          {
+            "name": "warm",
+            "ready": false,
+            "restart_count": 0,
+            "waiting_reason": null
+          }
+        ]
+      },
+      "shop/debug-shell": {
+        "identity": {
+          "namespace": "shop",
+          "name": "debug-shell",
+          "uid": "synthetic-bare-pod"
+        },
+        "labels": {
+          "run": "debug-shell"
+        },
+        "phase": "running",
+        "ready": true,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": null,
+        "containers": [
+          {
+            "name": "shell",
+            "ready": true,
+            "restart_count": 0,
+            "waiting_reason": null
+          }
+        ]
+      },
+      "shop/flaky-agent-6d8f9c7b44-x1q2z": {
+        "identity": {
+          "namespace": "shop",
+          "name": "flaky-agent-6d8f9c7b44-x1q2z",
+          "uid": "synthetic-flaky-pod"
+        },
+        "labels": {
+          "app": "flaky-agent",
+          "pod-template-hash": "6d8f9c7b44"
+        },
+        "phase": "running",
+        "ready": false,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": {
+          "kind": "ReplicaSet",
+          "name": "flaky-agent-6d8f9c7b44"
+        },
+        "containers": [
+          {
+            "name": "agent",
+            "ready": false,
+            "restart_count": 17,
+            "waiting_reason": "CrashLoopBackOff"
+          }
+        ]
+      },
+      "shop/queue-redis-66f544d5b-mplh5": {
+        "identity": {
+          "namespace": "shop",
+          "name": "queue-redis-66f544d5b-mplh5",
+          "uid": "60c9f4d4-82c9-4b04-aab3-703ca6d56677"
+        },
+        "labels": {
+          "app": "queue-redis",
+          "pod-template-hash": "66f544d5b"
+        },
+        "phase": "running",
+        "ready": true,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": {
+          "kind": "ReplicaSet",
+          "name": "queue-redis-66f544d5b"
+        },
+        "containers": [
+          {
+            "name": "redis",
+            "ready": true,
+            "restart_count": 0,
+            "waiting_reason": null
+          }
+        ]
+      },
+      "shop/storefront-server-94f65b68f-22zfj": {
+        "identity": {
+          "namespace": "shop",
+          "name": "storefront-server-94f65b68f-22zfj",
+          "uid": "92bf3ca6-e40e-436e-9e71-01f55d2e10c8"
+        },
+        "labels": {
+          "app.kubernetes.io/component": "storefront-server",
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "storefront-server",
+          "app.kubernetes.io/part-of": "storefront",
+          "app.kubernetes.io/version": "0.3.0",
+          "com.example.monitoring-enabled": "true",
+          "helm.sh/chart": "storefront-server-0.1.0",
+          "pod-template-hash": "94f65b68f"
+        },
+        "phase": "failed",
+        "ready": false,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": {
+          "kind": "ReplicaSet",
+          "name": "storefront-server-94f65b68f"
+        },
+        "containers": [
+          {
+            "name": "storefront-server",
+            "ready": false,
+            "restart_count": 0,
+            "waiting_reason": null
+          }
+        ]
+      },
+      "shop/storefront-server-94f65b68f-qz8mp": {
+        "identity": {
+          "namespace": "shop",
+          "name": "storefront-server-94f65b68f-qz8mp",
+          "uid": "386cf8c0-2fe2-4eb1-a985-3c1a3d5c6bdb"
+        },
+        "labels": {
+          "app.kubernetes.io/component": "storefront-server",
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "storefront-server",
+          "app.kubernetes.io/part-of": "storefront",
+          "app.kubernetes.io/version": "0.3.0",
+          "com.example.monitoring-enabled": "true",
+          "helm.sh/chart": "storefront-server-0.1.0",
+          "pod-template-hash": "94f65b68f"
+        },
+        "phase": "pending",
+        "ready": false,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": {
+          "kind": "ReplicaSet",
+          "name": "storefront-server-94f65b68f"
+        },
+        "containers": [
+          {
+            "name": "storefront-server",
+            "ready": false,
+            "restart_count": 0,
+            "waiting_reason": null
+          }
+        ]
+      },
+      "shop/switchboard-0": {
+        "identity": {
+          "namespace": "shop",
+          "name": "switchboard-0",
+          "uid": "90d54813-52bb-48bf-b463-cfd251023473"
+        },
+        "labels": {
+          "app.kubernetes.io/component": "switchboard",
+          "app.kubernetes.io/managed-by": "Helm",
+          "app.kubernetes.io/name": "devspace-app",
+          "apps.kubernetes.io/pod-index": "0",
+          "controller-revision-hash": "switchboard-6b55f5755d",
+          "statefulset.kubernetes.io/pod-name": "switchboard-0"
+        },
+        "phase": "pending",
+        "ready": false,
+        "node": {
+          "state": "resolved",
+          "key": "k3d-fixture-server-0"
+        },
+        "owner": {
+          "kind": "StatefulSet",
+          "name": "switchboard"
+        },
+        "containers": [
+          {
+            "name": "switchboard",
+            "ready": false,
+            "restart_count": 0,
+            "waiting_reason": "ContainerCreating"
+          }
+        ]
+      }
+    },
+    "replica_sets": {
+      "kube-system/coredns-ccb96694c": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "coredns-ccb96694c",
+          "uid": "afc64b99-7019-49c3-ab0e-22397f02b8b5"
+        },
+        "labels": {
+          "k8s-app": "kube-dns",
+          "pod-template-hash": "ccb96694c"
+        },
+        "owner": {
+          "kind": "Deployment",
+          "name": "coredns"
+        },
+        "replicas": 1
+      },
+      "shop/flaky-agent-6d8f9c7b44": {
+        "identity": {
+          "namespace": "shop",
+          "name": "flaky-agent-6d8f9c7b44",
+          "uid": "synthetic-flaky-rs"
+        },
+        "labels": {
+          "app": "flaky-agent",
+          "pod-template-hash": "6d8f9c7b44"
+        },
+        "owner": {
+          "kind": "Deployment",
+          "name": "flaky-agent"
+        },
+        "replicas": 1
+      },
+      "shop/queue-redis-66f544d5b": {
+        "identity": {
+          "namespace": "shop",
+          "name": "queue-redis-66f544d5b",
+          "uid": "f76be73f-a062-41f2-bbda-22abe0f8fda6"
+        },
+        "labels": {
+          "app": "queue-redis",
+          "pod-template-hash": "66f544d5b"
+        },
+        "owner": {
+          "kind": "Deployment",
+          "name": "queue-redis"
+        },
+        "replicas": 1
+      },
+      "shop/storefront-server-94f65b68f": {
+        "identity": {
+          "namespace": "shop",
+          "name": "storefront-server-94f65b68f",
+          "uid": "ee504964-de39-4922-84c0-0c126f1dfffd"
+        },
+        "labels": {
+          "app.kubernetes.io/instance": "storefront-server",
+          "app.kubernetes.io/name": "storefront-server",
+          "pod-template-hash": "94f65b68f"
+        },
+        "owner": {
+          "kind": "Deployment",
+          "name": "storefront-server"
+        },
+        "replicas": 2
+      }
+    },
+    "jobs": {
+      "shop/cache-warm": {
+        "identity": {
+          "namespace": "shop",
+          "name": "cache-warm",
+          "uid": "synthetic-cache-warm-job"
+        },
+        "labels": {
+          "job-name": "cache-warm"
+        },
+        "owner": null,
+        "completions": 1,
+        "succeeded": 1,
+        "failed": 0
+      },
+      "shop/reindex-29301120": {
+        "identity": {
+          "namespace": "shop",
+          "name": "reindex-29301120",
+          "uid": "synthetic-reindex-job"
+        },
+        "labels": {
+          "job-name": "reindex-29301120"
+        },
+        "owner": {
+          "kind": "CronJob",
+          "name": "reindex"
+        },
+        "completions": 1,
+        "succeeded": 0,
+        "failed": 3
+      }
+    },
+    "cron_jobs": {
+      "shop/nightly-report": {
+        "identity": {
+          "namespace": "shop",
+          "name": "nightly-report",
+          "uid": "synthetic-nightly-report"
+        },
+        "labels": {},
+        "schedule": "0 1 * * *",
+        "suspend": true
+      },
+      "shop/reindex": {
+        "identity": {
+          "namespace": "shop",
+          "name": "reindex",
+          "uid": "synthetic-reindex-cron"
+        },
+        "labels": {},
+        "schedule": "0 3 * * *",
+        "suspend": false
+      }
+    },
+    "pod_disruption_budgets": {
+      "kube-system/coredns": {
+        "identity": {
+          "namespace": "kube-system",
+          "name": "coredns",
+          "uid": "synthetic-coredns-pdb"
+        },
+        "labels": {},
+        "selector": {
+          "k8s-app": "kube-dns"
+        },
+        "min_available": "1",
+        "max_unavailable": null
+      },
+      "shop/retired-workers": {
+        "identity": {
+          "namespace": "shop",
+          "name": "retired-workers",
+          "uid": "synthetic-retired-pdb"
+        },
+        "labels": {},
+        "selector": {
+          "app": "retired",
+          "app.kubernetes.io/name": "devspace-app"
+        },
+        "min_available": null,
+        "max_unavailable": "50%"
+      },
+      "shop/switchboard": {
+        "identity": {
+          "namespace": "shop",
+          "name": "switchboard",
+          "uid": "synthetic-switchboard-pdb"
+        },
+        "labels": {},
+        "selector": {
+          "app.kubernetes.io/name": "devspace-app"
+        },
+        "min_available": "1",
+        "max_unavailable": null
+      }
+    },
+    "horizontal_pod_autoscalers": {
+      "shop/ghost-scaler": {
+        "identity": {
+          "namespace": "shop",
+          "name": "ghost-scaler",
+          "uid": "synthetic-ghost-hpa"
+        },
+        "labels": {},
+        "target": {
+          "kind": "Deployment",
+          "name": "retired-api-server"
+        },
+        "min_replicas": 1,
+        "max_replicas": 4
+      },
+      "shop/storefront-server": {
+        "identity": {
+          "namespace": "shop",
+          "name": "storefront-server",
+          "uid": "synthetic-storefront-hpa"
+        },
+        "labels": {},
+        "target": {
+          "kind": "Deployment",
+          "name": "storefront-server"
+        },
+        "min_replicas": 1,
+        "max_replicas": 3
+      },
+      "shop/switchboard": {
+        "identity": {
+          "namespace": "shop",
+          "name": "switchboard",
+          "uid": "synthetic-switchboard-hpa"
+        },
+        "labels": {},
+        "target": {
+          "kind": "StatefulSet",
+          "name": "switchboard"
+        },
+        "min_replicas": 2,
+        "max_replicas": 2
+      }
+    },
+    "unresolved": [
+      {
+        "from": "ingresses/shop/edge",
+        "site": "rules[0].paths[1]",
+        "target": {
+          "kind": "service",
+          "name": "retired-api"
+        }
+      },
+      {
+        "from": "services/shop/lost-lookup",
+        "site": "selector",
+        "target": {
+          "kind": "pods_matching_selector",
+          "selector": {
+            "app": "retired"
+          }
+        }
+      },
+      {
+        "from": "workloads/kube-system/deployment/coredns",
+        "site": "volumes[custom-config-volume]",
+        "target": {
+          "kind": "config_map",
+          "name": "coredns-custom",
+          "optional": true
+        }
+      },
+      {
+        "from": "workloads/shop/deployment/flaky-agent",
+        "site": "containers[agent].env[AGENT_TOKEN]",
+        "target": {
+          "kind": "secret",
+          "name": "agent-credentials",
+          "optional": false
+        }
+      }
+    ]
+  }
+}
