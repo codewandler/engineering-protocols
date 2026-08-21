@@ -89,7 +89,10 @@ const config: Config = {
   ],
 
   themeConfig: {
-    image: 'img/docusaurus-social-card.jpg',
+    // The social/Open Graph preview card. Source of truth is `static/img/social-card.svg`;
+    // re-rasterize after editing it: `rsvg-convert -w 1200 -h 630 static/img/social-card.svg
+    // -o static/img/social-card.png` (1200x630 is what Slack, X and LinkedIn crop against).
+    image: 'img/social-card.png',
     colorMode: {
       respectPrefersColorScheme: true,
     },

@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"
+     font-family="JetBrains Mono, Fira Code, DejaVu Sans Mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+     role="img"
+     aria-label="engineering-protocols — typed, executable rules for agent-performed engineering work. A transcript is checked against a typed spec, and a passing check mints an evidence record.">
+  <!-- Source of `static/img/social-card.png` (the site's Open Graph / social preview image).
+       Edit here, then re-rasterize at exactly 1200x630:
+         rsvg-convert -w 1200 -h 630 static/img/social-card.svg -o static/img/social-card.png
+       Palette matches static/img/trace-evidence-gate.svg and the site's dark panels. -->
+  <defs>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3fb950"/>
+      <stop offset="1" stop-color="#58a6ff"/>
+    </linearGradient>
+  </defs>
+  <style>
+    .panel   { fill: #161d24; stroke: #2b3540; stroke-width: 1; }
+    .rule    { stroke: #2b3540; stroke-width: 1; }
+    .name    { fill: #d7dde3; font-size: 64px; }
+    .claim   { fill: #8b98a5; font-size: 26px; }
+    .ptitle  { fill: #8b98a5; font-size: 13px; letter-spacing: .12em; }
+    .t       { fill: #d7dde3; font-size: 15px; }
+    .n       { fill: #8b98a5; font-size: 15px; }
+    .note    { fill: #8b98a5; font-size: 13px; }
+    .ok      { fill: #3fb950; font-size: 15px; }
+    .oknote  { fill: #3fb950; font-size: 13px; }
+    .foot    { fill: #8b98a5; font-size: 15px; }
+    .url     { fill: #58a6ff; font-size: 15px; }
+  </style>
+
+  <rect width="1200" height="630" fill="#0f1418"/>
+  <rect width="1200" height="6" fill="url(#accent)"/>
+
+  <text class="name"  x="72" y="128">engineering-protocols</text>
+  <text class="claim" x="72" y="186">Typed, executable rules for agent-performed engineering work</text>
+
+  <!-- 1 - the transcript -->
+  <rect class="panel" x="72" y="252" width="320" height="190" rx="10"/>
+  <text class="ptitle" x="94" y="284">1 · THE TRANSCRIPT</text>
+  <line class="rule" x1="94" y1="298" x2="370" y2="298"/>
+  <text class="n" x="94"  y="330">5</text><text class="t" x="134" y="330">tool_call Skill</text>
+  <text class="n" x="94"  y="362">13</text><text class="t" x="134" y="362">tool_call Bash</text>
+  <text class="n" x="94"  y="394">38</text><text class="t" x="134" y="394">run_outcome</text>
+  <text class="note" x="94" y="424">one event per line, as written</text>
+
+  <path d="M400 347 H424" stroke="#58a6ff" stroke-width="2"/>
+  <polygon points="424,341 434,347 424,353" fill="#58a6ff"/>
+
+  <!-- 2 - the check -->
+  <rect class="panel" x="440" y="252" width="320" height="190" rx="10"/>
+  <text class="ptitle" x="462" y="284">2 · THE CHECK</text>
+  <line class="rule" x1="462" y1="298" x2="738" y2="298"/>
+  <text class="ok" x="462" y="330">ok</text><text class="t" x="502" y="330">skill-completed</text>
+  <text class="ok" x="462" y="362">ok</text><text class="t" x="502" y="362">created-through-the-cli</text>
+  <text class="ok" x="462" y="394">ok</text><text class="t" x="502" y="394">terminal-record-clean</text>
+  <text class="oknote" x="462" y="424">41 ok · 0 gap · 0 unk</text>
+
+  <path d="M768 347 H792" stroke="#58a6ff" stroke-width="2"/>
+  <polygon points="792,341 802,347 792,353" fill="#58a6ff"/>
+
+  <!-- 3 - the evidence -->
+  <rect class="panel" x="808" y="252" width="320" height="190" rx="10" stroke="#3fb950"/>
+  <text class="ptitle" x="830" y="284" fill="#3fb950">3 · THE EVIDENCE</text>
+  <line class="rule" x1="830" y1="298" x2="1106" y2="298" stroke="#3fb950" stroke-opacity=".35"/>
+  <text class="t" x="830" y="330">trace_conformance</text>
+  <text class="n" x="830" y="362">status:</text><text class="ok" x="902" y="362">passed</text>
+  <text class="n" x="830" y="394">producer: verifier</text>
+  <text class="note" x="830" y="424">an agent's claim never mints this</text>
+
+  <line class="rule" x1="72" y1="506" x2="1128" y2="506"/>
+  <!-- two elements, not one: SVG collapses runs of whitespace, so a gap must be a coordinate. -->
+  <text class="foot" x="72" y="546">AEP · how the work is performed</text>
+  <text class="foot" x="402" y="546">ESS · what the software must be</text>
+  <text class="url" x="1128" y="546" text-anchor="end">codewandler.github.io/engineering-protocols</text>
+</svg>
