@@ -69,20 +69,23 @@ tasks:
       - cargo xtask suite --check
 
   # Beside `generate` for the reason `suite` is: `generated/` has one owner per subtree, and the
-  # synthesised workspaces under `generated/rust/` are the synth task's — the projection task's
-  # orphan scan carves that root out, and `xtask`'s ownership test holds the carve-out to the list
-  # of owners. This one also compiles: a workspace that matches its specification byte for byte and
-  # no longer builds is a claim nothing else checks.
+  # synthesised trees under `generated/rust/` and `generated/go/` are the synth task's — the
+  # projection task's orphan scan carves both roots out, and `xtask`'s ownership test holds the
+  # carve-outs to the list of owners. This one also builds what it wrote: a tree that matches its
+  # specification byte for byte and no longer compiles is a claim nothing else checks.
   synth:
-    desc: Regenerate generated/rust/ — the workspaces the specifications determine.
+    desc: >-
+      Regenerate generated/rust/ and generated/go/ — the two trees the specifications determine,
+      from one language-neutral plan.
     cmds:
       - cargo xtask synth
 
   synth-check:
     desc: >-
-      Fail if the committed synthesised workspaces differ from what the specifications determine,
-      no longer compile, or no longer hold the committed suite — the honest realization linkage
-      must pass it and the corrupted one must fail it.
+      Fail if either synthesised tree differs from what the specifications determine, no longer
+      builds (cargo check; gofmt -l, go build, go vet), or no longer holds the committed suite —
+      the honest realization linkage must pass it and the corrupted one must fail it. Needs the Go
+      toolchain, and says so rather than skipping when it is absent.
     cmds:
       - cargo xtask synth --check
 

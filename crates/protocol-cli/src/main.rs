@@ -775,10 +775,14 @@ enum EssCommand {
     /// because none of it changes what the system means. `examples/revision-pair/` is that claim
     /// with a fixture behind it.
     ///
-    /// Six construct families are compared — system, types, events, errors, actors, components —
-    /// and four kinds of change carry a direction: a grant added widens what the system permits, a
-    /// grant removed narrows it, and an enum or union variant does the same for what a type accepts.
-    /// Everything else is reported as *changed*, which is an answer rather than a shrug.
+    /// Ten construct families are compared — system, types, entities, commands, events, errors,
+    /// views, actors, components, bindings — and four kinds of change carry a direction: a grant
+    /// added widens what the system permits, a grant removed narrows it, and an enum or union
+    /// variant does the same for what a type accepts. Everything else is reported as *changed*,
+    /// which is an answer rather than a shrug. Where a construct carries a predicate — an entity
+    /// invariant, an outcome's `when:`, a view's filter — two canonically equal predicates are no
+    /// change and two different ones are *changed*, never a direction: whether one implies the
+    /// other is a proof, and it is refused rather than guessed.
     ///
     /// Exits 1 when either side does not compile, or when the two name different systems — which is
     /// the one pair this verb refuses rather than answers.
@@ -1081,22 +1085,31 @@ impl EssProjection {
 
 /// Which language `ess synthesize` emits.
 ///
-/// One variant, and the flag exists anyway: the synthesis plan is language-neutral and Rust is the
-/// first target rather than the only intended one, so the day a second emitter lands, callers gain
-/// a value instead of a breaking change. No further variants are scaffolded before their emitters
-/// exist — a `--target` that parses and then fails is worse than one that does not parse.
+/// Two, and the second is what the flag was reserved for: the synthesis plan is language-neutral,
+/// so a target is a choice of emitter and never a choice of plan. `rust` stays the default because
+/// it is the target the committed workspace and its realization are built around. No further
+/// variants are scaffolded before their emitters exist — a `--target` that parses and then fails is
+/// worse than one that does not parse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum EssSynthTarget {
     /// A standalone Rust workspace of semantic types.
     Rust,
+    /// A standalone Go module of the same, with what Go cannot carry stated in `TARGET.md`.
+    Go,
 }
 
 impl EssSynthTarget {
+    /// The emitter this selects.
+    fn emitter(self) -> ess_synth::Target {
+        match self {
+            Self::Rust => ess_synth::Target::Rust,
+            Self::Go => ess_synth::Target::Go,
+        }
+    }
+
     /// The name the report carries.
     fn name(self) -> &'static str {
-        match self {
-            Self::Rust => "rust",
-        }
+        self.emitter().name()
     }
 }
 
@@ -1667,6 +1680,10 @@ struct EssSynthesized<'a> {
     obligations: usize,
     /// How many are refused.
     refused: usize,
+    /// What this target emits with a weaker guarantee than the first target's, and what it cannot
+    /// represent at all. Absent where the target carried the plan whole.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target_notes: Option<&'a ess_synth::TargetReport>,
     /// Every artifact, in path order, with its contents.
     artifacts: Vec<&'a Artifact>,
 }
@@ -1686,10 +1703,9 @@ fn ess_synthesize(
         EssCompiled::Reported => return Ok(exit_code(false)),
     };
 
-    // `--target` selects an emitter; with one emitter there is nothing to select, but matching on
-    // it here is what keeps the day a second one lands a local change.
-    let EssSynthTarget::Rust = target;
-    let synthesis = ess_synth::synthesize(&ir);
+    // `--target` selects an emitter, and nothing else: both consume the same plan, and the plan's
+    // two renderings are byte-identical whichever is chosen.
+    let synthesis = ess_synth::synthesize_for(&ir, target.emitter());
 
     // Written, and nothing else: `--out` may be any directory a caller names, and a command that
     // deletes what it did not write is a command nobody points at a working tree. `cargo xtask
@@ -1716,6 +1732,7 @@ fn ess_synthesize(
         generated: counts.generated,
         obligations: counts.obligations,
         refused: counts.refused,
+        target_notes: synthesis.target.as_ref(),
         artifacts: synthesis.artifacts.values().collect(),
     };
 
@@ -1756,6 +1773,20 @@ fn ess_synthesize_text(report: &EssSynthesized<'_>, plan: &ess_synth::SynthesisP
                 planned.capability.source,
                 refusal.reason.describes()
             ),
+        }
+    }
+    if let Some(notes) = report.target_notes {
+        for refusal in &notes.refusals {
+            outln!(
+                "  refused by {}: {} `{}` — {}",
+                notes.target,
+                refusal.capability.kind.describes(),
+                refusal.capability.source,
+                refusal.detail
+            );
+        }
+        for weakening in &notes.weakenings {
+            outln!("  weakened by {}: {}", notes.target, weakening.guarantee);
         }
     }
     for artifact in &report.artifacts {

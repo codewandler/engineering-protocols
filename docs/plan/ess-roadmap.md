@@ -339,11 +339,14 @@ bindings enter the six-family comparison, which stops being six.
 
 ### W7.3 A second emitter, and the seam proves itself
 
-> Status 2026-08-21: briefly deferred by the sequencing decision that pulled the infra waves
-> forward, then **revived by operator instruction** the same night, running on Opus agents.
-> A dual-target demonstration follows it: one application specified in `examples/`, synthesised
-> to Go *and* Rust, both binaries starting with semantically identical log output and serving
-> the same API and its documentation. W7.4 stays deferred.
+> **Delivered.** See [`ess-wave-7-closing-the-loop.md`](ess-wave-7-closing-the-loop.md) § W7.3:
+> `generated/go/` is committed and gated (`gofmt -l`, `go build`, `go vet`), the plan's two
+> renderings are byte-identical in both trees, and what Go holds more weakly or cannot represent
+> at all is in each module's `TARGET.md`. The dual-target *demonstration* the paragraph below
+> anticipated — one application in `examples/` synthesised to both, two binaries with
+> semantically identical log output serving the same API — is **not** part of it: it needs an
+> application specification that does not exist and a runtime neither emitter produces, so it is
+> a slice of its own rather than a criterion this wave quietly failed. W7.4 stays deferred.
 
 **Go, by decision** — reversible, and chosen *because* it lacks sum types: every outcome enum and
 tagged union forces the emitter to either encode honestly or refuse at the target stage, which is

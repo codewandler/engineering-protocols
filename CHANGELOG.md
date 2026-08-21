@@ -11,6 +11,50 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`protocol ess synthesize --target go` — a second emitter, and the proof that the synthesis
+  plan is language-neutral (ESS wave 7, W7.3).** The same specification now synthesises a
+  standard-library-only Go module beside the Rust workspace, committed under `generated/go/` and
+  drift-checked in the gate along with `gofmt -l`, `go build ./...` and `go vet ./...`. The plan
+  did not change to admit it: `PLAN.md` and `plan.json` are byte-identical in both trees. Go was
+  chosen because it has no sum type, so every tagged union, enum and command outcome had to be
+  encoded honestly — a **sealed interface**, one unexported marker method per variant set, which no
+  other package can join — or refused out loud. A lifecycle becomes one type per state with
+  transitions as methods on exactly the states that declare them, so an illegal move is a method
+  that does not exist, as it is in Rust; a newtype becomes a struct with an unexported field, a
+  constructor and an accessor, because `type Email string` would let an untyped constant become an
+  `Email` by assignment.
+
+  **What Go holds more weakly is written down, never silently downgraded.** Each module carries a
+  `TARGET.md` (and `target.json`) beside the plan with four weakenings — a `switch` over a sealed
+  interface is not checked for exhaustiveness, Go's zero value needs no constructor, refinement
+  from a runtime state therefore answers `(value, ok)` where Rust's is total, and `==` is undefined
+  for a type carrying a list, a map or bytes — each also stated in the generated doc comment where
+  a reader meets it. Two things Go cannot represent at all become **target-stage refusals**, marked
+  as such so they can never read as facts about the model: a `Map<Bytes, _>` (a Go map key must be
+  comparable) and two obligation seams of one component that derive the same method name (a Go type
+  has one method set). A refusal travels the way dependence does — the command that holds the
+  unrepresentable input is refused, and so is the port that accepts it — rather than emitting a
+  surface with one handler quietly missing.
+
+- **`protocol ess diff` compares entities, commands, views and bindings (ESS wave 7, W7.2).** Ten
+  construct families now, in the canonical order `system, type, entity, command, event, error,
+  view, actor, component, binding`; 74 new typed change kinds — lifecycle moves and routes, an
+  entity's identity, an outcome's guard, subject, emitted events, payload table and error, a
+  view's filter and consistency promise, a binding's trigger, mapping and failure policy — each
+  reported by name, none with a direction. Where a construct carries a predicate, the comparison
+  is conservative canonical equality (gap register D-1, executed): two spellings the parser
+  normalises to one form are no change, anything canonically different is *changed*, and whether
+  the new predicate implies the old stays refused. An edit that used to arrive as an empty delta
+  and put **everything** back to owed — a strengthened entity invariant, a moved `when:`, an
+  erased payload mapping — now arrives as a named change, and `ess impact` narrows through it: on
+  the worked revision pair (now six changes, ten scenarios) the invariant edit owes nine scenarios
+  and twelve artifacts, the guard edit ten and ten, and neither owes a type schema. The
+  fail-closed uncompared-family arm shrank to what still has no family — conversions, workloads,
+  and each domain's naming, the last closing a fail-open gap where a domain's wire name, display
+  name or summary could move without either a change entry or the catch-all firing. `ess-diff/1`
+  documents are unchanged in shape; the new change kinds are additive rows, and pre-W7.2 deltas
+  still read back.
+
 - **`protocol infra view --path <bundle|ir> [--namespace <ns>]`** — the component view as one
   self-contained HTML page, written and opened (`$BROWSER`, else `xdg-open`). `infra graph`
   gains `--format html` for the same page on stdout. The page badge-colours each component by

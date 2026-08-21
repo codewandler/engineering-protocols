@@ -31,6 +31,14 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      # The Test step runs `xtask`'s own tests, and those write both synthesised trees and then
+      # build them — `gofmt -l`, `go build ./...`, `go vet ./...` inside the Go module. The check
+      # never skips when the toolchain is missing (it fails and names it), so the toolchain has to
+      # be here. The version tracks the `go` directive the emitter pins, not whatever is newest.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
       - uses: Swatinem/rust-cache@v2
 
       # Ordered cheapest-first, as the Taskfile is: formatting tells you in seconds, tests take
@@ -140,13 +148,14 @@ jobs:
   # Its own job for the reason `suites` is, plus two of its own: this check also runs `cargo
   # check` *inside* each committed workspace, and then the committed billing suite against that
   # workspace linked with `examples/billing-realization` — so it fails for three distinguishable
-  # reasons. The tree drifted from the specification (fix: `cargo xtask synth`); the tree matches
-  # and no longer compiles, which is a defect in `ess-synth` rather than in any specification; or
-  # the linked system no longer holds the suite — the honest linkage must pass all 27 scenarios
-  # and the deliberately corrupted one must fail exactly the scenario that exists to catch it.
-  # Folded into the gate, all three would read as "one of eight steps failed".
+  # reasons. Either tree drifted from its specification (fix: `cargo xtask synth`); a tree matches
+  # and no longer builds — `cargo check` for the Rust workspace, `gofmt -l` / `go build` / `go vet`
+  # for the Go module — which is a defect in `ess-synth` rather than in any specification; or the
+  # linked system no longer holds the suite: the honest linkage must pass all 27 scenarios and the
+  # deliberately corrupted one must fail exactly the scenario that exists to catch it. Folded into
+  # the gate, all three would read as "one of nine steps failed".
   synthesis:
-    name: Synthesised workspaces up to date
+    name: Synthesised trees up to date
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -154,9 +163,17 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # The second emitter's tree is checked with the Go toolchain, not with prose: `gofmt -l` must
+      # be empty (the emitter writes already-formatted source), `go build ./...` and `go vet ./...`
+      # must pass. Pinned to the `go` directive the emitter writes into every generated `go.mod`, so
+      # this job proves the committed module builds on the oldest toolchain it claims to support.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check synthesised workspaces
+      - name: Check the synthesised Rust and Go trees
         run: cargo xtask synth --check
 
   # Its own job because it is its own toolchain, which a step in `gate` cannot be. `rust-version =

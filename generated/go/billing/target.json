@@ -1,0 +1,56 @@
+{
+  "provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
+    "contract_digest": "d2b48060b7ee32e8f23b1e28972fea39921a25fdcacd635fdf7bbb538e94f367",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0"
+  },
+  "target": "go",
+  "weakenings": [
+    {
+      "guarantee": "handling a closed set of variants is exhaustive: a `match` that forgets one does not compile",
+      "instead": "the set stays closed — an undeclared variant cannot implement the sealed interface's unexported marker from another package — but a `switch` over it is not checked, so a consumer that forgets a variant compiles and falls through. Go has no exhaustiveness check and none can be emitted; every generated sealed interface says so in its own doc comment",
+      "affects": [
+        "domain_type",
+        "entity_lifecycle",
+        "command_contract",
+        "component_port",
+        "binding_delivery"
+      ]
+    },
+    {
+      "guarantee": "a value of a generated type exists only where a generated constructor or transition produced one",
+      "instead": "Go gives every type a zero value that no constructor has to produce, so `Email{}`, an invoice resting in a state nothing moved it to, and a nil variant of a sealed interface are all spellable from any package. The unexported field stops a *populated* value being forged; nothing in the language stops the empty one existing",
+      "affects": [
+        "domain_type",
+        "entity_lifecycle",
+        "command_contract",
+        "event_type",
+        "error_type",
+        "view_type"
+      ]
+    },
+    {
+      "guarantee": "refining a runtime state into the typed lifecycle is total: every declared state has an arm and no other state can reach it",
+      "instead": "the snapshot's state field is a sealed interface, whose zero value is nil and names no declared state — the previous row's weakening, reaching this one. Refinement therefore answers `(value, ok)`, and a caller that ignores the second result gets the interface's own zero value",
+      "affects": [
+        "entity_lifecycle"
+      ]
+    },
+    {
+      "guarantee": "every generated type compares by value",
+      "instead": "Go defines `==` only for comparable types, so a generated type carrying a list, a map or bytes cannot be compared at all — and no deep comparison is emitted in its place, because a hand-written equality is behaviour, and behaviour is not synthesised",
+      "affects": [
+        "domain_type",
+        "entity_lifecycle",
+        "command_contract",
+        "event_type",
+        "error_type",
+        "view_type"
+      ]
+    }
+  ],
+  "refusals": []
+}

@@ -1109,7 +1109,18 @@ fn no_source_file_in_this_crate_reads_a_clock_or_an_unordered_map() {
         }
     }
     assert!(
-        scanned >= 6,
-        "the scan found only {scanned} source files, so it is probably not looking at the crate"
+        scanned >= 14,
+        "the scan found only {scanned} source files, so it is not looking at both emitters — the \
+         crate carries a `rust` and a `go` module, and a scan that reaches one of them would pass \
+         while the other drifted"
     );
+    for emitter in ["rust", "go"] {
+        assert!(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src")
+                .join(emitter)
+                .is_dir(),
+            "`src/{emitter}` is gone, so the floor above is guarding a shape the crate no longer has"
+        );
+    }
 }

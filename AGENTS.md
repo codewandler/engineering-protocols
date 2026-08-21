@@ -44,8 +44,9 @@ See the status table in [`README.md`](README.md); keep it accurate when you land
 is the per-wave record of what actually shipped — read it before believing any prose about progress.
 
 **Every crate in the workspace is implemented and gated. There are no skeletons left.** The most
-recent tag is `0.6.1-ess-wave-6.5`; `task check` (nine steps) currently passes 84 suites and 1497
-tests, with 0 clippy warnings and 0 rustdoc warnings.
+recent tag is `0.6.1-ess-wave-6.5`; `task check` (nine steps) currently passes 89 suites and 1654
+tests, with 0 clippy warnings and 0 rustdoc warnings. The gate now needs the **Go toolchain** as
+well as Rust's: two of the nine steps build the second emitter's committed module.
 
 * **AEP — the protocol; the v0.2 scope is implemented.** `aep-domain`, `aep-schema`, `aep-engine`,
   `aep-contract`, `aep-backend-memory`, `aep-conformance`, `adp-domain`, `aop-domain`,
@@ -60,12 +61,14 @@ tests, with 0 clippy warnings and 0 rustdoc warnings.
   `0.3.1-ess-wave-2`), `ess-gen` (four projections behind one `Generator` trait,
   `0.3.2-ess-wave-3`), `ess-conformance` (the specification as oracle: synthesis, runner, evidence,
   `0.4.0-ess-wave-4`), `ess-diff` (semantic delta and impact closure, `0.5.0-ess-wave-5`) and
-  `ess-synth` (language-neutral synthesis plan, Rust emission, wave 6 complete: the committed
-  billing suite, unchanged, passes the synthesised workspace linked with the hand-written
-  realization in `examples/billing-realization`, and fails the deliberately corrupted linkage at
-  the one scenario that exists to catch it). `generated/` holds the committed projections and the
-  synthesised workspace, `suites/generated/` the committed conformance suites; all drift-checked
-  in the gate.
+  `ess-synth` (language-neutral synthesis plan, **two** emitters behind one seam: wave 6's Rust
+  workspace — whose linkage with the hand-written realization in `examples/billing-realization`
+  passes the committed billing suite unchanged, and fails the deliberately corrupted linkage at
+  the one scenario that exists to catch it — and wave 7's Go module, W7.3, which is the test of
+  the neutrality claim: the plan's two renderings are byte-identical in both trees, and what Go
+  holds more weakly or cannot represent at all is stated in a `TARGET.md` beside the plan, never
+  folded into it). `generated/` holds the committed projections and both synthesised trees,
+  `suites/generated/` the committed conformance suites; all drift-checked in the gate.
 * **Infra — observed infrastructure as a second instance of the ESS pattern.** Three crates:
   `infra-domain` (the k8s observation subset, raw→validated, eleven `INFRA-*` refusal codes,
   secrets only ever as digests — IW1), `infra-compiler` (the content-addressed `infra-ir/1`
@@ -210,13 +213,19 @@ Nine steps, all nine of which CI also runs, in this order:
 7. `suite-check` — `cargo xtask suite --check`, which fails if the committed conformance suites under
    `suites/generated/` differ from what the specifications produce. A suite is a contract an
    implementation is checked against, so a stale one certifies the wrong thing.
-8. `synth-check` — `cargo xtask synth --check`, which fails if the committed synthesised workspaces
-   under `generated/rust/` differ from what the specifications determine, if a matching tree no
-   longer passes `cargo check`, or if the committed billing suite no longer holds against the
-   workspace linked with `examples/billing-realization`: the honest linkage must pass all 27
-   scenarios and the deliberately corrupted one must fail exactly the scenario that exists to
-   catch it. A tree that matches its specification and still fails here is a defect in
-   `ess-synth` or in the realization, not in any specification.
+8. `synth-check` — `cargo xtask synth --check`, which fails if either committed synthesised tree —
+   `generated/rust/` and `generated/go/`, two emitters behind one language-neutral plan — differs
+   from what the specifications determine, if a matching tree no longer builds (`cargo check` for
+   the Rust workspace; `gofmt -l` empty, `go build ./...` and `go vet ./...` for the Go module), or
+   if the committed billing suite no longer holds against the workspace linked with
+   `examples/billing-realization`: the honest linkage must pass all 27 scenarios and the
+   deliberately corrupted one must fail exactly the scenario that exists to catch it. A tree that
+   matches its specification and still fails here is a defect in `ess-synth` or in the realization,
+   not in any specification.
+
+   **It needs the Go toolchain**, and says so rather than skipping when it is absent — a check that
+   quietly passes without its toolchain reads exactly like a check that passed. `cargo test` needs
+   it too, because `xtask`'s own tests write both trees and build them.
 
 Land nothing that does not pass all nine.
 
@@ -283,8 +292,11 @@ only by violating it.
   `default-features = false`, which drops `resolve-http`, `resolve-file` and the TLS backend.
 * **Nothing in `task check` reaches the network.** No step downloads a schema, resolves a remote
   `$ref` or calls an API — `jsonschema` is built with `default-features = false` for exactly that
-  reason. Keep it that way: a gate that needs the network is a gate that goes red for reasons that
-  have nothing to do with the change.
+  reason. The Go steps hold the same line by construction: the generated module has no
+  dependencies, and every `go` invocation runs with `GOPROXY=off` and `GOTOOLCHAIN=local`, so
+  neither a dependency nor a `go` directive can make the toolchain fetch anything. Keep it that
+  way: a gate that needs the network is a gate that goes red for reasons that have nothing to do
+  with the change.
 
 ## Changelog
 

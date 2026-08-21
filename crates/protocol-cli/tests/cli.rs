@@ -70,7 +70,7 @@ const ORACLE: &str = "examples/oracle-fixture";
 /// The `--from` half of the semantic-diff fixture pair.
 const REVISION_BEFORE: &str = "examples/revision-pair/before";
 
-/// The `--to` half: the same system, four changes later.
+/// The `--to` half: the same system, six changes later.
 const REVISION_AFTER: &str = "examples/revision-pair/after";
 
 /// The committed suite the drift check keeps in step with `examples/billing/`.
@@ -2329,7 +2329,7 @@ fn the_same_run_claimed_by_the_agent_that_wrote_the_code_does_not_close_the_task
 }
 
 #[test]
-fn ess_diff_names_the_four_changes_and_which_way_each_one_goes() {
+fn ess_diff_names_the_six_changes_and_which_way_each_one_goes() {
     // What a person sees. The pair is built so a reviewer's first question — did anything widen —
     // is answered by the count line before the list starts, and so that each line says the
     // direction before it says the subject.
@@ -2345,12 +2345,16 @@ fn ess_diff_names_the_four_changes_and_which_way_each_one_goes() {
     let text = stdout(&output);
 
     assert!(
-        text.contains("4 change(s): 2 widening, 2 narrowing, 0 other"),
+        text.contains("6 change(s): 2 widening, 2 narrowing, 2 other"),
         "the count comes before the list: {text}"
     );
     for line in [
         "widens   type catalog.pricing.Currency: variant `CHF` added",
         "narrows  type catalog.pricing.Currency: variant `GBP` removed",
+        "changes  entity catalog.pricing.PriceList: invariants [floor.amount >= 0] \u{2192} \
+         [floor.amount > 0]",
+        "changes  command catalog.pricing.CreatePriceList: outcome `created` is decided by `when \
+         floor.amount >= 1`, was `when floor.amount > 0`",
         "narrows  actor catalog.pricing.Auditor: may no longer invoke \
          `catalog.pricing.RetirePriceList`",
         "widens   actor catalog.pricing.PricingManager: may invoke \
@@ -2365,7 +2369,7 @@ fn ess_diff_names_the_four_changes_and_which_way_each_one_goes() {
         "every change carries the id a review comment quotes: {text}"
     );
     assert!(
-        text.contains("bc6f70b3dc81a99d67c95510139c121d21bbef19f229f46ac7887551b31811d8"),
+        text.contains("9aa886fb68a2447af40c92cf53ed260af0d102507ac87e73a8e31fb7d20a0916"),
         "and the digest that says which resolution was compared, because `catalog/v2` is a label \
          two resolutions can share: {text}"
     );
@@ -2431,7 +2435,7 @@ fn ess_diff_writes_a_document_that_carries_its_own_format_and_both_digests() {
     );
 
     let changes = parsed["changes"].as_array().expect("a list of changes");
-    assert_eq!(changes.len(), 4);
+    assert_eq!(changes.len(), 6);
     let grant = changes
         .iter()
         .find(|change| {
@@ -2615,7 +2619,7 @@ fn ess_impact_says_what_changed_before_it_says_what_that_invalidates() {
     let text = stdout(&output);
 
     let delta_line = text
-        .find("4 change(s): 2 widening, 2 narrowing, 0 other")
+        .find("6 change(s): 2 widening, 2 narrowing, 2 other")
         .expect("the delta comes first");
     let suite_line = text
         .find("scenario(s) owed again")
@@ -2625,7 +2629,7 @@ fn ess_impact_says_what_changed_before_it_says_what_that_invalidates() {
         "what changed has to be readable before what it invalidates:\n{text}"
     );
     assert!(
-        text.contains("9 of 9 scenario(s) owed again"),
+        text.contains("10 of 10 scenario(s) owed again"),
         "the size of the answer arrives before the list: {text}"
     );
 }
@@ -2656,8 +2660,7 @@ fn ess_impact_explains_every_scenario_it_names() {
     );
     for hop in [
         "-> type catalog.pricing.Money has a field of type type catalog.pricing.Currency",
-        "-> type catalog.pricing.Headline wraps type catalog.pricing.Money",
-        "-> entity catalog.pricing.PriceList has a field of type type catalog.pricing.Headline",
+        "-> entity catalog.pricing.PriceList has a field of type type catalog.pricing.Money",
     ] {
         assert!(text.contains(hop), "missing `{hop}` in:\n{text}");
     }
@@ -2715,8 +2718,8 @@ fn ess_impact_writes_a_document_carrying_the_delta_the_suite_and_the_counts() {
     assert_eq!(document["format"], "ess-impact/2");
     assert_eq!(document["delta"]["format"], "ess-diff/1");
     assert_eq!(document["suite"]["system"], "catalog");
-    assert_eq!(document["churn"]["conformance_scenarios_total"], 9);
-    assert_eq!(document["churn"]["conformance_scenarios_invalidated"], 9);
+    assert_eq!(document["churn"]["conformance_scenarios_total"], 10);
+    assert_eq!(document["churn"]["conformance_scenarios_invalidated"], 10);
     assert_eq!(document["churn"]["actor_grants_changed"], 2);
     assert_eq!(document["invalidation"]["invalidates"], "narrowed");
 
@@ -2825,7 +2828,7 @@ fn ess_impact_owes_the_whole_suite_when_the_specification_itself_moved() {
     let text = stdout(&output);
 
     assert!(
-        text.contains("9 of 9 scenario(s) owed again"),
+        text.contains("10 of 10 scenario(s) owed again"),
         "every scenario, and not the zero a closure would have reached: {text}"
     );
     assert!(
@@ -2932,7 +2935,7 @@ fn ess_impact_answers_for_the_artifacts_without_a_suite() {
         .expect("a total");
     assert!(
         !owed.is_empty() && (owed.len() as u64) < total,
-        "{} of {total} owed — the four changes must narrow to a strict subset",
+        "{} of {total} owed — the six changes must narrow to a strict subset",
         owed.len()
     );
 }
