@@ -717,6 +717,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "infra-spec"
+version = "0.1.0"
+dependencies = [
+ "aep-domain",
+ "infra-analyze",
+ "infra-compiler",
+ "infra-domain",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
 name = "invoice-service"
 version = "3.0.0"
 dependencies = [
@@ -1031,6 +1044,7 @@ dependencies = [
  "infra-analyze",
  "infra-compiler",
  "infra-domain",
+ "infra-spec",
  "serde",
  "serde_json",
  "serde_yaml",

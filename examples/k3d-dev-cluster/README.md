@@ -5,10 +5,15 @@ A small, deterministic `infra-observation/1` bundle and the `infra-ir/1` documen
 | file | role |
 |---|---|
 | `observation.json` | input: a trimmed observation, derived from a real scan (see below) |
-| `cluster.ir.json` | output: what `protocol infra compile` produces from it — committed, drift-checked by `cargo xtask infra --check` |
+| `observation.drifted.json` | input: the same cluster one working day later — twenty documented mutations of the file above |
+| `expected.yaml` | input: the desired state, as somebody would write it (`infra-spec/1`) |
+| `cluster.ir.json` | output: what `protocol infra compile` produces from `observation.json` |
+| `simulation.json` | output: what `protocol infra simulate --spec expected.yaml --path observation.json` produces |
+| `drift.json` | output: what `protocol infra diff --from observation.json --to observation.drifted.json` produces |
 
-Never edit `cluster.ir.json` by hand; regenerate it with `cargo xtask infra`. `observation.json`
-*is* hand-maintained — it is a fixture, not an output.
+The three outputs are committed and drift-checked by `cargo xtask infra --check`. Never edit one by
+hand; regenerate all three with `cargo xtask infra`. The three inputs *are* hand-maintained — they
+are fixtures, not outputs.
 
 ## Derivation
 
@@ -78,6 +83,9 @@ subset small enough to review and rich enough that every construct the model rea
      the `svclb` containers given requests and limits, so the coverage and resource-bounds
      invariant candidates hold their strict majorities on this fixture.
 
+* **Extended for IW3**, the desired-state wave. Two fixtures joined the directory and the
+  observation itself gained nothing — IW3 reads what IW2.5 already collected.
+
 Secret values were `{sha256, length}` digests before the scanner ever wrote the bundle;
 this repository refuses a bundle where they are anything else (`INFRA-SECRET-001`).
 
@@ -85,3 +93,64 @@ The compiled IR carries exactly four unresolved references — the optional `cor
 configmap, the `lost-lookup` selector, the `retired-api` backend, and `flaky-agent`'s required
 `agent-credentials` secret — as typed facts, not errors: they are true statements about the
 observed cluster, and `protocol infra diagnose` turns each into a coded finding.
+
+## `expected.yaml` — the desired state
+
+Twenty-eight expectations covering all twelve kinds of the `infra-spec/1` vocabulary. Every kind
+appears at least twice — once where this cluster satisfies it and once where it does not — so a
+kind that stops working fails a test rather than quietly reporting `ok` everywhere. One kind,
+`image_pinned_by_digest`, has no satisfying case here because nothing in this cluster is
+digest-pinned; that positive lives in a purpose-built bundle in `crates/infra-spec/tests/`, and
+`every_expectation_kind_holds_somewhere_on_the_fixture_and_fails_somewhere_on_it` names the
+exception so it stays deliberate.
+
+Five expectations are deliberately **undecidable**, one per reason the snapshot can give:
+
+| id | verdict | why the snapshot cannot decide |
+|---|---|---|
+| `kube-system-replicas` | `unknown` | the `svclb` daemonset declares no replica count |
+| `shop-registry` | `unknown` | `redis:7-alpine` names no registry, so which one resolves it is not observed |
+| `payments-resources` | `unknown` | the namespace `payments` was never observed |
+| `shop-ready-pods` | `unknown` | the bare `debug-shell` pod has an underivable controller, so no pod count in `shop` is a count |
+| `retired-replicas` | `unknown` | the workload selector `app: retired` matches nothing |
+
+The sixth reason — a bundle that never scanned a kind — cannot appear here, because this bundle
+scans all seventeen. It is covered by
+`a_bundle_that_never_scanned_disruption_budgets_is_undecidable_and_not_uncovered`.
+
+The report is `11 hold, 12 gaps, 5 undecidable`, and `simulation.json` holds those bytes.
+
+## `observation.drifted.json` — the derivation
+
+A copy of `observation.json` with twenty mutations, each one existing to make a drift change kind
+load-bearing. Nothing about the runtime layer moved: no pod was renamed, no phase changed, no
+restart counter advanced — because drift is over *declared* state, and a fixture that also churned
+its pods would prove nothing about that.
+
+| # | mutation | change kind it exercises |
+|---|---|---|
+| 1 | `scanned_at` moved forward; the context is unchanged | none — provenance is outside the digest, and a different context is the one refusal |
+| 2 | the `payments` namespace appears | `added` (namespace) |
+| 3 | the `checkout-api` deployment appears, digest-pinned, with probes and bounds | `added` (workload) |
+| 4 | the `flaky-agent` deployment is gone, with its required dangling secret | `removed` (workload), and **no** `reference_healed` |
+| 5 | `switchboard` goes from 2 replicas to 3 | `replicas_changed` |
+| 6 | `storefront-server`'s image tag moves | `image_changed` |
+| 7 | its `BC_LOG_LEVEL` moves from `debug` to `info` | `environment_changed` |
+| 8 | a `metrics-sidecar` container joins it | `container_added` |
+| 9 | `svclb` loses its `lb-tcp-443` container | `container_removed` |
+| 10 | `queue-redis` gains requests, limits and a readiness probe | `resources_changed`, `probes_changed` |
+| 11 | it also gains a required `configMapKeyRef` to the unobserved `redis-tuning` | `reference_broke`, `environment_changed` |
+| 12 | `coredns` gains a `managed-by` label | `workload_field_changed` (labels) |
+| 13 | the `lost-lookup` service is gone, with its dangling selector | `removed` (service), and **no** `reference_healed` |
+| 14 | a `checkout-api` service appears | `added` (service) |
+| 15 | `queue-redis-master`'s port moves from 6379 to 6380 | `service_field_changed` (ports) |
+| 16 | the `edge` ingress routes `/legacy` to `checkout-api` instead of the unobserved `retired-api` | `ingress_routing_changed`, `reference_healed` |
+| 17 | `storefront-env`'s `REGION` value changes | `config_content_changed` (configmap) |
+| 18 | a `checkout-config` configmap appears | `added` (configmap) |
+| 19 | the `storefront-server` secret gains a `session-key` | `config_content_changed` (secret) |
+| 20 | `orphan-cache` moves from `Pending` to `Bound` | `claim_phase_changed` |
+
+Twenty-two changes in total, covering every one of the sixteen change kinds this build can report.
+Mutations 4 and 13 are there for the rule that a reference event is only reported for a holder
+present in *both* snapshots: the removal already says what happened, and reporting both would count
+one event twice.

@@ -9,7 +9,7 @@ tasks:
   check:
     desc: >-
       Format check, lint, test, doc check, schema check, projection check, suite check,
-      observation-IR check and synthesis check — everything CI runs. The last one needs the Go
+      observation check and synthesis check — everything CI runs. The last one needs the Go
       toolchain, the wasm32-unknown-unknown Rust target and Node beside Rust's own.
     cmds:
       - task: fmt-check
@@ -95,16 +95,22 @@ tasks:
     cmds:
       - cargo xtask synth --check
 
-  # A single-file drift check rather than a tree with an orphan scan: `cluster.ir.json` is the
-  # one output the task owns, and its input `observation.json` sits beside it as a reviewed,
-  # hand-derived fixture. `xtask/src/main.rs` documents the pairing.
+  # Three named files rather than a tree with an orphan scan: the task owns exactly
+  # `cluster.ir.json`, `simulation.json` and `drift.json`, and every input beside them —
+  # `observation.json`, `observation.drifted.json`, `expected.yaml` — is a reviewed, hand-written
+  # fixture. `xtask/src/main.rs` documents the pairing.
   infra:
-    desc: Regenerate examples/k3d-dev-cluster/cluster.ir.json — the IR of the example observation.
+    desc: >-
+      Regenerate the example cluster's three committed documents: the compiled IR, the
+      three-valued simulation of expected.yaml against it, and the drift between the two
+      observations.
     cmds:
       - cargo xtask infra
 
   infra-check:
-    desc: Fail if the committed observation IR differs from what the bundle compiles to.
+    desc: >-
+      Fail if the committed observation IR, simulation or drift differs from what its inputs
+      produce.
     cmds:
       - cargo xtask infra --check
 

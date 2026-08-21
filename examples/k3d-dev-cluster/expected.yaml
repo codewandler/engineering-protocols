@@ -1,0 +1,168 @@
+# The desired state of the example observation, as somebody would write it.
+#
+# Every one of the twelve expectation kinds appears, and every one appears at least twice: once
+# where the fixture satisfies it and once where it does not. Five expectations are deliberately
+# undecidable, one per reason the snapshot can give — a specification whose report holds no
+# `unknown` would say nothing about whether `unknown` still works.
+#
+# Regenerate the committed report with `cargo xtask infra`; it is drift-checked in the gate.
+format: infra-spec/1
+name: k3d dev cluster, as it ought to be
+
+expectations:
+  # --- workload_exists ------------------------------------------------------------------------
+  - id: storefront-exists
+    statement: the storefront deployment is the reason this cluster exists
+    expect:
+      workload_exists: {namespace: shop, workload_kind: deployment, name: storefront-server}
+
+  - id: checkout-exists
+    statement: checkout was never deployed here; this expectation exists to say so out loud
+    expect:
+      workload_exists: {namespace: shop, workload_kind: deployment, name: checkout-api}
+
+  # --- replicas_within ------------------------------------------------------------------------
+  - id: storefront-replicas
+    scope:
+      workload_selector: {app.kubernetes.io/name: storefront-server}
+    expect:
+      replicas_within: {min: 2, max: 4}
+
+  - id: shop-replicas
+    scope: {namespace: shop}
+    expect:
+      replicas_within: {min: 2, max: 4}
+
+  # A daemonset declares no replica count, so this one cannot be decided about `svclb`.
+  - id: kube-system-replicas
+    scope: {namespace: kube-system}
+    expect:
+      replicas_within: {min: 1, max: 4}
+
+  # --- resources_declared ---------------------------------------------------------------------
+  - id: storefront-resources
+    scope:
+      workload_selector: {app.kubernetes.io/name: storefront-server}
+    expect: resources_declared
+
+  - id: shop-resources
+    scope: {namespace: shop}
+    expect: resources_declared
+
+  # Nothing was observed in `payments`, which is not the same as nothing being there.
+  - id: payments-resources
+    scope: {namespace: payments}
+    expect: resources_declared
+
+  # --- probes_declared ------------------------------------------------------------------------
+  - id: coredns-probes
+    scope:
+      workload_selector: {k8s-app: kube-dns}
+    expect:
+      probes_declared: {liveness: true, readiness: true}
+
+  - id: shop-probes
+    scope: {namespace: shop}
+    expect:
+      probes_declared: {liveness: true}
+
+  # --- image_registry -------------------------------------------------------------------------
+  - id: switchboard-registry
+    scope:
+      workload_selector: {app.kubernetes.io/name: devspace-app}
+    expect:
+      image_registry: {allowed: [registry.example.com]}
+
+  - id: flaky-agent-registry
+    scope:
+      workload_selector: {app: flaky-agent}
+    expect:
+      image_registry: {allowed: [registry.example.com]}
+
+  # `redis:7-alpine` names no registry at all, so which one resolves it is not in the snapshot.
+  - id: shop-registry
+    scope: {namespace: shop}
+    expect:
+      image_registry: {allowed: [registry.example.com, "localhost:31721", registry.local]}
+
+  # --- image_tag_not_latest -------------------------------------------------------------------
+  - id: storefront-tag
+    scope:
+      workload_selector: {app.kubernetes.io/name: storefront-server}
+    expect: image_tag_not_latest
+
+  - id: shop-tags
+    scope: {namespace: shop}
+    expect: image_tag_not_latest
+
+  # --- image_pinned_by_digest -----------------------------------------------------------------
+  - id: shop-digests
+    statement: nothing in this cluster is digest-pinned, and the report should say which
+    scope: {namespace: shop}
+    expect: image_pinned_by_digest
+
+  # --- pdb_covers_multi_replica ---------------------------------------------------------------
+  - id: coredns-pdb
+    scope:
+      workload_selector: {k8s-app: kube-dns}
+    expect: pdb_covers_multi_replica
+
+  - id: shop-pdb
+    scope: {namespace: shop}
+    expect: pdb_covers_multi_replica
+
+  # --- service_selector_resolves --------------------------------------------------------------
+  - id: kube-system-selectors
+    scope: {namespace: kube-system}
+    expect: service_selector_resolves
+
+  - id: shop-selectors
+    scope: {namespace: shop}
+    expect: service_selector_resolves
+
+  # --- config_references_resolve --------------------------------------------------------------
+  # `coredns` has a dangling reference the cluster itself marked optional, which is not a gap.
+  - id: kube-system-config-refs
+    scope: {namespace: kube-system}
+    expect: config_references_resolve
+
+  - id: shop-config-refs
+    scope: {namespace: shop}
+    expect: config_references_resolve
+
+  # --- namespace_allowlist --------------------------------------------------------------------
+  - id: known-namespaces
+    expect:
+      namespace_allowlist: {allowed: [kube-system, shop]}
+
+  - id: shop-only
+    statement: a deliberately wrong allowlist, so the fixture carries a failing one
+    expect:
+      namespace_allowlist: {allowed: [shop]}
+
+  # --- workload_predicate ---------------------------------------------------------------------
+  - id: flaky-agent-one-container
+    scope:
+      workload_selector: {app: flaky-agent}
+    expect:
+      workload_predicate: workload.containers == 1
+
+  - id: shop-replica-floor
+    scope: {namespace: shop}
+    expect:
+      workload_predicate: workload.replicas >= 2
+
+  # `debug-shell` is a bare pod, so no pod count in `shop` is a count — see `infra_spec::facts`.
+  - id: shop-ready-pods
+    scope: {namespace: shop}
+    expect:
+      workload_predicate: workload.ready_pods >= 1
+
+  # --- a scope that selects nothing -----------------------------------------------------------
+  # Not vacuously true: an expectation that passes by selecting nothing is the one way a green
+  # report means nothing.
+  - id: retired-replicas
+    scope:
+      workload_selector: {app: retired}
+    expect:
+      replicas_within: {min: 1, max: 1}

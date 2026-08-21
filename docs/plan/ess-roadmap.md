@@ -401,11 +401,30 @@ spawned it. A third is why gate G19 exists: this design has evidence failing **o
 repository fails closed, and it needs G19 as a precondition rather than replacing it.
 
 **Infrastructure** ([design](../design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md),
-[review](../reviews/2026-08-20-infrastructure-design-feasibility-review.md)) — deferred whole, with two
-ideas harvested. It is roughly eleven waves at this repository's measured rate, sequenced behind four
-that do not exist yet. It would also put cloud discovery adapters inside this workspace, making live API
-calls under a credential, which `docs/VISION.md` refuses — and the design argues against itself on that
-point in two of its own sections, so the fix is to move the design rather than the boundary.
+[review](../reviews/2026-08-20-infrastructure-design-feasibility-review.md)) — the *design* is deferred
+whole, and three waves have since shipped from plan pages that took none of it as a work order. It is
+roughly eleven waves at this repository's measured rate, sequenced behind four that do not exist yet. It
+would also put cloud discovery adapters inside this workspace, making live API calls under a credential,
+which `docs/VISION.md` refuses — and the design argues against itself on that point in two of its own
+sections, so the fix is to move the design rather than the boundary. The scanner therefore lives in its
+own repository (`infra-scout`), holds the credentials, and nothing in this workspace reaches a network.
+
+What has shipped, as a second instance of the ESS pattern rather than as that design:
+
+| wave | plan page | delivers |
+|---|---|---|
+| IW1 | [`infra-wave-1-observe.md`](infra-wave-1-observe.md) | `infra-domain` and `infra-compiler`: a scanned bundle validated, refused with stable `INFRA-*` codes, compiled into the content-addressed `infra-ir/1` |
+| IW2 (+2.5) | [`infra-wave-2-analyze.md`](infra-wave-2-analyze.md) | `infra-analyze`: the typed dependency graph, twenty `INFRA-DIAG-*` rules, workload properties, invariant candidates, directions, the HTML view |
+| IW3 | [`infra-wave-3-desired-state.md`](infra-wave-3-desired-state.md) | `infra-spec`: an authored desired state, its three-valued simulation against a snapshot, and typed drift between two snapshots |
+| IW4 | — | not started: manifests projected *from* a desired-state model |
+
+The two ideas the review harvested are both honoured in IW3 rather than in the design's own shape.
+Its §2.7 rule — "a fact that cannot be established is not a pass" — is invariant 5, and `simulate`
+makes it structural: an `Outcome` is `Holds`, `Gap(what would have to change)` or
+`Undecidable(why)`, with no fourth shape and no boolean to collapse into. Its freshness model,
+stated as `now() − t < D`, is refused outright: no expectation compares a timestamp, there is no
+duration vocabulary to write one in, and a banned-token test in `infra-spec` keeps it that way
+(review finding I7).
 
 Worth taking from it now, without any infrastructure: its required / permitted / observed split is a
 better answer than `Truth::Unknown` for *"we looked and saw nothing"*, and it is portable into wave 4.

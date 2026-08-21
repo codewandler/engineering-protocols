@@ -9,7 +9,58 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`protocol infra simulate --spec <file> --path <bundle|ir>` — what you expected, against what
+  was observed, with a third answer beside yes and no (infra wave 3).** You write an
+  `infra-spec/1` document saying how the cluster ought to be, and every expectation in it comes
+  back `ok`, `gap` or `unk`. A `gap` says what would have to change — *`storefront-server` declares
+  2 replicas and no disruption budget covers it*, not "failed". An `unk` says why the snapshot
+  cannot decide — *the `svclb` daemonset declares no replica count*, *`redis:7-alpine` names no
+  registry so which one resolves it is not observed*, *namespace `payments` was not observed*, *the
+  bundle did not scan `poddisruptionbudgets`*, *the bare `debug-shell` pod has an underivable
+  controller, so pod counts in its namespace are a lower bound*, *the scope selects no subject*.
+
+  **`unknown` is never quietly a failure**, and an expectation cannot pass by selecting nothing:
+  a scope that matches no workload comes back `unk`, not `ok`. An expectation with one contradicted
+  subject and one undecidable subject is a `gap` — something *was* observed to be wrong.
+
+  Twelve expectation kinds, kept small and decidable: a workload exists; replicas within a range;
+  requests and limits declared; probes declared; images from a registry allowlist, not `latest`,
+  pinned by digest; a disruption budget covers every multi-replica workload; a service selector
+  matches a pod; every required configmap and secret reference resolves; workloads only in listed
+  namespaces; and a labelled predicate over eighteen `workload.*` facts, using the protocol's own
+  three-valued predicate language rather than a second one. Scopes are the whole cluster, one
+  namespace, or workloads carrying a set of labels.
+
+  **No expectation asks what time it is.** Nothing compares a timestamp and there is no way to
+  write a duration, so the same specification and the same snapshot always produce the same
+  report — which is what lets a report be committed and reviewed as a diff at all.
+
+  **Simulating is a report, not a gate**: exit 0 whatever the verdicts say, exactly as
+  `protocol infra diagnose` behaves. Exit 1 means the input could not be simulated — a
+  specification this build refuses, a bundle that is not valid, an IR document somebody edited.
+
+- **`protocol infra diff --from <ir> --to <ir>` — what moved between two scans of one cluster.**
+  Sixteen typed change kinds over the *declared* state: objects added and removed, replicas,
+  images, containers, resource bounds, probes, environment, workload and service fields, ingress
+  routing, configuration content, claim phases, and references that broke or healed. A configuration
+  change names which keys moved and never what they hold. Pods are deliberately absent — they are
+  renamed on every rollout, and a report listing a thousand of them is one nobody reads. Reordering
+  a template's containers is not a change. It refuses one thing: two snapshots scanned in different
+  kubeconfig contexts.
+
+- **`examples/k3d-dev-cluster/` grew a desired state and a second scan.** `expected.yaml` is 28
+  expectations reaching all three verdicts on the example cluster (11 hold, 12 gaps, 5 undecidable),
+  `observation.drifted.json` is the same cluster twenty documented mutations later, and
+  `simulation.json` and `drift.json` are the two reports — committed and drift-checked by
+  `cargo xtask infra --check` beside the compiled IR, so a rule that starts answering `false` where
+  it answered `unknown` shows up as a reviewable diff.
+
+### Changed
+
+- **`cargo xtask infra` writes three documents instead of one**, and `task infra-check` checks all
+  three. The CI job is renamed to match.
 
 ## [0.7.0-ess-wave-7] — 2026-08-21
 

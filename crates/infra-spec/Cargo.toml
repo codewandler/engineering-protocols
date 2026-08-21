@@ -1,0 +1,45 @@
+[package]
+name = "infra-spec"
+description = "Desired state for an observed cluster: an authored specification, its three-valued simulation against a snapshot, and the drift between two snapshots."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+# `Truth`, `Predicate`, `FactStore`. The three-valued evaluator is reused, never rebuilt: a second
+# predicate language would be a second place for `Unknown` to be collapsed into `False`, and
+# invariant 5 is one rule, not one rule per crate.
+aep-domain.workspace = true
+
+# `InfraCode` and `ValidationErrors` — the one `INFRA-` registry and the one accumulator the
+# infrastructure family shares, extended with `INFRA-SPEC-001`…`008` rather than duplicated.
+# `WorkloadKind` and the observation types the expectations read through the IR.
+infra-domain.workspace = true
+
+# `InfraIr`: the observed side. A simulation evaluates a specification against a compiled
+# snapshot, and drift compares two of them.
+infra-compiler.workspace = true
+
+# `InfraGraph` for derived pod ownership, `properties`/`parse_image` for the workload sheet the
+# expectations and the fact projection read. One owner for "what is this workload's registry" —
+# a second parser here could disagree with `INFRA-DIAG-006` about the same image.
+infra-analyze.workspace = true
+
+# The two the documents need, both already in `[workspace.dependencies]`. A simulation and a
+# drift report are JSON for the reason a delta is: canonical bytes a drift check can compare.
+serde.workspace = true
+serde_json.workspace = true
+
+# Specifications are authored in YAML. `read_spec` reads the text into a `serde_json::Value` and
+# deserializes from *that*, deliberately: `serde_yaml` 0.9 spells an externally tagged enum as a
+# YAML tag (`!replicas_within`), where the JSON data model spells one as a single-key map — which
+# is the shape a specification is written in. One conversion buys the readable wire form and
+# `deny_unknown_fields` on every variant at once, and JSON parses through the same path because
+# JSON is YAML.
+serde_yaml.workspace = true
+
+[lints]
+workspace = true

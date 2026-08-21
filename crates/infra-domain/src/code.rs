@@ -8,6 +8,15 @@
 //! The codes live in their own `INFRA-` namespace because an observation bundle is neither a
 //! protocol document nor a specification: a harness that sees `INFRA-SECRET-001` knows which tool
 //! to re-run without parsing a sentence.
+//!
+//! # One registry for the whole infrastructure family
+//!
+//! The registry is wider than this crate's own documents, deliberately, and it already was:
+//! `INFRA-IR-001`…`004` refuse a *persisted IR document*, which `infra-compiler` reads and this
+//! crate never sees. `INFRA-SPEC-001`…`008` join them for the *desired-state specification*
+//! `infra-spec` reads. One enum, one `ALL`, one accumulator across the family — because the
+//! alternative is three parallel code registries and three parallel `ValidationErrors`, and a
+//! consumer that has to know which one a refusal came from before it can print it.
 
 use std::fmt;
 
@@ -18,7 +27,7 @@ use std::fmt;
 /// there: a hand-maintained list beside a hand-maintained enum is two lists, and two lists drift.
 macro_rules! infra_codes {
     ($( $(#[$attribute:meta])* $variant:ident => $wire:literal, )*) => {
-        /// Stable machine-readable classification of an observation-bundle refusal.
+        /// Stable machine-readable classification of an infrastructure-document refusal.
         ///
         /// Codes are part of the public interface: harnesses and tests match on them rather than
         /// on message text.
@@ -110,6 +119,43 @@ infra_codes! {
     /// A document carrying one was assembled by hand, and reading it as-is would turn a total
     /// lookup into a panic.
     IrDanglingHandle => "INFRA-IR-004",
+
+    /// A desired-state specification's `format` is not `infra-spec/1`.
+    SpecUnsupportedFormat => "INFRA-SPEC-001",
+
+    /// A desired-state specification does not read as the `infra-spec/1` shape at all.
+    ///
+    /// The one refusal in this family that cannot accumulate with others: a document that does
+    /// not deserialize has no expectations to go on and check.
+    SpecMalformed => "INFRA-SPEC-002",
+
+    /// Two expectations share an id, and an id is how a report names a verdict.
+    SpecDuplicateExpectation => "INFRA-SPEC-003",
+
+    /// A specification declares no expectations.
+    ///
+    /// A simulation of nothing is not a passing simulation; it is a report with no content, and
+    /// reading one as green is the failure mode this refuses.
+    SpecEmptyExpectations => "INFRA-SPEC-004",
+
+    /// An expectation's own parameters cannot decide anything: an empty registry allowlist, a
+    /// `min` above its `max`, an empty selector, a blank name, an unknown workload kind.
+    SpecInvalidExpectation => "INFRA-SPEC-005",
+
+    /// A scope that cannot select what this expectation is about — a workload-label selector on
+    /// an expectation about services, or anything but cluster scope on one that names its own
+    /// subject.
+    SpecScopeNotApplicable => "INFRA-SPEC-006",
+
+    /// An expectation id is not a stable identifier: lowercase letters, digits and dashes.
+    SpecMalformedId => "INFRA-SPEC-007",
+
+    /// A predicate expectation reads a fact the workload projection does not produce.
+    ///
+    /// The escape hatch's dangling-reference rule. A predicate over `workload.replica` instead of
+    /// `workload.replicas` would otherwise evaluate `Unknown` forever and read as "the snapshot
+    /// cannot decide", which is a lie about a typo.
+    SpecUnknownFact => "INFRA-SPEC-008",
 }
 
 impl fmt::Display for InfraCode {
@@ -124,12 +170,13 @@ impl From<InfraCode> for String {
     }
 }
 
-/// One refusal: what rule broke, where in the bundle, and what a reader should know.
+/// One refusal: what rule broke, where in the document, and what a reader should know.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct ValidationError {
     /// The stable code a harness matches on.
     pub code: InfraCode,
-    /// Where in the bundle, in dotted form: `kinds.secrets.items[3].data.password`.
+    /// Where in the document, in dotted form: `kinds.secrets.items[3].data.password`, or
+    /// `expectations[2].scope` in a desired-state specification.
     pub location: String,
     /// What is wrong, for a human. Never carries a secret value.
     pub message: String,
@@ -152,9 +199,9 @@ impl fmt::Display for ValidationError {
     }
 }
 
-/// Every refusal found in one pass, in the order the bundle presents the defects.
+/// Every refusal found in one pass, in the order the document presents the defects.
 ///
-/// Validation pushes into this and keeps going; returning on the first failure is how a bundle
+/// Validation pushes into this and keeps going; returning on the first failure is how a document
 /// with forty defects costs forty runs to fix.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(transparent)]
@@ -200,6 +247,19 @@ impl ValidationErrors {
     pub fn contains(&self, code: InfraCode) -> bool {
         self.0.iter().any(|error| error.code == code)
     }
+
+    /// `value` when nothing was refused, every refusal otherwise.
+    ///
+    /// The `aep-domain` idiom, and it exists for the same reason: a validator that builds its
+    /// result and then decides is a validator whose "did anything break" test is written once,
+    /// rather than once per `TryFrom`.
+    pub fn into_result<T>(self, value: T) -> Result<T, Self> {
+        if self.is_empty() {
+            Ok(value)
+        } else {
+            Err(self)
+        }
+    }
 }
 
 impl fmt::Display for ValidationErrors {
@@ -222,8 +282,9 @@ mod tests {
     fn every_code_renders_in_the_infra_namespace_and_the_generated_list_holds_them_all() {
         assert_eq!(
             InfraCode::ALL.len(),
-            15,
-            "the catalogue is fifteen codes: eleven observation refusals and four IR-document ones"
+            23,
+            "the catalogue is twenty-three codes: eleven observation refusals, four IR-document \
+             ones and eight desired-state-specification ones"
         );
         for code in InfraCode::ALL {
             assert!(

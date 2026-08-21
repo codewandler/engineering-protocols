@@ -42,6 +42,12 @@ infra-analyze.workspace = true
 infra-compiler.workspace = true
 infra-domain.workspace = true
 
+# `protocol infra simulate` and `protocol infra diff`. The desired-state model, the three-valued
+# evaluator and the snapshot comparison all live in the library, so a harness calling
+# `infra_spec::simulate(&spec, &ir)` gets the same verdicts and the same bytes the command line
+# prints — which is what lets `cargo xtask infra` drift-check the CLI's own output.
+infra-spec.workspace = true
+
 # `protocol ess synthesize`. The plan and the emitters live in the library, so the command line is
 # a shell over it: `ess_synth::synthesize(&ir)` from a harness produces the same plan and the same
 # bytes, and `cargo xtask synth` compares the committed tree against what this verb prints.

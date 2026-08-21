@@ -1,0 +1,138 @@
+{
+  "changes": [
+    {
+      "change": "added",
+      "kind": "namespace",
+      "subject": "payments"
+    },
+    {
+      "change": "added",
+      "kind": "workload",
+      "subject": "shop/deployment/checkout-api"
+    },
+    {
+      "change": "added",
+      "kind": "service",
+      "subject": "shop/checkout-api"
+    },
+    {
+      "change": "added",
+      "kind": "config_map",
+      "subject": "shop/checkout-config"
+    },
+    {
+      "change": "removed",
+      "kind": "workload",
+      "subject": "shop/deployment/flaky-agent"
+    },
+    {
+      "change": "removed",
+      "kind": "service",
+      "subject": "shop/lost-lookup"
+    },
+    {
+      "change": "replicas_changed",
+      "from": 2,
+      "subject": "shop/statefulset/switchboard",
+      "to": 3
+    },
+    {
+      "change": "container_added",
+      "container": "metrics-sidecar",
+      "subject": "shop/deployment/storefront-server"
+    },
+    {
+      "change": "container_removed",
+      "container": "lb-tcp-443",
+      "subject": "kube-system/daemonset/svclb-traefik-2290261f"
+    },
+    {
+      "change": "image_changed",
+      "container": "storefront-server",
+      "from": "localhost:31721/apps/storefront-server:AtqQlTV",
+      "subject": "shop/deployment/storefront-server",
+      "to": "localhost:31721/apps/storefront-server:Bx7pQr2"
+    },
+    {
+      "change": "resources_changed",
+      "container": "redis",
+      "subject": "shop/deployment/queue-redis"
+    },
+    {
+      "change": "probes_changed",
+      "container": "redis",
+      "subject": "shop/deployment/queue-redis"
+    },
+    {
+      "change": "environment_changed",
+      "container": "redis",
+      "subject": "shop/deployment/queue-redis"
+    },
+    {
+      "change": "environment_changed",
+      "container": "storefront-server",
+      "subject": "shop/deployment/storefront-server"
+    },
+    {
+      "change": "workload_field_changed",
+      "field": "labels",
+      "subject": "kube-system/deployment/coredns"
+    },
+    {
+      "change": "service_field_changed",
+      "field": "ports",
+      "subject": "shop/queue-redis-master"
+    },
+    {
+      "change": "ingress_routing_changed",
+      "subject": "shop/edge"
+    },
+    {
+      "added_keys": [],
+      "change": "config_content_changed",
+      "changed_keys": [
+        "REGION"
+      ],
+      "kind": "config_map",
+      "removed_keys": [],
+      "subject": "shop/storefront-env"
+    },
+    {
+      "added_keys": [
+        "session-key"
+      ],
+      "change": "config_content_changed",
+      "changed_keys": [],
+      "kind": "secret",
+      "removed_keys": [],
+      "subject": "shop/storefront-server"
+    },
+    {
+      "change": "claim_phase_changed",
+      "from": "Pending",
+      "subject": "shop/orphan-cache",
+      "to": "Bound"
+    },
+    {
+      "change": "reference_broke",
+      "site": "containers[redis].env[REDIS_MAXMEMORY]",
+      "subject": "workloads/shop/deployment/queue-redis",
+      "target": "configmap redis-tuning"
+    },
+    {
+      "change": "reference_healed",
+      "site": "rules[0].paths[1]",
+      "subject": "ingresses/shop/edge",
+      "target": "service retired-api"
+    }
+  ],
+  "format": "infra-drift/1",
+  "from": {
+    "context": "k3d-dev-cluster",
+    "digest": "9ed0e8608fd69c43c3b0405a7a5fd599fad61a6246b42e2cdd4cffd1e29c8e75"
+  },
+  "to": {
+    "context": "k3d-dev-cluster",
+    "digest": "af6c34c7f640a81d988e8ceac371ab3108a5113ab02b17dbd5c26f7aa85bd0c9"
+  }
+}

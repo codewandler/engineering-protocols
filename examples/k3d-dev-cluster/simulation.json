@@ -1,0 +1,634 @@
+{
+  "format": "infra-simulation/1",
+  "reports": [
+    {
+      "claim": "deployment/shop/storefront-server exists",
+      "id": "storefront-exists",
+      "kind": "workload_exists",
+      "outcomes": [],
+      "scope": "cluster",
+      "statement": "the storefront deployment is the reason this cluster exists",
+      "subjects": [
+        "workloads/shop/deployment/storefront-server"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "deployment/shop/checkout-api exists",
+      "id": "checkout-exists",
+      "kind": "workload_exists",
+      "outcomes": [
+        {
+          "gap": "workload_absent",
+          "kind": "deployment",
+          "name": "checkout-api",
+          "namespace": "shop",
+          "outcome": "gap",
+          "subject": "workloads/shop/deployment/checkout-api"
+        }
+      ],
+      "scope": "cluster",
+      "statement": "checkout was never deployed here; this expectation exists to say so out loud",
+      "subjects": [
+        "workloads/shop/deployment/checkout-api"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "replicas within [2, 4]",
+      "id": "storefront-replicas",
+      "kind": "replicas_within",
+      "outcomes": [],
+      "scope": "workloads matching app.kubernetes.io/name=storefront-server",
+      "subjects": [
+        "workloads/shop/deployment/storefront-server"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "replicas within [2, 4]",
+      "id": "shop-replicas",
+      "kind": "replicas_within",
+      "outcomes": [
+        {
+          "gap": "replicas_outside_range",
+          "have": 1,
+          "outcome": "gap",
+          "subject": "workloads/shop/deployment/flaky-agent",
+          "want_max": 4,
+          "want_min": 2
+        },
+        {
+          "gap": "replicas_outside_range",
+          "have": 1,
+          "outcome": "gap",
+          "subject": "workloads/shop/deployment/queue-redis",
+          "want_max": 4,
+          "want_min": 2
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "replicas within [1, 4]",
+      "id": "kube-system-replicas",
+      "kind": "replicas_within",
+      "outcomes": [
+        {
+          "field": "replicas",
+          "outcome": "undecidable",
+          "reason": "field_absent",
+          "subject": "workloads/kube-system/daemonset/svclb-traefik-2290261f"
+        }
+      ],
+      "scope": "namespace kube-system",
+      "subjects": [
+        "workloads/kube-system/daemonset/svclb-traefik-2290261f",
+        "workloads/kube-system/deployment/coredns"
+      ],
+      "verdict": "unknown"
+    },
+    {
+      "claim": "requests and limits declared",
+      "id": "storefront-resources",
+      "kind": "resources_declared",
+      "outcomes": [],
+      "scope": "workloads matching app.kubernetes.io/name=storefront-server",
+      "subjects": [
+        "workloads/shop/deployment/storefront-server"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "requests and limits declared",
+      "id": "shop-resources",
+      "kind": "resources_declared",
+      "outcomes": [
+        {
+          "container": "agent",
+          "gap": "resources_absent",
+          "limits_missing": true,
+          "outcome": "gap",
+          "requests_missing": true,
+          "subject": "workloads/shop/deployment/flaky-agent"
+        },
+        {
+          "container": "redis",
+          "gap": "resources_absent",
+          "limits_missing": true,
+          "outcome": "gap",
+          "requests_missing": true,
+          "subject": "workloads/shop/deployment/queue-redis"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "requests and limits declared",
+      "id": "payments-resources",
+      "kind": "resources_declared",
+      "outcomes": [
+        {
+          "namespace": "payments",
+          "outcome": "undecidable",
+          "reason": "namespace_unobserved",
+          "subject": "namespace payments"
+        }
+      ],
+      "scope": "namespace payments",
+      "subjects": [],
+      "verdict": "unknown"
+    },
+    {
+      "claim": "liveness and readiness probe declared",
+      "id": "coredns-probes",
+      "kind": "probes_declared",
+      "outcomes": [],
+      "scope": "workloads matching k8s-app=kube-dns",
+      "subjects": [
+        "workloads/kube-system/deployment/coredns"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "liveness probe declared",
+      "id": "shop-probes",
+      "kind": "probes_declared",
+      "outcomes": [
+        {
+          "container": "agent",
+          "gap": "probe_absent",
+          "liveness_missing": true,
+          "outcome": "gap",
+          "readiness_missing": false,
+          "subject": "workloads/shop/deployment/flaky-agent"
+        },
+        {
+          "container": "redis",
+          "gap": "probe_absent",
+          "liveness_missing": true,
+          "outcome": "gap",
+          "readiness_missing": false,
+          "subject": "workloads/shop/deployment/queue-redis"
+        },
+        {
+          "container": "storefront-server",
+          "gap": "probe_absent",
+          "liveness_missing": true,
+          "outcome": "gap",
+          "readiness_missing": false,
+          "subject": "workloads/shop/deployment/storefront-server"
+        },
+        {
+          "container": "switchboard",
+          "gap": "probe_absent",
+          "liveness_missing": true,
+          "outcome": "gap",
+          "readiness_missing": false,
+          "subject": "workloads/shop/statefulset/switchboard"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "image registry in [registry.example.com]",
+      "id": "switchboard-registry",
+      "kind": "image_registry",
+      "outcomes": [],
+      "scope": "workloads matching app.kubernetes.io/name=devspace-app",
+      "subjects": [
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "image registry in [registry.example.com]",
+      "id": "flaky-agent-registry",
+      "kind": "image_registry",
+      "outcomes": [
+        {
+          "allowed": [
+            "registry.example.com"
+          ],
+          "container": "agent",
+          "gap": "image_registry_not_allowed",
+          "have": "registry.local",
+          "image": "registry.local/flaky-agent",
+          "outcome": "gap",
+          "subject": "workloads/shop/deployment/flaky-agent"
+        }
+      ],
+      "scope": "workloads matching app=flaky-agent",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "image registry in [registry.example.com, localhost:31721, registry.local]",
+      "id": "shop-registry",
+      "kind": "image_registry",
+      "outcomes": [
+        {
+          "field": "containers[redis].image registry",
+          "outcome": "undecidable",
+          "reason": "field_absent",
+          "subject": "workloads/shop/deployment/queue-redis"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "unknown"
+    },
+    {
+      "claim": "image tag is not `latest`",
+      "id": "storefront-tag",
+      "kind": "image_tag_not_latest",
+      "outcomes": [],
+      "scope": "workloads matching app.kubernetes.io/name=storefront-server",
+      "subjects": [
+        "workloads/shop/deployment/storefront-server"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "image tag is not `latest`",
+      "id": "shop-tags",
+      "kind": "image_tag_not_latest",
+      "outcomes": [
+        {
+          "container": "agent",
+          "gap": "image_tag_is_latest",
+          "image": "registry.local/flaky-agent",
+          "outcome": "gap",
+          "subject": "workloads/shop/deployment/flaky-agent",
+          "tag": null
+        },
+        {
+          "container": "switchboard",
+          "gap": "image_tag_is_latest",
+          "image": "registry.example.com/services/switchboard-8:latest",
+          "outcome": "gap",
+          "subject": "workloads/shop/statefulset/switchboard",
+          "tag": "latest"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "image pinned by digest",
+      "id": "shop-digests",
+      "kind": "image_pinned_by_digest",
+      "outcomes": [
+        {
+          "container": "agent",
+          "gap": "image_not_pinned",
+          "image": "registry.local/flaky-agent",
+          "outcome": "gap",
+          "subject": "workloads/shop/deployment/flaky-agent"
+        },
+        {
+          "container": "redis",
+          "gap": "image_not_pinned",
+          "image": "redis:7-alpine",
+          "outcome": "gap",
+          "subject": "workloads/shop/deployment/queue-redis"
+        },
+        {
+          "container": "storefront-server",
+          "gap": "image_not_pinned",
+          "image": "localhost:31721/apps/storefront-server:AtqQlTV",
+          "outcome": "gap",
+          "subject": "workloads/shop/deployment/storefront-server"
+        },
+        {
+          "container": "switchboard",
+          "gap": "image_not_pinned",
+          "image": "registry.example.com/services/switchboard-8:latest",
+          "outcome": "gap",
+          "subject": "workloads/shop/statefulset/switchboard"
+        }
+      ],
+      "scope": "namespace shop",
+      "statement": "nothing in this cluster is digest-pinned, and the report should say which",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "a disruption budget covers every multi-replica workload",
+      "id": "coredns-pdb",
+      "kind": "pdb_covers_multi_replica",
+      "outcomes": [],
+      "scope": "workloads matching k8s-app=kube-dns",
+      "subjects": [
+        "workloads/kube-system/deployment/coredns"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "a disruption budget covers every multi-replica workload",
+      "id": "shop-pdb",
+      "kind": "pdb_covers_multi_replica",
+      "outcomes": [
+        {
+          "gap": "disruption_budget_absent",
+          "outcome": "gap",
+          "replicas": 2,
+          "subject": "workloads/shop/deployment/storefront-server"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "service selector matches a pod",
+      "id": "kube-system-selectors",
+      "kind": "service_selector_resolves",
+      "outcomes": [],
+      "scope": "namespace kube-system",
+      "subjects": [
+        "services/kube-system/kube-dns"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "service selector matches a pod",
+      "id": "shop-selectors",
+      "kind": "service_selector_resolves",
+      "outcomes": [
+        {
+          "gap": "selector_matches_no_pod",
+          "outcome": "gap",
+          "selector": {
+            "app": "retired"
+          },
+          "subject": "services/shop/lost-lookup"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "services/shop/lost-lookup",
+        "services/shop/queue-redis-master",
+        "services/shop/storefront-server",
+        "services/shop/switchboard-client",
+        "services/shop/switchboard-headless"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "every required configmap and secret reference resolves",
+      "id": "kube-system-config-refs",
+      "kind": "config_references_resolve",
+      "outcomes": [],
+      "scope": "namespace kube-system",
+      "subjects": [
+        "workloads/kube-system/daemonset/svclb-traefik-2290261f",
+        "workloads/kube-system/deployment/coredns"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "every required configmap and secret reference resolves",
+      "id": "shop-config-refs",
+      "kind": "config_references_resolve",
+      "outcomes": [
+        {
+          "gap": "reference_unresolved",
+          "outcome": "gap",
+          "site": "containers[agent].env[AGENT_TOKEN]",
+          "subject": "workloads/shop/deployment/flaky-agent",
+          "target": "secret agent-credentials"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "namespace in [kube-system, shop]",
+      "id": "known-namespaces",
+      "kind": "namespace_allowlist",
+      "outcomes": [],
+      "scope": "cluster",
+      "subjects": [
+        "workloads/kube-system/daemonset/svclb-traefik-2290261f",
+        "workloads/kube-system/deployment/coredns",
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "namespace in [shop]",
+      "id": "shop-only",
+      "kind": "namespace_allowlist",
+      "outcomes": [
+        {
+          "allowed": [
+            "shop"
+          ],
+          "gap": "namespace_not_allowed",
+          "have": "kube-system",
+          "outcome": "gap",
+          "subject": "workloads/kube-system/daemonset/svclb-traefik-2290261f"
+        },
+        {
+          "allowed": [
+            "shop"
+          ],
+          "gap": "namespace_not_allowed",
+          "have": "kube-system",
+          "outcome": "gap",
+          "subject": "workloads/kube-system/deployment/coredns"
+        }
+      ],
+      "scope": "cluster",
+      "statement": "a deliberately wrong allowlist, so the fixture carries a failing one",
+      "subjects": [
+        "workloads/kube-system/daemonset/svclb-traefik-2290261f",
+        "workloads/kube-system/deployment/coredns",
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "workload.containers == 1",
+      "id": "flaky-agent-one-container",
+      "kind": "workload_predicate",
+      "outcomes": [],
+      "scope": "workloads matching app=flaky-agent",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent"
+      ],
+      "verdict": "true"
+    },
+    {
+      "claim": "workload.replicas >= 2",
+      "id": "shop-replica-floor",
+      "kind": "workload_predicate",
+      "outcomes": [
+        {
+          "facts": {
+            "workload.replicas": "1"
+          },
+          "gap": "predicate_false",
+          "outcome": "gap",
+          "predicate": "workload.replicas >= 2",
+          "subject": "workloads/shop/deployment/flaky-agent"
+        },
+        {
+          "facts": {
+            "workload.replicas": "1"
+          },
+          "gap": "predicate_false",
+          "outcome": "gap",
+          "predicate": "workload.replicas >= 2",
+          "subject": "workloads/shop/deployment/queue-redis"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "false"
+    },
+    {
+      "claim": "workload.ready_pods >= 1",
+      "id": "shop-ready-pods",
+      "kind": "workload_predicate",
+      "outcomes": [
+        {
+          "because": {
+            "pod": "shop/debug-shell",
+            "reason": "ownership_underivable"
+          },
+          "outcome": "undecidable",
+          "path": "workload.ready_pods",
+          "reason": "fact_withheld",
+          "subject": "workloads/shop/deployment/flaky-agent"
+        },
+        {
+          "because": {
+            "pod": "shop/debug-shell",
+            "reason": "ownership_underivable"
+          },
+          "outcome": "undecidable",
+          "path": "workload.ready_pods",
+          "reason": "fact_withheld",
+          "subject": "workloads/shop/deployment/queue-redis"
+        },
+        {
+          "because": {
+            "pod": "shop/debug-shell",
+            "reason": "ownership_underivable"
+          },
+          "outcome": "undecidable",
+          "path": "workload.ready_pods",
+          "reason": "fact_withheld",
+          "subject": "workloads/shop/deployment/storefront-server"
+        },
+        {
+          "because": {
+            "pod": "shop/debug-shell",
+            "reason": "ownership_underivable"
+          },
+          "outcome": "undecidable",
+          "path": "workload.ready_pods",
+          "reason": "fact_withheld",
+          "subject": "workloads/shop/statefulset/switchboard"
+        }
+      ],
+      "scope": "namespace shop",
+      "subjects": [
+        "workloads/shop/deployment/flaky-agent",
+        "workloads/shop/deployment/queue-redis",
+        "workloads/shop/deployment/storefront-server",
+        "workloads/shop/statefulset/switchboard"
+      ],
+      "verdict": "unknown"
+    },
+    {
+      "claim": "replicas within [1, 1]",
+      "id": "retired-replicas",
+      "kind": "replicas_within",
+      "outcomes": [
+        {
+          "outcome": "undecidable",
+          "reason": "no_subject_in_scope",
+          "subject": "workloads matching app=retired"
+        }
+      ],
+      "scope": "workloads matching app=retired",
+      "subjects": [],
+      "verdict": "unknown"
+    }
+  ],
+  "snapshot": {
+    "context": "k3d-dev-cluster",
+    "digest": "9ed0e8608fd69c43c3b0405a7a5fd599fad61a6246b42e2cdd4cffd1e29c8e75"
+  },
+  "specification": "k3d dev cluster, as it ought to be",
+  "summary": {
+    "expectations": 28,
+    "gaps": 12,
+    "holds": 11,
+    "undecidable": 5
+  }
+}

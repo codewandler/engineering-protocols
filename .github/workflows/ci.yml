@@ -118,10 +118,14 @@ jobs:
 
   # Its own job for the reason `projections` is: stale observation IR reads as stale observation
   # IR. The committed `examples/k3d-dev-cluster/cluster.ir.json` is what IW2's graph and diagnosis
-  # work will be reviewed against, and a document that no longer matches what its observation
-  # compiles to certifies a cluster state nobody observed. The fix is `cargo xtask infra`.
+  # work is reviewed against, and a document that no longer matches what its observation compiles
+  # to certifies a cluster state nobody observed. Since IW3 the same job also owns
+  # `simulation.json` and `drift.json` — the three-valued report and the snapshot comparison — and
+  # they are here for a sharper version of the same reason: a rule that quietly starts answering
+  # `false` where it answered `unknown` moves those bytes and nothing else. The fix is
+  # `cargo xtask infra`.
   infra:
-    name: Observation IR up to date
+    name: Observation IR, simulation and drift up to date
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -131,7 +135,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check the committed observation IR
+      - name: Check the committed observation IR, simulation and drift
         run: cargo xtask infra --check
 
   # Its own job for the same reason again, and it is the reason that matters most here: a conformance

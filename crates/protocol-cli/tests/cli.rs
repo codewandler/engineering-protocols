@@ -3517,3 +3517,224 @@ fn diagnose_candidates_and_directions_appear_only_when_asked() {
         "directions present when asked"
     );
 }
+
+// -------------------------------------------------------------------------------------------
+// `protocol infra simulate` and `protocol infra diff` — the desired-state surface (IW3).
+// -------------------------------------------------------------------------------------------
+
+/// The committed desired-state specification for `OBSERVATION`.
+const EXPECTED: &str = "examples/k3d-dev-cluster/expected.yaml";
+
+/// The second observation: the same cluster, twenty documented mutations later.
+const DRIFTED: &str = "examples/k3d-dev-cluster/observation.drifted.json";
+
+/// The committed simulation and drift documents the gate drift-checks.
+const COMMITTED_SIMULATION: &str = "examples/k3d-dev-cluster/simulation.json";
+const COMMITTED_DRIFT: &str = "examples/k3d-dev-cluster/drift.json";
+
+#[test]
+fn infra_simulate_reports_all_three_verdicts_and_exits_zero_because_it_is_not_a_gate() {
+    let output = protocol(&[
+        "infra",
+        "simulate",
+        "--spec",
+        EXPECTED,
+        "--path",
+        OBSERVATION,
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "a cluster that fails an expectation has still been simulated: {}",
+        stderr(&output)
+    );
+    let text = stdout(&output);
+    for marker in ["ok  ", "gap ", "unk "] {
+        assert!(
+            text.contains(marker),
+            "the fixture is built to reach all three verdicts, and `{marker}` is missing:\n{text}"
+        );
+    }
+    assert!(
+        text.contains("28 expectations: 11 hold, 12 gaps, 5 undecidable"),
+        "the summary line names the counts:\n{text}"
+    );
+}
+
+#[test]
+fn infra_simulate_says_why_it_cannot_decide_rather_than_calling_it_a_failure() {
+    let text = stdout(&protocol(&[
+        "infra",
+        "simulate",
+        "--spec",
+        EXPECTED,
+        "--path",
+        OBSERVATION,
+    ]));
+    for reason in [
+        "declares no `replicas`",
+        "was not observed",
+        "underivable controller",
+        "selects no subject",
+    ] {
+        assert!(
+            text.contains(reason),
+            "an undecidable verdict names what is missing, and {reason:?} is absent:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn infra_simulate_from_the_bundle_and_from_the_committed_ir_render_identical_bytes() {
+    let from_bundle = protocol(&[
+        "infra",
+        "simulate",
+        "--spec",
+        EXPECTED,
+        "--path",
+        OBSERVATION,
+        "--format",
+        "json",
+    ]);
+    let from_ir = protocol(&[
+        "infra",
+        "simulate",
+        "--spec",
+        EXPECTED,
+        "--path",
+        COMMITTED_IR,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&from_bundle), 0, "{}", stderr(&from_bundle));
+    assert_eq!(code(&from_ir), 0, "{}", stderr(&from_ir));
+    assert_eq!(
+        stdout(&from_bundle),
+        stdout(&from_ir),
+        "reading a persisted IR back must be indistinguishable from a fresh compile"
+    );
+    assert_eq!(
+        stdout(&from_bundle),
+        std::fs::read_to_string(root().join(COMMITTED_SIMULATION)).expect("committed"),
+        "run `cargo xtask infra` and review the diff"
+    );
+}
+
+#[test]
+fn infra_simulate_refuses_a_broken_specification_with_stable_codes_and_exit_1() {
+    let directory = scratch("protocol-infra-bad-spec");
+    let spec = directory.join("expected.yaml");
+    write(
+        &spec,
+        "format: infra-spec/1\nname: broken\nexpectations:\n  - id: Bad\n    expect:\n      \
+         replicas_within: {min: 9, max: 1}\n",
+    );
+    let output = protocol(&[
+        "infra",
+        "simulate",
+        "--spec",
+        printable(&spec),
+        "--path",
+        OBSERVATION,
+    ]);
+    assert_eq!(code(&output), 1, "an unusable input is exit 1");
+    let text = stdout(&output);
+    assert!(text.contains("INFRA-SPEC-007"), "{text}");
+    assert!(text.contains("INFRA-SPEC-005"), "{text}");
+}
+
+#[test]
+fn infra_simulate_refuses_a_tampered_ir_document_with_exit_1() {
+    let directory = scratch("protocol-infra-simulate-tampered");
+    let ir = directory.join("cluster.ir.json");
+    let text = std::fs::read_to_string(root().join(COMMITTED_IR)).expect("committed");
+    // Raise a replica count in the digested model: exactly the edit that would turn a `gap` into
+    // an `ok` if the document were believed rather than checked.
+    let tampered = text.replacen("\"replicas\": 1", "\"replicas\": 9", 1);
+    assert_ne!(text, tampered, "the tampering has to land");
+    write(&ir, &tampered);
+    let output = protocol(&[
+        "infra",
+        "simulate",
+        "--spec",
+        EXPECTED,
+        "--path",
+        printable(&ir),
+    ]);
+    assert_eq!(code(&output), 1, "a hand-edited IR is not a snapshot");
+    assert!(
+        stdout(&output).contains("INFRA-IR-002"),
+        "the refusal carries the digest code: {}",
+        stdout(&output)
+    );
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn infra_diff_reports_the_typed_changes_between_the_two_committed_observations() {
+    let output = protocol(&["infra", "diff", "--from", OBSERVATION, "--to", DRIFTED]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let text = stdout(&output);
+    for line in [
+        "workload shop/deployment/checkout-api added",
+        "workload shop/deployment/flaky-agent removed",
+        "shop/statefulset/switchboard replicas 2 -> 3",
+        "shop/orphan-cache phase Pending -> Bound",
+    ] {
+        assert!(text.contains(line), "{line:?} is missing from:\n{text}");
+    }
+    assert!(text.contains("22 changes"), "{text}");
+}
+
+#[test]
+fn infra_diff_json_matches_the_committed_document_byte_for_byte() {
+    let output = protocol(&[
+        "infra",
+        "diff",
+        "--from",
+        OBSERVATION,
+        "--to",
+        DRIFTED,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output),
+        std::fs::read_to_string(root().join(COMMITTED_DRIFT)).expect("committed"),
+        "run `cargo xtask infra` and review the diff"
+    );
+}
+
+#[test]
+fn infra_diff_refuses_two_snapshots_of_different_clusters_with_exit_1() {
+    let directory = scratch("protocol-infra-diff-contexts");
+    let other = directory.join("other.observation.json");
+    let bundle = std::fs::read_to_string(root().join(OBSERVATION)).expect("committed");
+    write(&other, &bundle.replace("k3d-dev-cluster", "production"));
+    let output = protocol(&[
+        "infra",
+        "diff",
+        "--from",
+        OBSERVATION,
+        "--to",
+        printable(&other),
+    ]);
+    assert_eq!(code(&output), 1, "two clusters is the one refusal");
+    assert!(
+        stderr(&output).contains("different contexts"),
+        "the refusal says what it refused: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn infra_diff_of_one_snapshot_with_itself_reports_no_change() {
+    let output = protocol(&["infra", "diff", "--from", OBSERVATION, "--to", COMMITTED_IR]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("no change"),
+        "a bundle and its own compiled IR are one cluster state: {}",
+        stdout(&output)
+    );
+}

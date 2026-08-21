@@ -150,6 +150,19 @@ pub enum ClaimPhase {
 }
 
 impl ClaimPhase {
+    /// The phase as the API spells it, which is also how a report prints it.
+    ///
+    /// [`Self::Unknown`] renders as `Unknown`, the API's own word for "the state could not be
+    /// obtained" — not as an absence, because the claim was observed and its phase was not.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "Pending",
+            Self::Bound => "Bound",
+            Self::Lost => "Lost",
+            Self::Unknown => "Unknown",
+        }
+    }
+
     fn parse(phase: Option<&str>) -> Self {
         match phase {
             Some("Pending") => Self::Pending,
