@@ -103,7 +103,11 @@ fn a_required_missing_reference_is_an_error_and_an_optional_one_is_info() {
         "the required `agent-credentials` secret is absent and must be an error"
     );
     assert!(
-        fires_on(&diagnosis, DiagCode::MissingReference, "ingresses/shop/edge"),
+        fires_on(
+            &diagnosis,
+            DiagCode::MissingReference,
+            "ingresses/shop/edge"
+        ),
         "the `retired-api` backend service is absent and must be an error"
     );
 
@@ -233,7 +237,11 @@ fn a_crashlooping_container_is_an_error_and_a_creating_one_is_not() {
         Some("CrashLoopBackOff")
     );
     assert!(
-        !fires_on(&diagnosis, DiagCode::PodStuckWaiting, "pods/shop/switchboard-0"),
+        !fires_on(
+            &diagnosis,
+            DiagCode::PodStuckWaiting,
+            "pods/shop/switchboard-0"
+        ),
         "switchboard-0 waits as ContainerCreating — normal startup, not a defect"
     );
 }
@@ -376,7 +384,8 @@ fn two_services_selecting_one_workload_set_are_reported_once_together() {
         .get("services")
         .expect("the group names its services");
     assert!(
-        services.contains("shop/switchboard-client") && services.contains("shop/switchboard-headless"),
+        services.contains("shop/switchboard-client")
+            && services.contains("shop/switchboard-headless"),
         "both services of the group are named: {services}"
     );
     assert!(
@@ -438,7 +447,10 @@ fn an_autoscaler_pinned_to_one_size_fires_and_a_real_range_does_not() {
     let diagnosis = example_diagnosis();
     let pinned = of_code(&diagnosis, DiagCode::HpaFixedRange);
     assert_eq!(pinned.len(), 1, "exactly the switchboard autoscaler");
-    assert_eq!(pinned[0].subject, "horizontal_pod_autoscalers/shop/switchboard");
+    assert_eq!(
+        pinned[0].subject,
+        "horizontal_pod_autoscalers/shop/switchboard"
+    );
     assert!(
         !fires_on(
             &diagnosis,
