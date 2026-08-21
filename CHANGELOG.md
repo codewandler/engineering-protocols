@@ -9,6 +9,10 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.9.0-harness-waves-2-3] — 2026-08-21
+
 ### Added
 
 - **`protocol drive` — a workflow you specified is now a workflow that runs, and a step the protocol
