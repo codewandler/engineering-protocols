@@ -33,6 +33,26 @@ Not changed, and worth knowing: `docs/plan/ess-wave-3.5-reconciliation.md` disag
 how many gates there are (19 in its summary, 18 in its table). That is one line to fix on a page
 outside this proposal's scope.
 
+## Applied, 2026-08-21
+
+A second round, and a different cause. The first round was written because four unreviewed designs
+had landed and the control documents did not say so. This one is written because a decision was
+**taken** — in session, by the operator, on 2026-08-21 — and one of the three control documents
+states the opposite of it. `docs/VISION.md` refuses *a workflow engine*, and the repository is now
+going to ship a reference driver. A refusal that a decision has overtaken is worse than a missing
+entry: it reads as current policy, and the next agent enforces it.
+
+All four applied the same day they were proposed, because the decision they record was taken before
+they were written. The proposals are kept below for the same reason the first round's are: each
+states evidence the documents themselves do not repeat.
+
+| item | applied where | difference from the proposal |
+|---|---|---|
+| V-5 | `docs/VISION.md` § What this is deliberately not | applied as proposed. The narrowing is written *inside* the refusal list rather than as a new section, so the reader who came to that section for the boundary finds the amended boundary and not a cross-reference to it. The argument follows as its own paragraph, and it names what did **not** move — invariant 7, engine-only gate evaluation, and the "external systems do the work" sentence |
+| V-6 | `docs/VISION.md` § Proposed, not accepted | the table's preamble said *"Four design documents"* and now says five, because a count in a preamble is the first thing to go stale. Status is split rather than single-valued: **Phase 1 accepted** as harness wave 1, **driver decided and sketched, build unsequenced** — one word would have hidden the boundary the design document draws inside itself |
+| R-4 | `README.md` § Status, § Documents, § What works today, § Repository layout | three touches, not one. The design doc **and its plan page** get rows, since a plan page is where a reader checks what was actually accepted; the `protocol artifact` verbs and the plugin get one bullet each where the README already lists what works; `integrations/` and the new crate get lines in the layout tree, since a directory nothing mentions is a directory nobody finds; and § Status's count of proposed designs moves four→five, the same stale-count correction V-6 makes in the vision |
+| A-6 | `AGENTS.md` § Which documents are normative, § Current state | the acceptance row as proposed, **plus** the "Not built yet" line, which said *"any durable backend — the only implementation of the contract is in memory"*. Half of that is now false and half is still true, and the two halves are worth separating: a durable **store** exists; the **contract** still has exactly one implementor until P3 |
+
 ---
 
 ## `docs/VISION.md`
@@ -94,6 +114,60 @@ repeating — presumably: this project decides what an infrastructure's observed
 still does not deploy anything. If that is not the answer, the "deliberately not" list is out of date
 and should say so.
 
+### V-5 — the refusal of "a workflow engine" is now contradicted by a decision (high) — **applied**
+
+`docs/VISION.md` § *What this is deliberately not*, first sentence: *"Not an LLM orchestration
+framework, a CI system, an incident-management product, **a workflow engine**, a message broker, or a
+policy language meant to replace OPA."*
+
+On 2026-08-21 the operator decided that the repository ships a reference driver: the first in-repo
+implementation of the harness contract, designed in
+[`harness-planning-and-driver-design-v0.1.md`](../design/harness-planning-and-driver-design-v0.1.md)
+§ 4. The refusal as written forbids it, and an agent reading that line is right to refuse the work.
+The refusal is not deleted — it is **narrowed**, and the narrowing is marked as one, so a reader can
+see that a boundary moved rather than finding a boundary that quietly differs from last month's.
+
+Replacement text for the paragraph:
+
+> Not an LLM orchestration framework, a CI system, an incident-management product, a message broker,
+> or a policy language meant to replace OPA. Not a universal ontology of software engineering, and
+> not a mandate for microservices, CQRS or event sourcing. One earlier entry in this list has been
+> narrowed, deliberately: this is still not *a workflow engine* in the sense refused before — a
+> general-purpose orchestrator other systems are built on — but the repository now ships one
+> **reference driver**, a default harness that walks its own workflows by asking the engine the seven
+> questions and doing, outside the engine, only what the answers permit.
+
+And the argument, which is the part that has to be written down, because a narrowed refusal with no
+reason beside it is indistinguishable from a refusal somebody forgot:
+
+> The harness contract — seven calls, three rules — is published in
+> [`docs/guide/harness.md`](../guide/harness.md) and mandated by the normative consolidated design,
+> and it is implemented by no program in this repository. A contract with zero implementations is the
+> same defect as an invariant enforced by nothing. The driver is that implementation, and the line it
+> does not move is the one that mattered: the engine still evaluates and never acts (invariant 7
+> unchanged — an agent's own statement never satisfies an independence requirement), gates are still
+> evaluated by the engine and never by the driver, and *"external systems do the work; this project
+> decides what the results permit"* remains true — the driver is the first of those external systems,
+> kept in-tree the way the website is: a deliverable beside the specification, consuming only its
+> public surface. Decided by the operator, 2026-08-21; designed, not yet built — building it waits
+> behind its own reviewed design.
+
+The cost of not applying this: the vision refuses what the roadmap builds, and the two are read by
+different people.
+
+### V-6 — a fifth design document, and the table that exists to stop exactly this (medium) — **applied**
+
+V-3 added § *Proposed, not accepted* so that reading the newest file in `docs/design/` could not be
+mistaken for reading what the project agreed to build. A fifth design document now exists and the
+table does not list it — which is the failure V-3 was written to prevent, one round later.
+
+Add the row, with a status that says both halves, because this document is the first in the
+directory whose acceptance boundary runs *inside* it:
+
+> **Phase 1 accepted as harness wave 1; driver decided and sketched, build unsequenced.**
+
+And correct the preamble's count from four to five.
+
 ---
 
 ## `README.md`
@@ -116,6 +190,24 @@ wave 4 does not start until they land. The table shows waves 1–5 and skips the
 ### R-3 — the two-halves framing needs its third axis (low, follows V-3) — **applied**
 
 `README.md:34-36` says "this repository has two halves". Same issue as V-3, same fix, one line.
+
+### R-4 — the README lists what works, and the newest thing that works is not on it (medium) — **applied**
+
+Two omissions, and they are the two things a reader arriving today would most plausibly be looking
+for:
+
+* § *Documents* has a row for every design document in `docs/design/` and none for
+  `harness-planning-and-driver-design-v0.1.md`. R-1's argument applies unchanged — a design a reader
+  cannot find is a design that gets re-proposed.
+* § *What works today* is the list of what a person can actually run, and `protocol artifact` and the
+  Claude Code plugin are runnable. A capability list that omits the newest capability is a list
+  people stop trusting.
+
+Add: the design-doc row, with its split status; one bullet for the `protocol artifact` verb family
+naming the behaviour rather than the flags — lifecycle-validated moves whose refusals name the legal
+set, `validate` accumulating, frontmatter private to the backend; and one bullet for the plugin —
+one skill, two agents, no hooks on purpose. Keep it to a few lines: this is a status list, not the
+design document.
 
 ---
 
@@ -170,3 +262,26 @@ violating it.
 ### A-5 — the gate is six steps (low) — **applied**
 
 § Gate now says five. `doc-check` was added when the rustdoc backlog reached zero.
+
+### A-6 — the acceptance table has no row for the fifth design, and one honest limit is now half false (medium) — **applied**
+
+Two lines, in two sections, both of which A-1 and the "Current state" convention already oblige.
+
+**§ Which documents are normative.** The table of proposed designs and their acceptance state is what
+A-1 added so that "do not implement from an unreviewed design" has something to check against. It
+needs a row:
+
+| proposed design | status |
+|---|---|
+| `harness-planning-and-driver-design-v0.1.md` | **Phase 1 accepted** by `docs/plan/harness-wave-1-planning-plugin.md` (harness wave 1); its Phase 2 reference driver is **decided** (vision V-5) and **not accepted for build** — a feasibility review comes first |
+
+**§ Current state, "Not built yet".** It says: *"any durable backend — the only implementation of the
+contract is in memory."* After this wave that sentence is half false, and the false half is the half
+that matters to somebody choosing whether to adopt. Split it:
+
+> a durable markdown **store** now exists (`aep-backend-markdown`, harness wave 1) — but it is a
+> store, not a contract implementation, and the **contract** still has exactly one implementor,
+> `aep-backend-memory`, until the journal-backed milestone (P3) makes the store answer as one.
+
+Both halves stated is the point. "There is a durable backend now" would be a claim the conformance
+suites do not support, and "no durable backend" stops being true the day the store lands.

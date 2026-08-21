@@ -35,7 +35,7 @@ This repository has two halves. **AEP** governs how engineering work is performe
 what software must exist. They meet at evidence: a task can be blocked until something proves an
 implementation conforms to its specification. See [`docs/VISION.md`](docs/VISION.md).
 
-Two halves is what exists. Four further designs in [`docs/design/`](docs/design/) proposed extending
+Two halves is what exists. Five further designs in [`docs/design/`](docs/design/) proposed extending
 it. Three have been taken up: the specification as an oracle is **implemented** as ESS wave 4,
 semantic diff — what a revision invalidates — is **implemented** as ESS wave 5 after being accepted
 into the thesis as a stated amendment and extended by wave 7 down to the generated artifact, and
@@ -43,8 +43,10 @@ structural synthesis is **delivered through wave 7** — three emitters behind o
 specification running as two applications held to one behaviour in every gate run. The fourth —
 infrastructure, a fourth domain — stays deferred as designed; a Kubernetes-scoped subset is being
 built as infrastructure waves, its first two delivered, with the discovery adapter outside this
-workspace, per the boundary the vision draws. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not
-accepted* is where their status is kept.
+workspace, per the boundary the vision draws. The fifth is the newest: a planning store and a
+reference driver, whose Phase 1 — the store, the `protocol artifact` verbs and the Claude Code
+plugin — is accepted as **harness wave 1**, and whose driver is decided and not yet built.
+[`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* is where their status is kept.
 
 ### AEP — the protocol (v0.2 scope, complete)
 
@@ -155,6 +157,18 @@ be caught by `billing.invoice.CreateInvoice/outcome/rejected`
 not conformant: the implementation contradicted the specification (exit 1)
 ```
 
+* **Planning artifacts have somewhere to live, and a status move is checked.**
+  `protocol artifact new|move|relate|list|board|graph|validate|kinds|relations|lifecycle` keeps
+  epics, stories, tasks and initiatives as markdown under `.engineering/planning/`. A move is
+  validated against the kind's lifecycle, and a refusal names every status legal from where the
+  artifact stands rather than saying "illegal transition"; `validate` reports every problem in one
+  run. The file format belongs to `aep-backend-markdown` — `aep-domain` gained nothing for it — and
+  is described by a generated schema like every other document type here.
+* **Claude Code can plan through it.** [`integrations/claude-code/`](integrations/claude-code/) is a
+  plugin: one `planning` skill, two agents — `decomposer` drafts, `plan-reviewer` only reads — and no
+  hooks, on purpose. The skill carries rules and no vocabulary; it asks the CLI which kinds, statuses
+  and moves exist at the moment it needs them, because a prose copy of a validated document is drift.
+
 * **And the protocol decides on the result.** `protocol ess conform evidence` mints the record in the
   same process that ran the suite, so no caller can author its own verdict;
   [`examples/billing-conformance/`](examples/billing-conformance/) walks both directions — a passing
@@ -210,6 +224,7 @@ crates/
   aep-engine/       resolution, evaluation, transition logic
   aep-schema/       document reading and JSON Schema generation
   aep-backend-memory/ in-memory reference implementation of the contract
+  aep-backend-markdown/ the durable planning store: artifacts as markdown under .engineering/planning/
   aep-conformance/  black-box conformance suites for backends
   adp-domain/       development-specific types (ADP)
   aop-domain/       operations-specific types (AOP)
@@ -232,6 +247,7 @@ schemas/generated/  generated JSON Schema — do not edit by hand
 generated/          projections of examples/billing/, and under rust/, go/ and web/ the synthesised trees — do not edit by hand
 suites/generated/   conformance suites, generated from the specifications — do not edit by hand
 conformance/        fixtures, scenarios and expected results
+integrations/       deliverables named after who they are for: claude-code/ is the planning plugin
 docs/design/        the design specifications
 xtask/              repository automation
 ```
@@ -273,6 +289,7 @@ Without `task`: `cargo xtask fmt --check`, `cargo clippy --workspace --all-targe
 | [`docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | *core implemented* as ESS wave 5 — `ess diff` and `ess impact`. The feasibility review reads the full design as four waves rather than one, and two of its seventy-eight sections were rejected outright rather than deferred |
 | [`docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | *first slice implemented* as ESS wave 6 — the plan, the Rust emission, obligations as plan entries. The review reads the full design as four waves; §36's behavioural synthesis, §41's agent loop and §28's obligation-derived grants are rejected outright, and `Realization`, topology synthesis and formal verification stay proposed with the design |
 | [`docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | *proposed, reviewed, deferred whole* — infrastructure as a fourth domain, `InfraSpec`/`InfraIr`. Two ideas harvested; the design itself would put cloud discovery adapters inside this workspace, which the vision refuses. A Kubernetes-scoped subset is planned as infrastructure waves, with the discovery adapter external to this workspace |
+| [`docs/design/harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md) | *Phase 1 accepted* as harness wave 1 — the markdown planning store, the `protocol artifact` verbs and the Claude Code plugin. Its Phase 2, a **reference driver** implementing the harness contract, is decided by the operator and **not accepted for build**: the vision narrowing that admits it is recorded, and the build waits behind a feasibility review |
 | [`docs/plan/ess-wave-1-the-model.md`](docs/plan/ess-wave-1-the-model.md) | ESS wave 1 — the model, and what its review changed |
 | [`docs/plan/ess-wave-2-the-compiler.md`](docs/plan/ess-wave-2-the-compiler.md) | ESS wave 2 — the IR, and where validation turned out to belong |
 | [`docs/plan/ess-wave-3-projections.md`](docs/plan/ess-wave-3-projections.md) | ESS wave 3 — the projections, and what they refuse to guess |
@@ -282,6 +299,7 @@ Without `task`: `cargo xtask fmt --check`, `cargo clippy --workspace --all-targe
 | [`docs/plan/ess-wave-6-structural-synthesis.md`](docs/plan/ess-wave-6-structural-synthesis.md) | ESS wave 6 — structural synthesis: the decisions taken, and what is deliberately not in it |
 | [`docs/plan/ess-wave-7-closing-the-loop.md`](docs/plan/ess-wave-7-closing-the-loop.md) | ESS wave 7 — the loop closed over generated code, the second and third emitters, and the dual-target demonstration; W7.4 deferred |
 | [`docs/plan/infra-wave-1-observe.md`](docs/plan/infra-wave-1-observe.md) / [`infra-wave-2-analyze.md`](docs/plan/infra-wave-2-analyze.md) | the infrastructure waves delivered so far — observation and IR, then graph, diagnosis, candidates and directions — and IW3/IW4 as what comes next |
+| [`docs/plan/harness-wave-1-planning-plugin.md`](docs/plan/harness-wave-1-planning-plugin.md) | harness wave 1 — the planning store, its verbs and lifecycles, the Claude Code plugin, and the driver wave it deliberately does not open |
 | [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) | the ESS waves, and what is deliberately outside them |
 | [`docs/plan/wave-1-execution-core.md`](docs/plan/wave-1-execution-core.md) | the protocol's four waves, with their acceptance criteria |
 | [`docs/plan/document-authoring-brief.md`](docs/plan/document-authoring-brief.md) | how to write a valid principle, workflow, profile or lifecycle |

@@ -145,9 +145,10 @@ verdict is only worth what the guards under it are worth.
 
 ## Proposed, not accepted
 
-Four design documents in [`docs/design/`](design/) propose extending this. They are listed here with
+Five design documents in [`docs/design/`](design/) propose extending this. They are listed here with
 their status so that reading the newest file in that directory cannot be mistaken for reading what
-this project has agreed to build — two have been taken up, two have not.
+this project has agreed to build — three have been taken up, one has not, and one is accepted in part
+by its own admission.
 
 | proposed design | what it would add | status |
 |---|---|---|
@@ -155,6 +156,7 @@ this project has agreed to build — two have been taken up, two have not.
 | [semantic diff, impact and evolution](design/ess-semantic-diff-impact-evolution-design-v0.1.md) | the system changing over time, impact closure, what a revision invalidates | **core accepted** into the thesis above and sequenced as ESS wave 5; reviewed, and its proposal-evaluation and architecture-search sections rejected rather than deferred |
 | [structural synthesis, obligations and realizations](design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | generated applications, and human or agent work carried as typed obligations | proposed; reviewed once and not reconciled — that review reads it as four waves, not one; unsequenced |
 | [infrastructure discovery and multi-cloud realization](design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | a **fourth domain**: infrastructure, with `InfraSpec` and `InfraIr` beside the ESS pair | reviewed, and deferred whole with two ideas harvested; unsequenced |
+| [the planning store and the reference driver](design/harness-planning-and-driver-design-v0.1.md) | a durable store for planning artifacts, a Claude Code plugin that uses it, and the first in-repository implementation of the harness contract | **Phase 1 accepted as harness wave 1; driver decided and sketched, build unsequenced.** The narrowing it rests on is the one recorded above |
 
 Closed-loop conformance and structural synthesis are horizons the two halves already implied — the
 thesis promises the tests and the skeleton, and wave 4 delivered the first of them. Semantic diff was
@@ -164,11 +166,34 @@ Infrastructure remains outside. It is a second subject matter rather than a furt
 first, and a review of it recommended deferring the whole and harvesting two ideas. Absorbing it would
 be another amendment, and nobody has made the argument for one.
 
+The planning store and the driver are a different case again. Neither adds a subject matter: the
+store holds artifact kinds the protocol has always modelled and never had anywhere to put, and the
+driver implements a contract this repository already published. What the second of them needed was
+not an amendment to the thesis but a narrowing of one refusal, and that narrowing is above, with the
+reason beside it.
+
 ## What this is deliberately not
 
-Not an LLM orchestration framework, a CI system, an incident-management product, a workflow engine, a
-message broker, or a policy language meant to replace OPA. Not a universal ontology of software
-engineering, and not a mandate for microservices, CQRS or event sourcing.
+Not an LLM orchestration framework, a CI system, an incident-management product, a message broker, or
+a policy language meant to replace OPA. Not a universal ontology of software engineering, and not a
+mandate for microservices, CQRS or event sourcing. One earlier entry in this list has been narrowed,
+deliberately: this is still not *a workflow engine* in the sense refused before — a general-purpose
+orchestrator other systems are built on — but the repository now ships one **reference driver**, a
+default harness that walks its own workflows by asking the engine the seven questions and doing,
+outside the engine, only what the answers permit.
+
+The narrowing has an argument, because a refusal that quietly differs from last month's is
+indistinguishable from a refusal somebody forgot. The harness contract — seven calls, three rules —
+is published in [`docs/guide/harness.md`](guide/harness.md) and mandated by the normative
+consolidated design, and it is implemented by no program in this repository. A contract with zero
+implementations is the same defect as an invariant enforced by nothing. The driver is that
+implementation, and the line it does not move is the one that mattered: the engine still evaluates
+and never acts (invariant 7 unchanged — an agent's own statement never satisfies an independence
+requirement), gates are still evaluated by the engine and never by the driver, and "external systems
+do the work; this project decides what the results permit" remains true — the driver is the first of
+those external systems, kept in-tree the way the website is: a deliverable beside the specification,
+consuming only its public surface. Decided by the operator, 2026-08-21; designed, not yet built —
+building it waits behind its own reviewed design.
 
 **Not a deployment platform**, and the infrastructure design does not change that — it makes the line
 worth drawing precisely. Generating an artifact is in scope: this project may compile a specification

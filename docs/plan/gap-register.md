@@ -10,6 +10,19 @@ Sources are the feasibility review (`docs/reviews/2026-08-20-next-waves-feasibil
 the per-invariant *Enforced by* lines in `AGENTS.md`, and the honest-limits sections of the wave 4
 and 5 records.
 
+## Open, from 2026-08-21 — the harness family
+
+The first two rows on this page that are neither closed by decision nor closed by code. Both are
+opened deliberately by [`harness-wave-1-planning-plugin.md`](harness-wave-1-planning-plugin.md) and
+its design, [`harness-planning-and-driver-design-v0.1.md`](../design/harness-planning-and-driver-design-v0.1.md),
+which is the correct way for a wave to leave something owed: name it here on the way in, rather than
+have a reader find it by its absence.
+
+| gap | what closes it |
+|---|---|
+| **The reference driver is decided and not built.** `docs/VISION.md` § *What this is deliberately not* now says the repository ships one, and no crate implements the harness contract — the same shape of claim as a published contract with no implementor, which is the defect the driver exists to fix. The design (§ 4) is architecture with six named holes: step-map versioning, store→facts, `require_approval` headless, session granularity, failure taxonomy, concurrency | **harness wave 3**, the driver build — which opens only behind harness wave 2's feasibility review of § 4 against the code. **Or** a recorded decision not to build it, which is a legitimate outcome of that review and closes this row just as building it would, provided the VISION narrowing is reverted in the same change |
+| **The planning store is durable and is not a contract implementation.** `aep-backend-markdown` writes through its own `create`/`update` rather than through `CommandService` — deviation **D-P1** against invariant 14 — so the sixteen `aep-conformance` suites do not run against it, and it has no journal, no audit join and no history (**D-P3**). Until then, "there is a durable backend" is a claim the suites do not support | **P3**, the journal-backed `CommandService`/`QueryService` for the markdown store: the two write functions reroute through command envelopes, the journal becomes the history, and the store runs the sixteen suites. `AGENTS.md` § *Current state* states both halves in the meantime |
+
 ## Closed by decision, 2026-08-20
 
 ### D-1 — predicate comparison in the diff: conservative canonical equality

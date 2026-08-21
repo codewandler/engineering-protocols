@@ -24,8 +24,9 @@ in the reconciliation register §5. Add to that list rather than diverging silen
 proposal is not a work order, however long and however recent it is.
 `ess-implementor-design-v0.1.md` and `ess-review-v0.1.md` show what acceptance looks like:
 [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) and the wave 1–3 plan pages took them up, and
-waves 1 to 3 shipped from them. The four proposals filed 2026-08-20 have since been reviewed, and
-their acceptance state is:
+waves 1 to 3 shipped from them. Five further proposals now sit in that directory — four filed
+2026-08-20 and since reviewed, one filed 2026-08-21 and accepted in part the same day. Their
+acceptance state is:
 
 | proposed design | status |
 |---|---|
@@ -33,6 +34,7 @@ their acceptance state is:
 | [`ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | **core implemented** as ESS wave 5 (`0.5.0-ess-wave-5`). Two of its seventy-eight sections are rejected outright (the proposal-evaluation loop and architecture search); the rest past §31 stays proposed |
 | [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | **accepted in part** by [`docs/plan/ess-wave-6-structural-synthesis.md`](docs/plan/ess-wave-6-structural-synthesis.md), which is wave 6, in progress. Its obligation/`Realization` programme stays proposed (W7.4 takes a slice), and its §28 is refused by invariant 6 |
 | [`semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | reviewed and **deferred whole**; two ideas harvested |
+| [`harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md) | **Phase 1 accepted** by [`docs/plan/harness-wave-1-planning-plugin.md`](docs/plan/harness-wave-1-planning-plugin.md), which is harness wave 1: the markdown planning store, `protocol artifact`, and the Claude Code plugin. Its Phase 2 **reference driver** is decided by the operator (`docs/VISION.md` § *What this is deliberately not*, narrowed 2026-08-21) and **not accepted for build** — harness wave 2 is a feasibility review of §4 against the code, and the build waits behind it |
 
 Do not implement from an unreviewed design, and do not treat one as evidence of what this repository
 is. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* says what each would add, and
@@ -106,8 +108,15 @@ passing one.
   chunk A closed the three unenforced invariants, the digest widening and `proptest` phase 1;
   chunk B closed the input→event-payload model gap — an outcome's `payload:` declaration — and
   the value-object invariant scenarios);
-  attested evidence (gap register D-3, proposed and unaccepted); any durable backend — the only
-  implementation of the contract is in memory.
+  attested evidence (gap register D-3, proposed and unaccepted); a **contract implementation that
+  survives a process exit**. That last one is now half true and worth stating as two facts rather
+  than one: a durable markdown **store** exists (`aep-backend-markdown`, harness wave 1) and holds
+  planning artifacts as files, but it is a store and not a `CommandService`/`QueryService`
+  implementation — it writes through its own two functions, which is deviation D-P1 against
+  invariant 14 — so the **contract** still has exactly one implementor, `aep-backend-memory`, and the
+  sixteen conformance suites run against that and nothing else. The journal-backed milestone (P3)
+  is what makes the store answer as a backend; until then, "there is a durable backend" is a claim
+  the suites do not support.
 * Work order: [`docs/design/reconciliation-v0.2.md`](docs/design/reconciliation-v0.2.md) §4 for AEP,
   [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) for ESS, and
   [`docs/plan/gap-register.md`](docs/plan/gap-register.md) for what is owed outside any wave.

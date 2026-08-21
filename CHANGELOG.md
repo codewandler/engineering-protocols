@@ -9,7 +9,29 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- **The vision's refusal of "a workflow engine" is narrowed: a reference driver is now in scope —
+  decided and designed, not yet built.** Nothing about the engine changes; it still only decides.
+  What changes is that the harness contract in [`docs/guide/harness.md`](docs/guide/harness.md) —
+  seven calls, three rules — is going to get a first implementation inside this repository, the way
+  the storage contract has `aep-backend-memory`. A published contract that nothing implements is the
+  same defect as an invariant that nothing enforces, and it had been that since the guide was
+  written.
+
+  What did **not** move is worth as much as what did. Gates are still evaluated by the engine and
+  never by a driver. Invariant 7 is untouched: an agent's own statement never satisfies an
+  independence requirement, and in the driver's design that is a type rather than a rule — a step
+  that calls a model has no field to put evidence in. "External systems do the work; this project
+  decides what the results permit" still holds, with the driver as the first of those external
+  systems, kept in-tree the way the website is.
+
+  [`docs/VISION.md`](docs/VISION.md) carries the argument;
+  [`docs/plan/control-document-updates.md`](docs/plan/control-document-updates.md) carries the
+  record of who decided it and when;
+  [`docs/design/harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md)
+  § 4 is the design, which is architecture with six named open problems and is explicitly **not**
+  accepted for build.
 
 ## [0.7.1-infra-waves-1-4] — 2026-08-21
 
