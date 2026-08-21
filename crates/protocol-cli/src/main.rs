@@ -301,6 +301,22 @@ enum Command {
         #[command(subcommand)]
         command: planning::ArtifactCommand,
     },
+    /// Judge an agent run against a typed specification, or report what is in one.
+    ///
+    /// The transcript comes from a harness that has already finished — these verbs never start an
+    /// agent, never call a model and never reach a network. They read a file and evaluate typed
+    /// predicates over it, which is what makes a verdict reproducible: the same transcript and the
+    /// same specification produce the same report on any machine, at any load, on any day.
+    ///
+    /// The third observation domain in this repository, after an authored specification and a
+    /// scanned cluster, and it takes the same shape on purpose: a content-addressed IR, an
+    /// authored expectation document, and `ok`/`gap`/`unk` verdicts where the third value means
+    /// *the adapter did not understand the event*.
+    Trace {
+        /// What to do with it.
+        #[command(subcommand)]
+        command: trace::TraceCommand,
+    },
     /// Ask the reference backend about the entities an artifact manifest or planning store holds.
     Entity {
         /// Which question to ask about them.
@@ -477,6 +493,11 @@ macro_rules! out {
 // with its own store, its own vocabulary and no shared state with the rest.
 mod planning;
 
+// The second module split, on the same criterion: a verb family with its own observation
+// domain, its own vocabulary and no shared state with the rest of the binary. It brings its own
+// `--format` enum too, because a check report has two useful renderings and not three.
+mod trace;
+
 fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
@@ -507,6 +528,7 @@ fn run() -> Result<ExitCode> {
         Command::Evaluate(args) => evaluate(&args, None),
         Command::Explain { execution, action } => evaluate(&execution, action.as_deref()),
         Command::Artifact { command } => planning::run(command),
+        Command::Trace { command } => trace::run(command),
         Command::Entity { command } => entity(&command),
         Command::Audit {
             backend,

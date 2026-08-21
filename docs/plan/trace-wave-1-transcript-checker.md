@@ -57,7 +57,7 @@ cutting is allowed, silent cutting is not.
 | a streaming checker | **D5** | batch only, deferred by name. Incremental evaluation, partial verdicts and a halt signal are not designable against a format that is not stable (**D1**) |
 | the `review` attachment slot on the run record | § 6.5 | the adversarial reviewer stays exactly where it is — outside the verdict, in its own file. The slot is a shape the design sketches and does not settle |
 | `--format yaml` | § 4 | see the decisions table |
-| `protocol trace evidence` and `EvidenceKind::TraceConformance` | § 5 | **not deferred — split.** It is part of this wave and is implemented by a parallel workstream; W1.5 below says what it owes and what this half guarantees it |
+| `protocol trace evidence` and `EvidenceKind::TraceConformance` | § 5 | **not deferred — split, and now delivered.** It was part of this wave and was implemented by a parallel workstream in two phases; W1.5 below records what shipped and how each acceptance claim is held |
 
 Two kinds ship and are documented as weak, because the design documents them as weak and hiding
 that would be worse than the kinds themselves:
@@ -203,25 +203,51 @@ rows, counted separately and printed in full.
   green while checking nothing, which is the failure mode `AGENTS.md` § *Gate* names. The row count
   is asserted, not assumed.
 
-## W1.5 — the evidence join (`trace_conformance`)
+## W1.5 — the evidence join (`trace_conformance`) — **delivered**
 
-**Part of this wave, implemented by a parallel workstream**, and split because the two halves touch
-disjoint files: `EvidenceKind::TraceConformance` is a change to `aep-domain`'s closed enum, which
-this half does not own.
+Part of this wave, implemented by a parallel workstream in two phases, and split because the two
+halves touch disjoint files: `EvidenceKind::TraceConformance` is a change to `aep-domain`'s closed
+enum, which the checker half does not own.
 
-What this half guarantees it: `trace_spec::report::CheckReport` is a serializable value carrying
-the counts, every gapped expectation's id, and — as first-class fields, never derived at the call
-site — the **transcript digest** and the **specification digest**. That pair is what makes the
-record mean something later: *"some agent passed some behavioural spec"* is worthless, and *"the
-run with this digest satisfied the spec with that digest"* is not.
+What the checker half guaranteed it: `trace_spec::report::CheckReport` is a serializable value
+carrying the counts, every gapped expectation's id, and — as first-class fields, never derived at
+the call site — the **transcript digest** and the **specification digest**. That pair is what makes
+the record mean something later: *"some agent passed some behavioural spec"* is worthless, and
+*"the run with this digest satisfied the spec with that digest"* is not. The `trace` verb family
+was left extensible for it, and `protocol trace evidence` is the third arm on `TraceCommand` it was
+left room for.
 
-The `trace` verb family is left extensible for it: `protocol trace evidence` is a third arm on
-`TraceCommand`, added without touching either library.
+**Phase 1 — the vocabulary.** `EvidenceKind::TraceConformance` (wire name `trace_conformance`, no
+alias) and `Verifier::TraceChecker` (`trace-checker`), the only class that can establish it. Both
+declared in `protocols/adp/1.yaml`, because declaration is *required*: the engine refuses a
+submission whose kind the protocol does not declare
+(`crates/aep-engine/src/engine.rs:320-321`). Recorded as gap-register **D-5**.
 
-**Acceptance** (the other half's, recorded here so the wave has one place to be judged from): the
-record is minted in the **same process that ran the check**, as `protocol ess conform evidence`
-does, so no caller can author its own verdict; its producer is `Producer::Verifier`, because the
-checker observed a file and did not ask an agent how it went.
+**Phase 2 — the record and the verb.** `Evidence::TraceConformance(TraceConformanceResult)`
+carrying the verdict, the three counts, every gapped expectation's id, the ids downgraded on the
+command line, and the digest pair; `CheckReport::to_evidence` in `crates/trace-spec/src/evidence.rs`
+converting on the producing side; and `protocol trace evidence --spec … --transcript … [--out]
+[--format] [--advisory]` in `crates/protocol-cli/src/trace.rs`.
+
+The record is a **summary and not the report**: an expectation's citation quotes the transcript —
+the most sensitive input this repository consumes — and an evidence record is a thing people paste
+into pull requests. Counts, ids and two digests survive the handoff; the rows do not.
+
+**Acceptance, met:**
+
+| claim | how it is held |
+|---|---|
+| the record is minted in the **same process that ran the check**, so no caller can author its own verdict | `mint_evidence` runs `perform` and hands the report straight to `to_evidence`; there is no `--report` input, and `perform` is shared with `trace check` so the record cannot come from a different evaluation than the one a reader was shown |
+| its producer is `Producer::Verifier`, because the checker observed a file and did not ask an agent how it went | `TraceEvidence::PRODUCER` is a constant, not a parameter — `the_record_names_the_trace_checker_and_never_the_caller` |
+| the record the checker writes is one the engine reads | `crates/protocol-cli/tests/trace_cli.rs` writes the document with `--out` and feeds the file to `protocol evaluate --evidence`, in both renderings the verb offers |
+| a run that gapped is written down rather than exited on | `a_run_that_gapped_is_written_down_rather_than_exited_on`: `trace check` exits 1 on the same pair of files, `trace evidence` exits 0 and the record says `status: failed` and names the expectation |
+| a `--advisory` downgrade cannot satisfy a protocol requirement | the record names every downgraded id, and `trace_conformance.passed` counts all gaps — `a_command_line_downgrade_is_recorded_and_does_not_make_the_record_pass` |
+
+**The loop closes**, and this is the sentence the whole family exists for: a behavioural claim about
+an LLM step is now admissible evidence **without the LLM minting anything**. The model does not
+report that it consulted the CLI before editing; a deterministic checker reads the transcript the
+model produced and establishes it, and the independence boundary is not weakened but satisfiable
+for the first time for a claim about *how* an agent worked.
 
 ## What is deliberately not in this wave
 

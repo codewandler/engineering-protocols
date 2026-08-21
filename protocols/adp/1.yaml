@@ -19,9 +19,19 @@ evidence_kinds:
   # Development-specific because a specification is a development artifact: operations work is
   # governed by what production is doing, not by what a compiler derived.
   - ess_conformance
+  # A harness transcript checked against a trace specification: which tools the agent called, in
+  # which order, with which arguments, in which environment and at what cost. Development-specific
+  # for the same reason as the row above — the runs this governs are development runs, driven from
+  # a plan the protocol owns — and it is deliberately not in the base protocol, because widening it
+  # to every profile is additive later and narrowing it would not be.
+  - trace_conformance
 
 verifiers:
   - conformance-runner
+  # Reads the transcript and decides it. Named separately from `conformance-runner` because the two
+  # observe different things: one executes an implementation against a suite, the other reads a
+  # recording of how an agent worked.
+  - trace-checker
 
 artifact_kinds:
   - executable-system-specification
@@ -29,6 +39,9 @@ artifact_kinds:
 # Development-specific fact families, on top of the base protocol's.
 observables:
   - 'ess_conformance.**'
+  # What a trace-conformance record projects: the verdict, the digest pair that says which run
+  # against which document, and the three expectation counts.
+  - 'trace_conformance.**'
   - 'mutation.**'
   - 'differential.**'
   - 'invariant.**'

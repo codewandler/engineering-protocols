@@ -1,0 +1,379 @@
+format: trace-spec/1
+id: planning-plugin/eval
+title: The planning plugin behaves as its skill says it does
+
+# What this document replaces: `run.sh` assertions 3.4–3.8, which had grown into five transcript
+# claims written in three idioms — a `grep` over 86KB of JSON, two `jq` filters each carrying a
+# weaker `grep` fallback for when `jq` is absent, and one `jq` filter that passed unconditionally
+# when it was. It also gives the sixty-five-line metrics block somewhere to have an opinion.
+#
+# Two severities, and the difference is the whole point of writing it down:
+#
+#   gate      — about the plugin, the CLI or the experiment. A gap fails the eval.
+#   advisory  — about the account, the model routing or the day. Evaluated, printed and in the
+#               report; it does not move the exit code. Design decision D6: a CI job that goes red
+#               because a cache was cold is a CI job people learn to ignore, and that is worse than
+#               having no bound at all.
+#
+# Every advisory bound is calibrated at roughly three to ten times an observed value, and the
+# observation is in the comment beside it, so the next reader knows what it was set against. The
+# two runs it was written from are committed at `crates/trace-spec/tests/fixtures/`, and
+# `cargo test -p trace-spec` checks this document against both of them — so a bound that stops
+# holding is caught by the gate rather than by a paid eval run.
+
+expectations:
+  # --- the experiment: the environment the run actually got --------------------------------
+
+  - id: our-plugin-loaded
+    statement: the plugin under test is the one that loaded, at the version and from the path the eval copied
+    expect:
+      env.plugin_loaded:
+        plugin: engineering-protocols
+        version: "0.1.0"
+        source: engineering-protocols@inline
+
+  - id: nothing-else-loaded
+    statement: nothing leaked in from the operator's own configuration
+    # run.sh assertion 3.7, as a document. The eval prevents the leak with CLAUDE_CONFIG_DIR and
+    # this asserts it, because isolation that silently stops working is indistinguishable from
+    # isolation that works: the run goes green either way, and the contamination shows up months
+    # later as an unreproducible result.
+    expect:
+      env.exclusive:
+        plugins: [engineering-protocols]
+
+  - id: billed-to-the-session
+    statement: the run billed the logged-in session, not a stray exported API key
+    # run.sh assertion 3.8. The one that has already bitten: an exported ANTHROPIC_API_KEY took
+    # precedence over the claude.ai login and billed an account with no credits.
+    # `EVAL_USE_API_KEY=1` downgrades this row to advisory on the command line — it is still
+    # evaluated and still printed, and the report names it as downgraded.
+    expect:
+      env.api_key_source:
+        equals: none
+
+  - id: the-run-did-not-ask
+    statement: the run was headless in the mode the eval intended
+    expect:
+      env.permission_mode:
+        equals: dontAsk
+
+  - id: the-operators-output-style-did-not-leak
+    statement: the output style is the default, not whatever the operator has configured
+    expect:
+      env.output_style:
+        equals: default
+
+  - id: the-skill-was-offered
+    statement: the harness offered the plugin's skill — available is not invoked
+    expect:
+      env.skill_available:
+        skill: engineering-protocols:planning
+
+  - id: the-decomposer-loaded
+    statement: the plugin's agents loaded under the names W1.3's acceptance refers to
+    expect:
+      env.agent_available:
+        agent: engineering-protocols:decomposer
+
+  # --- what the agent did ---------------------------------------------------------------
+
+  - id: skill-completed
+    statement: the planning skill ran to completion, structurally — a boolean the harness set, not a sentence the model wrote
+    # run.sh assertion 3.5, and the strongest claim in the eval.
+    expect:
+      skill.completed:
+        skill: engineering-protocols:planning
+        count: {at_least: 1}
+
+  - id: consulted-the-skill-before-touching-the-store
+    statement: the skill was loaded before the CLI was reached for, not afterwards
+    expect:
+      order:
+        first: {tool: Skill}
+        before: {tool: Bash, args: {command: {contains: "protocol artifact"}}}
+
+  - id: created-through-the-cli
+    statement: artifacts were created with the CLI, not with hand-written frontmatter
+    # run.sh assertion 3.4 — which was a `grep` for this string anywhere in the file, including
+    # inside the skill text the model was shown and inside a sentence saying it would not use the
+    # CLI. This is a tool call, with a name and an argument matcher.
+    expect:
+      tool.called:
+        tool: Bash
+        args: {command: {contains: "protocol artifact new"}}
+        count: {at_least: 1}
+
+  - id: validated-its-own-work
+    statement: the agent ran the store's own validator before reporting
+    expect:
+      tool.called:
+        tool: Bash
+        args: {command: {contains: "protocol artifact validate"}}
+        count: {at_least: 1}
+
+  - id: no-destructive-shell
+    statement: nothing in the run tried to delete a tree
+    # `tool.absent` rather than `count: {exactly: 0}`, because "this must never happen" is the
+    # assertion people get wrong when they have to spell it as a bound.
+    expect:
+      tool.absent:
+        tool: Bash
+        args: {command: {contains: "rm -rf"}}
+
+  - id: the-cli-never-refused-a-shell-call
+    statement: no Bash call came back an error
+    # Scoped to Bash on purpose. A refusal this project designed is correct behaviour — `protocol
+    # artifact move` exits 1 when the move is illegal and the plugin's fourth guardrail says the
+    # refusal is the answer — so a blanket zero-error rule would forbid the plugin's own intended
+    # behaviour. What this says is narrower: in a run that was supposed to succeed, nothing did.
+    expect:
+      tool.failed:
+        tool: Bash
+        count: {exactly: 0}
+
+  # --- the terminal record ----------------------------------------------------------------
+
+  - id: terminal-record-clean
+    statement: the run ended the way a completed run ends
+    # run.sh assertion 3.6, first half.
+    expect:
+      result:
+        is_error: false
+        terminal_reason: completed
+        api_error_status: absent
+
+  - id: no-permission-denials
+    statement: the sandbox contract held — nothing was refused permission
+    # run.sh assertion 3.6, second half.
+    expect:
+      permission.denied:
+        count: {exactly: 0}
+
+  - id: not-paid-from-overage
+    statement: this eval run was not paid for out of overage
+    # A fact about money no other part of the record carries. Gating deliberately: a CI job running
+    # an eval on every merge should be allowed to assert it.
+    expect:
+      rate_limit.overage:
+        equals: false
+
+  # --- this repository's own CLI, which is the one thing here we can regress ---------------
+
+  - id: the-cli-stays-fast
+    statement: every `protocol artifact` call returned promptly
+    # Derived from recorded timestamps, never measured (design § 2.6). Observed: every such call
+    # returned in ≤ 187 ms on `7hTYjT`. The bound is 2 000 ms — ten times that — because this is a
+    # guard against a verb that got slow, not a benchmark. Gating, because unlike everything in the
+    # advisory block below, this is about code in this repository.
+    expect:
+      step.exec_time:
+        tool: Bash
+        args: {command: {contains: "protocol artifact"}}
+        ms: {at_most: 2000}
+
+  - id: the-plugin-loads-fast
+    statement: startup overhead before the first API request stayed small
+    # The one latency number that is about the harness rather than the model, which makes it the
+    # one worth bounding: it catches a plugin that got slow to load. Observed: 50 ms and 61 ms.
+    expect:
+      time_to_request:
+        ms: {at_most: 2000}
+
+  # --- advisory: the metrics block, with an opinion for the first time ---------------------
+  # Everything below is `severity: advisory`. It is printed, it is in the report, and it gates
+  # nothing. These are the quantities design D6 names: they vary run to run with model routing,
+  # cache state, service tier and load.
+
+  - id: turns-within-reason
+    statement: the agent did not loop
+    severity: advisory
+    # Observed 13 and 13; `run.sh` caps the run at 30 turns anyway.
+    expect:
+      turns:
+        count: {at_most: 30}
+
+  - id: api-requests-within-reason
+    statement: the run did not call the model an unreasonable number of times
+    severity: advisory
+    # Observed 8 and 8. The closest thing to "how many times did we call the model".
+    expect:
+      api_requests:
+        count: {at_most: 40}
+
+  - id: the-stream-did-not-fragment
+    statement: assistant events stayed in proportion to the requests behind them
+    severity: advisory
+    # Observed 19 and 18. Bound to catch a run that fragmented, not to bound cost.
+    expect:
+      events.assistant:
+        count: {at_most: 80}
+
+  - id: one-pass-per-request
+    statement: no request needed many iterations
+    severity: advisory
+    # Observed 1 and 1 — an array's length, not a counter.
+    expect:
+      iterations:
+        count: {at_most: 5}
+
+  - id: output-tokens-within-reason
+    statement: the model did not write an essay
+    severity: advisory
+    # Observed 3 824 and 3 017.
+    expect:
+      tokens.output:
+        count: {at_most: 20000}
+
+  - id: thinking-tokens-within-reason
+    statement: billed thinking stayed small
+    severity: advisory
+    # Observed 34 and 38 — the billed figure the API reported, not the harness's live estimate.
+    expect:
+      tokens.thinking:
+        count: {at_most: 5000}
+
+  - id: cost-under-a-dollar
+    statement: the run cost what an eval run should cost
+    severity: advisory
+    # Observed $0.2737 and $0.2522. Bounds only, never equality — the type has no `exactly`.
+    expect:
+      cost.total:
+        at_most_usd: 1.00
+
+  - id: the-cache-was-read
+    statement: the run read from the prompt cache rather than paying full price
+    severity: advisory
+    expect:
+      cache.used:
+        equals: true
+
+  - id: cache-hit-ratio-high
+    statement: almost all input came from the cache
+    # hit_ratio = cache_read_input_tokens / (cache_read_input_tokens + input_tokens).
+    # Observed 0.99995 and 0.99995.
+    severity: advisory
+    expect:
+      cache.hit_ratio:
+        at_least: 0.9
+
+  - id: cache-creation-within-reason
+    statement: the run did not re-create a cache it should have read
+    severity: advisory
+    # Observed 20 168 and 18 809. Invisible in cost until it is expensive.
+    expect:
+      cache.created_tokens:
+        count: {at_most: 200000}
+
+  - id: duration-within-reason
+    statement: the run finished in a time a person would wait for
+    severity: advisory
+    # Observed 42 167 ms and 34 237 ms.
+    expect:
+      duration.total:
+        ms: {at_most: 300000}
+
+  - id: api-duration-within-reason
+    statement: time attributed to API calls stayed in proportion
+    severity: advisory
+    # Observed 42 955 ms and 35 479 ms — note it exceeds the run's own duration on `7hTYjT`, which
+    # is why it is its own kind rather than derived from the other.
+    expect:
+      duration.api:
+        ms: {at_most: 300000}
+
+  - id: ttft-within-reason
+    statement: the first token arrived promptly
+    severity: advisory
+    # Read from the recorded field, never derived: the first four events of a run carry no
+    # timestamp at all, so a subtraction there would compute zero. Observed 1 915 ms and 1 668 ms.
+    expect:
+      ttft:
+        ms: {at_most: 20000}
+
+  - id: inference-dominates-the-wall-clock
+    statement: the run's time went where it should — into the model
+    severity: advisory
+    # Observed 27 761 ms of inference against 415 ms of tool execution on `7hTYjT`: 98.5% model.
+    expect:
+      time.inference_total:
+        ms: {at_most: 600000}
+
+  - id: tool-execution-stays-small
+    statement: the tools themselves cost almost nothing
+    severity: advisory
+    # Observed 415 ms across 11 steps.
+    expect:
+      time.tool_exec_total:
+        ms: {at_most: 60000}
+
+  - id: tool-output-within-the-context-budget
+    statement: tool results did not eat the context window
+    severity: advisory
+    # A tool result is injected into the *next* request, where it costs input tokens and then sits
+    # in the context for the rest of the run. Observed about 8 000 bytes — roughly 2 000 tokens —
+    # which no aggregate in the terminal record accounts for.
+    expect:
+      tool.result_bytes:
+        bytes: {at_most: 400000}
+        per: total
+
+  - id: the-model-did-not-lose-track
+    statement: no meaningful number of identical calls were repeated
+    severity: advisory
+    # Two identical reads of one file is a model that lost track; three identical invocations is a
+    # retry loop. Observed 0 and 0. A confusion signal, not a correctness one — worth a look, not a
+    # failure, which is why it is a bound and why it is advisory.
+    expect:
+      tool.repeated:
+        count: {at_most: 2}
+
+  - id: no-subagents
+    statement: the run did the work itself
+    severity: advisory
+    # Observed 0 and 0. `Task` is in `--allowedTools`, so this is a fact about what happened rather
+    # than about what was possible.
+    expect:
+      subagent.spawned:
+        count: {at_most: 2}
+
+  - id: the-account-was-not-throttled
+    statement: the rate-limit window was not in a state that will start failing runs
+    severity: advisory
+    # Observed `allowed_warning` at 0.64 on both. An eval suite that starts reporting this is an
+    # eval suite about to start failing for reasons that have nothing to do with the code.
+    expect:
+      rate_limit.status:
+        allowed: [allowed, allowed_warning]
+
+  - id: rate-limit-headroom
+    statement: there was headroom in the window
+    severity: advisory
+    expect:
+      rate_limit.utilization:
+        at_most: 0.95
+
+  - id: the-model-resolved-as-expected
+    statement: the alias on the command line resolved to the model the eval means
+    severity: advisory
+    # Advisory because `EVAL_MODEL` is an override a caller is allowed to use. Observed
+    # `claude-sonnet-5` from `--model sonnet` on both runs.
+    expect:
+      env.model:
+        equals: claude-sonnet-5
+
+  - id: served-at-the-standard-tier
+    statement: the account was served at the ordinary tier
+    severity: advisory
+    # Environment-dependent by definition: a specification that gated on this would fail on
+    # somebody else's account rather than on the agent's behaviour.
+    expect:
+      service_tier:
+        equals: standard
+
+  - id: served-at-standard-speed
+    statement: the account was served at the ordinary speed
+    severity: advisory
+    expect:
+      speed:
+        equals: standard

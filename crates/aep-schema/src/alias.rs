@@ -75,6 +75,11 @@ pub const WIRE_ALIASES: &[WireAlias] = &[
     alias("Evidence", "test_result", "test_execution"),
     alias("RawBindingSpec", "name", "id"),
     alias("RawComponentSpec", "name", "component"),
+    alias(
+        "RawExpectationKind",
+        "env.skill_available",
+        "skill.available",
+    ),
     alias("RawObligation", "requires", "require"),
     alias("RawPrinciple", "applies_when", "applicability"),
     alias("RawPrinciple", "on_failure", "failure_policy"),
@@ -114,16 +119,22 @@ fn title_of(schema: &SchemaObject) -> Option<&str> {
         .and_then(|metadata| metadata.title.as_deref())
 }
 
-/// Publishes one alias, as a field spelling or as a variant tag value.
+/// Publishes one alias: a field spelling, an internally tagged variant's tag value, or an
+/// externally tagged variant's key.
 ///
-/// Which of the two it is comes from the schema rather than from the list, because the schema is
-/// what has to end up right: a field alias names a property, a variant alias names a tag value, and
-/// a list entry that matched neither would be a silent no-op. `publishes_alias` in the test file is
-/// what refuses that.
+/// Which of the three it is comes from the schema rather than from the list, because the schema is
+/// what has to end up right: a field alias names a property, an internal variant alias names a tag
+/// value, an external variant alias names the single key of a `oneOf` member — and a list entry
+/// that matched none of them would be a silent no-op. `publishes_alias` in the test file is what
+/// refuses that.
 fn publish_into(target: &mut SchemaObject, entry: &WireAlias) {
-    if !publish_field(target, entry) {
-        publish_variant(target, entry);
+    if publish_field(target, entry) {
+        return;
     }
+    if publish_variant(target, entry) {
+        return;
+    }
+    publish_external_variant(target, entry);
 }
 
 /// Publishes an alias for a field, and returns whether the type had such a field.
@@ -198,6 +209,66 @@ fn publish_variant(target: &mut SchemaObject, entry: &WireAlias) -> bool {
         }
     }
     false
+}
+
+/// Publishes an alias for a variant of an **externally** tagged enum, and returns whether it found
+/// one.
+///
+/// An externally tagged variant is a single-key map — `{tool.called: {…}}` — so the member is
+/// **duplicated** under the other spelling rather than gaining a second property. A member
+/// carrying both keys would describe a document that writes the variant twice, which no parser
+/// accepts, and `deny_unknown_fields` on the variant's own parameters makes that shape doubly
+/// wrong.
+fn publish_external_variant(target: &mut SchemaObject, entry: &WireAlias) -> bool {
+    let Some(variants) = target
+        .subschemas
+        .as_mut()
+        .and_then(|subschemas| subschemas.one_of.as_mut())
+    else {
+        return false;
+    };
+
+    let mut aliased = None;
+    for variant in variants.iter() {
+        let Schema::Object(object) = variant else {
+            continue;
+        };
+        let Some(validation) = object.object.as_ref() else {
+            continue;
+        };
+        // Already published, by an earlier pass or by the type's own impl.
+        if validation.required.contains(entry.alias) {
+            return true;
+        }
+        if validation.required.len() != 1 || !validation.required.contains(entry.canonical) {
+            continue;
+        }
+        let Some(body) = validation.properties.get(entry.canonical).cloned() else {
+            continue;
+        };
+        let mut copy = object.clone();
+        {
+            let validation = copy.object();
+            validation.properties.clear();
+            validation.properties.insert(entry.alias.to_owned(), body);
+            validation.required.clear();
+            validation.required.insert(entry.alias.to_owned());
+        }
+        copy.metadata().description = Some(format!(
+            "An accepted spelling of `{}`; give one or the other, not both.",
+            entry.canonical
+        ));
+        aliased = Some(copy);
+        break;
+    }
+
+    match aliased {
+        Some(copy) => {
+            variants.push(copy.into());
+            true
+        }
+        None => false,
+    }
 }
 
 /// `required` naming exactly `names`, and nothing else.

@@ -1,0 +1,32 @@
+[package]
+name = "trace-spec"
+description = "Reading an agent-run transcript into trace-ir/1, and checking it against an authored trace-spec/1: three verdicts, every one citing the events that produced it."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+# The two models. This crate holds the two *computations* over them — reading a harness's
+# transcript into the IR, and evaluating a specification against it — and no model of its own: a
+# second event type or a second expectation type here would be a second place for the vocabulary
+# to drift.
+trace-domain.workspace = true
+
+# The protocol's evidence vocabulary, for the one module that hands a check report over to it
+# (`evidence`). The conversion lives on the producing side rather than in the engine — invariant 7,
+# the engine never manufactures evidence — so this crate has to know the record type. No new
+# third-party dependency: `aep-domain` is a workspace member.
+aep-domain.workspace = true
+
+# A transcript is JSONL and a report is JSON: text for people, JSON for programs.
+serde.workspace = true
+serde_json.workspace = true
+
+# Specifications are authored in YAML, and `read_spec` lives in `trace-domain`; this crate needs
+# no YAML of its own. Kept out deliberately rather than added "for symmetry".
+
+[lints]
+workspace = true

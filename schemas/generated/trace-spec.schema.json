@@ -1,0 +1,1521 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawTraceSpec",
+  "description": "A specification as it is written, before anything has checked what it claims.",
+  "type": "object",
+  "required": [
+    "format",
+    "id"
+  ],
+  "properties": {
+    "expectations": {
+      "description": "The expectations it declares.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/RawExpectation"
+      }
+    },
+    "format": {
+      "description": "The shape the document says it is written in.",
+      "type": "string"
+    },
+    "id": {
+      "description": "What the specification is about, such as `planning-plugin/eval`.",
+      "type": "string"
+    },
+    "title": {
+      "description": "A human sentence for a report's heading.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "RawAgent": {
+      "description": "The parameters of `env.agent_available`.",
+      "type": "object",
+      "required": [
+        "agent"
+      ],
+      "properties": {
+        "agent": {
+          "description": "The agent's name, as the harness lists it.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawAggregate": {
+      "description": "`total` or `each`, as written.",
+      "oneOf": [
+        {
+          "description": "The default: the sum across every selected call.",
+          "type": "string",
+          "enum": [
+            "total"
+          ]
+        },
+        {
+          "description": "Every selected call on its own.",
+          "type": "string",
+          "enum": [
+            "each"
+          ]
+        }
+      ]
+    },
+    "RawAllowed": {
+      "description": "The parameters of `rate_limit.status`.",
+      "type": "object",
+      "required": [
+        "allowed"
+      ],
+      "properties": {
+        "allowed": {
+          "description": "The acceptable statuses.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawApiErrorStatus": {
+      "description": "What the terminal record's `api_error_status` must say: `absent`, or `{equals: \"429\"}`.",
+      "oneOf": [
+        {
+          "description": "`absent` — there must be no API error status at all.",
+          "type": "string",
+          "enum": [
+            "absent"
+          ]
+        },
+        {
+          "description": "`{equals: \"429\"}` — there must be one, and it must be this.",
+          "type": "object",
+          "required": [
+            "equals"
+          ],
+          "properties": {
+            "equals": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "RawCostTotal": {
+      "description": "The parameters of `cost.total`.\n\nThe two keys carry their unit — `at_most_usd`, not `at_most` — because that is how the design writes them, and because a number of dollars beside a number of tokens on the next line should not be spelled identically.",
+      "type": "object",
+      "properties": {
+        "at_least_usd": {
+          "description": "The lowest acceptable cost, in US dollars.",
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "at_most_usd": {
+          "description": "The highest acceptable cost, in US dollars.",
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "model": {
+          "description": "The model to scope to, where the specification names one.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawCount": {
+      "description": "The parameters of the eight kinds that bound one whole number and nothing else.",
+      "type": "object",
+      "required": [
+        "count"
+      ],
+      "properties": {
+        "count": {
+          "description": "How many are acceptable.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawCountBound"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawCountBound": {
+      "description": "A bound over a whole number as written: `{at_least: 1}`, `{at_most: 3}`, `{exactly: 0}`, or a floor and a ceiling together.\n\nNever a bare number. `count: 1` cannot be read as \"at least once\" by one author and \"exactly once\" by the next, so there is no shorthand to read it as either.",
+      "type": "object",
+      "properties": {
+        "at_least": {
+          "description": "The lowest acceptable value.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "at_most": {
+          "description": "The highest acceptable value.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        },
+        "exactly": {
+          "description": "The only acceptable value; validation refuses it beside either of the other two.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawEquals": {
+      "description": "The parameters of the six kinds that compare one recorded string.",
+      "type": "object",
+      "required": [
+        "equals"
+      ],
+      "properties": {
+        "equals": {
+          "description": "The value expected.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawEqualsBool": {
+      "description": "The parameters of the two kinds that compare one recorded boolean.",
+      "type": "object",
+      "required": [
+        "equals"
+      ],
+      "properties": {
+        "equals": {
+          "description": "What it must be.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawExpectation": {
+      "description": "One expectation as written.",
+      "type": "object",
+      "required": [
+        "expect",
+        "id"
+      ],
+      "properties": {
+        "expect": {
+          "description": "What it claims.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawExpectationKind"
+            }
+          ]
+        },
+        "id": {
+          "description": "The id a verdict is reported under.",
+          "type": "string"
+        },
+        "on_unknown": {
+          "description": "What an undecidable verdict means here. `unknown` when the document omits it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawOnUnknown"
+            }
+          ]
+        },
+        "severity": {
+          "description": "Whether a gap moves the exit code. `gate` when the document omits it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawSeverity"
+            }
+          ]
+        },
+        "statement": {
+          "description": "The author's own sentence, carried into the report unchanged.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawExpectationKind": {
+      "description": "An expectation kind as written, externally tagged so the parameter names are checked.\n\nThe variant names are the design's dotted kind names verbatim, and [`ExpectationKind::NAMES`] is the same vocabulary on the validated side. A test at the bottom of this file builds a document for every published name and refuses to let the two lists drift.",
+      "oneOf": [
+        {
+          "description": "`{env.plugin_loaded: {plugin: …, version: …, source: …}}`",
+          "type": "object",
+          "required": [
+            "env.plugin_loaded"
+          ],
+          "properties": {
+            "env.plugin_loaded": {
+              "$ref": "#/definitions/RawPluginLoaded"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{env.exclusive: {plugins: [...]}}`",
+          "type": "object",
+          "required": [
+            "env.exclusive"
+          ],
+          "properties": {
+            "env.exclusive": {
+              "$ref": "#/definitions/RawPlugins"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{env.output_style: {equals: …}}`",
+          "type": "object",
+          "required": [
+            "env.output_style"
+          ],
+          "properties": {
+            "env.output_style": {
+              "$ref": "#/definitions/RawEquals"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{env.skill_available: {skill: …}}`, also spelled `{skill.available: {skill: …}}`.",
+          "type": "object",
+          "required": [
+            "env.skill_available"
+          ],
+          "properties": {
+            "env.skill_available": {
+              "$ref": "#/definitions/RawSkill"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{env.agent_available: {agent: …}}`",
+          "type": "object",
+          "required": [
+            "env.agent_available"
+          ],
+          "properties": {
+            "env.agent_available": {
+              "$ref": "#/definitions/RawAgent"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{env.model: {equals: …}}`",
+          "type": "object",
+          "required": [
+            "env.model"
+          ],
+          "properties": {
+            "env.model": {
+              "$ref": "#/definitions/RawEquals"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{env.permission_mode: {equals: …}}`",
+          "type": "object",
+          "required": [
+            "env.permission_mode"
+          ],
+          "properties": {
+            "env.permission_mode": {
+              "$ref": "#/definitions/RawEquals"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{env.api_key_source: {equals: none}}`",
+          "type": "object",
+          "required": [
+            "env.api_key_source"
+          ],
+          "properties": {
+            "env.api_key_source": {
+              "$ref": "#/definitions/RawEquals"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{skill.invoked: {skill: …, count: {…}}}`",
+          "type": "object",
+          "required": [
+            "skill.invoked"
+          ],
+          "properties": {
+            "skill.invoked": {
+              "$ref": "#/definitions/RawSkillCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{skill.completed: {skill: …, count: {…}}}`",
+          "type": "object",
+          "required": [
+            "skill.completed"
+          ],
+          "properties": {
+            "skill.completed": {
+              "$ref": "#/definitions/RawSkillCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tool.called: {tool: …, args: {…}, count: {…}}}`",
+          "type": "object",
+          "required": [
+            "tool.called"
+          ],
+          "properties": {
+            "tool.called": {
+              "$ref": "#/definitions/RawToolCalled"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tool.absent: {tool: …, args: {…}}}`",
+          "type": "object",
+          "required": [
+            "tool.absent"
+          ],
+          "properties": {
+            "tool.absent": {
+              "$ref": "#/definitions/RawSelector"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tool.result: {tool: …, args: {…}, result: {<field>: <matcher>}}}`",
+          "type": "object",
+          "required": [
+            "tool.result"
+          ],
+          "properties": {
+            "tool.result": {
+              "$ref": "#/definitions/RawToolResult"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tool.result_bytes: {tool: …, args: {…}, bytes: {…}, per: total|each}}`",
+          "type": "object",
+          "required": [
+            "tool.result_bytes"
+          ],
+          "properties": {
+            "tool.result_bytes": {
+              "$ref": "#/definitions/RawToolResultBytes"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tool.failed: {tool: …, args: {…}, count: {…}}}`",
+          "type": "object",
+          "required": [
+            "tool.failed"
+          ],
+          "properties": {
+            "tool.failed": {
+              "$ref": "#/definitions/RawScopedCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tool.error_rate: {tool: …, args: {…}, rate: {at_most: …}}}`",
+          "type": "object",
+          "required": [
+            "tool.error_rate"
+          ],
+          "properties": {
+            "tool.error_rate": {
+              "$ref": "#/definitions/RawToolErrorRate"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tool.repeated: {tool: …, args: {…}, count: {…}}}`",
+          "type": "object",
+          "required": [
+            "tool.repeated"
+          ],
+          "properties": {
+            "tool.repeated": {
+              "$ref": "#/definitions/RawScopedCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{order: {first: {tool: …}, before: {tool: …}}}`",
+          "type": "object",
+          "required": [
+            "order"
+          ],
+          "properties": {
+            "order": {
+              "$ref": "#/definitions/RawOrder"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{result: {is_error: …, subtype: …, stop_reason: …, terminal_reason: …, api_error_status: …}}`",
+          "type": "object",
+          "required": [
+            "result"
+          ],
+          "properties": {
+            "result": {
+              "$ref": "#/definitions/RawRunResult"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{permission.denied: {count: {…}}}`",
+          "type": "object",
+          "required": [
+            "permission.denied"
+          ],
+          "properties": {
+            "permission.denied": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{subagent.spawned: {count: {…}}}`",
+          "type": "object",
+          "required": [
+            "subagent.spawned"
+          ],
+          "properties": {
+            "subagent.spawned": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{text.matches: {contains: \"…\"}}` — the matcher's own keys, inline.",
+          "type": "object",
+          "required": [
+            "text.matches"
+          ],
+          "properties": {
+            "text.matches": {
+              "$ref": "#/definitions/RawFieldMatcher"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{rate_limit.status: {allowed: [...]}}`",
+          "type": "object",
+          "required": [
+            "rate_limit.status"
+          ],
+          "properties": {
+            "rate_limit.status": {
+              "$ref": "#/definitions/RawAllowed"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{rate_limit.overage: {equals: false}}`",
+          "type": "object",
+          "required": [
+            "rate_limit.overage"
+          ],
+          "properties": {
+            "rate_limit.overage": {
+              "$ref": "#/definitions/RawEqualsBool"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{rate_limit.utilization: {at_most: 0.9}}` — the range bound's own keys, inline.",
+          "type": "object",
+          "required": [
+            "rate_limit.utilization"
+          ],
+          "properties": {
+            "rate_limit.utilization": {
+              "$ref": "#/definitions/RawRangeBound"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{turns: {count: {…}}}`",
+          "type": "object",
+          "required": [
+            "turns"
+          ],
+          "properties": {
+            "turns": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{api_requests: {count: {…}}}`",
+          "type": "object",
+          "required": [
+            "api_requests"
+          ],
+          "properties": {
+            "api_requests": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{events.assistant: {count: {…}}}`",
+          "type": "object",
+          "required": [
+            "events.assistant"
+          ],
+          "properties": {
+            "events.assistant": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{iterations: {count: {…}}}`",
+          "type": "object",
+          "required": [
+            "iterations"
+          ],
+          "properties": {
+            "iterations": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tokens.input: {count: {…}, model: …}}`",
+          "type": "object",
+          "required": [
+            "tokens.input"
+          ],
+          "properties": {
+            "tokens.input": {
+              "$ref": "#/definitions/RawModelCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tokens.output: {count: {…}, model: …}}`",
+          "type": "object",
+          "required": [
+            "tokens.output"
+          ],
+          "properties": {
+            "tokens.output": {
+              "$ref": "#/definitions/RawModelCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tokens.total: {count: {…}, model: …}}`",
+          "type": "object",
+          "required": [
+            "tokens.total"
+          ],
+          "properties": {
+            "tokens.total": {
+              "$ref": "#/definitions/RawModelCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{tokens.thinking: {count: {…}}}`",
+          "type": "object",
+          "required": [
+            "tokens.thinking"
+          ],
+          "properties": {
+            "tokens.thinking": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{thinking.estimated: {count: {…}}}`",
+          "type": "object",
+          "required": [
+            "thinking.estimated"
+          ],
+          "properties": {
+            "thinking.estimated": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{cost.total: {at_most_usd: 1.0, model: …}}`",
+          "type": "object",
+          "required": [
+            "cost.total"
+          ],
+          "properties": {
+            "cost.total": {
+              "$ref": "#/definitions/RawCostTotal"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{cache.used: {equals: true}}`",
+          "type": "object",
+          "required": [
+            "cache.used"
+          ],
+          "properties": {
+            "cache.used": {
+              "$ref": "#/definitions/RawEqualsBool"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{cache.read_tokens: {count: {…}, model: …}}`",
+          "type": "object",
+          "required": [
+            "cache.read_tokens"
+          ],
+          "properties": {
+            "cache.read_tokens": {
+              "$ref": "#/definitions/RawModelCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{cache.created_tokens: {count: {…}, model: …}}`",
+          "type": "object",
+          "required": [
+            "cache.created_tokens"
+          ],
+          "properties": {
+            "cache.created_tokens": {
+              "$ref": "#/definitions/RawModelCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{cache.hit_ratio: {at_least: 0.9}}` — the range bound's own keys, inline.",
+          "type": "object",
+          "required": [
+            "cache.hit_ratio"
+          ],
+          "properties": {
+            "cache.hit_ratio": {
+              "$ref": "#/definitions/RawRangeBound"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{duration.total: {ms: {…}}}`",
+          "type": "object",
+          "required": [
+            "duration.total"
+          ],
+          "properties": {
+            "duration.total": {
+              "$ref": "#/definitions/RawMs"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{duration.api: {ms: {…}}}`",
+          "type": "object",
+          "required": [
+            "duration.api"
+          ],
+          "properties": {
+            "duration.api": {
+              "$ref": "#/definitions/RawMs"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{ttft: {ms: {…}}}`",
+          "type": "object",
+          "required": [
+            "ttft"
+          ],
+          "properties": {
+            "ttft": {
+              "$ref": "#/definitions/RawMs"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{time_to_request: {ms: {…}}}`",
+          "type": "object",
+          "required": [
+            "time_to_request"
+          ],
+          "properties": {
+            "time_to_request": {
+              "$ref": "#/definitions/RawMs"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{step.gen_time: {tool: …, args: {…}, ms: {…}}}`",
+          "type": "object",
+          "required": [
+            "step.gen_time"
+          ],
+          "properties": {
+            "step.gen_time": {
+              "$ref": "#/definitions/RawStepMs"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{step.exec_time: {tool: …, args: {…}, ms: {…}}}`",
+          "type": "object",
+          "required": [
+            "step.exec_time"
+          ],
+          "properties": {
+            "step.exec_time": {
+              "$ref": "#/definitions/RawStepMs"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{time.inference_total: {ms: {…}}}`",
+          "type": "object",
+          "required": [
+            "time.inference_total"
+          ],
+          "properties": {
+            "time.inference_total": {
+              "$ref": "#/definitions/RawMs"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{time.tool_exec_total: {ms: {…}}}`",
+          "type": "object",
+          "required": [
+            "time.tool_exec_total"
+          ],
+          "properties": {
+            "time.tool_exec_total": {
+              "$ref": "#/definitions/RawMs"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{speed: {equals: standard}}`",
+          "type": "object",
+          "required": [
+            "speed"
+          ],
+          "properties": {
+            "speed": {
+              "$ref": "#/definitions/RawEquals"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{service_tier: {equals: standard}}`",
+          "type": "object",
+          "required": [
+            "service_tier"
+          ],
+          "properties": {
+            "service_tier": {
+              "$ref": "#/definitions/RawEquals"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "An accepted spelling of `env.skill_available`; give one or the other, not both.",
+          "type": "object",
+          "required": [
+            "skill.available"
+          ],
+          "properties": {
+            "skill.available": {
+              "$ref": "#/definitions/RawSkill"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "RawFieldMatcher": {
+      "description": "A matcher over one named field as written: `{contains: \"protocol artifact new\"}`.\n\nExternally tagged, so a matcher name this build does not know is refused by name rather than defaulted away — and so `regex:` can be *read* and then refused with advice, which an unknown-field refusal could not do.",
+      "oneOf": [
+        {
+          "description": "`{exact: \"…\"}` — the whole field, character for character.",
+          "type": "object",
+          "required": [
+            "exact"
+          ],
+          "properties": {
+            "exact": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{contains: \"…\"}` — a substring of the field.",
+          "type": "object",
+          "required": [
+            "contains"
+          ],
+          "properties": {
+            "contains": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{glob: \"…\"}` — `*` for any run of characters, `?` for one.",
+          "type": "object",
+          "required": [
+            "glob"
+          ],
+          "properties": {
+            "glob": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{equals: <bool|integer|string>}` — a scalar field, compared like with like.",
+          "type": "object",
+          "required": [
+            "equals"
+          ],
+          "properties": {
+            "equals": {
+              "$ref": "#/definitions/RawScalar"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "`{regex: \"…\"}` — accepted by the parser and refused by validation ([`TraceCode::SpecUnsupportedMatcher`]), with `glob` named as what to write instead.",
+          "type": "object",
+          "required": [
+            "regex"
+          ],
+          "properties": {
+            "regex": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "RawModelCount": {
+      "description": "The parameters of the five token and cache kinds that may be scoped to one model.",
+      "type": "object",
+      "required": [
+        "count"
+      ],
+      "properties": {
+        "count": {
+          "description": "How many are acceptable.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawCountBound"
+            }
+          ]
+        },
+        "model": {
+          "description": "The model to scope to, where the specification names one.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawMs": {
+      "description": "The parameters of the six kinds that bound one recorded duration.",
+      "type": "object",
+      "required": [
+        "ms"
+      ],
+      "properties": {
+        "ms": {
+          "description": "The acceptable duration, in milliseconds.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawCountBound"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawOnUnknown": {
+      "description": "`unknown` or `gap`, as written.",
+      "oneOf": [
+        {
+          "description": "The default: report `unk`.",
+          "type": "string",
+          "enum": [
+            "unknown"
+          ]
+        },
+        {
+          "description": "Report a gap — the transcript must have carried the field.",
+          "type": "string",
+          "enum": [
+            "gap"
+          ]
+        }
+      ]
+    },
+    "RawOrder": {
+      "description": "The parameters of `order`.",
+      "type": "object",
+      "required": [
+        "before",
+        "first"
+      ],
+      "properties": {
+        "before": {
+          "description": "The call it must come before.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawSelector"
+            }
+          ]
+        },
+        "first": {
+          "description": "The call that must come first.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawSelector"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawPluginLoaded": {
+      "description": "The parameters of `env.plugin_loaded`.",
+      "type": "object",
+      "required": [
+        "plugin"
+      ],
+      "properties": {
+        "plugin": {
+          "description": "The plugin's name.",
+          "type": "string"
+        },
+        "source": {
+          "description": "The source it must have come from, where the specification pins one.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "description": "The version it must be at, where the specification pins one.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawPlugins": {
+      "description": "The parameters of `env.exclusive`.",
+      "type": "object",
+      "required": [
+        "plugins"
+      ],
+      "properties": {
+        "plugins": {
+          "description": "Every plugin that may be loaded, and no others.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawRangeBound": {
+      "description": "A bound over a fractional quantity as written: `{at_least: 0.9}`, `{at_most: 0.62}`, or both.\n\nNo `exactly`, by construction — design decision D6, and the same absence [`RangeBound`] has.",
+      "type": "object",
+      "properties": {
+        "at_least": {
+          "description": "The lowest acceptable value.",
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "at_most": {
+          "description": "The highest acceptable value.",
+          "default": null,
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawRunResult": {
+      "description": "The parameters of `result`.",
+      "type": "object",
+      "properties": {
+        "api_error_status": {
+          "description": "What the API error status must say.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RawApiErrorStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "is_error": {
+          "description": "Whether the run must be flagged as an error.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "stop_reason": {
+          "description": "Why the model must have stopped.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subtype": {
+          "description": "The record's subtype.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "terminal_reason": {
+          "description": "Why the run must have ended.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawScalar": {
+      "description": "A scalar under `equals:` as written.\n\n[`ScalarValue`] has no fractional variant, deliberately; this one does, so that a fraction is refused with the advice to write a bound rather than with a serde sentence about which of four shapes it failed to be.",
+      "anyOf": [
+        {
+          "description": "A boolean, such as `userModified: {equals: false}`.",
+          "type": "boolean"
+        },
+        {
+          "description": "A whole number.",
+          "type": "integer",
+          "format": "int64"
+        },
+        {
+          "description": "A fraction, which validation refuses.",
+          "type": "number",
+          "format": "double"
+        },
+        {
+          "description": "A string.",
+          "type": "string"
+        }
+      ]
+    },
+    "RawScopedCount": {
+      "description": "The parameters of `tool.failed` and `tool.repeated`, where the bound is not optional.",
+      "type": "object",
+      "required": [
+        "count"
+      ],
+      "properties": {
+        "args": {
+          "description": "Matchers over named arguments, all of which must hold.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawFieldMatcher"
+          }
+        },
+        "count": {
+          "description": "How many are acceptable.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawCountBound"
+            }
+          ]
+        },
+        "tool": {
+          "description": "The tool's name. Absent selects every tool.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawSelector": {
+      "description": "The scope half of the tool family as written, where a kind nests it: `{tool: Bash, args: {…}}`.\n\nThe other tool-family kinds spell `tool:` and `args:` as their own fields rather than nesting a selector, because `deny_unknown_fields` does not survive `flatten` and a shared selector struct would have to be flattened to keep the design's wire form. The duplication is the price of refusing `toool: Bash`.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Matchers over named arguments, all of which must hold.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawFieldMatcher"
+          }
+        },
+        "tool": {
+          "description": "The tool's name. Absent selects every tool.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawSeverity": {
+      "description": "`gate` or `advisory`, as written.",
+      "oneOf": [
+        {
+          "description": "The default: a gap fails the check.",
+          "type": "string",
+          "enum": [
+            "gate"
+          ]
+        },
+        {
+          "description": "A gap is reported and printed, and the exit code does not move.",
+          "type": "string",
+          "enum": [
+            "advisory"
+          ]
+        }
+      ]
+    },
+    "RawSkill": {
+      "description": "The parameters of `env.skill_available`.",
+      "type": "object",
+      "required": [
+        "skill"
+      ],
+      "properties": {
+        "skill": {
+          "description": "The skill's name, as the harness lists it.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawSkillCount": {
+      "description": "The parameters of `skill.invoked` and `skill.completed`.",
+      "type": "object",
+      "required": [
+        "skill"
+      ],
+      "properties": {
+        "count": {
+          "description": "How many are acceptable. `{at_least: 1}` when the document omits it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RawCountBound"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skill": {
+          "description": "The skill's name.",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawStepMs": {
+      "description": "The parameters of `step.gen_time` and `step.exec_time`.",
+      "type": "object",
+      "required": [
+        "ms"
+      ],
+      "properties": {
+        "args": {
+          "description": "Matchers over named arguments, all of which must hold.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawFieldMatcher"
+          }
+        },
+        "ms": {
+          "description": "The acceptable interval, in milliseconds.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawCountBound"
+            }
+          ]
+        },
+        "tool": {
+          "description": "The tool's name. Absent selects every tool.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawToolCalled": {
+      "description": "The parameters of `tool.called`.",
+      "type": "object",
+      "properties": {
+        "args": {
+          "description": "Matchers over named arguments, all of which must hold.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawFieldMatcher"
+          }
+        },
+        "count": {
+          "description": "How many are acceptable. `{at_least: 1}` when the document omits it.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RawCountBound"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool": {
+          "description": "The tool's name. Absent selects every tool.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawToolErrorRate": {
+      "description": "The parameters of `tool.error_rate`.",
+      "type": "object",
+      "required": [
+        "rate"
+      ],
+      "properties": {
+        "args": {
+          "description": "Matchers over named arguments, all of which must hold.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawFieldMatcher"
+          }
+        },
+        "rate": {
+          "description": "The acceptable rate, from 0 to 1.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawRangeBound"
+            }
+          ]
+        },
+        "tool": {
+          "description": "The tool's name. Absent selects every tool.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawToolResult": {
+      "description": "The parameters of `tool.result`.",
+      "type": "object",
+      "required": [
+        "result"
+      ],
+      "properties": {
+        "args": {
+          "description": "Matchers over named arguments, all of which must hold.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawFieldMatcher"
+          }
+        },
+        "result": {
+          "description": "What the matched calls' results must say, by field name.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawFieldMatcher"
+          }
+        },
+        "tool": {
+          "description": "The tool's name. Absent selects every tool.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawToolResultBytes": {
+      "description": "The parameters of `tool.result_bytes`.",
+      "type": "object",
+      "required": [
+        "bytes"
+      ],
+      "properties": {
+        "args": {
+          "description": "Matchers over named arguments, all of which must hold.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RawFieldMatcher"
+          }
+        },
+        "bytes": {
+          "description": "The byte bound.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawCountBound"
+            }
+          ]
+        },
+        "per": {
+          "description": "Whether the bound is over the sum or over each call. `total` when the document omits it.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/RawAggregate"
+            }
+          ]
+        },
+        "tool": {
+          "description": "The tool's name. Absent selects every tool.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -23,6 +23,73 @@ have a reader find it by its absence.
 | **The reference driver is decided and not built.** `docs/VISION.md` § *What this is deliberately not* now says the repository ships one, and no crate implements the harness contract — the same shape of claim as a published contract with no implementor, which is the defect the driver exists to fix. The design (§ 4) is architecture with six named holes: step-map versioning, store→facts, `require_approval` headless, session granularity, failure taxonomy, concurrency | **harness wave 3**, the driver build — which opens only behind harness wave 2's feasibility review of § 4 against the code. **Or** a recorded decision not to build it, which is a legitimate outcome of that review and closes this row just as building it would, provided the VISION narrowing is reverted in the same change |
 | **The planning store is durable and is not a contract implementation.** `aep-backend-markdown` writes through its own `create`/`update` rather than through `CommandService` — deviation **D-P1** against invariant 14 — so the sixteen `aep-conformance` suites do not run against it, and it has no journal, no audit join and no history (**D-P3**). Until then, "there is a durable backend" is a claim the suites do not support | **P3**, the journal-backed `CommandService`/`QueryService` for the markdown store: the two write functions reroute through command envelopes, the journal becomes the history, and the store runs the sixteen suites. `AGENTS.md` § *Current state* states both halves in the meantime |
 
+## Closed by code, 2026-08-21 — transcript conformance, phase 2
+
+One row, opened on the way in by phase 1 and closed the same day by the phase that had to wait for
+the checker's real types. It is on this page rather than absent from it because a vocabulary with
+no producer is exactly the shape of defect the page exists to catch — and it was named here while
+it was still true.
+
+| gap | what closed it |
+|---|---|
+| **The vocabulary admitted transcript conformance and nothing could produce it.** `EvidenceKind::TraceConformance` existed, `Verifier::TraceChecker` could establish it and `protocols/adp/1.yaml` declared both — but `Evidence` had no `TraceConformance` payload, so `Evidence::kind()` could never return the kind and the engine's admission check could never be reached with it (`crates/aep-engine/src/engine.rs:320-321` reads the kind off the payload). A protocol could require the kind and nothing could satisfy it | `Evidence::TraceConformance(TraceConformanceResult)` — the verdict, the three counts, every gapped expectation's id, the ids downgraded on the command line and the digest pair, typed so the two digests cannot be transposed; `trace_conformance.**` declared observable; `CheckReport::to_evidence` in `crates/trace-spec/src/evidence.rs`, on the producing side, with a producer nobody can set; and `protocol trace evidence`. The loop is asserted end to end rather than by inspection: `crates/protocol-cli/tests/trace_cli.rs` writes the document and feeds the file back to `protocol evaluate --evidence`, in both renderings |
+
+Three decisions inside it, each taken deliberately and each recoverable from here rather than from
+a diff:
+
+- **The record is a summary, not the report.** An expectation's citation quotes the transcript —
+  the prompt, the model's reasoning, file contents it read — and an evidence record is a thing
+  people paste into pull requests. Counts, ids and two digests cross the boundary; the rows do not,
+  and `--redact` is therefore not an option on the evidence verb because there is nothing left in
+  the record for it to remove.
+- **`trace_conformance.passed` ignores `--advisory`.** A downgrade moves the checker's exit code so
+  a cost bound that drifted with model routing cannot turn a CI job red (design D6). It is a
+  property of the *invocation*, not of the protocol's requirement, and a requirement a caller's own
+  flag could satisfy would not be a requirement. The record names every downgraded id so the
+  narrowing is visible, and the fact stays strictly stronger than exit 0 — the same polarity as
+  everything else here: unproven is not proven.
+- **`Evidence::spec_digest` does not opt in.** That accessor is the *resolved-model* digest the ESS
+  revision binding compares against an artifact. A trace specification's digest is the digest of an
+  authored YAML document about behaviour, and no ESS artifact will ever pin one — returning it
+  would make every trace record fail the revision comparison for a reason unrelated to the
+  revision. The match arm says so where a reader will look for it.
+
+## Closed by decision, 2026-08-21
+
+### D-5 — transcript conformance is its own evidence kind, not a `Verification`
+
+The transcript-conformance design (§ 5.1) flags that `EvidenceKind` is a closed enum and that a
+`TraceConformance` variant is therefore a **domain change**, belonging in the acceptance decision
+rather than being discovered during implementation. Accepted, and the alternative refused for the
+reason the design gives: reusing `Verification` would make a claim about *how an agent worked*
+indistinguishable from every other verifier statement, and being distinguishable is the entire value
+of the record.
+
+**Executed by code, 2026-08-21 (trace-evidence phases 1 and 2).** Phase 1 is the vocabulary below;
+phase 2 added the payload, the builder and the verb, and closed the row it opened — see *Closed by
+code, 2026-08-21 — transcript conformance, phase 2* above.
+
+- `EvidenceKind::TraceConformance`, wire name `trace_conformance`. No alias: the list of aliases
+  exists for documents written against earlier drafts, and this kind has none.
+- `Verifier::TraceChecker`, wire name `trace-checker`, the only class that can establish it — named
+  separately from `conformance-runner` for the same reason that class was named separately in the
+  first place, that an agent reporting on its own run is not a check of it, and the type says so.
+  Deliberately **not** `artifact-validator`, which the design's own § 5.2 step example writes: a
+  transcript is a record of the worker rather than an artifact of the work, and letting any artifact
+  validator mint the claim gives away exactly the distinguishability this decision is about. The
+  design's § 5.2 step example was the one place left disagreeing with the code, and phase 2
+  corrected it in place (`docs/design/transcript-conformance-design-v0.1.md:782`).
+- Declaration in a protocol document is **required**, not optional: the engine refuses a submission
+  whose kind the protocol does not declare (`crates/aep-engine/src/engine.rs:321`, stated for
+  harness authors at `docs/guide/harness.md:18`). Both spellings therefore go into
+  `protocols/adp/1.yaml` beside `ess_conformance`, and not into the base protocol — development is
+  the reversible direction, because widening a declaration to every profile later is additive and
+  narrowing one is not.
+- No new observable family. The engine projects `evidence.count.trace_conformance` from the kind's
+  own name, and `aep/1` already declares `evidence.**` (`protocols/aep/1.yaml:119`). The
+  `trace_conformance.**` family belongs with the payload that projects facts into it, which is the
+  open row above.
+
 ## Closed by decision, 2026-08-20
 
 ### D-1 — predicate comparison in the diff: conservative canonical equality

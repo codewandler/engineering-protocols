@@ -687,6 +687,46 @@ pub struct SpecificationRecord {
     pub unsatisfied: Vec<String>,
 }
 
+/// The one hex-digest validation, shared by every digest newtype in this module.
+///
+/// Extracted rather than copied when [`TranscriptDigest`] joined [`SpecDigest`]: two digest types
+/// that disagreed about whether upper case, a non-hex character or a length were acceptable would
+/// be two definitions of "a digest" in one file, and the second one would be discovered by a
+/// record that one type accepted and the other refused.
+///
+/// `kind` names the digest in the refusal, so the reason says which field was wrong, and `hint`
+/// carries the part that is specific to that field.
+fn parse_hex_digest(
+    kind: &'static str,
+    value: String,
+    min: usize,
+    max: usize,
+    hint: &'static str,
+) -> Result<String, ParseError> {
+    if value
+        .chars()
+        .any(|character| character.is_ascii_uppercase())
+    {
+        return Err(ParseError::reference(
+            kind,
+            &value,
+            "digests are written in lower case, so one value has one spelling",
+        ));
+    }
+    if !value.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err(ParseError::reference(kind, &value, hint));
+    }
+    let length = value.chars().count();
+    if !(min..=max).contains(&length) {
+        return Err(ParseError::reference(
+            kind,
+            &value,
+            format!("expected {min} to {max} hexadecimal characters, found {length}"),
+        ));
+    }
+    Ok(value)
+}
+
 /// A digest of the resolved specification a conformance suite was generated from.
 ///
 /// Lower-case hexadecimal. `ess-gen` writes the full 64-character SHA-256 of the resolved model
@@ -715,37 +755,13 @@ impl SpecDigest {
 
     /// Builds a digest, refusing anything that is not one.
     pub fn new(value: impl Into<String>) -> Result<Self, ParseError> {
-        let value = value.into();
-        if value
-            .chars()
-            .any(|character| character.is_ascii_uppercase())
-        {
-            return Err(ParseError::reference(
-                "specification digest",
-                &value,
-                "digests are written in lower case, so one model has one spelling",
-            ));
-        }
-        if !value.chars().all(|character| character.is_ascii_hexdigit()) {
-            return Err(ParseError::reference(
-                "specification digest",
-                &value,
-                "expected hexadecimal; a name such as `billing/v3` is not a digest",
-            ));
-        }
-        let length = value.chars().count();
-        if !(Self::MIN_LENGTH..=Self::MAX_LENGTH).contains(&length) {
-            return Err(ParseError::reference(
-                "specification digest",
-                &value,
-                format!(
-                    "expected {} to {} hexadecimal characters, found {length}",
-                    Self::MIN_LENGTH,
-                    Self::MAX_LENGTH
-                ),
-            ));
-        }
-        Ok(Self(value))
+        Ok(Self(parse_hex_digest(
+            "specification digest",
+            value.into(),
+            Self::MIN_LENGTH,
+            Self::MAX_LENGTH,
+            "expected hexadecimal; a name such as `billing/v3` is not a digest",
+        )?))
     }
 
     /// The digest as written.
@@ -793,6 +809,176 @@ impl schemars::JsonSchema for SpecDigest {
                 .map(|value| serde_json::Value::String((*value).to_owned()))
                 .collect();
         schema.into()
+    }
+}
+
+/// A digest of the transcript a trace-conformance check was run over.
+///
+/// The full SHA-256 of the transcript file's raw bytes, in 64 lowercase hexadecimal characters —
+/// exactly what `sha256sum` prints for the same file, which is the property that makes the record
+/// checkable by a reader who does not run this code.
+///
+/// # Why this is not a [`SpecDigest`]
+///
+/// Both are lowercase hex and a compiler cannot tell them apart as strings, and
+/// [`TraceConformanceResult`] holds one of each — so a builder that transposed them would produce
+/// a record claiming a transcript's digest identified the specification, which is *false* and
+/// which nothing downstream could detect. Two types make the transposition a compile error
+/// instead. They also disagree about width on purpose: a `SpecDigest` may be a 16-character
+/// truncation because `ess-gen` wrote those before the D-4 widening, and a transcript digest never
+/// was one, so it demands all 64.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(transparent)]
+pub struct TranscriptDigest(String);
+
+impl TranscriptDigest {
+    /// The only accepted length: a full SHA-256 in hex.
+    ///
+    /// Exact rather than a range. Nothing in this workspace has ever written a truncated
+    /// transcript digest, so accepting one would widen the type for no record that exists.
+    pub const LENGTH: usize = 64;
+
+    /// Builds a digest, refusing anything that is not one.
+    pub fn new(value: impl Into<String>) -> Result<Self, ParseError> {
+        Ok(Self(parse_hex_digest(
+            "transcript digest",
+            value.into(),
+            Self::LENGTH,
+            Self::LENGTH,
+            "expected hexadecimal; a file path is not a digest",
+        )?))
+    }
+
+    /// The digest as written.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for TranscriptDigest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TranscriptDigest {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Self::new(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+impl schemars::JsonSchema for TranscriptDigest {
+    fn schema_name() -> String {
+        "TranscriptDigest".to_owned()
+    }
+
+    fn json_schema(_: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        let mut schema = schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            ..Default::default()
+        };
+        schema.string().pattern = Some(format!("^[0-9a-f]{{{}}}$", Self::LENGTH));
+        schema.metadata().description = Some(
+            "A digest of the transcript a trace-conformance check read, as `sha256sum` writes it: \
+             64 lower-case hexadecimal characters."
+                .to_owned(),
+        );
+        schema.metadata().examples =
+            ["e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"]
+                .iter()
+                .map(|value| serde_json::Value::String((*value).to_owned()))
+                .collect();
+        schema.into()
+    }
+}
+
+/// What a trace-conformance check found when it judged a harness transcript against a trace
+/// specification.
+///
+/// The body of an [`Evidence::TraceConformance`] record, and deliberately **not** the check
+/// report: the report carries every expectation with the events it cites and the text those events
+/// said, which is transcript-derived content that a protocol never predicates over and that a
+/// record pasted into a pull request should not carry. What survives the handoff is the verdict,
+/// the three counts, the id of every expectation that gapped — so a failure names something
+/// actionable — and the digest pair that makes the claim mean anything.
+///
+/// # The digest pair is the record
+///
+/// *"Some agent passed some behavioural specification"* is worthless. *"The run whose transcript
+/// digests to this satisfied the specification that digests to that"* is a claim a reader holding
+/// the two files can check, and it is the only reason this record is worth minting. Both digests
+/// are required, and both are typed so they cannot be swapped.
+///
+/// Facts: `trace_conformance.{status,passed,specification,spec_digest,transcript_digest}`,
+/// `trace_conformance.expectations.{total,gapped,unknown}`.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
+pub struct TraceConformanceResult {
+    /// Which specification, by the id it declares, such as `planning-plugin/eval`.
+    ///
+    /// What a person reads. It is not what identifies the document — see [`Self::spec_digest`].
+    pub specification: String,
+    /// A digest of the specification as authored.
+    pub spec_digest: SpecDigest,
+    /// A digest of the transcript's raw bytes.
+    pub transcript_digest: TranscriptDigest,
+    /// The outcome, over the gating expectations alone.
+    ///
+    /// `Passed` when every gating expectation held, `Failed` when the run contradicted one, and
+    /// `Inconclusive` when nothing was contradicted and something could not be judged. The last is
+    /// not a softer failure: *"the agent did the wrong thing"* and *"the transcript format moved
+    /// under us"* want different people to be woken up, and a record that flattened them would
+    /// open a defect report against a run nobody managed to read.
+    pub status: VerificationStatus,
+    /// How many expectations were evaluated.
+    #[serde(default)]
+    pub expectations_total: usize,
+    /// How many the transcript contradicted — **every** one, including any the caller downgraded
+    /// to advisory for the run.
+    ///
+    /// See [`Self::advisory_overrides`] for why the downgrade does not shrink this number.
+    #[serde(default)]
+    pub expectations_gapped: usize,
+    /// How many it could not decide, on the same all-rows basis.
+    #[serde(default)]
+    pub expectations_unknown: usize,
+    /// Expectation ids the caller downgraded to advisory on the command line, so they were
+    /// reported and gated nothing.
+    ///
+    /// Recorded rather than folded away, because the specification's digest is the digest of the
+    /// document *as authored*: without this list a reader of the record could not tell that the
+    /// run gated on something narrower than the document says.
+    ///
+    /// A downgrade moves the checker's exit code and deliberately does **not** move
+    /// `trace_conformance.passed`. `--advisory` exists so a cost bound that drifted with model
+    /// routing cannot turn a CI job red (design D6); it is a property of the invocation, not of
+    /// the protocol's requirement, and a requirement that a caller's own flag could satisfy would
+    /// not be a requirement. So the fact stays strictly stronger than exit 0, on the same polarity
+    /// as everything else here: unproven is not proven.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub advisory_overrides: Vec<String>,
+    /// Which adapter read the transcript, where the check named one.
+    ///
+    /// A harness output format is not a stable public schema (design D1), so which adapter — and
+    /// which harness versions it was written against — is part of what a later reader needs to
+    /// know why a verdict came out as it did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adapter: Option<String>,
+    /// Which expectations gapped, so a failure names something actionable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub gapped_expectations: Vec<String>,
+}
+
+impl TraceConformanceResult {
+    /// `true` when this check is evidence about the transcript `digest` identifies.
+    ///
+    /// The digest, never the file name. Two runs of one eval write two transcripts to one path,
+    /// and a record naming the path would be a true statement about whichever run happened last.
+    pub fn attests(&self, digest: &TranscriptDigest) -> bool {
+        &self.transcript_digest == digest
     }
 }
 
@@ -1021,6 +1207,27 @@ pub enum EvidenceKind {
     Specification,
     /// An implementation checked against an executable system specification.
     EssConformance,
+    /// A harness transcript checked against a trace specification.
+    ///
+    /// What it attests: a `trace-spec` document was decided against the recorded transcript of an
+    /// agent run — which tools were called, in which order, with which arguments and results, in
+    /// which environment, and at what cost — by the trace checker reading that file. The producer
+    /// is therefore [`Producer::Verifier`]: the checker observed a recording, it did not ask the
+    /// agent how the run went.
+    ///
+    /// What its provenance must carry: **the digest of the transcript** and **the digest of the
+    /// specification**, in [`Provenance::digest`] and [`Provenance::inputs`]. Without both, the
+    /// record says only that *some* run satisfied *some* specification, which establishes nothing;
+    /// with both it says that the run with this digest satisfied the specification with that one,
+    /// and any reader holding the two files can check it.
+    ///
+    /// What it is not: an agent's own account of how it worked. That is a claim by the subject
+    /// about the subject, and no amount of confidence in it makes it this kind — which is the
+    /// reason the kind exists separately from [`EvidenceKind::Verification`] rather than being
+    /// folded into it. The only class that can establish it is [`Verifier::TraceChecker`], and
+    /// that is what makes a behavioural claim about an LLM step admissible without the LLM minting
+    /// anything.
+    TraceConformance,
 }
 
 impl EvidenceKind {
@@ -1040,6 +1247,7 @@ impl EvidenceKind {
         Self::Verification,
         Self::Specification,
         Self::EssConformance,
+        Self::TraceConformance,
     ];
 
     /// The kind as written in documents and fact paths.
@@ -1059,6 +1267,7 @@ impl EvidenceKind {
             Self::Verification => "verification",
             Self::Specification => "specification",
             Self::EssConformance => "ess_conformance",
+            Self::TraceConformance => "trace_conformance",
         }
     }
 
@@ -1120,6 +1329,7 @@ impl EvidenceKind {
             Self::Verification => &[Verifier::PolicyEngine, Verifier::ModelChecker],
             Self::Specification => &[Verifier::TestRunner, Verifier::HumanReview],
             Self::EssConformance => &[Verifier::ConformanceRunner],
+            Self::TraceConformance => &[Verifier::TraceChecker],
         }
     }
 }
@@ -1211,6 +1421,8 @@ pub enum Evidence {
     Specification(SpecificationRecord),
     /// An implementation checked against an executable system specification.
     EssConformance(EssConformanceResult),
+    /// A harness transcript checked against a trace specification.
+    TraceConformance(TraceConformanceResult),
 }
 
 impl Evidence {
@@ -1231,6 +1443,7 @@ impl Evidence {
             Self::Verification(_) => EvidenceKind::Verification,
             Self::Specification(_) => EvidenceKind::Specification,
             Self::EssConformance(_) => EvidenceKind::EssConformance,
+            Self::TraceConformance(_) => EvidenceKind::TraceConformance,
         }
     }
 
@@ -1246,6 +1459,13 @@ impl Evidence {
     pub fn spec_digest(&self) -> Option<&SpecDigest> {
         match self {
             Self::EssConformance(result) => Some(&result.spec_digest),
+            // `TraceConformance` also holds a `SpecDigest` and deliberately does **not** opt in,
+            // which is worth saying because a reader will otherwise take it for an oversight. This
+            // binding asks whether evidence was produced against the resolved model an artifact
+            // pins *now*; a trace specification's digest is the digest of an authored YAML
+            // document about an agent's behaviour, and no ESS artifact will ever pin one.
+            // Returning it would make every trace record fail the revision comparison for a reason
+            // that has nothing to do with the revision.
             _ => None,
         }
     }
@@ -1312,6 +1532,17 @@ impl Evidence {
                 result.status,
                 result.scenarios_failed,
                 result.scenarios_total
+            ),
+            Self::TraceConformance(result) => format!(
+                "transcript against {}: {} ({} ok, {} gap, {} unk of {})",
+                result.specification,
+                result.status,
+                result
+                    .expectations_total
+                    .saturating_sub(result.expectations_gapped + result.expectations_unknown),
+                result.expectations_gapped,
+                result.expectations_unknown,
+                result.expectations_total
             ),
             Self::Specification(record) => format!(
                 "specification satisfied: {}{}",
@@ -1620,6 +1851,47 @@ impl Evidence {
                 facts.push((
                     base.child("scenarios").child("failed"),
                     FactValue::count(result.scenarios_failed),
+                ));
+            }
+            Self::TraceConformance(result) => {
+                let base = path(&["trace_conformance"]);
+                facts.push((
+                    base.child("status"),
+                    FactValue::text(result.status.as_str()),
+                ));
+                // The pessimistic reading, as `ess_conformance.passed` takes: a check reporting a
+                // pass alongside gapped expectations is contradicting itself, and this fact does
+                // not take the optimistic half of that.
+                facts.push((
+                    base.child("passed"),
+                    FactValue::bool(result.status.is_pass() && result.expectations_gapped == 0),
+                ));
+                facts.push((
+                    base.child("specification"),
+                    FactValue::text(result.specification.clone()),
+                ));
+                facts.push((
+                    base.child("spec_digest"),
+                    FactValue::text(result.spec_digest.as_str()),
+                ));
+                // The transcript's digest is a fact in its own right: it is how a rule pins the
+                // *run* a claim is about, where `spec_digest` pins only the document it was
+                // judged against.
+                facts.push((
+                    base.child("transcript_digest"),
+                    FactValue::text(result.transcript_digest.as_str()),
+                ));
+                facts.push((
+                    base.child("expectations").child("total"),
+                    FactValue::count(result.expectations_total),
+                ));
+                facts.push((
+                    base.child("expectations").child("gapped"),
+                    FactValue::count(result.expectations_gapped),
+                ));
+                facts.push((
+                    base.child("expectations").child("unknown"),
+                    FactValue::count(result.expectations_unknown),
                 ));
             }
         }
@@ -2121,6 +2393,233 @@ scenarios_total: 24
             EvidenceKind::EssConformance.default_verifiers(),
             &[Verifier::ConformanceRunner],
             "an agent reporting that its own implementation conforms is not a conformance run"
+        );
+    }
+
+    fn trace_result() -> TraceConformanceResult {
+        TraceConformanceResult {
+            specification: "planning-plugin/eval".to_owned(),
+            spec_digest: SpecDigest::new(
+                "9f3ca1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e",
+            )
+            .expect("a digest"),
+            transcript_digest: TranscriptDigest::new(
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            )
+            .expect("a digest"),
+            status: VerificationStatus::Failed,
+            expectations_total: 10,
+            expectations_gapped: 2,
+            expectations_unknown: 1,
+            adapter: Some("claude-code/stream-json".to_owned()),
+            advisory_overrides: Vec::new(),
+            gapped_expectations: vec![
+                "nothing-else-loaded".to_owned(),
+                "no-hand-edited-frontmatter".to_owned(),
+            ],
+        }
+    }
+
+    #[test]
+    fn a_trace_check_projects_the_verdict_the_counts_and_both_digests() {
+        let evidence = Evidence::TraceConformance(trace_result());
+        let facts = store(&evidence);
+
+        assert_eq!(
+            value(&facts, "trace_conformance.status"),
+            Some(FactValue::text("failed"))
+        );
+        assert_eq!(
+            value(&facts, "trace_conformance.specification"),
+            Some(FactValue::text("planning-plugin/eval"))
+        );
+        assert_eq!(
+            value(&facts, "trace_conformance.expectations.total"),
+            Some(FactValue::count(10))
+        );
+        assert_eq!(
+            value(&facts, "trace_conformance.expectations.gapped"),
+            Some(FactValue::count(2))
+        );
+        assert_eq!(
+            value(&facts, "trace_conformance.expectations.unknown"),
+            Some(FactValue::count(1))
+        );
+        // Both digests are facts, and they are different facts: one pins the document the run was
+        // judged against, the other pins the run. A record carrying only the first would say that
+        // *some* run satisfied this specification.
+        assert_eq!(
+            value(&facts, "trace_conformance.spec_digest"),
+            Some(FactValue::text(
+                "9f3ca1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e"
+            ))
+        );
+        assert_eq!(
+            value(&facts, "trace_conformance.transcript_digest"),
+            Some(FactValue::text(
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_trace_check_reporting_a_pass_beside_a_gap_does_not_pass() {
+        // The pessimistic reading `ess_conformance.passed` takes, one domain over: a record that
+        // says `passed` and then lists a contradicted expectation is contradicting itself, and the
+        // fact a principle predicates over does not take the optimistic half of that.
+        let mut result = trace_result();
+        result.status = VerificationStatus::Passed;
+        assert_eq!(
+            result.expectations_gapped, 2,
+            "the fixture reaches the state"
+        );
+        let facts = store(&Evidence::TraceConformance(result));
+        assert_eq!(
+            value(&facts, "trace_conformance.passed"),
+            Some(FactValue::bool(false)),
+            "a self-contradicting record must not project a pass"
+        );
+
+        let mut clean = trace_result();
+        clean.status = VerificationStatus::Passed;
+        clean.expectations_gapped = 0;
+        clean.gapped_expectations.clear();
+        let facts = store(&Evidence::TraceConformance(clean));
+        assert_eq!(
+            value(&facts, "trace_conformance.passed"),
+            Some(FactValue::bool(true))
+        );
+    }
+
+    #[test]
+    fn an_undecided_run_is_not_a_failed_one_in_the_record() {
+        // Exit 3, not a softer exit 1. `Inconclusive` is not a pass either, so the requirement
+        // stays owed — but a reader can tell "the agent did the wrong thing" from "nobody could
+        // read the transcript", which is the distinction the whole three-valued checker exists for.
+        let mut result = trace_result();
+        result.status = VerificationStatus::Inconclusive;
+        result.expectations_gapped = 0;
+        result.gapped_expectations.clear();
+        let facts = store(&Evidence::TraceConformance(result));
+        assert_eq!(
+            value(&facts, "trace_conformance.status"),
+            Some(FactValue::text("inconclusive"))
+        );
+        assert_eq!(
+            value(&facts, "trace_conformance.passed"),
+            Some(FactValue::bool(false)),
+            "undecided is not proven, here as everywhere else in this protocol"
+        );
+    }
+
+    #[test]
+    fn a_trace_record_does_not_claim_to_be_about_an_ess_revision() {
+        // `Evidence::spec_digest` is the resolved-model digest the ESS revision binding compares
+        // against an artifact. A trace specification's digest is a digest of an authored YAML
+        // document about behaviour, and no ESS artifact pins one — so opting in would make every
+        // trace record fail that comparison for a reason unrelated to the revision.
+        let evidence = Evidence::TraceConformance(trace_result());
+        assert!(
+            evidence.spec_digest().is_none(),
+            "the trace record must not be dragged into the ESS revision binding"
+        );
+        assert_eq!(evidence.kind(), EvidenceKind::TraceConformance);
+        assert!(
+            evidence.summary().contains("2 gap"),
+            "the summary names what went wrong: {}",
+            evidence.summary()
+        );
+    }
+
+    #[test]
+    fn a_trace_record_round_trips_through_the_document_form_the_engine_reads() {
+        let evidence = Evidence::TraceConformance(trace_result());
+        let written = serde_yaml::to_string(&evidence).expect("serialises");
+        assert!(
+            written.contains("kind: trace_conformance"),
+            "the tag is the wire name the protocol declares: {written}"
+        );
+        let read: Evidence = serde_yaml::from_str(&written).expect("a written record parses back");
+        assert_eq!(read, evidence, "the document form is lossless");
+    }
+
+    #[test]
+    fn a_transcript_digest_is_not_interchangeable_with_a_specification_digest() {
+        // Both are lowercase hex and a `String` field would let a builder transpose them, which
+        // would produce a record whose digest pair is false and which nothing downstream could
+        // detect. The types are what make that a compile error; the widths differ as well.
+        assert!(
+            TranscriptDigest::new("e3b0c44298fc1c14").is_err(),
+            "a 16-hex truncation is a legacy `SpecDigest`, and never a transcript digest"
+        );
+        assert!(
+            SpecDigest::new("e3b0c44298fc1c14").is_ok(),
+            "the fixture reaches the state: the same string is a valid `SpecDigest`"
+        );
+        let error = TranscriptDigest::new(
+            "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+        )
+        .expect_err("upper case is refused");
+        assert!(
+            error.to_string().contains("lower case"),
+            "the refusal says why: {error}"
+        );
+        assert!(
+            TranscriptDigest::new("integrations/claude-code/eval/result.jsonl").is_err(),
+            "a path is not a digest, and a record naming a path would name whichever run was last"
+        );
+    }
+
+    #[test]
+    fn only_a_trace_checker_establishes_transcript_conformance() {
+        assert_eq!(
+            EvidenceKind::TraceConformance.default_verifiers(),
+            &[Verifier::TraceChecker],
+            "an agent's own account of how it worked is not a check of the transcript it produced"
+        );
+        assert!(
+            !EvidenceKind::TraceConformance
+                .default_verifiers()
+                .iter()
+                .any(Verifier::is_human),
+            "a transcript check is mechanical: the same transcript and spec give the same verdict"
+        );
+    }
+
+    #[test]
+    fn trace_conformance_is_spelled_the_way_the_checker_writes_it() {
+        // The wire name is pinned: it is what the trace checker writes into an evidence record,
+        // what `protocols/adp/1.yaml` declares, and what a document written by hand says. A rename
+        // here silently stops matching a declaration that is not in this repository's control.
+        assert_eq!(
+            EvidenceKind::TraceConformance.as_str(),
+            "trace_conformance",
+            "the wire name is a contract with the checker and with every protocol declaring it"
+        );
+        assert_eq!(
+            EvidenceKind::TraceConformance.to_string(),
+            "trace_conformance",
+            "`Display` and `as_str` are one spelling, not two"
+        );
+        assert_eq!(
+            EvidenceKind::parse("trace_conformance").expect("the canonical name parses"),
+            EvidenceKind::TraceConformance
+        );
+        assert_eq!(
+            "trace_conformance"
+                .parse::<EvidenceKind>()
+                .expect("`FromStr` goes through `parse`"),
+            EvidenceKind::TraceConformance
+        );
+        assert!(
+            EvidenceKind::parse("trace-conformance").is_err(),
+            "evidence kinds are snake_case; the hyphenated spelling is a verifier name, not a kind"
+        );
+        assert!(
+            !EvidenceKind::ALIASES
+                .iter()
+                .any(|(_, kind)| *kind == EvidenceKind::TraceConformance),
+            "a kind with no earlier drafts has no older spellings to accept"
         );
     }
 

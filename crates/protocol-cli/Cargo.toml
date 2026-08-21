@@ -63,6 +63,14 @@ infra-project.workspace = true
 # a shell over it: `ess_synth::synthesize(&ir)` from a harness produces the same plan and the same
 # bytes, and `cargo xtask synth` compares the committed tree against what this verb prints.
 ess-synth.workspace = true
+
+# `protocol trace`. The event IR, the expectation vocabulary, the adapter and the checker all live
+# in the two libraries, so the command line is a shell over them: a harness calling
+# `trace_spec::check::check(&spec, &ir, &[])` gets the same verdicts, the same citations and the
+# same exit code the command line prints. Nothing in either reaches a network or reads a clock —
+# a transcript is a file, and a report that is not a function of its inputs could not be committed.
+trace-domain.workspace = true
+trace-spec.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 serde.workspace = true

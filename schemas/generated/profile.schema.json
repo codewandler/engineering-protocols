@@ -372,6 +372,7 @@
         "verification",
         "specification",
         "ess_conformance",
+        "trace_conformance",
         "test_execution",
         "source_diff",
         "artifact_evidence",
@@ -836,7 +837,8 @@
         "human-approval",
         "human-review",
         "artifact-validator",
-        "conformance-runner"
+        "conformance-runner",
+        "trace-checker"
       ],
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"

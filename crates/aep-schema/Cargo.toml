@@ -17,6 +17,12 @@ aep-domain.workspace = true
 # out — and the frontmatter is that backend's private format, deliberately absent from `aep-domain`.
 aep-backend-markdown.workspace = true
 ess-domain.workspace = true
+
+# The `trace-spec/1` document is published from here for the reason every other authored document
+# is: one generator, one drift check, one index. A transcript-conformance specification is a file
+# somebody writes, reviews and commits, so an editor should check its field names as they type
+# rather than after a build that runs somewhere else.
+trace-domain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true

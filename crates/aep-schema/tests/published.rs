@@ -300,7 +300,12 @@ fn carries<'a>(schema: &'a Value, type_name: &str) -> Option<&'a Value> {
     schema["definitions"].get(type_name)
 }
 
-/// `true` when `target` accepts `alias` — as a property name, or as a variant's tag value.
+/// `true` when `target` accepts `alias`, in any of the three positions an alias can occupy.
+///
+/// A **property name**, for a struct field. An **internally tagged** variant's tag value, which is
+/// a single-valued `enum` on a required property. Or an **externally tagged** variant's key, which
+/// is the single required property of a `oneOf` member — the shape `trace-spec/1` writes an
+/// expectation kind in.
 fn publishes_alias(target: &Value, alias: &str) -> bool {
     if target["properties"].get(alias).is_some() {
         return true;
@@ -308,11 +313,12 @@ fn publishes_alias(target: &Value, alias: &str) -> bool {
     target["oneOf"].as_array().is_some_and(|variants| {
         variants.iter().any(|variant| {
             variant["properties"].as_object().is_some_and(|properties| {
-                properties.values().any(|property| {
-                    property["enum"].as_array().is_some_and(|values| {
-                        values.iter().any(|value| value.as_str() == Some(alias))
+                properties.contains_key(alias)
+                    || properties.values().any(|property| {
+                        property["enum"].as_array().is_some_and(|values| {
+                            values.iter().any(|value| value.as_str() == Some(alias))
+                        })
                     })
-                })
             })
         })
     })

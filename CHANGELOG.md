@@ -9,6 +9,34 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+### Added
+
+- **`protocol trace check` — what an agent run did, judged by a typed document instead of a shell
+  pipeline (trace wave 1).** A harness transcript (first adapter: Claude Code `stream-json`)
+  normalizes into a content-addressed, harness-neutral event IR, and a `trace-spec/1` document
+  states expectations over it — forty-nine kinds, from *the skill completed* and *this tool was
+  called with these arguments* through ordering, token, cost, cache, rate-limit, tool-traffic and
+  per-step timing bounds. Verdicts are three-valued: `ok`, `gap`, and `unk` for the event the
+  adapter could not read or the field this transcript does not carry — exit 0/1/3, the same
+  contract as `ess conform`, because "the format moved under us" wakes a different person than
+  "the agent did the wrong thing". Every verdict cites the transcript event indices behind it,
+  and `protocol trace inspect` prints the census — event families, per-tool traffic in both
+  directions, each step's `gen`/`exec` split — from the same IR the checker judges.
+
+  The plugin eval now runs on it: five assertions in three shell idioms became
+  `integrations/claude-code/eval/expectations.trace.yaml`, forty-one expectations with the
+  observed value beside every bound, checked against two committed real transcripts by the
+  ordinary gate — so a bound that stops holding is caught without a paid run.
+
+- **`protocol trace evidence` — a passing check becomes an evidence record the engine admits.**
+  `Evidence::TraceConformance` carries the verdict, the three counts, every gapped expectation's
+  id, any command-line downgrades, and the digest pair binding it to exactly one transcript and
+  one specification; the producer is the `trace-checker` verifier class, so an agent's own claim
+  of conformance never satisfies the kind. The loop is asserted end to end: the emitted document
+  feeds back into `protocol evaluate --evidence` and is accepted. This is the mechanism the
+  future reference driver's model-calling steps rely on — an `llm` step cannot carry evidence by
+  type, and the command step that observes it now can.
+
 ### Changed
 
 - **The vision's refusal of "a workflow engine" is narrowed: a reference driver is now in scope —

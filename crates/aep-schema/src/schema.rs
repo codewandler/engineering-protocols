@@ -16,6 +16,7 @@ use aep_domain::raw::{
 use ess_domain::spec::RawSpecFile;
 use schemars::schema::RootSchema;
 use schemars::{schema_for, JsonSchema};
+use trace_domain::raw::RawTraceSpec;
 
 use crate::format::canonical_json;
 
@@ -105,6 +106,11 @@ pub fn generated_schemas() -> Vec<GeneratedSchema> {
             "planning-document",
             "the frontmatter of one markdown planning document",
         ),
+        entry::<RawTraceSpec>(
+            "RawTraceSpec",
+            "trace-spec",
+            "what an agent run must have looked like",
+        ),
     ]
 }
 
@@ -136,6 +142,7 @@ mod tests {
             "event.schema.json",
             "ess.schema.json",
             "planning-document.schema.json",
+            "trace-spec.schema.json",
         ] {
             assert!(filenames.contains(&expected), "{expected} is not published");
         }

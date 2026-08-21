@@ -54,6 +54,15 @@ pub enum Verifier {
     ArtifactValidator,
     /// A runner that checks an implementation against a specification's own conformance suite.
     ConformanceRunner,
+    /// A checker that reads a harness transcript and decides it against a trace specification.
+    ///
+    /// Distinct from [`Verifier::ConformanceRunner`] because the two observe different things: a
+    /// conformance runner executes an implementation against a suite, and a trace checker reads a
+    /// recording of how an agent worked. Distinct from [`Verifier::ArtifactValidator`] because a
+    /// transcript is not an artifact of the work — it is a record of the worker — and letting any
+    /// artifact validator establish a behavioural claim about an agent would make the claim
+    /// indistinguishable from every other file check, which is the whole thing it is for.
+    TraceChecker,
     /// Anything else, named by tool.
     ExternalTool(ToolRef),
 }
@@ -73,6 +82,7 @@ impl Verifier {
         Self::HumanReview,
         Self::ArtifactValidator,
         Self::ConformanceRunner,
+        Self::TraceChecker,
     ];
 
     /// The verifier as written in documents.
@@ -90,6 +100,7 @@ impl Verifier {
             Self::HumanReview => "human-review",
             Self::ArtifactValidator => "artifact-validator",
             Self::ConformanceRunner => "conformance-runner",
+            Self::TraceChecker => "trace-checker",
             Self::ExternalTool(tool) => tool.as_str(),
         }
     }
@@ -440,6 +451,28 @@ mod tests {
             Verifier::ExternalTool(ToolRef::new("cargo-mutants").expect("tool"))
         );
         assert!(Verifier::parse("Cargo Mutants").is_err());
+    }
+
+    #[test]
+    fn a_trace_checker_is_a_named_class_and_not_an_external_tool() {
+        // `EvidenceKind::TraceConformance::default_verifiers` names this class in a `'static`
+        // slice, and only a named variant can appear in one. Were `trace-checker` to fall through
+        // to `ExternalTool`, a protocol declaring it would compare unequal to the class the kind
+        // demands, and `can_establish` would report the kind establishable by nobody.
+        assert_eq!(
+            Verifier::parse("trace-checker").expect("named"),
+            Verifier::TraceChecker,
+            "`trace-checker` must resolve to the named class, not to an external tool"
+        );
+        assert_eq!(Verifier::TraceChecker.as_str(), "trace-checker");
+        assert!(
+            Verifier::NAMED.contains(&Verifier::TraceChecker),
+            "a class absent from `NAMED` is absent from the published schema's examples"
+        );
+        assert!(
+            !Verifier::TraceChecker.is_human(),
+            "reading a transcript mechanically is not a person reviewing one"
+        );
     }
 
     #[test]

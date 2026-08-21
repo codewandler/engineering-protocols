@@ -22,6 +22,8 @@ members = [
     "crates/infra-project",
     "crates/infra-spec",
     "crates/protocol-cli",
+    "crates/trace-domain",
+    "crates/trace-spec",
     "examples/billing-realization",
     "examples/gatepass-realization",
     "xtask",
@@ -70,6 +72,8 @@ infra-compiler = { path = "crates/infra-compiler", version = "0.1.0" }
 infra-domain = { path = "crates/infra-domain", version = "0.1.0" }
 infra-project = { path = "crates/infra-project", version = "0.1.0" }
 infra-spec = { path = "crates/infra-spec", version = "0.1.0" }
+trace-domain = { path = "crates/trace-domain", version = "0.1.0" }
+trace-spec = { path = "crates/trace-spec", version = "0.1.0" }
 aep-schema = { path = "crates/aep-schema", version = "0.1.0" }
 adp-domain = { path = "crates/adp-domain", version = "0.1.0" }
 aop-domain = { path = "crates/aop-domain", version = "0.1.0" }

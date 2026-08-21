@@ -19,28 +19,73 @@ A scratch directory (under `$TMPDIR`, kept after the run, path printed at the en
 | `plugin/` | the copy of this plugin the agent ran with (`eval/` excluded) |
 | `result.jsonl` | the full `stream-json` transcript, one event per line |
 | `stderr.log` | the agent process's stderr |
+| `metrics.txt` | the informational metrics block, as the report prints it |
+| `review-input.md`, `review.md`, `timeline.txt` | what the adversarial reviewer saw, and what it said |
 
 ## What green means
 
-`run.sh` exits 0 only if all of these hold:
+A run is checked by **composition**: the workspace is judged by looking at files, and the
+transcript is judged by a typed document. `run.sh` exits 0 only if both halves hold.
+
+**The workspace, in the shell** — these are questions about files and they stay where they are:
 
 1. `protocol artifact validate` exits 0 on the created store — every status lifecycle-legal,
    every relation resolvable, every file parseable.
 2. At least one epic and at least two stories exist.
 3. Every story carries a `derived_from`/`decomposes` relation to an epic.
-4. The transcript shows at least one `protocol artifact new` invocation — the agent used the CLI
-   rather than hand-writing frontmatter.
-5. The planning skill **completed**: the `Skill` tool's structured result reports
-   `success: true` for `engineering-protocols:planning` — not a text match.
-6. The terminal record is clean: `is_error: false` and zero permission denials, so the
-   sandbox contract (`--permission-mode dontAsk` + the allow-list) actually held.
-7. The environment is **hermetic**: the init event lists exactly one plugin,
-   `engineering-protocols`. The run gets a scratch `CLAUDE_CONFIG_DIR` holding only a copy of
-   your login credentials, so your own plugins, skills and output style cannot leak in (before
-   this existed, five of them did).
-8. Auth is the **login**, not a stray API key: `apiKeySource: none` in the init event — the
-   check that catches an exported `ANTHROPIC_API_KEY` before a single turn is spent. Skipped
-   when `EVAL_USE_API_KEY=1` opts into key-based billing.
+
+**The transcript, as a document** — one call to `protocol trace check` against
+[`expectations.trace.yaml`](./expectations.trace.yaml):
+
+```bash
+protocol trace check --spec expectations.trace.yaml --transcript "$WORK/result.jsonl"
+```
+
+That file is 41 expectations over 40 kinds of the `trace-spec/1` vocabulary, and it replaced five
+assertions written in three idioms — a `grep` for a string anywhere in 86KB of JSON, two `jq`
+filters each carrying a weaker `grep` fallback for when `jq` was absent, and one `jq` filter that
+passed *unconditionally* when it was. The claims it carries include:
+
+* the planning skill **completed** — the `Skill` tool's structured result reports `success: true`,
+  a boolean the harness set rather than a sentence the model wrote;
+* artifacts were created through a `Bash` call whose command matches `protocol artifact new` — a
+  tool call with a name and an argument matcher, not a string found somewhere in the file;
+* the terminal record is clean: `is_error: false`, `terminal_reason: completed`, no API error
+  status, zero permission denials;
+* the environment is **hermetic** — the init event lists exactly one plugin,
+  `engineering-protocols`. The run gets a scratch `CLAUDE_CONFIG_DIR` holding only a copy of your
+  login credentials, so your own plugins, skills and output style cannot leak in (before this
+  existed, five of them did);
+* auth is the **login**, not a stray API key: `apiKeySource: none` — the check that catches an
+  exported `ANTHROPIC_API_KEY` before a single turn is spent;
+* the skill was consulted *before* the store was touched, nothing shelled out to `rm -rf`, and
+  every `protocol artifact` call came back in under two seconds.
+
+Twenty-three further expectations are **advisory**: cost, tokens, cache state, latency, rate-limit
+headroom and the model's resolved name. They are evaluated, printed as `note` rows in the verdict
+table and counted separately — and they never move the exit code, because a gate that goes red
+when a cache was cold is a gate people learn to ignore. An advisory expectation is *not* a disabled
+one: a check that is switched off reads exactly like a check that passed.
+
+Every bound in the file carries the observed value in the comment beside it, so the next reader
+knows what it was calibrated against, and `cargo test -p trace-spec` checks the whole document
+against two committed real transcripts — so a bound that stops holding is caught by the ordinary
+gate rather than by a paid eval run.
+
+`EVAL_USE_API_KEY=1` passes `--advisory billed-to-the-session`, which downgrades exactly that one
+row: it is still evaluated, still printed, and the report names it as downgraded. An id the
+document does not declare is a usage error, so a typo there fails loudly instead of quietly
+relaxing nothing.
+
+Exit codes are the checker's, mirroring `ess conform`: `0` conformant, `1` contradicted, `3`
+nobody found out. Exit 3 means an event the adapter could not read, or a field this transcript does
+not carry — *"the format moved under us"*, which wakes a different person than *"the agent did the
+wrong thing"*. `run.sh` treats both as a failure of the run, which is the CI job making the choice
+the checker deliberately refuses to make on its behalf.
+
+`protocol trace inspect --transcript <file>` prints the same census the metrics block below does —
+event families, per-tool traffic in both directions, each step's `gen`/`exec` split — from the same
+IR the checker judges.
 
 The verdict table, the created file list, `protocol artifact list`, the validate output and the
 run's API cost are printed on every run, pass or fail — plus an **informational metrics block**

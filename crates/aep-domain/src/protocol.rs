@@ -361,6 +361,32 @@ observables: ['tests.**']
     }
 
     #[test]
+    fn the_spellings_adp_declares_for_transcript_conformance_are_the_ones_the_enum_holds() {
+        // The two strings below are copied from `protocols/adp/1.yaml`. Nothing else compares the
+        // document's vocabulary to the enum's: an unknown verifier name silently becomes an
+        // `ExternalTool`, so a typo there would leave `can_establish` false and the kind
+        // establishable by nobody, with no parse error anywhere to say so.
+        let parsed = protocol(
+            r"
+id: adp
+title: Agentic Development Protocol
+evidence_kinds: [trace_conformance]
+verifiers: [trace-checker]
+observables: ['evidence.**']
+",
+        )
+        .expect("the document's own spellings validate");
+        assert!(
+            parsed.declares_evidence(EvidenceKind::TraceConformance),
+            "`trace_conformance` in a document must be the enum variant the checker mints"
+        );
+        assert!(
+            parsed.can_establish(EvidenceKind::TraceConformance),
+            "`trace-checker` in a document must be the class `default_verifiers` names"
+        );
+    }
+
+    #[test]
     fn rejects_an_unsupported_major_version() {
         let errors = protocol(
             r"

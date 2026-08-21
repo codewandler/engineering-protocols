@@ -94,6 +94,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "thiserror",
+ "trace-domain",
 ]
 
 [[package]]
@@ -1074,6 +1075,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "trace-domain",
+ "trace-spec",
 ]
 
 [[package]]
@@ -1424,6 +1427,27 @@ checksum = "b1e27c91459209c2986af3dcf603a5a74a4368754ce37414f59acc971167f643"
 dependencies = [
  "displaydoc",
  "zerovec",
+]
+
+[[package]]
+name = "trace-domain"
+version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+]
+
+[[package]]
+name = "trace-spec"
+version = "0.1.0"
+dependencies = [
+ "aep-domain",
+ "serde",
+ "serde_json",
+ "trace-domain",
 ]
 
 [[package]]

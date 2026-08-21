@@ -100,6 +100,13 @@ check() { # check <name> <0-for-pass>  (never aborts the script: the report must
   if [ "$2" -eq 0 ]; then PASS=$((PASS + 1)); ROWS+=("PASS  $1"); else FAIL=$((FAIL + 1)); ROWS+=("FAIL  $1"); fi
 }
 
+# A row that is reported and counted and does not decide the verdict. The trace specification's
+# advisory expectations land here: cost, tokens, cache state and latency vary run to run with model
+# routing and load, and a gate that goes red because a cache was cold is a gate people learn to
+# ignore. They are printed, never hidden — a skipped check reads exactly like a passing one.
+NOTE=0
+note() { NOTE=$((NOTE + 1)); ROWS+=("note  $1"); }
+
 # 3.1 the store validates (lifecycle-legal statuses, graph builds, frontmatter parses)
 VALIDATE_OUT="$(cd "$PROJECT" && protocol artifact validate --store "$STORE" 2>&1)" && V=0 || V=$?
 check "protocol artifact validate exits 0" "$V"
@@ -117,53 +124,57 @@ while IFS= read -r f; do
 done < <(find "$STORE/story" -name '*.md' 2>/dev/null)
 R=1; [ "$UNLINKED" -eq 0 ] && R=0; check "every story carries an epic relation ($UNLINKED unlinked)" "$R"
 
-# 3.4 the agent used the CLI to create artifacts, not hand-written frontmatter
-R=1; grep -q 'protocol artifact new' "$WORK/result.jsonl" && R=0; check "transcript shows protocol artifact new" "$R"
+# 3.4 the transcript, as a document
+#
+# What used to be five assertions in three idioms — a `grep` over 86KB of JSON, two `jq` filters
+# each carrying a weaker `grep` fallback for when `jq` is absent, and one `jq` filter that passed
+# unconditionally when it was — is now one call to a checker over one typed document. The five
+# claims live in `expectations.trace.yaml` beside this script: 3.4 as `tool.called`, 3.5 as
+# `skill.completed`, 3.6 as `result` and `permission.denied`, 3.7 as `env.exclusive`, 3.8 as
+# `env.api_key_source` — plus the bounds the metrics block below could compute and never assert.
+#
+# The verdict table still shows one line per expectation: the rows below are the checker's own text
+# output, and the checker cites the transcript event indices behind each one.
+TRACE_SPEC="$SCRIPT_DIR/expectations.trace.yaml"
+TRACE_ARGS=(--spec "$TRACE_SPEC" --transcript "$WORK/result.jsonl")
 
-# 3.5 the skill actually completed — the Skill tool's structured result, not text matching
-R=1
-if command -v jq >/dev/null; then
-  jq -e 'select(.tool_use_result.commandName=="engineering-protocols:planning")
-         | select(.tool_use_result.success==true)' "$WORK/result.jsonl" >/dev/null 2>&1 && R=0
-else
-  grep -q '"commandName":"engineering-protocols:planning"' "$WORK/result.jsonl" && R=0
+# `EVAL_USE_API_KEY=1` opts into billing an exported key, which makes `env.api_key_source: none`
+# false by intention rather than by defect. It is downgraded, not removed: the expectation is still
+# evaluated, still printed and named in the report as downgraded — and `--advisory` refuses an id
+# the document does not declare, so a typo here fails loudly instead of relaxing nothing.
+if [ "${EVAL_USE_API_KEY:-0}" = "1" ]; then
+  TRACE_ARGS+=(--advisory billed-to-the-session)
 fi
-check "planning skill completed (Skill result success=true)" "$R"
 
-# 3.6 clean terminal record: no API error, no permission denials (the sandbox contract held)
-R=1
-if command -v jq >/dev/null; then
-  TERM_STATE="$(jq -r 'select(.type=="result")
-    | (.is_error|tostring)+" "+(.permission_denials|length|tostring)' "$WORK/result.jsonl" | tail -1)"
-  [ "$TERM_STATE" = "false 0" ] && R=0
-else
-  grep -q '"is_error":false' "$WORK/result.jsonl" && R=0
-fi
-check "terminal record clean (no error, 0 permission denials)" "$R"
+TRACE_OUT="$(protocol trace check "${TRACE_ARGS[@]}" 2>&1)" && TRACE_EXIT=0 || TRACE_EXIT=$?
 
-# 3.7 the environment is hermetic: exactly the eval's plugin loaded, nothing from the operator
-R=1
-if command -v jq >/dev/null; then
-  PLUGINS="$(jq -r 'select(.type=="system" and .subtype=="init")
-    | [.plugins[].name] | sort | join(",")' "$WORK/result.jsonl" | tail -1)"
-  [ "$PLUGINS" = "engineering-protocols" ] && R=0
-else
-  R=0  # cannot inspect without jq; do not fail on missing tooling
-fi
-check "hermetic: only engineering-protocols loaded (saw: ${PLUGINS:-unknown})" "$R"
+# 0 conformant, 1 contradicted, 3 nobody found out. Anything else is a usage error — a
+# specification that does not validate, or a transcript this build cannot read — and it is a
+# failure of the eval's own setup rather than a verdict about the agent.
+case "$TRACE_EXIT" in
+  0|1|3) ;;
+  *) check "protocol trace check ran (exit $TRACE_EXIT)" 1 ;;
+esac
 
-# 3.8 the run authenticated the way the eval intends (login, not a stray API key) — the check
-# that would have caught the ANTHROPIC_API_KEY misfire before a single turn was spent
-if [ "${EVAL_USE_API_KEY:-0}" != "1" ]; then
-  R=1
-  if command -v jq >/dev/null; then
-    SRC="$(jq -r 'select(.type=="system" and .subtype=="init") | .apiKeySource' "$WORK/result.jsonl" | tail -1)"
-    [ "$SRC" = "none" ] && R=0
-  else
-    R=0
-  fi
-  check "auth is the login (api-key-source: ${SRC:-unknown})" "$R"
-fi
+# Expand the checker's rows into the verdict table. A gating gap or an undecidable gating row is a
+# FAIL; an advisory row of any verdict is a note. Exit 3 is not a softer exit 1 — but for *this*
+# eval a run nobody could judge is not a green run, so an undecidable gating row fails here. That
+# is the CI job making the choice the checker deliberately refuses to make on its behalf.
+TRACE_ROWS=0
+while IFS= read -r line; do
+  case "$line" in
+    "  ok (adv)"*|"  gap (adv)"*|"  unk (adv)"*) note "trace  ${line#  }"; TRACE_ROWS=$((TRACE_ROWS + 1)) ;;
+    "  ok "*)  check "trace  ${line#  }" 0; TRACE_ROWS=$((TRACE_ROWS + 1)) ;;
+    "  gap "*|"  unk "*) check "trace  ${line#  }" 1; TRACE_ROWS=$((TRACE_ROWS + 1)) ;;
+  esac
+done <<< "$TRACE_OUT"
+
+# The guard that matters most here. A missing specification, an unreadable transcript or a
+# mistyped `--advisory` id all leave the checker as exit 1 with a reason on stderr and *no rows* —
+# and a verdict table with no transcript rows in it would go green while checking nothing, which is
+# precisely the failure mode `AGENTS.md` § Gate names. The reason is printed in section 6.
+R=1; [ "$TRACE_ROWS" -gt 0 ] && R=0
+check "protocol trace check produced verdicts ($TRACE_ROWS row(s))" "$R"
 
 # ---- 4. metrics -------------------------------------------------------------------------------
 # Informational, never asserted: numbers vary run to run (see README on variance); a missing field
@@ -265,7 +276,7 @@ if command -v jq >/dev/null && [ "${EVAL_SKIP_REVIEW:-0}" != "1" ]; then
   {
     printf '%s\n\n' "You are an adversarial reviewer of one evaluation run of a Claude Code plugin. You get the task the agent was given, the mechanical verdict, the run metrics, and a summarized timeline. The mechanical assertions only check outcomes; your job is what they cannot see: did the agent follow the plugin's rules in spirit, not just to the letter? Were there wasted, repeated or failing tool calls, and what do failures say about how well the agent understood the tooling? Any risky idiom (for example rewriting whole files where a targeted edit was safer, or touching machine-owned frontmatter)? Be specific: every finding cites a timeline line. At most six findings, most severe first; no praise, no filler. End with exactly one line: 'ADVISORY: sound' or 'ADVISORY: concerns — <one line>'."
     printf '== the task ==\n%s\n\n' "$PROMPT"
-    printf '== mechanical verdict (%s pass, %s fail) ==\n' "$PASS" "$FAIL"
+    printf '== mechanical verdict (%s pass, %s fail, %s advisory) ==\n' "$PASS" "$FAIL" "$NOTE"
     for row in "${ROWS[@]}"; do printf '%s\n' "$row"; done
     printf '\n== metrics ==\n'; cat "$WORK/metrics.txt" 2>/dev/null || true
     printf '\n== timeline ==\n'; cat "$WORK/timeline.txt" 2>/dev/null || true
@@ -286,8 +297,11 @@ fi
 
 # ---- 6. report --------------------------------------------------------------------------------
 say ""
-say "== verdict ($PASS pass, $FAIL fail) =="
+say "== verdict ($PASS pass, $FAIL fail, $NOTE advisory) =="
 for row in "${ROWS[@]}"; do say "  $row"; done
+say ""
+say "== transcript conformance =="
+say "$TRACE_OUT"
 say ""
 say "== created files =="
 (cd "$PROJECT" && find .engineering/planning -name '*.md' | sort)

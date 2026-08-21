@@ -9,7 +9,7 @@
 //! # What is banned, and what is not
 //!
 //! Banned in shipped engine code: constructing any *payload* of
-//! [`aep_domain::evidence::Evidence`] — the fourteen record types such as `TestResult` and
+//! [`aep_domain::evidence::Evidence`] — the fifteen record types such as `TestResult` and
 //! `ApprovalRecord` — whether through a struct literal (`TestResult { .. }`), a constructor path
 //! (`TestResult::passing(..)`), an enum-variant expression (`Evidence::TestResult(..)`) or a
 //! variant used as a function (`.map(Evidence::TestResult)`).

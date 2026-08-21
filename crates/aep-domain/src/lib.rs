@@ -90,7 +90,7 @@ pub use error::{ParseError, ValidationCode, ValidationError, ValidationErrors};
 pub use event::{EventEnvelope, ProtocolEvent};
 pub use evidence::{
     EssConformanceResult, Evidence, EvidenceEnvelope, EvidenceKind, EvidenceRecord, Producer,
-    Provenance, SpecDigest, TestSuite,
+    Provenance, SpecDigest, TestSuite, TraceConformanceResult, TranscriptDigest,
 };
 pub use facts::{FactPath, FactPattern, FactSource, FactStore, FactValue, Number, Scales};
 pub use ids::{

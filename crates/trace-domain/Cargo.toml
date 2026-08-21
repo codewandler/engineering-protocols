@@ -1,0 +1,43 @@
+[package]
+name = "trace-domain"
+description = "The two models of transcript conformance: a harness-neutral event IR of an agent run, and the authored expectations a run is judged against."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+# A tool call's input and a tool result's fields are open maps of arbitrary JSON: the adapter must
+# carry through what a harness recorded without a type per tool, and a matcher names one field of
+# it. `serde_json::Value` is the workspace's existing spelling for that (`infra-domain` reads a
+# scanned bundle the same way), so no second JSON model enters the workspace.
+serde_json.workspace = true
+
+# The `trace-spec/1` document is published as `schemas/generated/trace-spec.schema.json`, the way
+# every other authored document in this repository is: one generator (`aep-schema`), one drift
+# check (`cargo xtask schema --check`), one index. `RawTraceSpec` therefore derives `JsonSchema`
+# here rather than being described by a hand-written schema that could disagree with the parser.
+schemars.workspace = true
+
+# Specifications are authored in YAML. `read_spec` reads the text into a `serde_json::Value` and
+# deserializes from *that*, deliberately — the same construction and the same reason as
+# `infra-spec`: `serde_yaml` 0.9 spells an externally tagged enum as a YAML tag
+# (`!tool.called`), where the JSON data model spells one as a single-key map, which is the shape
+# a specification is written in. One conversion buys the readable wire form and
+# `deny_unknown_fields` on every variant at once, and JSON parses through the same path because
+# JSON is YAML.
+serde_yaml.workspace = true
+
+# The transcript digest and the specification digest: SHA-256, 64 hex characters, the same
+# construction and the same full width as `ess-gen`'s specification digest and `infra-compiler`'s
+# IR digest (gap register D-4 settled the width). Same version and same spelling as those two,
+# deliberately — one hash implementation across the workspace. Default features stay on: they are
+# the pure Rust implementation and carry no I/O, network or unsafe code.
+sha2 = "0.10"
+
+[lints]
+workspace = true

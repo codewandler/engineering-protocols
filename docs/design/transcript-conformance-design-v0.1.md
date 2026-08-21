@@ -779,7 +779,7 @@ This design supplies the missing command. The subsequent step becomes:
 - kind: command
   run: [protocol, trace, evidence, --spec, drivers/expectations/implement.trace.yaml,
         --transcript, "${step.previous.transcript}"]
-  evidence: {kind: trace_conformance, verifier: artifact-validator}
+  evidence: {kind: trace_conformance, verifier: trace-checker}
 ```
 
 and the consequence is worth stating plainly, because it is the point of the whole document:

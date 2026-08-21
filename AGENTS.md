@@ -108,6 +108,16 @@ passing one.
   the scanner (`infra-scout`) is a separate repository holding the credentials, and nothing
   here reaches a network. Plan pages: `docs/plan/infra-wave-1-observe.md`,
   `docs/plan/infra-wave-2-analyze.md`.
+* **Trace — an agent run as a third observation domain.** Two crates: `trace-domain` (the
+  harness-neutral event IR `trace-ir/1`, content-addressed by a digest over the transcript's raw
+  bytes, with an event the adapter cannot read kept opaque rather than dropped; and the
+  `trace-spec/1` expectation vocabulary, forty-nine kinds, raw→validated with ten `TRACE-*`
+  refusal codes) and `trace-spec` (the Claude Code `stream-json` adapter and the checker, whose
+  `ok`/`gap`/`unk` verdicts each cite the event indices that produced them). `protocol trace
+  check|inspect` is the surface, with `ess conform`'s exit codes — `0` conformant, `1`
+  contradicted, `3` nobody found out. Nothing here calls a model or reads a clock: every duration
+  and every cost comes out of the transcript, which is what lets a report be committed and
+  diffed. Plan page: `docs/plan/trace-wave-1-transcript-checker.md`.
 * **Not built yet:** W7.4 — obligations as artifacts a task can own — deferred by decision;
   the **reference driver**, decided by the operator and waiting behind harness wave 2's
   feasibility review;
@@ -200,11 +210,11 @@ enforcement here that you cannot point at.
     clippy-pedantic clean.
     *Enforced by* `missing_docs` and `clippy::pedantic` in `[workspace.lints]`, raised to errors by
     the `clippy` step's `-D warnings`, plus the `doc-check` step (`RUSTDOCFLAGS=-D warnings`) for
-    broken intra-doc links. All sixteen workspace members opt in with `[lints] workspace = true`; a
+    broken intra-doc links. All eighteen workspace members opt in with `[lints] workspace = true`; a
     new crate that omits that line is outside every lint here.
 12. **No `unsafe`** (`unsafe_code = "forbid"`).
     *Enforced by* that lint in `[workspace.lints.rust]`. `forbid` cannot be lifted by an inner
-    `allow`, so this one is closed rather than merely checked — again, for the fifteen members that
+    `allow`, so this one is closed rather than merely checked — again, for the seventeen members that
     opt in. **One crate cannot declare it and says so**: a `WebAssembly` export is a `#[no_mangle]`
     item, which rustc's own `unsafe_code` lint flags, so the emitted browser bridge under
     `generated/web/` and the host that links a realization into it (`examples/billing-web`, excluded

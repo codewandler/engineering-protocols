@@ -811,6 +811,95 @@
           ]
         }
       }
+    },
+    {
+      "description": "A harness transcript checked against a trace specification.",
+      "type": "object",
+      "required": [
+        "kind",
+        "spec_digest",
+        "specification",
+        "status",
+        "transcript_digest"
+      ],
+      "properties": {
+        "adapter": {
+          "description": "Which adapter read the transcript, where the check named one.\n\nA harness output format is not a stable public schema (design D1), so which adapter — and which harness versions it was written against — is part of what a later reader needs to know why a verdict came out as it did.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "advisory_overrides": {
+          "description": "Expectation ids the caller downgraded to advisory on the command line, so they were reported and gated nothing.\n\nRecorded rather than folded away, because the specification's digest is the digest of the document *as authored*: without this list a reader of the record could not tell that the run gated on something narrower than the document says.\n\nA downgrade moves the checker's exit code and deliberately does **not** move `trace_conformance.passed`. `--advisory` exists so a cost bound that drifted with model routing cannot turn a CI job red (design D6); it is a property of the invocation, not of the protocol's requirement, and a requirement that a caller's own flag could satisfy would not be a requirement. So the fact stays strictly stronger than exit 0, on the same polarity as everything else here: unproven is not proven.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectations_gapped": {
+          "description": "How many the transcript contradicted — **every** one, including any the caller downgraded to advisory for the run.\n\nSee [`Self::advisory_overrides`] for why the downgrade does not shrink this number.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "expectations_total": {
+          "description": "How many expectations were evaluated.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "expectations_unknown": {
+          "description": "How many it could not decide, on the same all-rows basis.",
+          "default": 0,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
+        "gapped_expectations": {
+          "description": "Which expectations gapped, so a failure names something actionable.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "trace_conformance"
+          ]
+        },
+        "spec_digest": {
+          "description": "A digest of the specification as authored.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/SpecDigest"
+            }
+          ]
+        },
+        "specification": {
+          "description": "Which specification, by the id it declares, such as `planning-plugin/eval`.\n\nWhat a person reads. It is not what identifies the document — see [`Self::spec_digest`].",
+          "type": "string"
+        },
+        "status": {
+          "description": "The outcome, over the gating expectations alone.\n\n`Passed` when every gating expectation held, `Failed` when the run contradicted one, and `Inconclusive` when nothing was contradicted and something could not be judged. The last is not a softer failure: *\"the agent did the wrong thing\"* and *\"the transcript format moved under us\"* want different people to be woken up, and a record that flattened them would open a defect report against a run nobody managed to read.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/VerificationStatus"
+            }
+          ]
+        },
+        "transcript_digest": {
+          "description": "A digest of the transcript's raw bytes.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/TranscriptDigest"
+            }
+          ]
+        }
+      }
     }
   ],
   "definitions": {
@@ -1431,6 +1520,14 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
     },
+    "TranscriptDigest": {
+      "description": "A digest of the transcript a trace-conformance check read, as `sha256sum` writes it: 64 lower-case hexadecimal characters.",
+      "examples": [
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      ],
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "VerificationStatus": {
       "description": "The outcome of a verification.",
       "oneOf": [
@@ -1478,7 +1575,8 @@
         "human-approval",
         "human-review",
         "artifact-validator",
-        "conformance-runner"
+        "conformance-runner",
+        "trace-checker"
       ],
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"
