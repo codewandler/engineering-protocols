@@ -339,6 +339,12 @@ bindings enter the six-family comparison, which stops being six.
 
 ### W7.3 A second emitter, and the seam proves itself
 
+> Status 2026-08-21: briefly deferred by the sequencing decision that pulled the infra waves
+> forward, then **revived by operator instruction** the same night, running on Opus agents.
+> A dual-target demonstration follows it: one application specified in `examples/`, synthesised
+> to Go *and* Rust, both binaries starting with semantically identical log output and serving
+> the same API and its documentation. W7.4 stays deferred.
+
 **Go, by decision** — reversible, and chosen *because* it lacks sum types: every outcome enum and
 tagged union forces the emitter to either encode honestly or refuse at the target stage, which is
 the first real test of "a target-specific refusal never masquerades as unsynthesizable". The plan
