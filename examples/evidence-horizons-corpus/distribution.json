@@ -1,0 +1,24 @@
+{
+ "description": "Measured horizon distribution of a production evidence-horizon corpus, for generating synthetic corpora at volume. Aggregate statistics only — no subject, file, date or claim text from the source corpus is reproduced anywhere in this fixture.",
+ "measured": "2026-08-21",
+ "total_horizon_tokens": 167,
+ "distribution_days": {
+  "1": 2,
+  "2": 9,
+  "3": 30,
+  "5": 12,
+  "7": 56,
+  "14": 33,
+  "21": 3,
+  "30": 19,
+  "60": 1,
+  "90": 2
+ },
+ "notes": [
+  "7d is the modal horizon (34%) and 3d the second (18%): short horizons dominate because most annotated claims are about deployment state, which moves on a weekly release cadence.",
+  "14d is the default applied to a malformed annotation, and also a real choice — so an implementation cannot infer 'malformed' from the horizon value alone. Mark the record; do not guess it back.",
+  "The 30d/60d/90d tail is slow external fact: vendor support windows, licence counts, contractual dates. These are the records most likely to be silently wrong, because nothing about them prompts a re-read.",
+  "1d and 2d horizons are almost always deliberate shortenings after a claim has already rotted once. They are the highest-information records in the corpus and — see corpus/06-reference-gaps.md — disproportionately live in table cells, which is exactly where a line-anchored parser loses them.",
+  "Malformed rate in the source corpus at time of measurement: 0 of 145 parsed records. The malformed class in this fixture is over-represented on purpose; it is the class an implementation gets wrong, not the class that is common."
+ ]
+}

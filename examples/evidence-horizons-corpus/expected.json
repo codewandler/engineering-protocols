@@ -1,0 +1,395 @@
+{
+ "reference_date": "2026-09-01",
+ "warn_days": 2,
+ "default_horizon_when_malformed": 14,
+ "generated_by": "generate_expected.py against a reference implementation",
+ "reference_is_not_ground_truth": true,
+ "known_reference_gaps": {
+  "corpus/06-reference-gaps.md": "4 well-formed annotations, 1 found by the reference. Three mechanisms: (1) a `Verify:` ending a table cell with no preceding `<br>`; (2) the second of two consecutive table rows each carrying `<br>Verify:`, absorbed into the first's body with its date and horizon both lost; (3) an annotation wrapped in inline-code backticks.",
+  "corpus/03-hidden-positions.md": "7 well-formed annotations, 5 found. The two misses are mechanisms (1) and (2) above, occurring incidentally in a file written to test the three positions the reference already handles. That is the point worth taking: the gaps were not sought, they fell out of writing a realistic table."
+ },
+ "coverage": {
+  "01-forms.md": {
+   "raw_occurrences": 12,
+   "parsed_by_reference": 12,
+   "missed_by_reference": 0
+  },
+  "02-malformed.md": {
+   "raw_occurrences": 7,
+   "parsed_by_reference": 7,
+   "missed_by_reference": 0
+  },
+  "03-hidden-positions.md": {
+   "raw_occurrences": 7,
+   "parsed_by_reference": 5,
+   "missed_by_reference": 2
+  },
+  "04-classification.md": {
+   "raw_occurrences": 8,
+   "parsed_by_reference": 8,
+   "missed_by_reference": 0
+  },
+  "05-traps.md": {
+   "raw_occurrences": 4,
+   "parsed_by_reference": 4,
+   "missed_by_reference": 0
+  },
+  "06-reference-gaps.md": {
+   "raw_occurrences": 4,
+   "parsed_by_reference": 1,
+   "missed_by_reference": 3
+  }
+ },
+ "summary": {
+  "total": 37,
+  "malformed": 8,
+  "expired": 7,
+  "expiring": 16,
+  "ok": 14,
+  "per_file": {
+   "01-forms.md": 12,
+   "02-malformed.md": 7,
+   "03-hidden-positions.md": 5,
+   "04-classification.md": 8,
+   "05-traps.md": 4,
+   "06-reference-gaps.md": 1
+  },
+  "raw_occurrences_all_files": 42,
+  "missed_by_reference": 5
+ },
+ "records": [
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 7,
+   "malformed": false,
+   "state": "ok",
+   "days": 5,
+   "what": "sprocket-api is running image v4.2.1 in the atlas namespace."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-29",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expiring",
+   "days": 0,
+   "what": "the flange-service chart tag published to the registry is 2.11.0, and no higher tag exists on the release branch as of this reading."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-28",
+   "horizon": 14,
+   "malformed": false,
+   "state": "ok",
+   "days": 10,
+   "what": "the nightly reconciliation job for the grommet index completed with exit 0, and the row count it reported matches the count in the primary store to within the tolerance the runbook states."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 2,
+   "malformed": false,
+   "state": "expiring",
+   "days": 0,
+   "what": "cogwheel-worker has 4 replicas ready in atlas."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 7,
+   "malformed": false,
+   "state": "ok",
+   "days": 5,
+   "what": "the escapement queue depth is under 100."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 5,
+   "malformed": false,
+   "state": "ok",
+   "days": 3,
+   "what": "the ratchet-gateway health endpoint returns 200."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 14,
+   "malformed": true,
+   "state": "ok",
+   "days": 12,
+   "what": "the pallet-fork latency is under 50ms. ( horizon: 5d)"
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 14,
+   "malformed": true,
+   "state": "ok",
+   "days": 12,
+   "what": "the mainspring migration has not yet been applied to atlas."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expiring",
+   "days": 1,
+   "what": "pinion-cache eviction rate is within its objective."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expiring",
+   "days": 1,
+   "what": "the balance-wheel scheduler is enabled in atlas."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-30",
+   "horizon": 7,
+   "malformed": false,
+   "state": "ok",
+   "days": 5,
+   "what": "the detent-service deployment succeeded."
+  },
+  {
+   "file": "01-forms.md",
+   "date": "2026-08-24",
+   "horizon": 7,
+   "malformed": false,
+   "state": "expired",
+   "days": 1,
+   "what": "the detent-service previous revision is still retained."
+  },
+  {
+   "file": "02-malformed.md",
+   "date": "2026-08-25",
+   "horizon": 14,
+   "malformed": true,
+   "state": "ok",
+   "days": 7,
+   "what": "the escapement-service rollout reached all three zones."
+  },
+  {
+   "file": "02-malformed.md",
+   "date": "2026-08-10",
+   "horizon": 14,
+   "malformed": true,
+   "state": "expired",
+   "days": 8,
+   "what": "the mainspring index rebuild finished."
+  },
+  {
+   "file": "02-malformed.md",
+   "date": "2026-08-20",
+   "horizon": 14,
+   "malformed": true,
+   "state": "expiring",
+   "days": 2,
+   "what": "the flange-service pin is 2.11.0. (superseded by the 2026-08-30 re-read above)"
+  },
+  {
+   "file": "02-malformed.md",
+   "date": "2026-08-20",
+   "horizon": 14,
+   "malformed": true,
+   "state": "expiring",
+   "days": 2,
+   "what": "the grommet queue is drained. (horizon: 5d — superseded by the re-read above)"
+  },
+  {
+   "file": "02-malformed.md",
+   "date": "2026-08-20",
+   "horizon": 14,
+   "malformed": true,
+   "state": "expiring",
+   "days": 2,
+   "what": "the ratchet-gateway pin is 1.4.0. (horizon: 3d — this namespace moves faster than 5d)"
+  },
+  {
+   "file": "02-malformed.md",
+   "date": "2026-08-30",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expiring",
+   "days": 1,
+   "what": "the ratchet-gateway pin is 1.4.0. Horizon shortened from 5d because this namespace demonstrably moves faster."
+  },
+  {
+   "file": "02-malformed.md",
+   "date": "2026-07-15",
+   "horizon": 14,
+   "malformed": true,
+   "state": "expired",
+   "days": 34,
+   "what": "the cogwheel-worker autoscaler is enabled in atlas."
+  },
+  {
+   "file": "03-hidden-positions.md",
+   "date": "2026-08-30",
+   "horizon": 7,
+   "malformed": false,
+   "state": "ok",
+   "days": 5,
+   "what": "this file's own header-block annotation is well-formed and must be found.  Last updated: 2026-08-30"
+  },
+  {
+   "file": "03-hidden-positions.md",
+   "date": "2026-08-29",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expiring",
+   "days": 0,
+   "what": "the escapement rework is not yet enabled in atlas.  A bare `>` line below must act as a stop."
+  },
+  {
+   "file": "03-hidden-positions.md",
+   "date": "2026-08-28",
+   "horizon": 5,
+   "malformed": false,
+   "state": "expiring",
+   "days": 1,
+   "what": "the flange-service canary is serving 5% of traffic and its error rate is under the stated objective, measured over a two-hour window rather than a single scrape."
+  },
+  {
+   "file": "03-hidden-positions.md",
+   "date": "2026-08-30",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expiring",
+   "days": 1,
+   "what": "pin confirmed against the running image.  | | grommet-index | rebuilt | rebuilt overnight<br>Verify: 2026-08-29 — row counts match the primary store.  |"
+  },
+  {
+   "file": "03-hidden-positions.md",
+   "date": "2026-08-30",
+   "horizon": 1,
+   "malformed": false,
+   "state": "expired",
+   "days": 1,
+   "what": "pin confirmed against the running image; horizon cut to 1d because this claim was falsified within hours on a previous reading.  |"
+  },
+  {
+   "file": "04-classification.md",
+   "date": "2026-08-30",
+   "horizon": 7,
+   "malformed": false,
+   "state": "ok",
+   "days": 5,
+   "what": "sprocket-api is running 4.2.1 in atlas."
+  },
+  {
+   "file": "04-classification.md",
+   "date": "2026-08-25",
+   "horizon": 7,
+   "malformed": false,
+   "state": "expiring",
+   "days": 0,
+   "what": "the flange-service canary is healthy."
+  },
+  {
+   "file": "04-classification.md",
+   "date": "2026-08-24",
+   "horizon": 7,
+   "malformed": false,
+   "state": "expired",
+   "days": 1,
+   "what": "the grommet index rebuild completed."
+  },
+  {
+   "file": "04-classification.md",
+   "date": "2026-07-01",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expired",
+   "days": 59,
+   "what": "the escapement queue is drained."
+  },
+  {
+   "file": "04-classification.md",
+   "date": "2026-08-27",
+   "horizon": 7,
+   "malformed": false,
+   "state": "expiring",
+   "days": 2,
+   "what": "cogwheel-worker has 4 replicas ready."
+  },
+  {
+   "file": "04-classification.md",
+   "date": "2026-08-31",
+   "horizon": 1,
+   "malformed": false,
+   "state": "expiring",
+   "days": 0,
+   "what": "the mainspring migration lock is released."
+  },
+  {
+   "file": "04-classification.md",
+   "date": "2026-08-20",
+   "horizon": 90,
+   "malformed": false,
+   "state": "ok",
+   "days": 78,
+   "what": "the vendor's published support window for the ratchet firmware still ends 2027-03-31."
+  },
+  {
+   "file": "04-classification.md",
+   "date": "2026-06-20",
+   "horizon": 30,
+   "malformed": false,
+   "state": "expired",
+   "days": 43,
+   "what": "the balance-wheel licence count purchased is 250 seats."
+  },
+  {
+   "file": "05-traps.md",
+   "date": "2026-08-25",
+   "horizon": 7,
+   "malformed": false,
+   "state": "expiring",
+   "days": 0,
+   "what": "the flange-service pin in atlas is 2.11.0."
+  },
+  {
+   "file": "05-traps.md",
+   "date": "2026-08-30",
+   "horizon": 3,
+   "malformed": false,
+   "state": "expiring",
+   "days": 1,
+   "what": "the flange-service pin in atlas is 2.12.0; the 2026-08-25 reading above was correct when written and was overtaken on 2026-08-28."
+  },
+  {
+   "file": "05-traps.md",
+   "date": "2026-08-30",
+   "horizon": 7,
+   "malformed": false,
+   "state": "ok",
+   "days": 5,
+   "what": "the grommet index row count matches the primary store."
+  },
+  {
+   "file": "05-traps.md",
+   "date": "2026-08-04",
+   "horizon": 60,
+   "malformed": false,
+   "state": "ok",
+   "days": 32,
+   "what": "the grommet index row count matches the primary store."
+  },
+  {
+   "file": "06-reference-gaps.md",
+   "date": "2026-08-30",
+   "horizon": 7,
+   "malformed": false,
+   "state": "ok",
+   "days": 5,
+   "what": "pin read from the running image.  | | balance-wheel | pinned 1.9.4 | notes<br>Verify: 2026-08-29 — pin read from the running image; horizon shortened because this component redeploys daily.  |"
+  }
+ ]
+}
