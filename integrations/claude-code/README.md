@@ -19,6 +19,7 @@ a copy that goes stale, and drift is the thing this project exists to refuse.
 | `agents/plan-reviewer.md` | read-only semantic audit: stories that no longer cover their epic, finished epics still open, stale work, missing acceptance statements. Proposes moves, performs none |
 | `hooks/` | two `PreToolUse` hooks — the deterministic half of the guardrails. `store-integrity.sh` keeps the planning store's frontmatter the CLI's; `driven-surface.sh` holds a driven run's shell to the `protocol` verbs. See below |
 | `eval/` | two repeatable checks that the plugin works: `eval/run.sh` drops a headless agent into a scratch project and inspects what it created; `eval/run-driven.sh` does the same for a whole `protocol drive` run, hooks included. Both cost API money and neither is part of `task check`. See [eval/README.md](./eval/README.md) |
+| `eval/checks/` | nine shell verifiers for the agent-charter work, one per decomposed task, written red in the `establish_verifiers` state of run `W4-1/1` before any of their subjects existed. They call no API. See [eval/checks/README.md](./eval/checks/README.md) |
 
 ## Prerequisite: `protocol` on `PATH`
 
@@ -91,16 +92,23 @@ cannot call `Engine::authorize`, which mutates an in-memory execution inside the
 the channel by which its decisions reach the run's record. It is also the only record that can tell
 *denied* from *never attempted*, which the transcript's whole-run denial counter cannot.
 
-## Deferred, on purpose
+## Deferred, and why that is no longer a wait
 
-Phase 1 covers planning only — writing down what is to be done. Two pieces arrive with the workflow
-driver, and not before, because both need an engine to be correct rather than plausible:
+The skill covers planning only — writing down what is to be done. Earlier versions of this file
+deferred two further pieces until the workflow driver existed. **The driver now exists**, and its
+arrival did not turn them into work items; it answered one of them and moved the other.
 
-* **a `governed-task` skill** — the evaluate/advance loop: what is owed in the current state, what
-  evidence satisfies it, when a transition is legal. That loop is answered by `aep-engine`, and a
-  skill that approximates it from prose would produce an agent that believes it finished tasks
-  nothing verified.
-* **`implementor` and `verifier` agents** — an implementor needs the capability policy in force to
-  know which tools it may use, and a verifier's output is only worth anything if it lands as evidence
-  with a `Producer` the engine can distinguish from the agent's own. Both are engine facts. Until the
-  driver exposes them, the honest surface is the one here: plan the work, and let a person run it.
+* **A `governed-task` skill is not coming, because `protocol drive` is that loop.** What is owed in
+  the current state, what evidence satisfies it and when a transition is legal are `aep-engine`
+  questions, and the driver asks them. A skill that approximated the same loop from prose would be
+  a second, weaker protocol implementation with none of the conformance suites — and the first time
+  the two disagreed, the untested one would be the one holding the session.
+* **`implementor` and `verifier` agents are still absent, and now for a narrower reason.** The
+  driver already puts the capability policy in force per state, so an implementor no longer has to
+  discover what it may use. What is missing is a verifier whose output the engine can tell apart
+  from the agent's own: `independent: true` is checked structurally, and nothing signs a record.
+  Until that gap closes — `gap-register.md` D-3, proposed and unaccepted — a verifier agent would
+  produce evidence that looks independent and is not.
+
+The honest surface today is the one here, plus the driver: plan the work with the skill, and run it
+with `protocol drive`, where the enforcement is a program rather than a paragraph.

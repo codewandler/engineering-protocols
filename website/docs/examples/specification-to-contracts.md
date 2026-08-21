@@ -17,6 +17,21 @@ repository: the source from `examples/billing/`, the output from `generated/`, k
 
 <LabLaunch />
 
+What the lab runs is this specification, executing in your browser. It fetches
+`billing_web_realized.wasm` — the module `protocol ess synthesize --target web` emits from
+`examples/billing/`, linked with the hand-written behaviour in `examples/billing-realization/` and
+built for `wasm32-unknown-unknown` — and sends five commands over its boundary: one accepted, two
+declared moves, one move the lifecycle does not have, and one refusal a guard decides. That is every
+way this model can answer. The outcomes, the log, the binding invocations and the view rows are what
+came back; the middle panel is the compiler's own model, asked for out of the same module. Nothing
+on the page is a recording of an earlier run.
+
+Three values are chosen rather than derived: an email address and two amounts. A specification
+declares types and not instances, so somebody has to pick an input. Everything the run then says
+about them came back over the module's boundary. Identifiers come from a counter inside the module
+rather than from a clock, so the same script produces a byte-identical stream of steps on every
+load, and `website/src/pages/lab/_run.test.mjs` holds it there.
+
 One command, from `examples/billing/domains/invoice.yaml`:
 
 ```yaml
@@ -46,6 +61,14 @@ commands:
         instance: invoice_id
         emits:
           - billing.invoice.InvoiceCreated
+        # Where the announced fact's values come from. Without this block the event's
+        # *types* are declared and its *values* are not, so an implementation
+        # announcing an amount nobody submitted contradicts nothing. `invoice_id` has
+        # no line on purpose: the identity is the implementation's to assign.
+        payload:
+          billing.invoice.InvoiceCreated:
+            customer_email: input.customer_email
+            amount: input.amount
         summary: The invoice is created in Draft.
 
       - name: rejected
@@ -83,7 +106,8 @@ commands:
   "x-ess-provenance": {
     "system": "billing",
     "specification_version": "v3",
-    "source_digest": "2940fd167bf4c4cc",
+    "source_digest": "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
+    "contract_digest": "e5df34917bf15c4fee175ec02ada20cff4b051b548c7d1da47ff37d85a743822",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "regenerate": "protocol ess generate"
@@ -123,9 +147,16 @@ commands:
 }
 ```
 
-Three things to notice: the newtype survived as its own definition rather than collapsing into
-`string`; the struct's invariant travelled with it as `x-ess-invariants`; and the provenance block
-names the model digest, so the artifact can always say which specification produced it.
+Three things to notice. The newtype survived as its own definition rather than collapsing into
+`string`. The struct's invariant travelled with it as `x-ess-invariants`. And the provenance block
+carries two digests, not one: `source_digest` is the whole model this file was generated from, and
+`contract_digest` is the digest of the *slice* it actually derives from — the seed constructs closed
+over everything they rest on.
+
+The second digest is what stops a one-word change costing a full regeneration. When the
+specification moves, `protocol ess impact` compares each artifact's committed `contract_digest`
+against the digest its slice computes, and names only the artifacts whose slice actually moved.
+Without it, every change owes the whole generated tree.
 
 ## OpenAPI 3.1
 
@@ -219,4 +250,5 @@ See [Synthesize code from a specification](../guides/synthesize.md) and
 **Sources.** `examples/billing/domains/invoice.yaml`;
 `generated/schema/commands/billing.invoice.CreateInvoice.schema.json`;
 `generated/openapi/invoice-service.yaml`; `generated/asyncapi/invoice-service.yaml`;
-`generated/docs/domains/billing.invoice.md`; `Taskfile.yml` (`generate-check`).
+`generated/docs/domains/billing.invoice.md`; `Taskfile.yml` (`generate-check`, and `lab`, which
+builds the module the lab runs and holds its output to `website/src/pages/lab/_run.test.mjs`).

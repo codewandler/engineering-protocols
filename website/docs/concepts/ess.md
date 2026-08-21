@@ -99,17 +99,28 @@ realization of its eight obligations, passes the committed 29-scenario suite unc
 deliberately corrupted linkage fails exactly the scenario that exists to catch it. See
 [Synthesize code from a specification](../guides/synthesize.md).
 
-## The same pattern, pointed at infrastructure
+## The same pattern, pointed somewhere else
 
-The `infra-*` crates apply the pipeline to observed Kubernetes clusters: an observation bundle from
-an external scanner compiles to a content-addressed IR; a typed graph and twenty coded diagnosis
-rules read it; a declared desired state (`infra-spec/1`, twelve expectation kinds) evaluates
-three-valued against a snapshot; and a gap projects back as a reviewable patch tree in which every
-value either came from the gap or is a named obligation for a human. Nothing reaches a cluster. See
+The pipeline shape — observe, normalize into a content-addressed IR, declare a desired state, judge
+three-valued — is reused twice more, which is the strongest evidence available that it is a shape
+and not a special case.
+
+**Infrastructure.** The `infra-*` crates read an observation bundle from an external scanner and
+compile it to a content-addressed IR; a typed graph and twenty coded diagnosis rules read it; a
+declared desired state (`infra-spec/1`, twelve expectation kinds) evaluates against a snapshot; and
+a gap projects back as a reviewable patch tree in which every value either came from the gap or is a
+named obligation for a human. Nothing reaches a cluster. See
 [Check infrastructure](../guides/check-infrastructure.md).
+
+**Agent runs.** The `trace-*` crates read a run transcript, normalize it to `trace-ir/1`, and hold
+it against an authored `trace-spec/1` document of 50 possible expectation kinds. Same three values,
+and a passing check mints an AEP evidence record. See
+[Check a transcript](../guides/check-a-transcript.md).
 
 ---
 
 **Sources.** `docs/guide/specification.md`; `crates/ess-domain/` through `crates/ess-synth/`;
-`examples/billing/` (the normative specification); `suites/generated/README.md`;
-`generated/rust/billing/PLAN.md`; `CHANGELOG.md` § *0.7.1*.
+`crates/ess-diff/src/lib.rs` (the ten construct families); `crates/infra-spec/src/spec.rs` and
+`crates/trace-domain/src/spec.rs` (the expectation-kind counts); `examples/billing/` (the normative
+specification); `suites/generated/*/suite.json` (the scenario counts);
+`generated/rust/billing/PLAN.md`; `CHANGELOG.md` §§ *0.7.1*, *0.8.0*.

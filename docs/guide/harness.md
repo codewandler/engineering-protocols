@@ -7,6 +7,46 @@ validated documents plus the evidence you submitted — never of anything it obs
 Add `aep-engine` and `aep-domain`; `aep-schema` if you read tasks and manifests from YAML, and
 `serde_json` if you persist executions.
 
+## Before you write one: there is a reference driver
+
+`protocol drive run|status|resume` walks a workflow instead of suggesting it, and it is worth
+reading before you build the same loop again — either as the thing you use, or as the worked
+answer to the questions below.
+
+What it does not do is the interesting part. **It evaluates no gate.** A driver that could evaluate
+a gate would be a second protocol implementation with none of the conformance suites behind it, and
+the first time the two disagreed the untested one would win. It makes the engine's calls in order,
+executes the three kinds of step that touch the world, and records what happened.
+
+| It supplies | You supply |
+|---|---|
+| the loop: initialize, ask, act, submit, transition | the model, the shell and the person |
+| a **step map** — what a harness *does* in each state — as the fifth document kind, under `drivers/` | a step map for your repository, or the shipped `drivers/development/default.yaml` |
+| a run directory under `.engineering/runs/<run-id>/`, and a store lock with a liveness probe | nothing; `resume` re-takes it |
+| three step kinds: `llm` (a model session), `command` (a program) and `operator` (a person) | which of them each state needs |
+
+The step map is where the split lands: a workflow says which states exist and what evidence each
+transition needs, and deliberately does not say how to obtain it — that is what lets one workflow
+govern a Rust repository and a Terraform one. A step map is pinned to a workflow *version*, and an
+orphaned pin is refused at load rather than applied to a state graph it was never written against.
+
+One property is worth copying whether or not you use the driver: **an `llm` step has no `evidence:`
+key and cannot be given one.** Anything a model is supposed to have achieved that is checkable is
+observed by the command step after it, so `producer: verifier` is a fact about who ran the suite
+rather than the model's opinion of a suite it says it ran. That is a type doing the work a rule
+would otherwise have to.
+
+Enforcement sits at two layers with different failure modes, which is the same enforce-and-verify
+argument this project makes elsewhere, one level down. The per-state tool set is fixed when a
+session launches and decides which tools exist; a `PreToolUse` hook is the only layer that sees a
+call's **arguments**. The shipped pair lives in
+[`integrations/claude-code/hooks/`](../../integrations/claude-code/hooks/). Afterwards
+`protocol trace check` reads the transcript and says whether it held — a verdict a program reached
+from the record, not one the agent reported about itself.
+
+`protocol workflow render --run <id>` draws where a run got to, what it produced and why it
+stopped, with the engine's own sentences on the arrows.
+
 ## The loop
 
 | Call | Answers | Returns |
@@ -29,6 +69,7 @@ use std::path::Path;
 
 use aep_domain::action::{Action, ActionRequest, RepositoryWrite};
 use aep_domain::evidence::{Evidence, Producer, TestResult, TestSuite};
+use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::Verifier;
 use aep_engine::{
     audit_trail, load_tree, DecisionExplanation, Engine, EvidenceSubmission, ProtocolEngine,
@@ -70,7 +111,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    // Submit what a verifier produced. The producer is the verifier's, not yours.
+    // Submit what a verifier produced. The producer is the verifier's, not yours, and
+    // `observed_at` is when the run actually happened — not when you got round to submitting it.
     engine.submit_evidence(
         &mut execution,
         EvidenceSubmission::new(
@@ -78,6 +120,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Producer::Verifier {
                 verifier: Verifier::TestRunner,
             },
+            ObservedAt::new(Timestamp::from_epoch_millis(1_699_999_940_000)),
         ),
     )?;
 
@@ -121,9 +164,20 @@ works if you route around them:
   `command`, `tool`, `revision`, `workspace`, `environment`, `digest`, `inputs` — so the record can be
   re-derived later by someone who does not trust you.
 
+* `observed_at` is yours and is required. It is when the verifier ran, not when you got round to
+  submitting the record, and there is no default — a caller who has to write the date down cannot
+  back-date by omission. A submission claiming a time in the future is refused rather than accepted
+  as an unusually fresh record.
+
 Order matters too, and the engine records it: `evidence.first_seq.test_result <
 evidence.first_seq.diff` is how red-before-green is checked. Submit as you observe. Batching a task's
 evidence at the end destroys the ordering facts, and the failure looks like a broken rule.
+
+A requirement may also carry a `horizon`, and then the date does real work: past it the observation
+stops counting and the requirement reads `Unknown` again. Nothing you can call extends a horizon —
+the only refresh is to run the verifier again and submit a record with a newer `observed_at`. A
+harness that re-submits an identical record to quiet a lapsed gate will find the gate still lapsed,
+which is the intended answer.
 
 ### 2. Map capabilities onto the tools you actually have
 
@@ -157,10 +211,17 @@ mean opposite things and want opposite responses:
 |---|---|---|
 | `True` | Observed, and it holds | nothing |
 | `False` | Observed, and it is wrong | fix the code |
-| `Unknown` | Nothing observed it | go and run the verifier that would |
+| `Unknown` | Nothing observed it, or nobody has looked since its horizon | go and run the verifier that would |
 
 Collapsing `Unknown` into `False` produces an agent that tries to fix code nobody has tested.
 Collapsing it into `True` produces one that finishes tasks nothing verified.
+
+A lapsed observation lands in the third row on purpose: an old green result is not a wrong answer,
+so a harness that treated it as `False` would send an agent to repair working code. The facts a
+lapsed record projected are withheld along with it, so a guard reading `tests.unit.failed == 0` off
+a stale suite refuses instead of passing on it. `evidence.lapsed` counts the records in that state
+and sits beside `evidence.missing`, because *nobody produced it* and *somebody did and nobody has
+looked since* want different next moves from the agent.
 
 ```rust
 use aep_domain::predicate::Truth;

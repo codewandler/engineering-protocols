@@ -6,10 +6,16 @@ description: What the pieces are, what runs where, and where the project's respo
 
 # Architecture overview
 
-`engineering-protocols` is a **library and a specification, not a service**. Nothing in it calls a
-model, holds a credential, schedules an agent, or reaches a network. It consumes typed documents and
-recorded evidence, and produces deterministic answers, generated artifacts and refusals. Everything
-that acts — the agent, the CI system, the deployment pipeline — lives outside and asks it questions.
+`engineering-protocols` is a **library and a specification, not a service**. The engine holds no
+credential and reaches no network: it consumes typed documents and recorded evidence, and produces
+deterministic answers, generated artifacts and refusals. Everything that acts — the agent, the CI
+system, the deployment pipeline — lives outside and asks it questions.
+
+One thing does act, on purpose. The CLI ships a **reference driver** that walks a workflow by running
+the steps a step map declares, and one of the three step kinds asks a model. It exists because a
+contract nobody has implemented is a contract nobody has tested. It **evaluates no gate itself** —
+a driver that could evaluate a gate would be a second protocol implementation with none of the
+conformance suites, and the first time the two disagreed the untested one would win.
 
 ## The pieces
 
@@ -43,12 +49,15 @@ outputs     plans, decisions, refusals,          docs, JSON Schema, OpenAPI, Asy
 | `aep-contract` | the storage-independent command/query contract for engineering entities |
 | `aep-backend-memory` | the in-memory reference implementation of that contract |
 | `aep-conformance` | black-box suites a backend runs to prove it implements the contract |
+| `aep-backend-markdown` | the durable planning store: epics, stories and tasks as markdown under `.engineering/planning/` |
+| `aep-driver`, `aep-driver-spec` | the reference driver, and the step map it walks |
+| `aep-render` | a workflow, and a run over it, drawn as SVG, HTML, PNG or a terminal frame |
 | `adp-domain`, `aop-domain` | development-specific and operations-specific vocabularies |
-| `protocol-cli` | the reference CLI over all of it |
+| `protocol-cli` | the reference CLI over all of it — seventeen top-level verbs |
 
-The document tree (`protocols/`, `principles/`, `workflows/`, `profiles/`,
-`artifacts/lifecycles/` — 39 files in this repository) is data, not code. Teams vendor it and add
-their own documents beside it; see [Govern a task](../guides/govern-a-task.md).
+The document tree (`protocols/`, `principles/`, `workflows/`, `profiles/`, `artifacts/lifecycles/`
+and `drivers/` — 44 files in this repository) is data, not code. Teams vendor it and add their own
+documents beside it; see [Govern a task](../guides/govern-a-task.md).
 
 ### ESS: the specification side
 
@@ -70,6 +79,15 @@ and projects gaps back as a reviewable patch tree. Nothing in the workspace reac
 scanner is a separate repository holding the credentials. See
 [Check infrastructure against a desired state](../guides/check-infrastructure.md).
 
+### Transcript conformance: a third instance of it
+
+`trace-domain` and `trace-spec` point the same pipeline at an agent run. A transcript is the
+observation, an authored `trace-spec/1` document is the desired state, a content-addressed
+`trace-ir/1` is the normal form, and the verdicts are `ok`/`gap`/`unk` — the third value meaning the
+adapter did not understand the event, which is a different thing from the expectation failing. A
+passing check mints an AEP evidence record, so *what the agent did* becomes a fact the protocol can
+read. See [Check a transcript](../guides/check-a-transcript.md).
+
 ## Design properties that hold everywhere
 
 These are the cross-cutting rules; [Design principles](./design-principles.md) covers each with its
@@ -90,8 +108,10 @@ enforcement mechanism.
 
 Stated so it can be held.
 
-* **Not an LLM orchestration framework.** Nothing calls a model or holds a prompt. The harness does
-  that; the protocol answers the harness's questions.
+* **Not an LLM orchestration framework.** The engine calls no model and holds no prompt; a harness
+  does that and asks the protocol what it may do next. The shipped driver is a *reference*
+  implementation of that harness role, kept in the repository so the contract has a proven caller —
+  not a product, and not a place to put routing, retries or a model catalogue.
 * **Not a CI system, an incident-management product, a workflow engine or a message broker.**
   External systems do the work; this project decides what the results permit.
 * **Not a policy language meant to replace OPA.** The subject is engineering work and the software
@@ -111,4 +131,6 @@ specification safely determines.
 ---
 
 **Sources.** `README.md` § *Repository layout*; `AGENTS.md` § *What this repository is*, § *Current
-state*, § *Invariants*; `docs/VISION.md` § *What this is deliberately not*.
+state*, § *Invariants*; `docs/VISION.md` § *What this is deliberately not* (and the narrowing that
+puts one reference driver inside the boundary); `target/debug/protocol validate` and `--help` at
+`0.10.0-horizons-dogfood-lab`; `crates/` (the component table).

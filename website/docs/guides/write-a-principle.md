@@ -14,6 +14,11 @@ it. This guide encodes a real rule end to end:
 
 For the full syntax, see the [document reference](../reference/documents.md).
 
+Commands assume `B=target/debug/protocol` after `cargo build -p protocol-cli`. The tree they run
+against is this repository's `protocols/`, `principles/`, `workflows/`, `profiles/` and `artifacts/`
+with the two documents below added to it — which is what every count in the output lines is a count
+of.
+
 ## Four decisions, in order
 
 | Decision | Question | In the document |
@@ -70,7 +75,7 @@ principles:
 ## Verify it does what you meant
 
 **Applicability.** Two tasks under the same profile — one declares `change.database_schema: true`,
-one does not:
+the other declares it `false`:
 
 ```console
 $ $B resolve --root . --task task.yaml | grep -E '^(task|principles|obligations)'
@@ -86,14 +91,21 @@ obligations 10
 The rule is **absent** from the second task, not present and vacuously satisfied — so nobody reads a
 green report and wonders which ticks meant anything.
 
+**Saying nothing is not the same as saying no.** Leave `change.database_schema` out of the second
+task entirely and the rule stays in force, all twelve obligations with it. An applicability condition
+the engine cannot evaluate resolves to *applies*
+(`crates/aep-domain/src/principle.rs:688`), because a rule that can rule itself out by silence is a
+rule nobody can rely on. Opting out is a declaration a reviewer can see.
+
 **Timing.** With the migration plan in the manifest, a failing test carries the task into
 implementation. Remove the plan from the manifest and the same evidence stops one state short:
 
 ```console
 $ $B evaluate --root . --task task.yaml --artifacts artifacts-without-the-plan.yaml \
-    --evidence red-test.yaml --advance | grep -E '^(state|transitions)|migration-plan'
+    --evidence red-test.yaml --advance | grep -E '^(state|transitions)| -> implement|migration-plan'
 state       establish_verifiers (Establish verifiers)
 transitions
+  establish_verifiers -> implement [blocked]
       ? artifact migration-plan (approved) — no migration-plan artifact is declared [principle migration-has-a-way-back]
 ```
 
@@ -107,9 +119,9 @@ rule — both better outcomes than an agent quietly writing the migration.
 
 ```console
 $ $B validate --root .
-40 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 5 lifecycle(s)
+46 file(s): 3 protocol(s), 23 principle(s), 4 workflow(s), 7 profile(s), 8 lifecycle(s), 1 step map(s)
 1 problem(s):
-  - [unobservable_fact] principle migration-has-a-way-back.obligations.migration-has-a-way-back/before-completion: `migration.rollback_tested` is not declared observable by protocol adp/1 (hint: declared families: mutation.**, differential.**, invariant.**, clean_room.**, build.**, types.**, task.**, change.**, risk, severity, state.**, workflow.**, principle.**, evidence.**, required_evidence.**, tests.**, test.**, unit_tests.**, contract_tests.**, regression_suite.**, static_analysis.**, contracts.**, property_test.**, coverage.**, specification.**, diff.**, source_diff.**, artifact.**, review.**, verification.**, approval.**, approvals.**, deployment.**, metric.**, service.**)
+  - [unobservable_fact] principle migration-has-a-way-back.obligations.migration-has-a-way-back/before-completion: `migration.rollback_tested` is not declared observable by protocol adp/1 (hint: declared families: ess_conformance.**, trace_conformance.**, mutation.**, differential.**, invariant.**, clean_room.**, build.**, types.**, task.**, change.**, risk, severity, state.**, workflow.**, principle.**, evidence.**, required_evidence.**, tests.**, test.**, unit_tests.**, contract_tests.**, regression_suite.**, static_analysis.**, contracts.**, property_test.**, coverage.**, specification.**, diff.**, source_diff.**, artifact.**, review.**, verification.**, approval.**, approvals.**, deployment.**, metric.**, service.**)
 $ echo $?
 1
 ```
@@ -123,9 +135,10 @@ becomes true:
 
 ```console
 $ $B validate --root .
+46 file(s): 3 protocol(s), 23 principle(s), 4 workflow(s), 7 profile(s), 8 lifecycle(s), 1 step map(s)
 valid
 $ $B evaluate --root . --task task.yaml | grep passsed
-  ? verification.recovery.passsed        [principle migration-has-a-way-back]
+  ? verification.recovery.passsed                                 [principle migration-has-a-way-back]
       unobserved: verification.recovery.passsed
 ```
 
@@ -134,14 +147,21 @@ than a typo. Check every new predicate against the
 [projected-facts table](../reference/vocabulary.md#facts-the-engine-projects) before writing the
 rest of the rule.
 
-## Rules the validator holds you to
+## Rules you are held to, and where each one bites
 
 * `before_<phase>` keys use `_` for `-` in phase names: `before_verification_setup` → phase
-  `verification-setup`. Every phase named must exist in the workflow the profile uses.
+  `verification-setup`. A phase no state declares is caught at **resolve**, not at validate — no
+  workflow is known until a profile picks one — as ``[unknown_phase] workflow adp/default: an
+  obligation is timed against phase `nonsense-phase`, which no state declares``, with the declared
+  phases listed beside it.
 * Requirements with no stated timing default to **before completion**.
-* A principle must enforce something — obligations, evidence, verification or a capability policy.
-  A document with only a title is rejected.
-* A principle's `capabilities:` may only take away (`deny`, `require_approval`) — granting is a
-  profile's or protocol's job.
-* Extending a profile can only make completion harder: conditions are conjoined, and a denial
-  cannot be granted back.
+* A principle must enforce something. A document with only a title is refused at validate as
+  `[empty_declaration] principle empty-rule: declares no obligations, evidence, verification or
+  capability policy, so it cannot change any outcome`.
+* A principle's `capabilities:` may only take away. `deny` and `require_approval` are applied; an
+  `allow:` parses, validates and is then **ignored** — a principle restricts, and granting is a
+  profile's or a protocol's job (`crates/aep-domain/src/capability.rs:630`). Adding
+  `allow: [secret.read]` to the rule above leaves `denied secret.read` in the resolved plan.
+* Extending a profile can only make completion harder: conditions are conjoined — `acme.service`
+  inherits `development.fast`'s completion condition through `development.standard` and reports both,
+  separately, in `evaluate` — and a denial cannot be granted back.

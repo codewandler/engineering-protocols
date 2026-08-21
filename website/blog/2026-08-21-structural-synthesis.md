@@ -20,6 +20,23 @@ output below is reproducible — and checked by tests, not pasted from memory.
 
 {/* truncate */}
 
+:::note[Since publication]
+
+**2026-08-22.** Three claims below have moved. The plan's counts and the typestate argument have not.
+
+- **`--target` is no longer a one-variant enum.** Wave 7 put a Go emitter and a `WebAssembly`
+  browser emitter behind the same language-neutral plan: `rust`, `go`, `web` — one planner, three
+  emitters, and what each target holds more weakly is written into a `TARGET.md` beside its tree
+  rather than lost.
+- **The billing suite is 29 scenarios, not 27.** `0.6.1-ess-wave-6.5` added two value-invariant
+  scenarios. The workspace linked with the hand-written obligations passes **29 of 29**, and the
+  deliberately corrupted linkage still fails exactly one.
+- **The byte counts in the file listing are all larger.** Wave 7 added a `contract_digest` to every
+  generated artifact's provenance header. The file set is the same, and so are the dispositions —
+  45 capabilities, 33 generated, 8 obligations, 4 refused.
+
+:::
+
 ## One command, one plan, one workspace
 
 ```console
@@ -188,7 +205,7 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 And the suite earned its keep before any human reviewer did: it caught a real generator defect. The
 generated delivery arm matched `is_err()`, which conflated a provider *refusing* an address — the
 binding's declared `failed` outcome, whose policy is to escalate — with the behaviour behind the
-port simply not being implemented yet. Under that shape a forced `SendEmail` failure produced no
+port not being implemented yet. Under that shape a forced `SendEmail` failure produced no
 `DeliveryEscalated`, and `notify-on-invoice-created/binding/on-failure` failed. The fix
 distinguishes them: a declared failure takes the declared policy; an unmet obligation propagates,
 because escalating it would publish a domain event no domain fact caused. That is the wave's

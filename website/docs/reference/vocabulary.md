@@ -36,8 +36,16 @@ metric_observation  health_observation  approval  diff  artifact  review  verifi
 specification
 ```
 
-Plus `ess_conformance`, produced by the conformance runner (see
-[Verify an implementation](../guides/verify-conformance.md)).
+`adp/1` adds two more, each minted by the verb that ran the check rather than by the party under
+review:
+
+```text
+ess_conformance     an implementation against a specification — protocol ess conform evidence
+trace_conformance   an agent run against a trace-spec/1 document — protocol trace evidence
+```
+
+See [Verify an implementation](../guides/verify-conformance.md) and
+[Check a transcript](../guides/check-a-transcript.md).
 
 ## Verifiers
 
@@ -45,6 +53,9 @@ Plus `ess_conformance`, produced by the conformance runner (see
 compiler  test-runner  contract-runner  static-analyzer  property-tester  model-checker
 telemetry-query  policy-engine  human-approval  human-review  artifact-validator
 ```
+
+`adp/1` adds `conformance-runner` and `trace-checker`, the producers of the two evidence kinds it
+declares.
 
 `aep_engine::engine::kinds_for_verifier` maps each verifier class to the evidence kinds it can
 produce.
@@ -54,8 +65,9 @@ produce.
 Kinds: `vision product-requirements initiative epic story task specification acceptance-criteria
 design feature-design component-design architecture-design api-design data-design
 architecture-decision-record test-plan evaluation-plan verification-report review-result
-approval-record release-plan migration-plan runbook incident-report postmortem`. Requiring `design`
-is satisfied by any design subkind.
+approval-record release-plan migration-plan runbook incident-report postmortem`, plus
+`executable-system-specification` under `adp/1`. Requiring `design` is satisfied by any design
+subkind.
 
 Statuses: `draft proposed in_review approved accepted rejected active implemented superseded
 archived`. Requiring `approved` is satisfied by `accepted`, `active` or `implemented` too.
@@ -79,7 +91,8 @@ static_analysis.**  contracts.**  property_test.**  coverage.**
 specification.**  diff.**  source_diff.**  artifact.**  review.**  verification.**
 approval.**  approvals.**  deployment.**  metric.**  service.**
 
-adp/1 adds: mutation.**  differential.**  invariant.**  clean_room.**  build.**  types.**
+adp/1 adds: ess_conformance.**  trace_conformance.**
+            mutation.**  differential.**  invariant.**  clean_room.**  build.**  types.**
 aop/1 adds: incident.**  blast_radius.**  slo.**  release.**  rollout.**  runbook.**  migration.**
             error_rate  recovery_verified
 ```
@@ -111,12 +124,20 @@ family with a spelling nothing projects passes validation and then never becomes
 | `review.<subject-kind>.{result,approved,blocking_findings,by_human}`, `review.{result,approved}` | a `review` |
 | `verification.<claim>.{status,passed}` | a `verification` |
 | `specification.satisfied`, `specification.requirements.{total,satisfied}`, `specification.unsatisfied.count` | a `specification` |
+| `ess_conformance.{status,passed,spec_version,spec_digest}`, `ess_conformance.scenarios.{total,failed}` | an `ess_conformance` (`adp/1`) |
+| `trace_conformance.{status,passed,specification,spec_digest,transcript_digest}`, `trace_conformance.expectations.{total,gapped,unknown}` | a `trace_conformance` (`adp/1`) |
 | `state.current`, `state.<id>.entered`, `workflow.terminal` | the engine |
 | `evidence.count.<kind>`, `evidence.first_seq.<kind>`, `evidence.last_seq.<kind>` | the engine |
-| `evidence.missing`, `required_evidence.missing`, `approvals.granted`, `principle.<id>.active` | the engine |
+| `evidence.missing`, `evidence.lapsed`, `required_evidence.missing`, `approvals.granted`, `principle.<id>.active` | the engine |
 
 `evidence.first_seq.<kind>` is submission order — how ordering rules become checkable:
 `evidence.first_seq.test_result < evidence.first_seq.diff` says a test ran before any code changed.
+
+Both `passed` facts read pessimistically: a conformance record claiming a pass alongside failed
+scenarios or gapped expectations is contradicting itself, and the fact does not take the optimistic
+half of that. `spec_digest` sits beside the label so a rule can pin the specification a task is
+governed by rather than trust a name two models can share; `trace_conformance.transcript_digest`
+pins the *run*, where `spec_digest` pins only the document it was judged against.
 
 Verification claim ids are singular and shared across documents: `precondition postcondition
 invariant hypothesis recovery blast-radius clean-room differential mutation migration dry-run`.
@@ -150,4 +171,14 @@ change.architectural: true
 
 Operators in mapping form: `eq ne lt lte gt gte any_of none_of exists truthy`.
 
-Evaluation is three-valued — see [Evidence and completion](../concepts/evidence.md).
+Evaluation is three-valued — see [Evidence and completion](../concepts/evidence.md). A fact nobody
+has observed reads Unknown; so does an evidence requirement whose most recent record is older than
+the `horizon:` it declares. Unknown blocks a transition exactly as False does, but it means
+something different and wants a different response — run something, rather than fix something.
+Horizons are in the [document reference](./documents.md#requirement-sets).
+
+A horizon reaches this table too. A lapsed record's facts are withheld from the fact store under the
+strictest horizon the resolved plan declares for that kind, so a guard reading `tests.unit.failed`
+directly rather than through a requirement decays the same way instead of running on a stale number.
+`evidence.lapsed` counts those separately from `evidence.missing`, so a gate nobody has looked at
+recently is distinguishable from a gate nobody has ever met.

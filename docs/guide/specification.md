@@ -19,6 +19,7 @@ its HTTP layer.
 | Look one declaration up, resolved | `protocol ess inspect --path <path> <name>` |
 | See the actor/command/event graph | `protocol ess graph --path <path> --format dot\|mermaid\|json\|yaml` |
 | Derive documentation, schemas and contracts | `protocol ess generate --kind docs\|schema\|openapi\|asyncapi` |
+| Synthesize the code it determines, and the plan for what it does not | `protocol ess synthesize --path <path> --target rust\|go\|web` |
 | Derive the conformance suite it obliges | `protocol ess conform synthesize --path <path>` |
 | Run that suite against an implementation | `protocol ess conform run --path <path> --target <name>` |
 | Turn that run into AEP evidence | `protocol ess conform evidence --path <path> --target <name>` |
@@ -82,9 +83,46 @@ the two values swapped validates clean.** JSON Schema constrains structure; it c
 identity. That is a real limit, stated rather than papered over.
 
 **A command becoming an endpoint.** `CreateInvoice` is a command; `POST /invoice/commands/create-invoice`
-is one way to expose it. The model has no `exposures:` construct yet (design §6 sketches one), so that
+is one way to expose it. The model has no `exposures:` construct yet
+([`ess-implementor-design-v0.1.md`](../design/ess-implementor-design-v0.1.md) §6 sketches one), so that
 path is a *convention the generator chose*, written down in the generated document's own description.
 When `exposures:` lands it should override the convention, not replace it.
+
+### The code a specification determines, and the plan for the rest
+
+`generate` writes documents about the system. `synthesize` writes part of the system: a standalone
+workspace of semantic types, plus `PLAN.md` and `plan.json` — the typed list of every capability with
+its disposition.
+
+```console
+$ protocol ess synthesize --path examples/billing --target rust
+billing v3 — 45 capabilities: 33 generated, 8 obligation(s), 4 refused, model digest 13577b3ce695…
+  obligation: command behaviour `billing.invoice.CreateInvoice` — the contract is declared; the algorithm is not
+  refused: actor grants `billing.invoice.Customer` — a grant is checked against a caller identity, which types do not carry
+  …
+nothing written: pass --out to write the workspace, or --format json for its contents
+```
+
+**No business logic is guessed.** What the specification does not determine is an obligation carrying
+the contract you owe, or a refusal carrying its reason — never a plausible-looking function. That is
+the limit to plan around: generated code is structural, never behavioural, and every algorithm stays a
+typed obligation someone implements. Making an obligation an artifact a task can own is W7.4, deferred
+by decision ([`docs/plan/ess-wave-7-closing-the-loop.md`](../plan/ess-wave-7-closing-the-loop.md)).
+
+Three targets are emitted behind one language-neutral plan — `rust`, `go` and `web`, the last a
+`WebAssembly` module over the Rust target's system with no `wasm-bindgen`. The plan is byte-identical
+in all three trees, so the choice of target changes what is made of the plan and never the plan. What a
+target holds more weakly, or cannot represent at all, is stated in a `TARGET.md` beside it rather than
+folded into the plan: [`generated/go/billing/TARGET.md`](../../generated/go/billing/TARGET.md) records
+four weakenings, including that a Go `switch` over a closed variant set is not checked for
+exhaustiveness where the Rust `match` is.
+
+The neutrality claim is not self-reported. `examples/gatepass/` is synthesised to Rust and to Go, and
+`cargo xtask synth --check` builds both applications from the committed trees plus their hand-written
+realizations, starts each on an ephemeral port, and compares their startup records outside `runtime`,
+the status and body of seven exchanges, and the two documents they publish about themselves byte for
+byte. One specification, two running applications, one surface — checked by running them, in the same
+gate step that checks the trees still match their specifications.
 
 ### Closing the loop: the suite a specification obliges
 
@@ -119,7 +157,9 @@ The third one is the distinction worth having: `1` says the system is wrong, `3`
 out. `protocol ess conform run --path examples/oracle-fixture --target billing` is `3`, because the
 billing implementation has never heard of `oracle.order.PlaceOrder`.
 
-`--untraced` shows the fourth word. §16 refuses to require every implementation to trace the commands
+`--untraced` shows the fourth word.
+[`ess-closed-loop-execution-conformance-design-v0.1.md`](../design/ess-closed-loop-execution-conformance-design-v0.1.md)
+§16 refuses to require every implementation to trace the commands
 its bindings invoke, so a target that cannot is legitimate — and the one scenario that needs it comes
 back `unsupported` rather than passing, and the run still fails. A check the target could not make is
 not a check that passed.
@@ -146,8 +186,8 @@ Two verbs, one word apart, two questions:
 | `protocol conformance` | does a storage **backend** implement the AEP contract — commands, queries, audit, idempotency, consistency? |
 | `protocol ess conform` | does an **implementation** satisfy this specification — is a negative amount refused, can a paid invoice still be cancelled? |
 
-Design §42 calls the first contract conformance and the second semantic conformance. Neither implies
-the other, and each command's `--help` names the other one.
+The closed-loop design §42 calls the first contract conformance and the second semantic conformance.
+Neither implies the other, and each command's `--help` names the other one.
 
 ### What changed, and which way
 
@@ -245,7 +285,7 @@ artifacts owed regeneration:
   …
 ```
 
-Without this, moving one grant means re-running all twenty-seven: gate G19 binds conformance
+Without this, moving one grant means re-running all twenty-nine: gate G19 binds conformance
 evidence to the specification digest it was produced against, so the moment the model moves, every
 requirement it satisfied goes back to owed. That is correct and it is blunt. Seven is the same
 answer, proportionate.
@@ -549,9 +589,17 @@ $ protocol ess conform evidence --path examples/billing --target billing
   status: passed
   scenarios_total: 29
   scenarios_failed: 0
+  suite_version: ess-conformance/1
+  compiler_version: 0.1.0
+  generator_version: 0.1.0
+  observed_at: 1787352140873
   producer:
     producer: verifier
     verifier: conformance-runner
+  provenance:
+    command: protocol ess conform evidence --path examples/billing --target billing
+    inputs:
+    - examples/billing
 ```
 
 That file goes straight into `protocol evaluate --evidence`, and
@@ -559,10 +607,10 @@ That file goes straight into `protocol evaluate --evidence`, and
 a passing run completes the task, and a run against an implementation with one deliberate fault
 leaves it blocked, naming `ess_conformance.scenarios.failed = 1` and the principle that refused it.
 
-Three things about that record are worth knowing before you rely on it.
+Five things about that record are worth knowing before you rely on it.
 
 **The conversion happens in the runner, not in the engine.** Invariant 7 — the engine never
-manufactures evidence — and design §32: an agent may trigger a run, read the report and repair what
+manufactures evidence — and the closed-loop design §32: an agent may trigger a run, read the report and repair what
 it says, and may not construct the record by assertion.
 [`ConformanceReport::to_evidence`](../../crates/ess-conformance/src/evidence.rs) takes no argument
 naming who produced it, so there is no call site at which a caller can describe itself as the
@@ -573,6 +621,14 @@ verifier. That is also why the verb runs the suite rather than converting a save
 resolutions can share; `spec_digest` is the content identity of the resolved model, and the rule
 fails closed — an ESS artifact recording no `model_digest` can never be shown to have been conformed
 to, and a run against yesterday's model does not close a task built against today's.
+
+**`observed_at` says when somebody looked.** It is required on every evidence record, it is the
+runner's, and a value in the future is refused rather than accepted as fresh. A requirement may
+declare a `horizon` in whole days, and past it the fact reads unknown rather than false — nobody
+knows whether the implementation still conforms, which is a run to go and repeat and not a defect to
+fix. `ess-conformance` declares no horizon today, so a conformance run counts until the model moves;
+declaring one is how a project says a green suite from three weeks ago has stopped meaning anything.
+`protocol evidence inspect <file>` reads the dates back and ages them.
 
 **`independent: true` is structural, not attested.** It says the producer is not the agent under
 review, checked by one comparison. Nothing signs the file, and a person can type one. Which

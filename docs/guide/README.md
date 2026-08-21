@@ -13,9 +13,10 @@ gated by `task check`.
 
 | Missing | Consequence for you |
 |---|---|
-| A durable backend | The only implementation is [`aep-backend-memory`](../../crates/aep-backend-memory/), which forgets everything when the process exits. [`backend.md`](backend.md) is about writing one that does not, and proving it. |
+| A durable backend | A durable store exists — [`aep-backend-markdown`](../../crates/aep-backend-markdown/) keeps planning artifacts as files — but it is not an implementation of the storage contract, so the only thing the suites have ever certified is [`aep-backend-memory`](../../crates/aep-backend-memory/), which forgets everything when the process exits. [`backend.md`](backend.md) is about writing one that does not, and proving it. |
 | A remote conformance runner | `protocol conformance` runs the suites against the in-memory backend. Proving *your* backend means calling `aep_conformance::run` from your own test suite. |
-| Federated artifact graphs | An artifact manifest describes one project. Cross-repository architecture (design §92) resolves references by hand today. |
+| Federated artifact graphs | An artifact manifest describes one project. Cross-repository architecture ([`consolidated-design-v0.2.md`](../design/consolidated-design-v0.2.md) §92) resolves references by hand today. |
+| An attestation behind `independent: true` | The engine checks that the producer is not the agent under review. Nothing signs the record, so which producers you let write one is your harness's decision, not the protocol's. |
 
 ## Which guide
 
@@ -38,7 +39,7 @@ Build the CLI, check the documents, watch a refusal.
 $ cargo build -p protocol-cli
 $ B=target/debug/protocol
 $ $B validate
-39 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 5 profile(s), 5 lifecycle(s)
+44 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 8 lifecycle(s), 1 step map(s)
 valid
 ```
 
@@ -119,3 +120,7 @@ One failing test and an approved specification are enough to reach implementatio
 failing one. `✗` and `?` mean different things and want different responses: `✗` is a fact that is
 wrong, `?` is a fact nobody has observed. Submit all five evidence files and the same command reaches
 `complete`.
+
+Every record above carries an `observed_at`, and a requirement may put a horizon on it — after which
+the fact goes back to `?` rather than to `✗`, because an old answer is not a wrong one.
+[`adopting.md`](adopting.md) § *A rule with a clock on it* is the worked version.

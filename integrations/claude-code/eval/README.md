@@ -200,6 +200,26 @@ enforcement design wanted an allowlist audit, and both specifications say so.
 **`subagent.spawned` is decidable after all.** Neither committed fixture records it, but both driven
 runs reported `subagent_stats.spawned = 0`, so the row is gating in both specifications.
 
+## A third check set, which costs nothing to run
+
+[`checks/`](./checks/) is not an eval. It is nine shell verifiers — one per decomposed task of
+`story:agent-eval-cases` — written in the `establish_verifiers` state of the governed run `W4-1/1`,
+**before** the things they check existed. They are red, and red is the product: a test that passes
+before the code exists is a test of nothing, and the `establish_verifiers → implement` transition is
+guarded on `test.exists` precisely so the order cannot be argued about afterwards.
+
+```bash
+bash ./checks/run-checks.sh                          # every check
+bash ./checks/run-checks.sh trace-documents readme   # only those
+```
+
+Today it reports `2 pass, 67 fail, 0 broken check(s)`. Nothing in it calls the Claude API: rows that
+are claims about a live run are asserted against the recordings
+[`checks/contracts/evidence-manifest.txt`](./checks/contracts/evidence-manifest.txt) names, so a
+live-only row stays in the table as a red row instead of becoming a skip. A missing deliverable is a
+red row, never an absent one — a check that reported nothing when its subject did not exist would go
+green for having no failures, which is the same defect as a gate somebody switched off.
+
 ## One thing the first run got wrong, kept because it is the interesting part
 
 The denial step originally asked the model to hand-edit a **`status:`** field. It did not take the

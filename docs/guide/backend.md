@@ -316,7 +316,7 @@ requires each suite. Read it rather than this table if the two ever disagree.
 
 `FaultyBackend` wraps a working backend and injects exactly one observable misbehaviour. The crate's
 own tests then assert that the suite responsible for that property fails — *and* that the others
-still pass, so a fault does not simply break everything.
+still pass, so a fault does not break everything at once.
 
 ```text
 Fault::ReplayApplies          →  the idempotency suite must fail
@@ -333,6 +333,22 @@ about reading a test suite tells you whether it would catch anything; the only w
 hand it something wrong and watch it complain. If you write suites of your own for a backend
 extension, write the broken backend too — otherwise a green run means the tests ran, not that the
 behaviour holds.
+
+## Nobody has proved a durable backend against these suites
+
+Worth knowing before you start: if you write one, you are the first. The contract has exactly one
+implementor — [`aep-backend-memory`](../../crates/aep-backend-memory/) — and every one of the sixteen
+suites runs against that and nothing else. A backend that survives a process exit has never been held
+to them.
+
+A durable store does exist, and it is not that. [`aep-backend-markdown`](../../crates/aep-backend-markdown/)
+keeps planning artifacts as markdown files under `.engineering/planning/`, one artifact per file, and
+this repository plans its own work in it. It writes through its own two functions rather than through
+`CommandService` — a second write path, recorded as deviation **D-P1** against invariant 14 rather
+than left to be discovered — so it implements neither trait and the suites cannot be pointed at it.
+What changes that is `story:journal-backed-store` ("P3: the markdown store writes through
+`CommandService`") under `epic:planning-store-as-backend`, both in `.engineering/planning/`. Until
+then, "there is a durable backend" is a claim the suites do not support.
 
 ## The reference to diff against
 
@@ -360,6 +376,10 @@ $ $B entity list --artifacts examples/development-passkeys/artifacts.yaml
 01MEM0000000000000013  aep.specification/v1                 ep://local/manifest/specification/passkeys-auth         r1
 01MEM0000000000000016  aep.story/v1                         ep://local/manifest/story/AUTH-141                      r1
 ```
+
+`--planning <store>` seeds the same in-memory backend from a markdown planning store instead of a
+manifest, which is how the store's artifacts are queried through the contract without the store
+implementing it.
 
 And `describe_type` is what stops a harness hard-coding what a design is:
 

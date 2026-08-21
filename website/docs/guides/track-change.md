@@ -54,48 +54,82 @@ Rules the report follows:
   removal and an addition, because a rename and a delete-plus-create have different consequences for
   everything already deployed.
 * **One refusal:** two specifications naming different systems. The delta would be enormous,
-  plausible, and an answer to a question nobody asked.
+  plausible, and an answer to a question nobody asked, so the answer is exit 1 and one line:
 
-`--format json` writes the canonical `ess-diff/1` document — byte-identical for the same pair, each
-change carrying an id derived from its own content, so a review comment can quote one and still mean
-the same change later.
+  ```text
+  refused: these are two systems, not two revisions: `billing` and `catalog`
+  ```
+
+`--format` takes `text` or `json`, and nothing else. `--format json` writes the canonical
+`ess-diff/1` document — byte-identical for the same pair, each change carrying an id derived from its
+own content, so a review comment can quote one and still mean the same change later.
 
 ## What that invalidates: `ess impact`
 
 A delta says what moved; `impact` says what **stood on** what moved — which conformance scenarios
-are owed again, and which generated artifacts are owed regeneration:
+are owed again, and which generated artifacts are owed regeneration. This repository ships one
+revision of billing, so make the second one: copy it and move a single grant from one actor to
+another.
 
 ```console
-$ protocol ess impact --from examples/billing --to billing-with-one-grant-moved/ \
-    --suite suites/generated/billing/suite.json
+$ NEXT=$(mktemp -d)/billing && cp -r examples/billing "$NEXT"
+$ # in $NEXT/domains/invoice.yaml, move `billing.invoice.CreateInvoice`
+$ # from actor `billing.invoice.Customer`'s `may:` list to `billing.invoice.Auditor`'s
+$ protocol ess impact --from examples/billing --to "$NEXT" \
+    --suite suites/generated/billing/suite.json | head -18
+billing v3 → v3
+  before  13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
+  after   c37415bc4c4d2dc113af19f38be2affc909fdc443fe7b080dbc4a9ef757cfab8
 
 2 change(s): 1 widening, 1 narrowing, 0 other
-  ...
-suite billing v3 (13577b3c…): 7 of 29 scenario(s) owed again
+
+  widens   actor billing.invoice.Auditor: may invoke `billing.invoice.CreateInvoice`
+           actor/billing.invoice.Auditor/grant-added/billing.invoice.CreateInvoice
+  narrows  actor billing.invoice.Customer: may no longer invoke `billing.invoice.CreateInvoice`
+           actor/billing.invoice.Customer/grant-removed/billing.invoice.CreateInvoice
+
+suite billing v3 (13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861): 7 of 29 scenario(s) owed again
 2 construct(s) reached: 2 changed, 0 depend on one directly, 0 through another
 9 of 37 generated artifact(s) owed regeneration
 
   billing.invoice.CreateInvoice/outcome/accepted
-    directly-changed actor billing.invoice.Customer — actor/…/grant-removed/…CreateInvoice
-  ...
+    directly-changed actor billing.invoice.Customer — actor/billing.invoice.Customer/grant-removed/billing.invoice.CreateInvoice
+  billing.invoice.CreateInvoice/outcome/rejected
 ```
+
+The delta comes first and in full; the suite section follows it. `head -18` above cuts the remaining
+five scenarios and the artifact section, each of which reads like the two shown.
 
 Without this, moving one grant re-runs all 29 scenarios. Seven is the same answer, proportionate.
 
-**Every impact carries the path that explains it** — not "these eleven things are affected" but
-*this is affected because it references that, which references what you changed*:
+`--suite` is what adds the scenario section. **Without it, the report answers for the generated
+artifacts alone** — the same two-line count and the same explained paths, and no claim about any
+suite. `--generated generated/` goes further and checks each committed artifact's stamped contract
+digest against what its model slice computes; an artifact whose claim cannot be read or does not hold
+is owed outright — *its committed contract digest is `e6e58e0…`, and its slice computes `d2b4806…`: a
+false claim about derivation* — rather than counted as reached.
 
-```text
+`--format json` writes the canonical `ess-impact/2` document — a different document from `diff`'s,
+which is why `impact` is a verb and not a flag.
+
+**Every impact carries the path that explains it** — not "these eleven things are affected" but
+*this is affected because it references that, which references what you changed*. The
+`examples/revision-pair/` pair shows it without any editing, because its `before/` obliges a suite
+you can synthesise on the spot:
+
+```console
+$ SUITE=$(mktemp -d)
+$ protocol ess conform synthesize --path examples/revision-pair/before --out "$SUITE" >/dev/null
+$ protocol ess impact --from examples/revision-pair/before --to examples/revision-pair/after \
+    --suite "$SUITE/suite.json" | grep -A 3 'PublishPriceList/outcome/published'
   catalog.pricing.PublishPriceList/outcome/published
-    transitively-impacted entity catalog.pricing.PriceList — type/…/variant-removed/GBP
+    transitively-impacted entity catalog.pricing.PriceList — type/catalog.pricing.Currency/variant-added/CHF
       -> type catalog.pricing.Money has a field of type type catalog.pricing.Currency
-      -> type catalog.pricing.Headline wraps type catalog.pricing.Money
-      -> entity catalog.pricing.PriceList has a field of type type catalog.pricing.Headline
+      -> entity catalog.pricing.PriceList has a field of type type catalog.pricing.Money
 ```
 
-`--suite` narrows scenarios; `--generated generated/` additionally checks each committed artifact's
-stamped `contract_digest` against what its model slice computes — an artifact whose claim cannot be
-read or does not hold is owed outright, stated as such.
+That scenario never mentions `Currency`. The two hops are why it is owed again anyway, and they are
+what a reviewer checks — the path, not the verdict.
 
 ## What it will never tell you
 
@@ -109,4 +143,9 @@ vocabulary for survival, and three situations put the whole suite back to owed:
 |---|---|
 | the specification header itself changed — version, summary | no scenario names the system as a dependency, so no closure can start |
 | the suite depends on a construct the dependency graph has no node for (conversions, workloads, a domain's naming have no compared family yet) | a closure could never reach it, and silently dropping it is the one wrong narrowing that looks right |
-| the suite was produced from another revision or another system | **refused** rather than answered |
+| the suite was produced from another revision or another system | **refused** rather than answered: *the suite checks `billing` and these are two revisions of `catalog`* — exit 1, no report |
+
+And one thing it does not look at all: **prose**. A design doc, a runbook or a README that quotes a
+specification is not in the model, so no closure reaches it and no count includes it. The verb for
+that class of claim is a different one — `protocol evidence scan` reads dated claims out of markdown
+and says which of them nobody has looked at since.

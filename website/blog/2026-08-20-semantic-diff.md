@@ -18,6 +18,28 @@ below is reproducible — and checked by tests, not pasted from memory.
 
 {/* truncate */}
 
+:::note[Since publication]
+
+**2026-08-22.** Both verbs still work as described. Several of the outputs quoted below have moved.
+
+- **Six construct families became ten.** The limit stated near the end of this post — *entities and
+  commands are not yet compared* — was closed by wave 7: entities, commands, views and bindings
+  joined the comparison. The same fixture pair now reports **six** changes rather than four, and
+  between them they owe all **10** of that suite's scenarios, where the text below counts nine.
+- **A digest is the full SHA-256.** `0.6.1-ess-wave-6.5` widened it everywhere at once, and the
+  fixture grew, so the pair above reads `9aa886fb…d20a0916` → `2dcf59ba…4f4616be` today.
+- **The transitive path is two hops, not three.** The fixture's `PriceList` gained a `floor` field
+  holding `Money` directly, so the shortest path from the changed `Currency` no longer runs through
+  `Headline`.
+- **Billing is 29 scenarios, not 27** — wave 6.5 added two value-invariant scenarios. Re-measured
+  today: moving a grant owes **7 of 29**, adding or removing an enum variant **25 of 29**. The
+  shape of the table is what it was; the denominator moved.
+- **A specification that has not moved is no longer enough.** Since `0.10.0-horizons-dogfood-lab`
+  an evidence requirement may declare a `horizon`, past which the record reads `Unknown` — so a
+  result goes back to owed on the calendar as well as on the diff.
+
+:::
+
 ## The problem, in one commit
 
 Somebody — increasingly, some *agent* — revises a specification. Between the two revisions,

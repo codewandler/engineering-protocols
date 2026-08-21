@@ -7,9 +7,9 @@ description: Build the CLI, validate the document tree, resolve a task, and watc
 # Getting started
 
 This page builds the reference CLI and runs it against the worked example that ships with the
-repository. At the end you will have seen the four operations everything else builds on: validating
-a document tree, resolving a task into a plan, asking whether an action is permitted, and evaluating
-a task against evidence.
+repository. At the end you will have seen the five operations everything else builds on: validating
+a document tree, resolving a task into a plan, asking whether an action is permitted, evaluating a
+task against evidence, and asking how old that evidence is.
 
 ## Prerequisites
 
@@ -34,7 +34,7 @@ The rest of this page uses `$B` for the binary.
 
 ```console
 $ $B validate
-39 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 5 profile(s), 5 lifecycle(s)
+44 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 8 lifecycle(s), 1 step map(s)
 valid
 ```
 
@@ -42,6 +42,9 @@ valid
 protocol declares observable, a workflow state nothing can reach or leave, and a rollback policy
 that cannot state its precondition — the ways a rule ends up looking enforced while doing nothing.
 Every refusal carries a stable code and all problems are reported in one run.
+
+The step map is the newest document type: it says which program, model or person runs in each
+workflow state, and it is what the reference driver walks. Nothing else in this page needs it.
 
 ## 2. Resolve a task into a plan
 
@@ -103,6 +106,7 @@ $ $B evaluate --task examples/development-passkeys/task.yaml \
     --artifacts examples/development-passkeys/artifacts.yaml \
     --evidence examples/development-passkeys/evidence/01-red-test.yaml \
     --advance
+inputs      . and examples/development-passkeys/task.yaml
 state       implement (Implement)
 transitions
   implement -> verify [blocked]
@@ -110,6 +114,8 @@ transitions
 Task incomplete in `implement`:
   ✗ (tests.unit.failed == 0 and static_analysis.errors == 0 and evidence.missing == 0)  [completion]
       tests.unit.failed = 1; unobserved: static_analysis.errors; evidence.missing = 7
+  ? (specification.satisfied and contracts.failed == 0)           [completion]
+      unobserved: specification.satisfied; unobserved: contracts.failed
   ? specification.satisfied                                       [principle spec-driven]
       unobserved: specification.satisfied
   ...
@@ -132,6 +138,22 @@ Submitting the example's remaining evidence files carries the task through to `c
 directory `examples/development-passkeys/evidence/` holds all five, and
 [Govern a task](./guides/govern-a-task.md) walks the full sequence.
 
+## 5. Ask how old the facts are
+
+Every evidence record states when somebody looked. `observed_at` is required, it is the caller's to
+supply, and a date in the future is refused (`observation_in_future`) rather than stored:
+
+```console
+$ $B evidence inspect examples/development-passkeys/evidence/01-red-test.yaml
+test_result              2023-11-12 1013d old  -  verifier test-runner
+1 record(s), aged at 2026-08-21
+```
+
+That record is over a thousand days old, and the fixture says so on purpose. A requirement can
+declare a `horizon`; past it the requirement reads `Unknown` rather than `False`, because a lapsed
+check has not failed — nobody has run it. See
+[Evidence and completion](./concepts/evidence.md#the-two-times-on-a-record).
+
 ## Machine output
 
 Every command above takes `--format json` or `--format yaml`. Refusals, decisions and evaluations
@@ -146,3 +168,10 @@ the JSON to programs.
   tests from one document.
 * [Integrate an agent harness](./guides/integrate-a-harness.md) — make these answers govern a real
   agent, via the engine API rather than the CLI.
+* [Check a transcript](./guides/check-a-transcript.md) — judge what an agent run actually did
+  against a typed specification of what it was supposed to do.
+
+The CLI has seventeen top-level verbs; this page used five of them. `protocol drive` walks a
+workflow by running the steps a step map declares, and is the one that puts everything above
+together — [Where this stands](./status/where-this-stands.md) records what happened the first time
+it was pointed at a real story.

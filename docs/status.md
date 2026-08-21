@@ -70,8 +70,8 @@ it implements the contract by running a suite against itself.
 |---|---:|---:|---|
 | `aep-domain` — core model | 25% | 100% | 27 modules |
 | `aep-engine` — resolution, evaluation, transitions | 15% | 100% | unit and integration tested |
-| Protocol, principle, workflow and profile documents | 10% | 100% | 39 documents, validated in CI |
-| `protocol-cli` | 7% | 100% | 11 subcommands |
+| Protocol, principle, workflow and profile documents | 10% | 100% | 44 documents, validated in CI |
+| `protocol-cli` | 7% | 100% | 17 subcommands |
 | `aep-schema` + `xtask` — documents and generated schemas | 6% | 100% | 12 schemas, drift-checked, each validated against every document shipped |
 | `aep-contract` — command/query contract | 12% | 100% | write surface pinned by test |
 | Entity identity, locators and types | 5% | 100% | commands, events and audit included |
@@ -127,8 +127,8 @@ production.write denied
 * **An approval names the revision it approved**, so an approval of design version 3 stops satisfying
   a review requirement once the design is at version 7.
 * **Every decision is explainable**, as a `✓ / ✗ / ?` checklist or as a machine-readable refusal.
-* 39 documents — 3 protocols, 22 principles, 4 workflows, 5 profiles, 5 artifact lifecycles — each
-  validated against the protocol vocabulary in CI.
+* 44 documents — 3 protocols, 22 principles, 4 workflows, 6 profiles, 8 artifact lifecycles, 1 step
+  map — each validated against the protocol vocabulary in CI.
 
 * **Every mutation goes through one boundary.** `CommandService` carries actor *and* executor,
   correlation and causation, an idempotency key and an asserted revision — so a retry is recognised, a
@@ -177,8 +177,10 @@ not conformant: the implementation contradicted the specification (exit 1)
   run. The file format belongs to `aep-backend-markdown` — `aep-domain` gained nothing for it — and
   is described by a generated schema like every other document type here.
 * **Claude Code can plan through it.** [`integrations/claude-code/`](../integrations/claude-code/) is a
-  plugin: one `planning` skill, two agents — `decomposer` drafts, `plan-reviewer` only reads — and no
-  hooks, on purpose. The skill carries rules and no vocabulary; it asks the CLI which kinds, statuses
+  plugin: one `planning` skill, two agents — `decomposer` drafts, `plan-reviewer` only reads — and two
+  `PreToolUse` hooks, the deterministic half of the guardrails: `store-integrity` holds the planning
+  store's frontmatter to the CLI everywhere, and `driven-surface` holds a driven run's shell to the
+  `protocol` verbs. The skill carries rules and no vocabulary; it asks the CLI which kinds, statuses
   and moves exist at the moment it needs them, because a prose copy of a validated document is drift.
 
 * **And the protocol decides on the result.** `protocol ess conform evidence` mints the record in the

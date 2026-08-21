@@ -70,10 +70,10 @@ same source twice is byte-identical. The domain crates read no clock and no rand
 takes an injected `Clock`, so an execution replays exactly. This is what makes an audit trail
 diffable and a generated tree drift-checkable at all.
 
-**Enforced by:** banned-token scans over the ten crates that claim the property (no `SystemTime`, no
-RNG, ordered maps instead of hash maps), plus tests that compile, diff, generate or render twice and
-compare bytes. Crates that legitimately own a clock or a terminal are named as unscanned rather than
-quietly exempted.
+**Enforced by:** banned-token scans in every crate that claims the property — no `SystemTime`, no
+RNG, ordered maps instead of hash maps — fourteen of them today, plus tests that compile, diff,
+generate or render twice and compare bytes. Crates that legitimately own a clock or a terminal are
+named as unscanned rather than quietly exempted.
 
 ## 6. Parse, then validate — and refuse loudly, all at once
 
@@ -96,8 +96,8 @@ all of it and fails on any byte of difference, so a generated artifact cannot qu
 what would be generated today. A check whose toolchain is missing **fails and names the toolchain**
 rather than skipping, because a skipped check reads exactly like a passing one.
 
-**Enforced by:** the gate's drift steps — `schema-check`, `generate-check`, `suite-check`,
-`synth-check` — all of which CI runs.
+**Enforced by:** the gate's six drift steps — `status-check`, `schema-check`, `generate-check`,
+`suite-check`, `infra-check`, `synth-check` — all of which CI runs.
 
 ## 8. Semantics over transport
 
@@ -127,6 +127,38 @@ obligation, and a target's weakness is a declared entry in its `TARGET.md`.
 **Enforced by:** the digest checks in the `ess-conformance` principle and gate G19; the impact
 report's construction (narrowing only); and refusal codes across every validator and runner.
 
+## 10. A fact has a date, and an old fact is not a wrong one
+
+An evidence record states when somebody looked, and `observed_at` is required — the engine will not
+infer it from the moment of submission, because a green suite from three weeks ago filed today is
+three weeks old. A requirement may declare a horizon; past it the requirement reads `Unknown`, so a
+stale gate says *go look again* rather than *this is broken*. A date in the future is refused, not
+stored: a scheduled-but-never-performed check filed as an observation is the newest record in the
+log, and after one of those the store can no longer say whether anybody has ever looked.
+
+**Enforced by:** the required field with no default; the `observation_in_future` refusal; the
+withholding of a lapsed record's facts under the plan's strictest horizon for that kind; and a
+source scan over the five crates a horizon can be reached from that refuses both `.horizon =` and
+any `fn` taking `&mut self` with `horizon` in its name — because if `extend` is as easy to call as
+`re-check`, `extend` is what gets called.
+
+**Limit:** a requirement with a horizon and no subject is revived by any fresh record of its kind.
+See [Limitations](../status/limitations.md).
+
+## 11. One implementation of the decision, and the driver is not it
+
+The repository ships a reference driver so the harness contract has a proven caller. That driver
+makes the engine's calls in order, runs the steps a step map declares, and records what it did — and
+it evaluates **no gate**. A driver that could decide whether a transition is permitted would be a
+second implementation of the protocol carrying none of the conformance suites, and the first time
+the two disagreed, the untested one would win.
+
+**Enforced by:** the split itself — the driver calls `Engine::evaluate`, `Engine::transition` and
+`Engine::submit_evidence`, and contains no predicate evaluation at all. The first governed run is
+the evidence that the restraint
+costs something and was kept anyway: it blocked four states short of the operator, printed the
+engine's two reasons, and nothing was changed to make it go through.
+
 ---
 
 Three principles here (1, 4, and the scans behind 5) were, for a time, stated but enforced by
@@ -135,5 +167,7 @@ that history rather than smoothing it over — a claims register is only useful 
 both directions.
 
 **Sources.** `AGENTS.md` § *Invariants* (each entry names its enforcing test, lint or scan);
-`README.md` § *Design decisions worth knowing*; `CHANGELOG.md` § *0.6.1*;
+`README.md` § *Design decisions worth knowing*; `Taskfile.yml` (the drift steps);
+`crates/aep-domain/tests/horizon_immutability.rs`; `crates/aep-engine/src/error.rs`;
+`docs/plan/harness-wave-4-governed-dogfood.md` § *W4.1*; `CHANGELOG.md` §§ *0.6.1*, *0.10.0*;
 `protocols/aep/1.yaml` (`approval_floor`).

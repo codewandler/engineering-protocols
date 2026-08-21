@@ -1,7 +1,7 @@
 ---
 title: "AEP: governing engineering work"
 sidebar_position: 2
-description: The document types, how a task resolves into a plan, how capabilities compose, and how a workflow advances on evidence.
+description: The document types, how a task resolves into a plan, how capabilities compose, how a workflow advances on evidence, and what actually runs the steps.
 ---
 
 # AEP: governing engineering work
@@ -20,6 +20,7 @@ document types and the resolution and evaluation model. For syntax, see the
 | **Workflow** | a state machine whose transitions are guarded by predicates over evidence | `adp/default` |
 | **Profile** | a bundle: protocol + workflow + principles + capability policy + completion condition | `development.standard` |
 | **Artifact lifecycle** | which statuses an artifact kind may hold and how they may change | `architecture-decision-record` |
+| **Step map** | which program, model or person runs in each workflow state | `development/default` |
 | **Task** | the unit of work: objective, kind, profile, declared context facts, artifact manifest | `AUTH-142` |
 | **Artifact manifest** | where the specs, designs and reviews live — references, not copies | `artifacts.yaml` |
 
@@ -79,6 +80,31 @@ States can carry phase labels (`intake`, `implementation`, `verification`, …).
 obligations against phases (`before_implementation:`), which is what lets one principle work across
 different workflows.
 
+## Step maps: something has to actually run the steps
+
+A workflow says which states exist and what moves between them. It does not say who does the work.
+A **step map** does: for each state, a list of steps, each of one of three kinds.
+
+| Kind | What runs |
+|---|---|
+| `command` | a program — a test suite, a linter, a build |
+| `llm` | a model, in a headless session |
+| `operator` | a person; the run stops and waits |
+
+`protocol drive run` walks the map, makes the engine's calls in order, and records what it did. It
+evaluates **no gate itself**. That restraint is the design: a driver that could decide whether a
+transition is permitted would be a second implementation of the protocol with none of the
+conformance suites behind it, and the first time the two disagreed, the one nobody tested would win.
+So the driver asks, the engine answers, and a blocked run prints the engine's reasons and exits
+non-zero — which is what happened the first time it was pointed at a real story, recorded in
+[Where this stands](../status/where-this-stands.md).
+
+A driven run needs a shell to reach the planning store, which is why `development.driven` exists: it
+extends `development.standard` with exactly one capability, `command.execute`, and says in the
+document why. The narrowing back down is a `PreToolUse` hook that refuses any shell call that is not
+one simple `protocol artifact` or `protocol trace` invocation. The profile states plainly that this
+is pattern-based and best-effort rather than claiming the capability is fully enforced.
+
 ## Everything is recorded, including refusals
 
 Every mutation of an engineering entity goes through one boundary — a command carrying actor and
@@ -105,8 +131,13 @@ document, and whether the task is complete. Every requirement line names the doc
 it, and every predicate outcome is three-valued — see
 [Evidence and completion](./evidence.md) for why `Unknown` and `False` must stay distinct.
 
+A requirement can also declare a **horizon**, after which the evidence that satisfied it stops
+counting and the requirement reads `Unknown` again. That is the same page's subject: a fact has a
+date, and an old fact is not a wrong one.
+
 ---
 
 **Sources.** `docs/guide/adopting.md`; `docs/guide/harness.md`;
-`docs/plan/document-authoring-brief.md`; `AGENTS.md` § *Invariants* 6, 10, 14–16;
-`protocols/aep/1.yaml` (`approval_floor`).
+`docs/plan/document-authoring-brief.md`; `drivers/development/default.yaml` and
+`crates/aep-driver-spec/src/map.rs` (the three step kinds); `profiles/development-driven.yaml`;
+`AGENTS.md` § *Invariants* 6, 10, 14–16; `protocols/aep/1.yaml` (`approval_floor`).

@@ -54,6 +54,10 @@ and nine principles, a workflow and twelve capability decisions are derived from
   requirement at version 7 — otherwise a reviewer's name ends up attached to a decision they never saw.
 * **Unknown is not false.** `✗` is a fact that is wrong — fix the code; `?` is a fact nobody
   observed — go run the tests. Only `true` permits a transition.
+* **A fact knows when somebody looked, and stops counting when nobody has.** Every evidence record
+  states `observed_at`; a requirement may declare a horizon, and past it the observation reads `?`
+  again — never `✗`, because a green suite from three weeks ago is not a wrong answer, it is an old
+  one. Nothing extends a horizon: the only refresh is to observe again and write a new date.
 * **Capabilities default to deny**, and `deny` cannot be granted back by a later document.
 * **Nothing is deleted.** Archive and supersede are the vocabulary; every mutation crosses one
   boundary carrying actor, executor, correlation, causation and an idempotency key.
@@ -64,6 +68,10 @@ and nine principles, a workflow and twelve capability decisions are derived from
 * **`protocol workflow render` draws the run.** A workflow, and where a run has been, what it
   produced and why it stopped, as SVG, HTML, PNG or a live terminal frame. The reasons are the
   engine's own sentences, verbatim.
+* **`protocol trace check` reads the run back.** An agent's transcript is judged against a typed
+  specification — fifty expectation kinds — so *the agent followed the rules* is a verdict a program
+  reached from the record, not a claim the agent made about itself. Its exit codes distinguish
+  contradicted from nobody-found-out.
 
 ## Is this for you
 
@@ -81,20 +89,31 @@ credential. External systems do the work; this project decides what the results 
 ## What works, and what does not
 
 Working today, all gated by `task check`: the AEP document tree, resolution, evidence-guarded
-workflows and the `protocol` CLI; ESS specifications compiling to documentation, OpenAPI, AsyncAPI,
+workflows and the `protocol` CLI; evidence that carries an observation date and decays past a
+declared horizon; ESS specifications compiling to documentation, OpenAPI, AsyncAPI,
 JSON Schema, generated conformance suites, and structural skeletons in Rust, Go and a browser
 realization — with one specification run as two applications and compared in every gate run; a
 Kubernetes observation checked three-valued against a desired state, with gaps projected back as
-reviewable patches; a durable markdown planning store; a
-[Claude Code plugin](integrations/claude-code/) that plans through it; and the **reference driver**
-that walks a workflow rather than being steered along one.
+reviewable patches; a durable markdown planning store, which is the store this repository plans
+itself in; an agent transcript judged against a typed specification; a
+[Claude Code plugin](integrations/claude-code/) that plans through it and carries the driver's two
+enforcement hooks; and the **reference driver** that walks a workflow rather than being steered
+along one.
 
-Not working yet, stated plainly: no durable backend implements the storage contract — the reference
-implementation is in memory; generated code is structural, never behavioural — every algorithm
+Not working yet, stated plainly: no durable backend implements the storage contract — the markdown
+store holds files but writes through its own functions, so the contract still has one implementor
+and it is in memory; generated code is structural, never behavioural — every algorithm
 remains a typed obligation; the conformance runner cannot reach an out-of-process implementation —
 holding your own system to a specification means depending on `ess-conformance` from your own tests;
 `independent: true` is self-declared, with no signature or attestation binding a verifier to its
-evidence; and no team's work is governed by this yet — the repository is its own first user.
+evidence.
+
+And nobody's work is governed by this yet. One outside tree has been written against the
+specification and validates, which is the first evidence that it is adoptable. This repository has
+driven exactly one real story of its own backlog end to end, and that run **blocked** four states
+short of the person it was meant to stop at, for two reasons the engine printed —
+[`docs/plan/harness-wave-4-governed-dogfood.md`](docs/plan/harness-wave-4-governed-dogfood.md) § W4.1
+is the record, kept as it ran. Built is not adopted.
 
 [`docs/status.md`](docs/status.md) is the full status report: the delivered waves (derived from the
 tags, drift-checked in the gate), the component tables, and every limitation with its consequence.
@@ -111,14 +130,17 @@ The gate is the measurement — run `task check` rather than trusting a number w
 | [`docs/design/`](docs/design/), [`docs/plan/`](docs/plan/) | designs — proposed until a plan page accepts them — and the plan pages that did |
 | [`crates/`](crates/) | the workspace: the protocol, the ESS toolchain, the infrastructure and trace domains, the driver and the CLI |
 | [`protocols/`](protocols/), [`principles/`](principles/), [`workflows/`](workflows/), [`profiles/`](profiles/), [`drivers/`](drivers/) | the document tree — the rules themselves, and the step maps that say how a harness obtains what a workflow asks for |
-| [`integrations/claude-code/`](integrations/claude-code/) | the plugin: the planning skill, two agents, and the driver's enforcement hooks |
+| [`integrations/claude-code/`](integrations/claude-code/) | the plugin: the planning skill, two agents, and the driver's two enforcement hooks |
+| `.engineering/` | this repository's own project: the planning store it plans itself in, the task under work, and the driver's run records |
+| [`examples/`](examples/) | the worked example, the normative specification, the two synthesised applications, and the evidence-horizon corpus a first adopter contributed |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |
 
 ## Build
 
-Requires a recent stable Rust, [go-task](https://taskfile.dev), the Go toolchain, the
+Requires Rust 1.85 or newer, [go-task](https://taskfile.dev), the Go toolchain, the
 `wasm32-unknown-unknown` target and Node. A check whose toolchain is missing fails and names it
-rather than skipping.
+rather than skipping — a check that quietly passes without its toolchain reads exactly like a check
+that passed.
 
 ```console
 task check     # the ten-step gate: format, status, lint, tests, rustdoc, and five more drift checks

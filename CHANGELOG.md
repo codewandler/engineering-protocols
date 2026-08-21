@@ -20,6 +20,31 @@ belongs in the commit message or in `docs/design/`.
 
 ### Changed
 
+- **The public docs, the guides and the control documents caught up with the tree.** Four
+  parallel review passes over README, AGENTS.md, `docs/guide/`, the plugin READMEs and all
+  26 website pages, with one rule: every number from a command run this session, every reference
+  resolving, every quoted output reproduced. What that surfaced and fixed, beyond prose: two Rust
+  snippets that no longer compiled (`EvidenceSubmission::new` takes `observed_at` now), four
+  evidence documents shown in shapes that no longer validate, sixteen CLI leaf verbs absent from
+  the reference page (and zero phantom ones), a limitations page rebuilt from the gap register's
+  20 open rows, the driver documented as shipped instead of planned — including the first
+  governed run and where it stopped — and the evidence concepts page teaching the two-times
+  model and decay to Unknown. Blog posts keep their published text and carry dated
+  "since publication" notes where a claim aged. Three literals that drifted inside generated or
+  checked surfaces are register rows rather than hand edits, beside two defects the overhaul
+  found (`horizon` published as an integer where the parser wants `7d`; `ess impact` counting
+  56 of 38).
+
+- **The guard-efficacy review's last two loose ends, closed.** Every substantive finding of
+  `docs/reviews/2026-08-20-guard-efficacy-review.md` was fixed by later waves — the refusal that
+  authorised, the unenforced `Deserialize` ban, the one-directional approval floor, the untested
+  Kleene negation, the audit disjunct, the Decimal rejection test, proptest phase 1 — and two small
+  ones were not: the two guards the review caught reporting a bare `left == right` now say what
+  broke and why it matters (`kleene_conjunction_keeps_false_ahead_of_unknown`, the Decimal
+  structural assertions), and the `identity` conformance suite's module doc records the mutation-11
+  efficacy evidence the review's D5 accepted in place of an in-CI fault, so the one suite whose
+  efficacy CI cannot verify carries its measured proof where a reader of the suite looks.
+
 - **The horizons corpus is ground truth now, and the scanner reads two more positions.** The
   adopter fixed their reference implementation against the vendored corpus and re-issued
   `expected.json` as ground truth: 43 raw annotations, 43 parsed, `missed_by_reference: 0`, with

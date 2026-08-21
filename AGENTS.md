@@ -20,13 +20,18 @@ Exactly two, and neither is the newest file in `docs/design/`:
 When code and the consolidated design disagree, the document wins unless the disagreement is recorded
 in the reconciliation register §5. Add to that list rather than diverging silently.
 
-**Everything else in `docs/design/` is proposed until a plan page in `docs/plan/` accepts it.** A
-proposal is not a work order, however long and however recent it is.
-`ess-implementor-design-v0.1.md` and `ess-review-v0.1.md` show what acceptance looks like:
-[`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) and the wave 1–3 plan pages took them up, and
-waves 1 to 3 shipped from them. Six further proposals now sit in that directory — four filed
-2026-08-20 and since reviewed, and two filed 2026-08-21, both of which were accepted the same day —
-one in part, one taken up whole by a plan page. Their acceptance state is:
+**Everything else in `docs/design/` is proposed until a plan page in `docs/plan/` — or a story in
+`.engineering/planning/` — accepts it.** A proposal is not a work order, however long and however
+recent it is. `ess-implementor-design-v0.1.md` and `ess-review-v0.1.md` show what acceptance looks
+like: [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) and the wave 1–3 plan pages took them
+up, and waves 1 to 3 shipped from them.
+
+The store is the second acceptance surface, and it is new: `story:evidence-horizons` took up
+`evidence-horizons-design-v0.1.md` and shipped it without a plan page ever existing, which is what
+the store is for — a triaged item is a story with a status, not a page somebody has to remember to
+write. A design accepted that way is accepted; check both surfaces before calling one proposed.
+
+Eight further proposals now sit in `docs/design/`. Their acceptance state is:
 
 | proposed design | status |
 |---|---|
@@ -34,7 +39,9 @@ one in part, one taken up whole by a plan page. Their acceptance state is:
 | [`ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | **core implemented** as ESS wave 5 (`0.5.0-ess-wave-5`). Two of its seventy-eight sections are rejected outright (the proposal-evaluation loop and architecture search); the rest past §31 stays proposed |
 | [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | **accepted in part** by [`docs/plan/ess-wave-6-structural-synthesis.md`](docs/plan/ess-wave-6-structural-synthesis.md), which is wave 6, in progress. Its obligation/`Realization` programme stays proposed (W7.4 takes a slice), and its §28 is refused by invariant 6 |
 | [`semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | reviewed and **deferred whole**; two ideas harvested |
-| [`harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md) | **Phase 1 accepted** by [`docs/plan/harness-wave-1-planning-plugin.md`](docs/plan/harness-wave-1-planning-plugin.md), which is harness wave 1: the markdown planning store, `protocol artifact`, and the Claude Code plugin. Its Phase 2 **reference driver** is decided by the operator (`docs/VISION.md` § *What this is deliberately not*, narrowed 2026-08-21), reviewed against the code by harness wave 2, and **built as harness wave 3** — `aep-driver-spec`, `aep-driver`, `drivers/`, `protocol drive`, the plugin's enforcement hooks and a second harness with no model in it. Both halves are recorded in [`docs/plan/harness-wave-2-driver-decision.md`](docs/plan/harness-wave-2-driver-decision.md), which carries wave 2's decisions and wave 3's acceptance. Harness wave 4 is **proposed and not sequenced** |
+| [`harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md) | **Phase 1 accepted** by [`docs/plan/harness-wave-1-planning-plugin.md`](docs/plan/harness-wave-1-planning-plugin.md), which is harness wave 1: the markdown planning store, `protocol artifact`, and the Claude Code plugin. Its Phase 2 **reference driver** is decided by the operator (`docs/VISION.md` § *What this is deliberately not*, narrowed 2026-08-21), reviewed against the code by harness wave 2, and **built as harness wave 3** — `aep-driver-spec`, `aep-driver`, `drivers/`, `protocol drive`, the plugin's enforcement hooks and a second harness with no model in it. Both halves are recorded in [`docs/plan/harness-wave-2-driver-decision.md`](docs/plan/harness-wave-2-driver-decision.md), which carries wave 2's decisions and wave 3's acceptance. Harness wave 4 — [`docs/plan/harness-wave-4-governed-dogfood.md`](docs/plan/harness-wave-4-governed-dogfood.md) — stays **proposed**, and its W4.1 has been run once: `W4-1/1`, 2026-08-21, **blocked in `establish_verifiers`** for two reasons the engine printed. The run is the finding, and it is on that page rather than repaired into a pass |
+| [`evidence-horizons-design-v0.1.md`](docs/design/evidence-horizons-design-v0.1.md) | **implemented**, 2026-08-21, accepted by `story:evidence-horizons` in `.engineering/planning/` rather than by a plan page. Its own header still reads *proposed* and is stale; the gap register's *Closed by code — evidence horizons* section is the record. Follow-ups it left are open rows there: F26, and decisions D-6 and D-7 |
+| [`story-completion-evidence-design-v0.1.md`](docs/design/story-completion-evidence-design-v0.1.md) | **proposed, not accepted.** Proposed by [`docs/plan/harness-wave-4-governed-dogfood.md`](docs/plan/harness-wave-4-governed-dogfood.md) § W4.3, whose acceptance criterion is a verdict on it — accepted, accepted in part or refused — and not a build. Both shapes it could take are domain changes |
 | [`transcript-conformance-design-v0.1.md`](docs/design/transcript-conformance-design-v0.1.md) | **accepted, in implementation** as trace wave 1 by [`docs/plan/trace-wave-1-transcript-checker.md`](docs/plan/trace-wave-1-transcript-checker.md), which takes up its milestones T1–T3, sequences them and sets their acceptance criteria. Its open decisions D1–D6 are taken at their stated defaults, with one narrowing: the `regex` matcher of § 3.4 is **refused by name** rather than implemented, because the workspace carries no regular-expression engine. What stays proposed is named on the plan page: assertions over the per-request usage *series* (§ 2.7), an expectation kind for the skill's own text entering context (§ 2.8), and a streaming checker (**D5**) |
 
 Do not implement from an unreviewed design, and do not treat one as evidence of what this repository
@@ -45,14 +52,19 @@ is. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* says what eac
 
 The status report is [`docs/status.md`](docs/status.md); keep it accurate when you land work. Its
 delivered-waves table is generated from the annotated tags (`cargo xtask status`) and drift-checked
-in the gate, and prose here states no suite or test counts — four hand-written counts drifted apart
-in the repository's first 48 hours, so the count lives in exactly one place, the gate's own output.
-`git tag -n99` is the per-wave record of what actually shipped, and `task check` is the
+in the gate, and prose here states **no count of the gate's own suites or tests** — four hand-written
+ones drifted apart in the repository's first 48 hours, so that number lives in exactly one place, the
+gate's output. Counts of things a command prints on demand — documents in the tree, artifacts in the
+store, records in a corpus — are written down with the command that produces them, so a reader can
+re-run it. `git tag -n99` is the per-wave record of what actually shipped, and `task check` is the
 measurement; read those before believing any prose about progress.
 
 **Every crate in the workspace is implemented and gated. There are no skeletons left.** Twenty-nine
 workspace members: **twenty-six crates** under `crates/`, two realization examples and `xtask`. The
-document tree holds **six profiles**. The gate
+latest wave is `0.10.0-horizons-dogfood-lab`; `git tag -n99` says what each one delivered.
+`protocol validate` reads the document tree and reports what it holds — at that tag, **44 files:
+3 protocols, 22 principles, 4 workflows, 6 profiles, 8 lifecycles and 1 step map** — so run it
+rather than copying that line forward. The gate
 (`task check`, ten steps) needs three toolchains beside
 Rust's own: the **Go toolchain**, the **`wasm32-unknown-unknown` target** and **Node**. Two of the
 ten steps build the second and third emitters' committed trees, and none of those checks skips
@@ -64,9 +76,10 @@ passing one.
   `protocol-cli` and `xtask`, plus the document tree (`protocols/`, `principles/`, `workflows/`,
   `profiles/`, `artifacts/lifecycles/`). `aep-conformance`, `adp-domain` and `aop-domain` all
   shipped in `0.2.0-wave-3`: sixteen black-box suites over the command and query surfaces, three
-  conformance levels, and a `FaultyBackend` whose injected defects the suites are checked against
-  (45 inline plus 7 integration tests), beside the development and operations typed vocabularies.
-  `0.2.1` added project discovery.
+  conformance levels, and a `FaultyBackend` whose injected defects the suites are checked against,
+  beside the development and operations typed vocabularies. `0.2.1` added project discovery.
+  **Evidence carries a clock as of `0.10.0`:** a record states `observed_at`, a requirement may
+  declare a `horizon`, and past it the fact reads `Unknown` — see invariants 5, 7 and 17.
 * **ESS — executable system specifications.** Six delivered, gated crates: `ess-domain` (the typed
   model, `0.3.0-ess-wave-1`), `ess-compiler` (resolution, `EssIr`, source-aware diagnostics,
   `0.3.1-ess-wave-2`), `ess-gen` (four projections behind one `Generator` trait,
@@ -113,13 +126,16 @@ passing one.
 * **Trace — an agent run as a third observation domain.** Two crates: `trace-domain` (the
   harness-neutral event IR `trace-ir/1`, content-addressed by a digest over the transcript's raw
   bytes, with an event the adapter cannot read kept opaque rather than dropped; and the
-  `trace-spec/1` expectation vocabulary, forty-nine kinds, raw→validated with ten `TRACE-*`
+  `trace-spec/1` expectation vocabulary, **fifty kinds** — `env.tool_available` was the fiftieth,
+  built first in harness wave 3 because the hooks lean on it — raw→validated with ten `TRACE-*`
   refusal codes) and `trace-spec` (the Claude Code `stream-json` adapter and the checker, whose
   `ok`/`gap`/`unk` verdicts each cite the event indices that produced them). `protocol trace
-  check|inspect` is the surface, with `ess conform`'s exit codes — `0` conformant, `1`
-  contradicted, `3` nobody found out. Nothing here calls a model or reads a clock: every duration
-  and every cost comes out of the transcript, which is what lets a report be committed and
-  diffed. Plan page: `docs/plan/trace-wave-1-transcript-checker.md`.
+  check|inspect|evidence` is the surface, with `ess conform`'s exit codes — `0` conformant, `1`
+  contradicted, `3` nobody found out. `evidence` runs the check and writes the AEP record it
+  produced, so a verdict about a run enters the engine as a fact rather than as a claim. Nothing
+  here calls a model or reads a clock: every duration and every cost comes out of the transcript,
+  which is what lets a report be committed and diffed. Plan page:
+  `docs/plan/trace-wave-1-transcript-checker.md`.
 * **Harness — the planning store, and the reference driver that walks a workflow.** Wave 1 built
   `aep-backend-markdown` and `protocol artifact`; wave 3 built the driver. Three crates:
   `aep-driver-spec` (the leaf — step maps raw→validated, the mandatory workflow pin, the run cursor,
@@ -131,10 +147,39 @@ passing one.
   document kind, under `drivers/`, and `development.driven` is the sixth profile — the only one that
   grants a shell, held to the `protocol` CLI by the plugin's own hook. **Gates are evaluated only by
   the engine**: the driver asks and does what it is told, and enforcement sits at two layers — the
-  per-state tool set at session launch and two `PreToolUse` hooks — with `protocol trace check`
+  per-state tool set at session launch and two `PreToolUse` hooks, `store-integrity` and
+  `driven-surface`, both shipped in `integrations/claude-code/hooks/` — with `protocol trace check`
   reading the transcript afterwards to say whether it held. Record:
   `docs/plan/harness-wave-2-driver-decision.md`; design
   `docs/design/harness-planning-and-driver-design-v0.1.md` §§ 4.1–4.9.
+  The store this repository runs on is `.engineering/planning/`: **59 artifacts** — one initiative,
+  seven epics, forty stories, ten tasks and one specification — and `protocol artifact validate`
+  exits 0 on it. **It has been driven once.** `W4-1/1`, 2026-08-21, walked a real story from that
+  store under `development.driven` and **blocked in `establish_verifiers`**, because the
+  specification it wrote was still `draft` and the suite it ran passed where the rule wants a
+  failing one. Four sessions, 80 hook decisions of which 11 were denials, no tracked file touched.
+  The record is `docs/plan/harness-wave-4-governed-dogfood.md` § W4.1, and it stands as run: a
+  dogfood wave that reports only its successes measures nothing. *Built* is not *adopted* — one
+  story driven once says the mechanism holds on real work, and does not say driven runs are how
+  work happens here.
+* **Evidence horizons — a fact knows when somebody looked.** An evidence record carries a required
+  `observed_at`; a requirement may carry a `horizon` in whole days; past it the fact decays to
+  `Unknown` and never to `False`, and the lapsed record's facts are withheld, so a guard reading
+  them refuses too. `evidence.lapsed` sits beside `evidence.missing` because *nobody produced it*
+  and *somebody did and nobody has looked since* want different responses. `protocol evidence
+  scan|inspect` is the observation half — `scan` reads the annotation convention out of
+  human-written markdown and reports coverage beside the classification, `inspect` reads an
+  evidence file. Neither writes anything and neither decides a gate. Ground truth is
+  `examples/evidence-horizons-corpus/`, vendored from an outside adopter: **43 occurrences, 43
+  records, 0 unparsed** at its reference date. Design:
+  `docs/design/evidence-horizons-design-v0.1.md`.
+* **Adopted by one tree that is not ours.** On 2026-08-21 somebody who did not write this
+  specification wrote a document tree against it — a protocol extending `aep/1`, four workflows,
+  six principles, four profiles, four lifecycles, 26 files — and it validates: `resolve`, `explain`
+  and `evaluate` all work on it. Their ranked-first finding, evidence horizons, is closed by code.
+  The rest of their review is triaged as `epic:adopter-feedback-round-1` in the store and as the
+  gap register's *first adopter's report* section. The review itself is held by the operator and is
+  **not in this tree** — nothing adopter-internal is written into a file here.
 * **Not built yet:** W7.4 — obligations as artifacts a task can own — deferred by decision;
   attested evidence (gap register D-3, proposed and unaccepted); a **contract implementation that
   survives a process exit**. That last one is now half true and worth stating as two facts rather
@@ -180,11 +225,19 @@ enforcement here that you cannot point at.
    macro in `crates/aep-domain/src/error.rs`, which generates `ValidationCode::ALL` from the same line
    as the variant, after five codes had fallen out of a hand-maintained list.
 5. **`Unknown` is not `False`.** Predicate evaluation is three-valued; only `True` permits a
-   transition. Never collapse unobserved to false.
+   transition. Never collapse unobserved to false. **A lapsed fact takes the same road**: past its
+   requirement's horizon an observation stops counting and the requirement reads `Unknown`, never
+   `False`, and the lapsed record's facts are withheld so a guard reading them refuses too. Nobody
+   has looked lately is not the same finding as it is broken, and only one of them is fixed by
+   changing code.
    *Enforced by* the `Truth` type: three variants, Kleene `and`/`or`, no `From<bool>` and no
-   `as_bool`, so there is no boolean to collapse into. The Kleene tables have tests, and the
-   algebra's laws are property-checked over generated expressions
-   (`crates/aep-domain/tests/truth_laws.rs`).
+   `as_bool`, so there is no boolean to collapse into. The Kleene tables have tests, the algebra's
+   laws are property-checked over generated expressions
+   (`crates/aep-domain/tests/truth_laws.rs`), and the decay is covered by
+   `crates/aep-engine/tests/evidence_horizons.rs`. One deliberate exception is recorded rather than
+   hidden: `evidence.missing` is a count, so `evidence.missing == 0` reads `False` on a lapse —
+   pre-existing polarity of a count, and the reason `evidence.lapsed` exists beside it (gap
+   register D-7).
 6. **Capabilities default to deny**, and `deny` beats `require_approval` beats `allow`. A principle
    may restrict; only a profile or protocol may grant.
    *Enforced by* `CapabilityPolicy::decide` plus tests that first construct the state where each link
@@ -192,14 +245,23 @@ enforcement here that you cannot point at.
    (`crates/aep-domain/src/capability.rs`) asserts its fixture holds one capability in all three sets
    before asserting the outcome, and `crates/aep-domain/tests/safety_envelope.rs` covers the approval
    floor. Verified by mutation, not by reading.
-7. **The engine never manufactures evidence.** It evaluates what verifiers and humans produced.
+7. **The engine never manufactures evidence, and it does not decide when the observation happened.**
+   It evaluates what verifiers and humans produced. `observed_at` is the caller's and is required —
+   there is no default, because a caller who has to write down when they looked cannot back-date by
+   omission — and a submission claiming a future observation is refused rather than accepted as a
+   fresh record. What the engine still stamps is the record's own envelope: the id, the clock time
+   it was submitted at, and the producer.
    *Enforced by* a source scan, `crates/aep-engine/tests/evidence_scan.rs`, which reads the payload
    types off `Evidence` itself and refuses any construction of one in shipped engine code — struct
    literal, constructor path, variant expression or variant-as-function. Destructuring and the
    envelope stamp in `submit_evidence` stay allowed: reading evidence and stamping the id, clock
    time and producer onto a caller's payload are the engine's job. The scan's extractor is checked
    against the engine's own test modules, which construct evidence constantly, so a scan that has
-   stopped seeing constructions fails on them instead of passing on everything.
+   stopped seeing constructions fails on them instead of passing on everything. The rule reaches the
+   driver too, one layer up and with a narrower ban:
+   `crates/aep-driver/tests/evidence_scan.rs` refuses any construction of an `Evidence::Approval` or
+   a `Producer::Human` in shipped driver code, because nothing below the driver would stop a harness
+   from writing its own approval and unlocking a capability with it.
 8. **The domain crate is clock-free and randomness-free.** No `SystemTime::now`, no RNG. The engine
    takes a `Clock` so an execution is replayable.
    *Enforced by* a banned-token scan, `crates/aep-domain/tests/determinism.rs` — boundary-aware,
@@ -264,6 +326,19 @@ enforcement here that you cannot point at.
     *Enforced by* the command vocabulary — there is no delete variant to call — and by a test that
     `CommandKind::parse("aep.entity.delete/v1")` fails, naming the kind it refused
     (`crates/aep-domain/src/command.rs`).
+17. **A horizon lives on the requirement, and nothing mutates one.** How long an observation is
+    worth something is a property of the question being asked, not of the observation — two
+    requirements may legitimately read one record on different clocks. The refresh that is allowed
+    is *observe again and write a new date*; there is deliberately no `extend`, because if
+    extending were as easy to call as re-checking it is the one that gets called, every time, by
+    whoever is trying to get a gate green.
+    *Enforced by* three mechanisms in decreasing order of strength: an evidence record has **no
+    horizon field**, so there is nothing on a record to mutate; a requirement's horizon comes from
+    a parsed document and is re-read on every resolve, so an in-memory change does not survive; and
+    a source scan over the five crates a horizon can be reached from,
+    `crates/aep-domain/tests/horizon_immutability.rs`, refuses a mutator a later edit would
+    otherwise add without argument. `Horizon::days` also refuses zero and anything over ten years,
+    so a typo cannot become a horizon nothing will outlive.
 
 ## Gate
 
@@ -325,10 +400,18 @@ Land nothing that does not pass all ten.
 **A green local gate does not guarantee a green CI.** The steps mirror each other exactly, but the
 *toolchain* does not: CI installs whatever `stable` is on the day, and a newer clippy can introduce a
 lint that fails a commit which passed locally on an older one. That is how `clippy::unused_async`
-turned `main` red on a commit whose gate was green. Before pushing something you cannot easily revisit,
-`rustup update` first — and when CI fails on a lint that did not exist locally, that is the cause, not
-a flaky gate. There is no release process yet; when there is, releases
-require a green full suite, not component gates.
+turned `main` red on a commit whose gate was green. Run `rustup update` before pushing anything you
+will not get a second chance at — and when CI fails on a lint that did not exist locally, that is the
+cause, not a flaky gate.
+
+**A release is the procedure in § *Tags*, and nothing mechanical enforces it.** A wave ships,
+`CHANGELOG.md` is cut under its heading, `cargo xtask status` regenerates the delivered-waves record
+and the annotated tag is written at the commit that delivered the work. The full gate comes first —
+component gates are not enough — and no hook, task or CI job checks that it did, which makes it a
+discipline rather than a guarantee. It has already slipped once, and the mechanism is worth
+knowing: `task check 2>&1 | tail` reports **`tail`'s** exit status, not the gate's, so two runs that
+aborted at the first step read as green and two commits were pushed claiming a gate that had never
+run past `fmt-check`. Read the gate's own status, not a pipeline's.
 
 ## Conventions
 
@@ -370,11 +453,12 @@ only by violating it.
 
 * **The workspace has ten direct third-party crates.** Seven are declared once in
   `[workspace.dependencies]` — `serde`, `serde_json`, `serde_yaml`, `schemars`, `thiserror`, `clap`,
-  `anyhow` — and three are crate-local: `sha2` in `ess-gen`, `jsonschema` as a dev-dependency of
-  `ess-gen` and `aep-schema`, and `proptest` as a dev-dependency of `aep-domain` and `ess-compiler`
-  (`default-features = false`, and every property runs under a fixed seed so the gate cannot be
-  flaky — the seed and the way to widen locally are documented where each is used). Reach for the
-  workspace list before adding to it.
+  `anyhow` — and three are crate-local: `sha2` wherever a document is content-addressed
+  (`ess-gen`, `trace-domain`, `infra-domain`, `infra-compiler`, `aep-driver-spec`), `jsonschema` as
+  a dev-dependency of `ess-gen` and `aep-schema`, and `proptest` in `aep-domain` and as a
+  dev-dependency of `ess-compiler` (`default-features = false`, and every property runs under a
+  fixed seed so the gate cannot be flaky — the seed and the way to widen locally are documented
+  where each is used). Reach for the workspace list before adding to it.
 * **A non-workspace dependency carries its justification in the manifest**, beside the line that adds
   it: what it buys, which features are dropped and why that is safe here, and why the version matches
   the other crate that uses it. `crates/ess-gen/Cargo.toml` is the model.

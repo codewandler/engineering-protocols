@@ -21,6 +21,20 @@ that was not run for this post says which committed file it is.
 
 {/* truncate */}
 
+:::note[Since publication]
+
+**2026-08-22.** Two lines below need correcting.
+
+- **The browser target emits a page for `gatepass`; what it refuses is the transport.**
+  `protocol ess synthesize --path examples/gatepass --target web` writes the whole workspace,
+  `index.html` included, and marks exactly one capability *refused by web* — the component
+  transport `pass-service`, because a page holds the system in one tab and binds no socket. The
+  refusal is the target's and it is about that one surface, not about the specification.
+- **The gate is ten steps, not nine.** `0.7.1-infra-waves-1-4` added `infra-check`, which holds the
+  committed observation IR, simulation, drift and projection trees to what their inputs produce.
+
+:::
+
 ## An artifact now knows what it derives from
 
 Wave 6 left an honest gap, stated on this site at the time: the diff did not know about generated

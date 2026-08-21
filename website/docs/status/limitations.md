@@ -7,7 +7,9 @@ description: What you still have to take on faith, and what the missing pieces m
 # Limitations and trust assumptions
 
 The point of the project is that what you must take on faith is narrow and named. This page is that
-list, with the concrete consequence of each entry for someone adopting the tool.
+list, with the concrete consequence of each entry for someone adopting the tool. The register behind
+it is `docs/plan/gap-register.md`, which holds one rule: a gap leaves it either **by decision** or
+**by code**, and never by quietly disappearing.
 
 ## The trust assumption that matters most
 
@@ -29,11 +31,66 @@ class, and that acceptance is the operator's to make.
 
 ## Storage
 
-**No durable backend.** The only implementation of the AEP storage contract is in memory; it forgets
-everything when the process exits. Persisting an execution is possible (snapshots serialise), but
-entities, audit trails and histories do not survive a restart. Writing a durable backend means
-implementing two traits and proving the result against the shipped conformance suites — the
-repository's backend guide (`docs/guide/backend.md`) covers it.
+**There is a durable store, and it is not an implementation of the contract.** Planning artifacts
+live as markdown under `.engineering/planning/` and survive a restart — this repository's own plan is
+59 of them. But `aep-backend-markdown` writes through its own `create`/`update` rather than through
+`CommandService`, so the 16 `aep-conformance` suites do not run against it, and it has no journal, no
+audit join and no history.
+
+*Consequence:* "there is a durable backend" is not yet a claim you can lean on. The only
+implementation of the AEP storage contract is still in memory, and it forgets entities, audit trails
+and histories when the process exits. Writing a durable one means implementing two traits and
+proving the result against the shipped conformance suites — `docs/guide/backend.md` in the
+repository covers it. Register rows D-P1 and D-P3.
+
+## The driver, and what a governed run does not yet prove
+
+The reference driver exists and has walked a real story. What it has not yet done is finish one.
+
+* **The shipped step map can only verify Rust.** `drivers/development/default.yaml` names `cargo` in
+  every state that names a verifier, so a story whose acceptance is written in shell is undrivable —
+  which is exactly what stopped the first governed run, in `establish_verifiers`. Closing it is a
+  decision about the map, not a patch.
+* **An `llm` step is told what must hold *in* its state and never what guards the way *out* of it.**
+  The step context is built from the evaluation's requirements; the outgoing transition's
+  requirements are never passed. *Consequence:* a model works on the wrong thing until it runs out
+  of budget. One state of the first run cost $8.36 this way.
+* **A hook's decision is recorded and is not folded into the audit trail.** Both plugin hooks write
+  a decision log and the driver writes the step context, but nothing folds those lines back through
+  `Engine::authorize`. *Consequence:* the audit trail is a complete account of what the engine
+  decided and not of what the harness stopped.
+* **The per-state tool set is enforced twice and audited by nothing.** The allowlist at session
+  launch and the `PreToolUse` hook enforce the same derived set, and the expectation kind meant to
+  audit it reads the harness's tool *inventory* rather than the session's allow rules.
+* **A run directory cannot be read back as a full account of the run.** The engine's reasons arrive
+  flattened into strings, there is no per-transition record and no report document, so a snapshot
+  alone cannot say a run is still going.
+* **A driven session is not hermetic.** A scratch config directory does not exclude account-level
+  MCP servers: two of the four sessions in the first run listed three of them, all unauthenticated,
+  and nothing asserts their absence.
+* **Harness neutrality has never met a second harness.** Every behavioural document here is
+  published as harness-neutral, and exactly one adapter exists. The claim is untested.
+* **A story's `implemented` is a claim nothing checks.** A status move is validated against the
+  kind's lifecycle and nothing else, so an artifact's status is whatever was typed. The rule that
+  would fix it exists one layer down — the `ess-conformance` principle gates a *task's* completion on
+  independent evidence — and has no analogue for the artifact.
+
+## Evidence horizons: what decay does not yet reach
+
+**A requirement with a horizon and no subject is revived by any fresh record of its kind.** The
+matcher checks the subject only when one is given, so a fresh run about an unrelated component
+restores a gate about this one. Until it is fixed, a requirement about one subject should say so.
+
+**More generally, evidence does not have to name its subject.** A fact observed of one thing can move
+another. This is not hypothetical: an adopter's end-to-end job held a legacy service while the
+deployment rolled its successor, and produced weeks of green about a component nobody was shipping.
+The approvals rule already refuses a record bound to the wrong revision; there is no analogue for the
+wrong subject.
+
+**An execution snapshot written before `observed_at` existed cannot be restored.** It fails to
+deserialize and says which field is missing. Decided that way rather than defaulted, because a
+default would have invented an observation date — which is the one thing this whole feature exists
+to stop.
 
 ## Conformance reach
 
@@ -75,19 +132,45 @@ Predicates are compared for canonical equality only — a provably weaker rewrit
   by key but not against their own meta-schemas, which are not vendored here. What is unchecked is
   the envelope, not the types.
 
+## What the first outside adopter found, and what is still open
+
+On 2026-08-21 somebody who did not write this specification wrote a document tree against it — a
+protocol extending `aep/1`, four workflows, six principles, four profiles, four lifecycles, 26 files
+— and it validates. `resolve`, `explain` and `evaluate` all work on it. It arrived with a written
+review of everything that got in the way, triaged into thirteen stories. One is implemented —
+evidence horizons, which they ranked first and which shipped in `0.10.0` — and four unambiguous bugs
+they found were fixed in the same release. The other twelve stories are drafts, and none is
+scheduled.
+
+Every row below was found by writing a tree, not by reading the guide. That is what makes the list
+worth its space here: none of it was visible to the people who built the thing.
+
+| Still open | Why it matters to an adopter |
+|---|---|
+| Nothing models a claim leaving the boundary | An assertion handed to a customer is near-irreversible and has no lifecycle here. `ArtifactStatus` is a closed ten-variant enum, so *sent, known wrong, audience not yet told* has no rung to stand on |
+| One enforcement level | A check blocks or it is deleted. There is no state for *not ready to block yet* — invented independently three times in the adopter's stack. This repository has that tier in exactly one place, the transcript checker's `advisory` severity |
+| Evidence does not name its subject | See above |
+| Four lifecycle concepts the protocol cannot express | A decision with a declared default and an expiry; time-based transitions of any kind; a blocker typed by what clears it, without which *parked on a credential* is indistinguishable from *parked on a person* |
+| A commitment on a clock nobody controls | It fires on a date the repository does not set, is satisfied by a person, and must never block a commit — blocking a commit cannot close one |
+| `release.progressive`'s `promote` is one step | A real fleet is a set. A release live in some targets and deliberately held in others cannot be said, and the adopter's hold-back was implemented as a revert that a downstream force-push silently undid |
+| Vocabularies that look open and are not | Three instances in one afternoon: a closed status enum, a project directory name that was a compile-time constant, and a kind ladder defined over built-in variants only. The last two are now fixed; what is owed is the audit that says which of the rest are open |
+
 ## Scope limits that are boundaries, not gaps
 
 * **No federated artifact graphs.** A manifest describes one project; cross-repository references
   are resolved by hand.
 * **Infrastructure scanning lives outside.** Raw cluster scans are trusted to the external scanner;
   this workspace begins at the observation file.
-* **No team has been governed by this yet.** The protocol runs, the documents validate, the suites
-  bite — and the next honest milestone for AEP is not a feature but a team whose work it actually
-  governs, which has not happened.
+* **One governed run, and it stopped.** The protocol has now driven a real story out of a real
+  backlog, and it blocked four states short of the person it was meant to stop at, for two reasons
+  it printed. That is a limitation of the step map, not of the engine — and it is stated here rather
+  than buried, because a dogfood wave that reports only its successes is marketing. No team's
+  ongoing work is governed by this yet.
 
 ---
 
-**Sources.** `docs/VISION.md` § *The thesis* (the attestation gap);
-`crates/aep-domain/src/evidence.rs`; `docs/guide/harness.md`; `docs/plan/gap-register.md` (D-3);
-`README.md` § *What does not work yet*; `CHANGELOG.md` § *0.7.0* (the demonstration's stated
-limits); `docs/guide/specification.md` § *Two things a projection can quietly destroy*.
+**Sources.** `docs/plan/gap-register.md` (every row above, with the story that closes it);
+`docs/plan/harness-wave-4-governed-dogfood.md` § *W4.1*; `docs/VISION.md` § *The thesis* (the
+attestation gap); `crates/aep-domain/src/evidence.rs` and `crates/aep-domain/src/requirement.rs`;
+`docs/guide/backend.md`; `docs/guide/harness.md`; `CHANGELOG.md` §§ *0.7.0*, *0.10.0*;
+`docs/guide/specification.md` § *Two things a projection can quietly destroy*.

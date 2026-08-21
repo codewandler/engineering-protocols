@@ -31,6 +31,12 @@ AsyncAPI contracts, a conformance test suite, and the structural part of the imp
 that one document. When the specification changes, a semantic diff derives what the change
 invalidates.
 
+The repository also ships a **reference driver** — `protocol drive` walks a workflow, running the
+program, model and person steps a step map declares — so that the harness contract has a caller
+somebody has actually run. On 2026-08-21 it drove a real story out of this repository's own backlog
+and **blocked four states short of the operator**, for two reasons the engine printed. That is
+recorded rather than smoothed over: see [Where this stands](./status/where-this-stands.md).
+
 ## Why prose rules fail with agents
 
 A person who ignores the wiki page can be asked why. An agent given the same page in a prompt
@@ -51,6 +57,7 @@ types:
 | "Write the test first" | an ordering fact: `evidence.first_seq.test_result < evidence.first_seq.diff`, checked against recorded submission order |
 | "Ada approved the design" | an approval bound to the revision it approved; version 7 is not covered by a review of version 3 |
 | "Build what we specified" | a conformance suite generated from the same specification the contracts came from, run by something other than the author |
+| "That check is from last month" | a `horizon` on the requirement: past it the requirement reads `Unknown` again, because a lapsed check has not failed — nobody has run it |
 
 None of this makes a model reliable. It makes a model's output **checkable**, which is a different
 and more achievable property.
@@ -92,6 +99,7 @@ control.
 | understand the model before adopting it | [Architecture overview](./concepts/overview.md), then [AEP](./concepts/aep.md) and [ESS](./concepts/ess.md) |
 | put your team's rules under the protocol | [Govern a task](./guides/govern-a-task.md) and [Write a principle](./guides/write-a-principle.md) |
 | make the protocol govern your agent | [Integrate an agent harness](./guides/integrate-a-harness.md) |
+| judge what an agent run actually did | [Check a transcript](./guides/check-a-transcript.md) |
 | derive contracts and tests from a specification | [Write a specification](./guides/write-a-specification.md) |
 | see real input and output before reading anything else | [A specification and its contracts](./examples/specification-to-contracts.md) |
 | know what is built, what is not, and what you have to trust | [Status](./status/where-this-stands.md) and [Limitations](./status/limitations.md) |

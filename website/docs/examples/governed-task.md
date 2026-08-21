@@ -94,6 +94,7 @@ The first submission is a **failing** test, before any code exists:
 
 ```yaml
 - kind: test_result
+  observed_at: 2023-11-12
   suite: unit
   passed: 0
   failed: 1
@@ -105,24 +106,42 @@ The first submission is a **failing** test, before any code exists:
     command: cargo test -p auth passkey_credential_is_scoped_to_one_user
 ```
 
-Two fields carry the weight: `producer` says a verifier produced this, not the agent — so it can
-satisfy requirements marked `independent: true` — and `provenance.command` says what was run.
-Submission order is recorded, so red-before-green is a fact
+Three fields carry the weight. `producer` says a verifier produced this, not the agent — so it can
+satisfy requirements marked `independent: true`. `provenance.command` says what was run.
+`observed_at` says when somebody looked, and it is required with no default: submitting a record
+without one is refused, so nobody can hand the engine an observation of unknown age. It is the
+caller's, not the log's — a suite that ran three weeks ago and reaches the engine this morning is
+three weeks old, and that is what a `horizon:` on a requirement reads.
+
+Submission order is recorded separately, so red-before-green is a fact
 (`evidence.first_seq.test_result < evidence.first_seq.diff`), and submitting a *passing* run first
 stops the walk early: `test-driven` requires `test.first_result == failed` before implementation.
 
 ## Where it stops, and why
 
-```text
+```console
+$ protocol evaluate --task examples/development-passkeys/task.yaml \
+    --artifacts examples/development-passkeys/artifacts.yaml \
+    --evidence examples/development-passkeys/evidence/01-red-test.yaml --advance
+state       implement (Implement)
+transitions
+  implement -> verify [blocked]
+      guard: diff.exists
 Task incomplete in `implement`:
   ✗ (tests.unit.failed == 0 and static_analysis.errors == 0 and evidence.missing == 0)  [completion]
       tests.unit.failed = 1; unobserved: static_analysis.errors; evidence.missing = 7
+  ? (specification.satisfied and contracts.failed == 0)           [completion]
+      unobserved: specification.satisfied; unobserved: contracts.failed
   ? specification.satisfied                                       [principle spec-driven]
       unobserved: specification.satisfied
 ```
 
 `✗` is a fact that is wrong; `?` is a fact nobody has observed. They want different responses — fix
 the code, or run something — and only `True` permits a transition.
+
+The manifest is passed explicitly, and it has to be: the task names it, but `evaluate` reads
+artifacts from `--artifacts` or from `.engineering/` inside a project. Without it the walk stops one
+state earlier, at `specify`, because there is no specification artifact to move it on.
 
 Submit all five evidence files and the task reaches `complete`. Drop the last one — the independent
 statement that the change is the one described — and the work stops at adversarial verification with

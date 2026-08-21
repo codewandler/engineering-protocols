@@ -21,11 +21,17 @@ description: The project's terms, defined once.
 | **Capability** | A named permission (`repository.write`, `production.write`, …) every governable action maps onto. Default deny; `deny` beats `require_approval` beats `allow`. |
 | **Approval floor** | Capabilities the protocol refuses to let any profile grant outright — `production.write` and `deployment.create:production` under `aep/1`. |
 | **Evidence** | A typed record of an observation — test result, approval, diff, conformance run — with a kind, a producer and provenance. Facts are projected from evidence; predicates read facts. |
+| **`observed_at`** | When somebody looked, on an evidence record. Required, with no default, and distinct from the submission time: a suite run three weeks ago and submitted this morning is three weeks old. A value in the future is refused rather than stored. |
+| **Horizon** | The age past which an observation stops counting — `horizon: 7d`, declared on a requirement and never on the record, because a record carrying its own expiry lets whoever wrote it choose how long it counted for. |
+| **Decay to Unknown** | What a requirement does when its most recent record is older than the horizon. Not `False`: nobody has established that the thing is broken, only that nobody has looked lately. It blocks the same way and wants a different response — run something, rather than fix something. A lapsed record's facts are withheld too, and `evidence.lapsed` counts them apart from `evidence.missing`. |
 | **Producer** | Who made an observation: `Agent` or `Verifier`. Requirements marked `independent: true` are satisfied only by verifier-produced records. |
 | **Verifier** | A class of independent fact-producer: test-runner, static-analyzer, human-review, conformance-runner, … |
 | **Truth** | The three-valued result of predicate evaluation: `True`, `False`, `Unknown`. Only `True` permits a transition; the CLI renders `False` as `✗` and `Unknown` as `?`. |
 | **Harness** | The system that runs an agent and asks the engine what is owed, permitted and done. The engine never observes anything itself. |
 | **Execution** | One task's run through a workflow: state, evidence in submission order, event stream, audit trail. Snapshots persist it; the plan is always re-resolved, never stored. |
+| **Step map** | The document (`aep.driver-steps/1`) saying what a harness *does* in each state a workflow declares, as `command`, `llm` and `operator` steps. The workflow says what evidence a transition needs; the step map says how to obtain it, which is what lets one workflow govern repositories that share nothing. |
+| **Driven run** | One walk of a workflow by `protocol drive`: a run id such as `AUTH-142/3`, a store lock, and a record of every step executed. The driver evaluates no gate — it asks the engine and does only what the engine permits, because a driver that could evaluate a gate would be a second protocol implementation with none of the conformance suites behind it. |
+| **Planning store** | A directory of markdown files — one artifact per file, YAML frontmatter, free body — that `protocol artifact` reads and writes, at `.engineering/planning/` by default. Durable in the way a plan needs to be: a status move is a one-line diff, and `git log` already knows who made it. |
 | **Backend** | An implementation of the AEP storage contract (`CommandService` + `QueryService`). The reference implementation is in-memory. |
 | **Contract conformance** | Whether a *backend* implements the AEP contract — checked by `protocol conformance`. |
 | **Semantic conformance** | Whether an *implementation* satisfies a specification — checked by `protocol ess conform`. |
@@ -47,4 +53,5 @@ description: The project's terms, defined once.
 | **`TARGET.md`** | The per-emitter declaration of what that target holds more weakly or cannot represent — a named weakening, never a silent downgrade. |
 | **Observation bundle / infra IR** | A scanner-produced snapshot of a cluster (`infra-observation/1`) and its compiled, content-addressed form (`infra-ir/1`). |
 | **Expectation** | One clause of a declared infrastructure desired state (`infra-spec/1`), evaluated three-valued: `ok`, `gap`, `unk`. |
-| **Gate** | The repository's own check suite, `task check` — nine steps, all mirrored in CI, including every drift check. |
+| **Trace specification** | A `trace-spec/1` document of typed expectations over an agent transcript a harness already wrote. `protocol trace check` judges the finished run against it three-valued, citing event indices; nothing in the family starts an agent, calls a model or reaches a network, which is what makes the verdict reproducible and usable as evidence. |
+| **Gate** | The repository's own check suite, `task check` — ten steps, all mirrored in CI, including every drift check. |

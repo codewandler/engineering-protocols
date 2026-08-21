@@ -80,6 +80,7 @@ your-repo/
     upstream/                       vendored
     acme-service.yaml               yours
   artifacts/lifecycles/             vendored
+  drivers/                          step maps, only if you drive runs with `protocol drive`
 ```
 
 Vendor by submodule, subtree or copy — the loader cares about content, not provenance. Documents are
@@ -171,9 +172,9 @@ profile changed:
 
 | | `development.fast` | `development.standard` | `development.critical` |
 |---|---:|---:|---:|
-| principles in force | 5 | 9 | 14 |
-| obligations | 6 | 10 | 16 |
-| completion checks | 14 | 24 | 43 |
+| principles in force | 5 | 9 | 15 |
+| obligations | 6 | 10 | 17 |
+| completion checks | 14 | 24 | 45 |
 | distinct evidence kinds owed | 5 | 7 | 7 |
 
 The evidence *kinds* barely grow between standard and critical — what grows is the number of runs and
@@ -183,7 +184,7 @@ who has to sign. Read the cost as what a person has to do that they were not doi
 |---|---|---|
 | `development.fast` | Blast radius contained, contract surface private: internal tooling, scripts, a spike | A spec, a failing test first, static analysis, provenance. It cannot request a review or an approval, so a human is never in the loop |
 | `development.standard` | Anything with an external consumer, persisted data, or a customer-visible path. The default | Adds contract tests and a property suite, and the ability — with it, the obligation — to ask a human |
-| `development.critical` | A silent defect is worse than a late delivery: auth, money, migrations, crypto | Adds a mutation run, a differential run against the implementation being replaced, an invariant check, an approved design related to the specification, and a **fresh human review of that design** |
+| `development.critical` | A silent defect is worse than a late delivery: auth, money, migrations, crypto | Adds a mutation run, a differential run against the implementation being replaced, an invariant check, an adversarial verification, contracts on the code, an approved design related to the specification, a **fresh human review of that design**, and — where the project has an executable system specification — conformance to it |
 
 The last line of `development.critical` is the one that bites. Under it, an approval of version 3 of a
 design stops satisfying the review requirement once the design reaches version 7:
@@ -284,6 +285,52 @@ transitions
 The block names the principle. Somebody can go and read it and either write the plan or argue with
 the rule — both better outcomes than an agent quietly writing the migration.
 
+## A rule with a clock on it
+
+A rehearsed rollback from six months ago is not a rehearsed rollback. Put a `horizon` on the
+evidence requirement and the engine stops taking the old record's word for it:
+
+```yaml
+    evidence:
+      - kind: verification
+        independent: true
+        horizon: 90          # whole days
+```
+
+Every evidence record already carries `observed_at` — the day somebody looked, written by whoever
+submitted it, never stamped by the engine, and refused outright if it is in the future. A horizon is
+what that date is measured against:
+
+```console
+$ $B evaluate --root . --task task.yaml --artifacts artifacts.yaml --evidence recovery-rehearsal.yaml
+  ? evidence verification (independent) within 90d                [principle migration-has-a-way-back]
+      the last observation was on 2023-11-13, the horizon is 90d, and it lapsed on 2024-02-11
+```
+
+**`?`, not `✗`, and the distinction is the whole point.** An expired observation is not a wrong
+answer, it is an old one, so the task is blocked with *nobody knows* rather than accused of a
+failure that never happened. The lapsed record's facts are withheld too, so a guard reading
+`tests.unit.failed == 0` off a stale suite refuses rather than passing on it. `evidence.lapsed` is
+the count of records in that state, and it sits beside `evidence.missing` because *nobody produced
+it* and *somebody did and nobody has looked since* are different problems with different owners.
+
+Two things a horizon cannot do, worth knowing before you set one:
+
+* **It is a volatility guess, not a guarantee.** A seven-day claim can be false on day five and the
+  gate will say it is fine. What follows is that *shortening* a horizon has to stay cheap and normal
+  — if the only way to say "this moves faster than I thought" is prose, nobody says it.
+* **There is no way to extend one.** The horizon lives on the requirement, in a reviewed document,
+  and no command mutates it. The only refresh is to observe again and write a new date, which is
+  deliberate: if extending were as easy to call as re-checking, it is the one that would get called
+  by whoever is trying to get a gate green.
+
+`protocol evidence inspect <file>` reads the dates back out of a record without submitting anything,
+and `protocol evidence scan <dir>` does the same for claims written into markdown by hand — with a
+coverage line comparing annotation-shaped occurrences against records the parser actually produced,
+because a scanner over human-written documents that quietly stops seeing half of them reports green
+either way. [`examples/evidence-horizons-corpus/`](../../examples/evidence-horizons-corpus/) is the
+regression corpus behind that, contributed by an adopter who had been keeping such claims by hand.
+
 ## The failure worth learning first
 
 A predicate may only read facts the protocol declares observable. Suppose the rule had reached for
@@ -291,9 +338,9 @@ A predicate may only read facts the protocol declares observable. Suppose the ru
 
 ```console
 $ $B validate --root .
-40 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 5 lifecycle(s)
+46 file(s): 3 protocol(s), 23 principle(s), 4 workflow(s), 7 profile(s), 8 lifecycle(s), 1 step map(s)
 1 problem(s):
-  - [unobservable_fact] principle migration-has-a-way-back.obligations.migration-has-a-way-back/before-completion: `migration.rollback_tested` is not declared observable by protocol adp/1 (hint: declared families: mutation.**, differential.**, invariant.**, clean_room.**, build.**, types.**, task.**, change.**, risk, severity, state.**, workflow.**, principle.**, evidence.**, required_evidence.**, tests.**, test.**, unit_tests.**, contract_tests.**, regression_suite.**, static_analysis.**, contracts.**, property_test.**, coverage.**, specification.**, diff.**, source_diff.**, artifact.**, review.**, verification.**, approval.**, approvals.**, deployment.**, metric.**, service.**)
+  - [unobservable_fact] principle migration-has-a-way-back.obligations.migration-has-a-way-back/before-completion: `migration.rollback_tested` is not declared observable by protocol adp/1 (hint: declared families: ess_conformance.**, trace_conformance.**, mutation.**, differential.**, invariant.**, clean_room.**, build.**, types.**, task.**, change.**, risk, severity, state.**, workflow.**, principle.**, evidence.**, required_evidence.**, tests.**, test.**, unit_tests.**, contract_tests.**, regression_suite.**, static_analysis.**, contracts.**, property_test.**, coverage.**, specification.**, diff.**, source_diff.**, artifact.**, review.**, verification.**, approval.**, approvals.**, deployment.**, metric.**, service.**)
 $ echo $?
 1
 ```
@@ -307,7 +354,7 @@ nothing projects passes validation and then never becomes true:
 
 ```console
 $ $B validate --root .
-40 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 5 lifecycle(s)
+46 file(s): 3 protocol(s), 23 principle(s), 4 workflow(s), 7 profile(s), 8 lifecycle(s), 1 step map(s)
 valid
 $ $B evaluate --root . --task task.yaml | grep passsed
   ? verification.recovery.passsed                                 [principle migration-has-a-way-back]
@@ -349,8 +396,8 @@ principle is timed against a phase your workflow does not have.
 
 This repository does the same thing from the other side: `crates/aep-engine/tests/documents.rs` loads
 the tree, asserts it has no failures, and resolves a task against every profile — so a principle that
-could never fire cannot be committed. The full local gate is `task check` (format, clippy as errors,
-`cargo test --workspace`, schema drift).
+could never fire cannot be committed. Its own gate is `task check`, ten steps, and a step whose
+toolchain is missing fails and names it rather than skipping.
 
 ## Next
 
