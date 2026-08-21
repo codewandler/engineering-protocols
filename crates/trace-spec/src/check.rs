@@ -38,7 +38,7 @@ use std::collections::BTreeMap;
 
 use trace_domain::ir::{ModelUsage, RunOutcome, RunUsage, SessionStart, Step, ToolCall, TraceIr};
 use trace_domain::matcher::{CallSelector, CountBound, FieldMatcher, RangeBound, ResultMatcher};
-use trace_domain::spec::{Aggregate, ApiErrorStatus, ExpectationKind, TraceSpec};
+use trace_domain::spec::{Aggregate, ApiErrorStatus, ExpectationKind, ToolAvailability, TraceSpec};
 
 use crate::report::{
     CheckReport, Citation, ExpectationReport, Outcome, UnknownReason, REPORT_FORMAT,
@@ -110,6 +110,7 @@ fn evaluate(kind: &ExpectationKind, ir: &TraceIr) -> Outcome {
                 start.agents.as_deref()
             })
         }
+        ExpectationKind::EnvToolAvailable { availability } => env_tool_available(ir, availability),
         ExpectationKind::EnvModel { equals } => {
             env_field(ir, "model", equals, |start| start.model.as_deref())
         }
@@ -550,6 +551,98 @@ fn env_exclusive(ir: &TraceIr, expected: &std::collections::BTreeSet<String>) ->
     }
     if !missing.is_empty() {
         parts.push(format!("{} not loaded", missing.join(", ")));
+    }
+    contradicted(at, parts.join("; "))
+}
+
+/// The offered tool list, in the three claims [`ToolAvailability`] can make about it.
+///
+/// Every one reads `SessionStart.tools` and nothing else. What the model *called* is a different
+/// question with its own kinds, and conflating them is the mistake this kind exists to make
+/// impossible: an allowlist that offers a tool nobody reaches for is invisible to `tool.absent`.
+fn env_tool_available(ir: &TraceIr, availability: &ToolAvailability) -> Outcome {
+    match availability {
+        ToolAvailability::Offered { tool } => {
+            env_offers(ir, "tools", "tool", tool, |start| start.tools.as_deref())
+        }
+        ToolAvailability::NotOffered { tool } => {
+            env_withholds(ir, "tools", "tool", tool, |start| start.tools.as_deref())
+        }
+        ToolAvailability::Only { tools } => env_tools_only(ir, tools),
+    }
+}
+
+/// A name that must **not** appear in one of the opening record's offered lists.
+///
+/// The negation of [`env_offers`], and its own function rather than a flag on that one, because
+/// the sentence it writes is a different sentence: here *not offered* is the claim that held, and
+/// there it was the contradiction.
+fn env_withholds(
+    ir: &TraceIr,
+    field: &str,
+    noun: &str,
+    unwanted: &str,
+    read: impl Fn(&SessionStart) -> Option<&[String]>,
+) -> Outcome {
+    let (at, start) = match session(ir) {
+        Ok(found) => found,
+        Err(outcome) => return outcome,
+    };
+    match read(start) {
+        None => unknown_field(field),
+        Some(offered) if offered.iter().any(|name| name == unwanted) => contradicted(
+            at,
+            format!("{noun} {unwanted} is among the {} offered", offered.len()),
+        ),
+        Some(offered) => holds(
+            at,
+            format!(
+                "{noun} {unwanted} is not among the {} offered",
+                offered.len()
+            ),
+        ),
+    }
+}
+
+/// The offered tools are exactly the named set.
+///
+/// [`env_exclusive`] pointed at tools rather than plugins, and reported the same way: what leaked
+/// in and what was expected and missing, because an author fixing one wants both halves at once.
+fn env_tools_only(ir: &TraceIr, expected: &std::collections::BTreeSet<String>) -> Outcome {
+    let (at, start) = match session(ir) {
+        Ok(found) => found,
+        Err(outcome) => return outcome,
+    };
+    let Some(tools) = &start.tools else {
+        return unknown_field("tools");
+    };
+    let offered: std::collections::BTreeSet<&str> = tools.iter().map(String::as_str).collect();
+    let unexpected: Vec<&str> = offered
+        .iter()
+        .copied()
+        .filter(|name| !expected.contains(*name))
+        .collect();
+    let missing: Vec<&str> = expected
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !offered.contains(name))
+        .collect();
+    if unexpected.is_empty() && missing.is_empty() {
+        return holds(
+            at,
+            format!("exactly the {} tools expected were offered", offered.len()),
+        );
+    }
+    let mut parts = Vec::new();
+    if !unexpected.is_empty() {
+        parts.push(format!(
+            "{} unexpected tool(s): {}",
+            unexpected.len(),
+            unexpected.join(", ")
+        ));
+    }
+    if !missing.is_empty() {
+        parts.push(format!("{} not offered", missing.join(", ")));
     }
     contradicted(at, parts.join("; "))
 }
@@ -1446,7 +1539,7 @@ mod tests {
     // prevent: a kind that reports `ok` because it is not looking. A positive case alone would
     // pass for a checker whose every arm returned `ok`.
     //
-    // That the *document* can express all forty-nine is a separate claim, checked where it
+    // That the *document* can express all fifty is a separate claim, checked where it
     // belongs — in `trace_domain::raw`'s own tests, against the wire form.
 
     /// The committed transcript of eval run `7hTYjT`: 36 events, 2026-08-21.
@@ -1457,6 +1550,46 @@ mod tests {
 
     /// The plugin the eval is about.
     const PLUGIN: &str = "engineering-protocols";
+
+    /// Every tool run `7hTYjT` was offered, in the order the opening record lists them.
+    ///
+    /// Written out rather than derived from the fixture, because a set derived from the thing
+    /// under test cannot contradict it: this is the literal an exactness expectation would be
+    /// authored with, and `Task` being in it is the hole the driver's enforcement mapping names.
+    const OFFERED: &[&str] = &[
+        "Task",
+        "Bash",
+        "CronCreate",
+        "CronDelete",
+        "CronList",
+        "DesignSync",
+        "Edit",
+        "EnterWorktree",
+        "ExitWorktree",
+        "Glob",
+        "Grep",
+        "ListAgents",
+        "Monitor",
+        "NotebookEdit",
+        "PushNotification",
+        "Read",
+        "RemoteTrigger",
+        "ReportFindings",
+        "ScheduleWakeup",
+        "SendMessage",
+        "Skill",
+        "TaskCreate",
+        "TaskGet",
+        "TaskList",
+        "TaskOutput",
+        "TaskStop",
+        "TaskUpdate",
+        "ToolSearch",
+        "WebFetch",
+        "WebSearch",
+        "Workflow",
+        "Write",
+    ];
 
     fn real_run() -> TraceIr {
         crate::adapter::read_transcript(SEVEN_H)
@@ -1557,6 +1690,57 @@ mod tests {
             case(
                 ExpectationKind::EnvAgentAvailable {
                     agent: "engineering-protocols:nonesuch".to_owned(),
+                },
+                Verdict::Gap,
+            ),
+            case(
+                ExpectationKind::EnvToolAvailable {
+                    availability: ToolAvailability::Offered {
+                        tool: "Bash".to_owned(),
+                    },
+                },
+                Verdict::Ok,
+            ),
+            case(
+                ExpectationKind::EnvToolAvailable {
+                    availability: ToolAvailability::Offered {
+                        tool: "Nonesuch".to_owned(),
+                    },
+                },
+                Verdict::Gap,
+            ),
+            case(
+                ExpectationKind::EnvToolAvailable {
+                    availability: ToolAvailability::NotOffered {
+                        tool: "Nonesuch".to_owned(),
+                    },
+                },
+                Verdict::Ok,
+            ),
+            // The one the driver's enforcement mapping is about: `Task` maps to no protocol
+            // action, and this run was offered it. A specification that forbids it gaps here,
+            // which is the point — the run never called `Task`, so `tool.absent` would be green.
+            case(
+                ExpectationKind::EnvToolAvailable {
+                    availability: ToolAvailability::NotOffered {
+                        tool: "Task".to_owned(),
+                    },
+                },
+                Verdict::Gap,
+            ),
+            case(
+                ExpectationKind::EnvToolAvailable {
+                    availability: ToolAvailability::Only {
+                        tools: names(OFFERED),
+                    },
+                },
+                Verdict::Ok,
+            ),
+            case(
+                ExpectationKind::EnvToolAvailable {
+                    availability: ToolAvailability::Only {
+                        tools: names(&["Read", "Glob", "Grep"]),
+                    },
                 },
                 Verdict::Gap,
             ),
@@ -2543,6 +2727,65 @@ mod tests {
     }
 
     #[test]
+    fn a_tool_expectation_over_a_run_that_recorded_no_tool_list_is_undecidable_not_a_gap() {
+        // The second `unk` rule of the module doc, on the newest kind: a harness that records an
+        // opening record without `tools` cannot answer the question, and *"the tool was not
+        // offered"* is a different sentence from *"this transcript does not say"*. Reading the
+        // absence as a gap would make an enforcement audit fail on a harness upgrade.
+        let silent = ir(vec![TraceEvent::new(
+            1,
+            None,
+            EventKind::SessionStart(Box::new(SessionStart {
+                model: Some("claude-sonnet-5".to_owned()),
+                ..SessionStart::default()
+            })),
+        )]);
+        for availability in [
+            ToolAvailability::Offered {
+                tool: "Bash".to_owned(),
+            },
+            ToolAvailability::NotOffered {
+                tool: "Task".to_owned(),
+            },
+            ToolAvailability::Only {
+                tools: BTreeSet::from(["Bash".to_owned()]),
+            },
+        ] {
+            let outcome = evaluate(&ExpectationKind::EnvToolAvailable { availability }, &silent);
+            assert!(
+                matches!(
+                    &outcome,
+                    Outcome::Undecidable(UnknownReason::FieldAbsent { field }) if field == "tools"
+                ),
+                "an absent tool list decided something: {}",
+                outcome.detail()
+            );
+        }
+        // And the same record with a list decides all three, so the `unk` above is about the
+        // field and not about the shape of the test.
+        let offered = ir(vec![TraceEvent::new(
+            1,
+            None,
+            EventKind::SessionStart(Box::new(SessionStart {
+                tools: Some(vec!["Bash".to_owned()]),
+                ..SessionStart::default()
+            })),
+        )]);
+        assert_eq!(
+            evaluate(
+                &ExpectationKind::EnvToolAvailable {
+                    availability: ToolAvailability::Only {
+                        tools: BTreeSet::from(["Bash".to_owned()]),
+                    },
+                },
+                &offered,
+            )
+            .verdict(),
+            Verdict::Ok
+        );
+    }
+
+    #[test]
     fn an_environment_expectation_over_a_transcript_with_no_session_start_is_undecidable() {
         let headless = ir(Vec::new());
         for kind in [
@@ -2556,6 +2799,11 @@ mod tests {
                 plugin: "engineering-protocols".to_owned(),
                 version: None,
                 source: None,
+            },
+            ExpectationKind::EnvToolAvailable {
+                availability: ToolAvailability::NotOffered {
+                    tool: "Task".to_owned(),
+                },
             },
         ] {
             assert!(

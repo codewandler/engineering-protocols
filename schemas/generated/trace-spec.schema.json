@@ -341,6 +341,19 @@
           "additionalProperties": false
         },
         {
+          "description": "`{env.tool_available: {tool: Bash}}`, `{env.tool_available: {tool: Task, available: false}}`, or `{env.tool_available: {only: [Read, Glob, Grep]}}`.",
+          "type": "object",
+          "required": [
+            "env.tool_available"
+          ],
+          "properties": {
+            "env.tool_available": {
+              "$ref": "#/definitions/RawToolAvailable"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
           "description": "`{env.model: {equals: …}}`",
           "type": "object",
           "required": [
@@ -1369,6 +1382,40 @@
         },
         "tool": {
           "description": "The tool's name. Absent selects every tool.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawToolAvailable": {
+      "description": "The parameters of `env.tool_available`, in its two forms.\n\n`tool` and `only` are two different claims — *\"this one was on the table\"* against *\"exactly these were\"* — so exactly one of them is written. Both is two expectations reported under one id; neither names no tool at all. `available` belongs to `tool` alone: beside `only` it has no reading, because `only` already says of every tool whether it was offered.\n\nThree optional fields rather than a tagged union, because that is what an author writes and `deny_unknown_fields` still catches a misspelt one. The combinations that mean nothing are refused by name in validation, which is where the message can say which line to delete.",
+      "type": "object",
+      "properties": {
+        "available": {
+          "description": "Whether that tool must have been offered. `true` when the document omits it.",
+          "default": null,
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "only": {
+          "description": "Every tool that may be offered, and no others.",
+          "default": null,
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "tool": {
+          "description": "One tool's name, as the harness lists it.",
           "default": null,
           "type": [
             "string",

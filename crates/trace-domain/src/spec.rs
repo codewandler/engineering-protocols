@@ -111,10 +111,44 @@ pub enum ApiErrorStatus {
     },
 }
 
+/// What the opening record's offered tool list must say.
+///
+/// Three spellings because the enforcement this audits is three claims. A harness that offers a
+/// tool set per state has to be able to write *"the tool this state needs was on the table"*,
+/// *"this one was not"* and *"exactly these were, and nothing else leaked in"* — and the third is
+/// the one that catches the failure, because a tool that is offered and never reached for leaves
+/// no other trace at all.
+///
+/// The exactness form is [`ExpectationKind::EnvExclusive`]'s argument pointed at tools: prevention
+/// is harness-specific and detection is not, and a guard is verified by what it refuses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "form", rename_all = "snake_case")]
+pub enum ToolAvailability {
+    /// The named tool is among those offered.
+    Offered {
+        /// The tool's name, as the harness lists it.
+        tool: String,
+    },
+    /// The named tool is **not** among those offered.
+    ///
+    /// The direction that audits a denial rather than a grant: a tool no protocol action
+    /// describes is a tool the protocol cannot govern, so being offered one is itself the defect,
+    /// whether or not the model reached for it.
+    NotOffered {
+        /// The tool's name, as the harness lists it.
+        tool: String,
+    },
+    /// The offered tools are **exactly** this set — nothing else was on the table.
+    Only {
+        /// Every tool that may be offered, and no others.
+        tools: BTreeSet<String>,
+    },
+}
+
 /// The v1 expectation vocabulary.
 ///
-/// Forty-nine kinds across five families, each decidable from a transcript alone. The wire form
-/// is externally tagged under `expect:` and keeps the design's dotted names verbatim —
+/// Fifty kinds across five families, each decidable from a transcript alone. The wire form is
+/// externally tagged under `expect:` and keeps the design's dotted names verbatim —
 /// `expect: {tool.called: {…}}` — so a kind this build does not implement is refused *by name*
 /// and every kind's own parameters get `deny_unknown_fields`, which a flattened form cannot have
 /// (serde's `deny_unknown_fields` does not survive `flatten`). A specification where `at_leats: 1`
@@ -184,6 +218,20 @@ pub enum ExpectationKind {
     EnvAgentAvailable {
         /// The agent's name, as the harness lists it.
         agent: String,
+    },
+    /// What the harness offered the model, by name: one tool was offered, one was not, or the
+    /// offered list is exactly a stated set.
+    ///
+    /// **Offered is not called**, and the difference is the whole reason this kind exists.
+    /// [`ToolAbsent`](Self::ToolAbsent) asserts a tool was never *used*, and a tool handed out by
+    /// a broken allowlist that nobody happened to reach for leaves exactly the trace of one that
+    /// was never handed out. Only the opening record can tell those apart.
+    ///
+    /// `unk` when the harness records no tool list.
+    #[serde(rename = "env.tool_available")]
+    EnvToolAvailable {
+        /// Which claim about the offered list this expectation makes.
+        availability: ToolAvailability,
     },
     /// The **resolved** model matches — what the alias on the command line turned into, not what
     /// was typed.
@@ -722,6 +770,7 @@ impl ExpectationKind {
             Self::EnvOutputStyle { .. } => "env.output_style",
             Self::EnvSkillAvailable { .. } => "env.skill_available",
             Self::EnvAgentAvailable { .. } => "env.agent_available",
+            Self::EnvToolAvailable { .. } => "env.tool_available",
             Self::EnvModel { .. } => "env.model",
             Self::EnvPermissionMode { .. } => "env.permission_mode",
             Self::EnvApiKeySource { .. } => "env.api_key_source",
@@ -791,6 +840,7 @@ impl ExpectationKind {
         "env.permission_mode",
         "env.plugin_loaded",
         "env.skill_available",
+        "env.tool_available",
         "events.assistant",
         "iterations",
         "order",
@@ -976,8 +1026,8 @@ mod tests {
     fn every_kind_names_itself_and_the_published_list_holds_them_all() {
         assert_eq!(
             ExpectationKind::NAMES.len(),
-            49,
-            "the vocabulary is forty-nine kinds; a new one must be published here to be writable"
+            50,
+            "the vocabulary is fifty kinds; a new one must be published here to be writable"
         );
         let mut sorted = ExpectationKind::NAMES.to_vec();
         sorted.sort_unstable();

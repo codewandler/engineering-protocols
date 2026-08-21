@@ -84,8 +84,8 @@ use crate::matcher::{
     CallSelector, CountBound, FieldMatcher, RangeBound, ResultMatcher, ScalarValue,
 };
 use crate::spec::{
-    Aggregate, ApiErrorStatus, Expectation, ExpectationKind, OnUnknown, Severity, TraceSpec,
-    SPEC_FORMAT,
+    Aggregate, ApiErrorStatus, Expectation, ExpectationKind, OnUnknown, Severity, ToolAvailability,
+    TraceSpec, SPEC_FORMAT,
 };
 
 /// Reads a specification's text — YAML or JSON — through its validation.
@@ -334,6 +334,10 @@ pub enum RawExpectationKind {
     /// `{env.agent_available: {agent: …}}`
     #[serde(rename = "env.agent_available")]
     EnvAgentAvailable(RawAgent),
+    /// `{env.tool_available: {tool: Bash}}`, `{env.tool_available: {tool: Task, available:
+    /// false}}`, or `{env.tool_available: {only: [Read, Glob, Grep]}}`.
+    #[serde(rename = "env.tool_available")]
+    EnvToolAvailable(RawToolAvailable),
     /// `{env.model: {equals: …}}`
     #[serde(rename = "env.model")]
     EnvModel(RawEquals),
@@ -528,6 +532,30 @@ pub struct RawSkill {
 pub struct RawAgent {
     /// The agent's name, as the harness lists it.
     pub agent: String,
+}
+
+/// The parameters of `env.tool_available`, in its two forms.
+///
+/// `tool` and `only` are two different claims — *"this one was on the table"* against *"exactly
+/// these were"* — so exactly one of them is written. Both is two expectations reported under one
+/// id; neither names no tool at all. `available` belongs to `tool` alone: beside `only` it has no
+/// reading, because `only` already says of every tool whether it was offered.
+///
+/// Three optional fields rather than a tagged union, because that is what an author writes and
+/// `deny_unknown_fields` still catches a misspelt one. The combinations that mean nothing are
+/// refused by name in validation, which is where the message can say which line to delete.
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RawToolAvailable {
+    /// One tool's name, as the harness lists it.
+    #[serde(default)]
+    pub tool: Option<String>,
+    /// Whether that tool must have been offered. `true` when the document omits it.
+    #[serde(default)]
+    pub available: Option<bool>,
+    /// Every tool that may be offered, and no others.
+    #[serde(default)]
+    pub only: Option<Vec<String>>,
 }
 
 /// The parameters of `skill.invoked` and `skill.completed`.
@@ -813,7 +841,7 @@ fn at_kind(location: &str, kind: &str) -> String {
 /// recorded and the expectation is dropped — a validated [`ExpectationKind`] is one a checker can
 /// evaluate.
 ///
-/// One `match` over all forty-nine, deliberately: this is the seam where the wire vocabulary and
+/// One `match` over all fifty, deliberately: this is the seam where the wire vocabulary and
 /// [`ExpectationKind::NAMES`] meet, and splitting it into families would hide the exhaustiveness
 /// that makes a missing kind a compile error rather than a silent gap. It is long for that
 /// reason and no other.
@@ -863,6 +891,7 @@ fn kind_of(
                 )?,
             })
         }
+        RawExpectationKind::EnvToolAvailable(written) => tool_available(written, location, errors),
         RawExpectationKind::EnvModel(written) => Some(ExpectationKind::EnvModel {
             equals: stated(
                 written.equals,
@@ -1111,6 +1140,71 @@ fn plugin_loaded(
         version,
         source,
     })
+}
+
+/// Validates `env.tool_available`: exactly one of `tool` and `only`, and `available` only where
+/// `tool` names something for it to be about.
+///
+/// The three refusals here are the whole reason this kind is not two lines like the two beside
+/// it. Each one is a document somebody meant to finish, and each message names the line to
+/// delete rather than the rule that was broken.
+fn tool_available(
+    written: RawToolAvailable,
+    location: &str,
+    errors: &mut ValidationErrors,
+) -> Option<ExpectationKind> {
+    let kind = "env.tool_available";
+    let availability = match (written.tool, written.only) {
+        (Some(_), Some(_)) => {
+            errors.refuse(
+                TraceCode::SpecInvalidExpectation,
+                at_kind(location, kind),
+                "`tool` and `only` are two different claims — one tool was offered, against \
+                 exactly these were — and an expectation holding both reports one verdict for two",
+            );
+            return None;
+        }
+        (None, None) => {
+            errors.refuse(
+                TraceCode::SpecInvalidExpectation,
+                at_kind(location, kind),
+                "an `env.tool_available` with neither `tool` nor `only` names no tool, so it can \
+                 only report a gap",
+            );
+            return None;
+        }
+        (Some(tool), None) => {
+            let tool = stated(tool, &at(location, kind, "tool"), "tool name", errors)?;
+            if written.available.unwrap_or(true) {
+                ToolAvailability::Offered { tool }
+            } else {
+                ToolAvailability::NotOffered { tool }
+            }
+        }
+        (None, Some(only)) => {
+            if written.available.is_some() {
+                errors.refuse(
+                    TraceCode::SpecInvalidExpectation,
+                    at(location, kind, "available"),
+                    "`available` is about the one tool `tool` names; beside `only` it has no \
+                     reading, because `only` already says of every tool whether it was offered",
+                );
+                return None;
+            }
+            ToolAvailability::Only {
+                tools: names_of(
+                    only,
+                    &at(location, kind, "only"),
+                    "tool",
+                    "an `env.tool_available` listing no tool under `only` is an unfinished \
+                     document far more often than it is the claim that no tool at all was \
+                     offered, and the two read the same",
+                    errors,
+                )?,
+            }
+        }
+    };
+    Some(ExpectationKind::EnvToolAvailable { availability })
 }
 
 /// Validates the two skill kinds, whose `count` defaults to `{at_least: 1}`.
@@ -1949,6 +2043,7 @@ expectations:
             "env.skill_available",
             "{env.skill_available: {skill: planning}}",
         ),
+        ("env.tool_available", "{env.tool_available: {tool: Bash}}"),
         (
             "events.assistant",
             "{events.assistant: {count: {at_most: 40}}}",
@@ -2325,6 +2420,10 @@ expectations:
     fn an_expectation_whose_parameters_decide_nothing_is_refused_in_each_of_its_shapes() {
         for (body, why) in [
             ("{env.exclusive: {plugins: []}}", "an empty exclusive set"),
+            (
+                "{env.tool_available: {only: []}}",
+                "an empty offered-tool set",
+            ),
             ("{rate_limit.status: {allowed: []}}", "an empty allowlist"),
             ("{env.plugin_loaded: {plugin: \"\"}}", "a blank plugin name"),
             (
@@ -2377,6 +2476,78 @@ expectations:
 
         let not_yaml = refusals("format: [unterminated\n");
         assert_eq!(not_yaml.count(TraceCode::SpecMalformed), 1, "{not_yaml}");
+    }
+
+    #[test]
+    fn env_tool_available_reads_its_three_claims_and_refuses_the_ways_they_can_be_written_wrong() {
+        // The 50th kind. `tool:` is the presence claim, `available: false` its negation, and
+        // `only:` the exactness claim `env.exclusive` makes about plugins.
+        for (body, expected) in [
+            (
+                "{env.tool_available: {tool: Bash}}",
+                ToolAvailability::Offered {
+                    tool: "Bash".to_owned(),
+                },
+            ),
+            (
+                "{env.tool_available: {tool: Bash, available: true}}",
+                ToolAvailability::Offered {
+                    tool: "Bash".to_owned(),
+                },
+            ),
+            (
+                "{env.tool_available: {tool: Task, available: false}}",
+                ToolAvailability::NotOffered {
+                    tool: "Task".to_owned(),
+                },
+            ),
+            (
+                "{env.tool_available: {only: [Read, Glob, Read]}}",
+                ToolAvailability::Only {
+                    tools: BTreeSet::from(["Glob".to_owned(), "Read".to_owned()]),
+                },
+            ),
+        ] {
+            let spec = accepted(&one(body));
+            assert_eq!(
+                spec.expectations[0].kind,
+                ExpectationKind::EnvToolAvailable {
+                    availability: expected
+                },
+                "`{body}` did not read as the claim it writes"
+            );
+            assert_eq!(spec.expectations[0].kind.name(), "env.tool_available");
+        }
+
+        for (body, why) in [
+            (
+                "{env.tool_available: {tool: Bash, only: [Bash]}}",
+                "one tool and an exact set are two claims under one id",
+            ),
+            (
+                "{env.tool_available: {}}",
+                "neither `tool` nor `only` names a tool",
+            ),
+            (
+                "{env.tool_available: {only: [Bash], available: false}}",
+                "`available` has no reading beside `only`",
+            ),
+            (
+                "{env.tool_available: {tool: \"\"}}",
+                "a blank tool name names nothing",
+            ),
+            (
+                "{env.tool_available: {only: [Bash, \"\"]}}",
+                "a blank entry is not a tool",
+            ),
+        ] {
+            let refused = refusals(&one(body));
+            assert_eq!(
+                refused.count(TraceCode::SpecInvalidExpectation),
+                1,
+                "{why} — `{body}` must be refused: {refused}"
+            );
+        }
     }
 
     #[test]
