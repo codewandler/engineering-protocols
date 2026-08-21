@@ -3829,6 +3829,14 @@ enum InfraCommand {
         /// The lowest severity to show; the summary always counts everything.
         #[arg(long, value_enum, default_value_t = SeverityFloor::Info)]
         min_severity: SeverityFloor,
+        /// Also report cluster-level invariant candidates: uniformity that mostly holds,
+        /// with its exceptions attached as evidence rather than hidden.
+        #[arg(long)]
+        candidates: bool,
+        /// Also report directions: findings deduplicated by shared root cause,
+        /// severity-ranked, so a wall of warnings reads as a handful of causes.
+        #[arg(long)]
+        directions: bool,
     },
 }
 
@@ -3899,7 +3907,15 @@ fn run_infra(command: &InfraCommand) -> Result<ExitCode> {
             path,
             format,
             min_severity,
-        } => infra_diagnose(path, *format, min_severity.severity()),
+            candidates,
+            directions,
+        } => infra_diagnose(
+            path,
+            *format,
+            min_severity.severity(),
+            *candidates,
+            *directions,
+        ),
     }
 }
 
@@ -4023,6 +4039,12 @@ struct DiagnoseReport<'a> {
     warnings: usize,
     /// See `errors`.
     infos: usize,
+    /// Cluster-level invariant candidates, present only when `--candidates` asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    candidates: Option<&'a [infra_analyze::InvariantCandidate]>,
+    /// Root-cause-grouped directions, present only when `--directions` asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    directions: Option<&'a [infra_analyze::Direction]>,
 }
 
 /// `protocol infra diagnose`
@@ -4033,6 +4055,8 @@ fn infra_diagnose(
     path: &Path,
     format: DiagnoseFormat,
     floor: infra_analyze::Severity,
+    with_candidates: bool,
+    with_directions: bool,
 ) -> Result<ExitCode> {
     let ir = match infra_ir_at(path)? {
         InfraIrLoaded::Ir(ir) => ir,
@@ -4047,6 +4071,16 @@ fn infra_diagnose(
     let diagnosis = infra_analyze::diagnose(&ir);
     let (errors, warnings, infos) = diagnosis.counts();
     let shown = diagnosis.at_least(floor);
+    // Directions read the candidates, so asking for directions computes both; only what was
+    // asked for is printed.
+    let candidate_pool = if with_candidates || with_directions {
+        infra_analyze::candidates(&ir)
+    } else {
+        Vec::new()
+    };
+    let direction_list =
+        with_directions.then(|| infra_analyze::directions(&diagnosis, &candidate_pool));
+    let candidate_list = with_candidates.then_some(candidate_pool);
     match format {
         DiagnoseFormat::Text => {
             for finding in &shown {
@@ -4072,6 +4106,12 @@ fn infra_diagnose(
                     floor
                 );
             }
+            if let Some(candidates) = candidate_list.as_deref() {
+                outln!("{}", infra_analyze::candidates_to_text(candidates));
+            }
+            if let Some(directions) = direction_list.as_deref() {
+                outln!("{}", infra_analyze::directions_to_text(directions));
+            }
             outln!("{errors} error(s), {warnings} warning(s), {infos} info(s)");
         }
         DiagnoseFormat::Json => print_serialised(
@@ -4083,6 +4123,8 @@ fn infra_diagnose(
                 errors,
                 warnings,
                 infos,
+                candidates: candidate_list.as_deref(),
+                directions: direction_list.as_deref(),
             },
             Format::Json,
         )?,

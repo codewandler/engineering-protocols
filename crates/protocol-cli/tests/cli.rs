@@ -3408,3 +3408,44 @@ fn infra_view_writes_the_page_and_a_missing_browser_is_a_warning_not_a_failure()
     );
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn diagnose_candidates_and_directions_appear_only_when_asked() {
+    let plain = protocol(&[
+        "infra",
+        "diagnose",
+        "--path",
+        OBSERVATION,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&plain), 0, "{}", stderr(&plain));
+    let report: serde_json::Value = serde_json::from_str(&stdout(&plain)).expect("json");
+    assert!(
+        report.get("candidates").is_none() && report.get("directions").is_none(),
+        "unasked sections must be absent, not empty"
+    );
+    let asked = protocol(&[
+        "infra",
+        "diagnose",
+        "--path",
+        OBSERVATION,
+        "--format",
+        "json",
+        "--candidates",
+        "--directions",
+    ]);
+    assert_eq!(code(&asked), 0, "{}", stderr(&asked));
+    let report: serde_json::Value = serde_json::from_str(&stdout(&asked)).expect("json");
+    let candidates = report["candidates"].as_array().expect("candidates present");
+    assert!(
+        candidates
+            .iter()
+            .any(|c| c["code"] == "INFRA-PROP-002" && c["exceptions"].as_array().is_some()),
+        "a candidate carries its exceptions as evidence: {candidates:?}"
+    );
+    assert!(
+        report["directions"].as_array().is_some(),
+        "directions present when asked"
+    );
+}
