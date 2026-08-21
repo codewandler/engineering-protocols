@@ -44,7 +44,7 @@ pub struct Finding {
     pub code: DiagCode,
     /// The code's registered severity, repeated here so a serialized finding stands alone.
     pub severity: Severity,
-    /// The object the finding is about, as an IR path: `workloads/sbf/deployment/api`.
+    /// The object the finding is about, as an IR path: `workloads/shop/deployment/api`.
     pub subject: String,
     /// Where inside the subject, when the finding is narrower than the object:
     /// `containers[main]`, `containers[main].env[TOKEN]`.

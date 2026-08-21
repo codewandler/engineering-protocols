@@ -266,7 +266,7 @@ pub struct GraphEdge {
 }
 
 impl fmt::Display for GraphEdge {
-    /// `workload sbf/deployment/api reads a key of secret sbf/creds`.
+    /// `workload shop/deployment/api reads a key of secret shop/creds`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {} {}", self.from, self.relation.verb(), self.to)
     }
@@ -1090,8 +1090,8 @@ mod tests {
 
     #[test]
     fn a_graph_node_reads_its_namespace_off_the_key_and_a_cluster_node_has_none() {
-        let workload = GraphNode::new(NodeKind::Workload, "sbf/deployment/api");
-        assert_eq!(workload.namespace(), Some("sbf"));
+        let workload = GraphNode::new(NodeKind::Workload, "shop/deployment/api");
+        assert_eq!(workload.namespace(), Some("shop"));
         assert_eq!(workload.name(), "api");
         let node = GraphNode::new(NodeKind::Node, "k3d-server-0");
         assert_eq!(node.namespace(), None);

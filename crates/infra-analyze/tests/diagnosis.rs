@@ -77,7 +77,7 @@ fn a_selector_matching_nothing_is_diagnosed_and_a_matching_one_is_not() {
     let diagnosis = example_diagnosis();
     let dangling = of_code(&diagnosis, DiagCode::DanglingSelector);
     assert_eq!(dangling.len(), 1, "exactly the lost-lookup service");
-    assert_eq!(dangling[0].subject, "services/sbf/lost-lookup");
+    assert_eq!(dangling[0].subject, "services/shop/lost-lookup");
     assert_eq!(
         dangling[0].evidence.get("selector").map(String::as_str),
         Some("app=retired")
@@ -98,12 +98,12 @@ fn a_required_missing_reference_is_an_error_and_an_optional_one_is_info() {
         fires_on(
             &diagnosis,
             DiagCode::MissingReference,
-            "workloads/sbf/deployment/flaky-agent"
+            "workloads/shop/deployment/flaky-agent"
         ),
         "the required `agent-credentials` secret is absent and must be an error"
     );
     assert!(
-        fires_on(&diagnosis, DiagCode::MissingReference, "ingresses/sbf/edge"),
+        fires_on(&diagnosis, DiagCode::MissingReference, "ingresses/shop/edge"),
         "the `retired-api` backend service is absent and must be an error"
     );
 
@@ -126,7 +126,7 @@ fn a_container_without_bounds_fires_and_the_bounded_coredns_container_does_not()
         fires_on(
             &diagnosis,
             DiagCode::NoResourceBounds,
-            "workloads/sbf/deployment/flaky-agent"
+            "workloads/shop/deployment/flaky-agent"
         ),
         "flaky-agent declares neither requests nor limits"
     );
@@ -147,9 +147,9 @@ fn a_container_without_probes_fires_and_the_probed_coredns_container_does_not() 
         fires_on(
             &diagnosis,
             DiagCode::NoProbes,
-            "workloads/sbf/statefulset/asterisk"
+            "workloads/shop/statefulset/switchboard"
         ),
-        "asterisk has no probes at all"
+        "switchboard has no probes at all"
     );
     assert!(
         !fires_on(
@@ -167,14 +167,14 @@ fn latest_and_untagged_images_fire_and_a_pinned_tag_does_not() {
     let unpinned = of_code(&diagnosis, DiagCode::UnpinnedImage);
     assert!(
         unpinned.iter().any(
-            |finding| finding.subject == "workloads/sbf/statefulset/asterisk"
+            |finding| finding.subject == "workloads/shop/statefulset/switchboard"
                 && finding.message.contains("`latest` tag")
         ),
-        "asterisk runs :latest: {unpinned:?}"
+        "switchboard runs :latest: {unpinned:?}"
     );
     assert!(
         unpinned.iter().any(
-            |finding| finding.subject == "workloads/sbf/deployment/flaky-agent"
+            |finding| finding.subject == "workloads/shop/deployment/flaky-agent"
                 && finding.message.contains("no tag")
         ),
         "flaky-agent's image is untagged: {unpinned:?}"
@@ -196,7 +196,7 @@ fn one_replica_is_info_and_two_replicas_or_a_daemonset_are_not() {
         fires_on(
             &diagnosis,
             DiagCode::SingleReplica,
-            "workloads/sbf/deployment/flaky-agent"
+            "workloads/shop/deployment/flaky-agent"
         ),
         "one replica is the finding"
     );
@@ -204,9 +204,9 @@ fn one_replica_is_info_and_two_replicas_or_a_daemonset_are_not() {
         !fires_on(
             &diagnosis,
             DiagCode::SingleReplica,
-            "workloads/sbf/statefulset/asterisk"
+            "workloads/shop/statefulset/switchboard"
         ),
-        "asterisk wants two replicas; firing on it would make the rule mean `has replicas`"
+        "switchboard wants two replicas; firing on it would make the rule mean `has replicas`"
     );
     assert!(
         !fires_on(
@@ -227,14 +227,14 @@ fn a_crashlooping_container_is_an_error_and_a_creating_one_is_not() {
         1,
         "exactly the crash-looping flaky-agent pod: {stuck:?}"
     );
-    assert_eq!(stuck[0].subject, "pods/sbf/flaky-agent-6d8f9c7b44-x1q2z");
+    assert_eq!(stuck[0].subject, "pods/shop/flaky-agent-6d8f9c7b44-x1q2z");
     assert_eq!(
         stuck[0].evidence.get("reason").map(String::as_str),
         Some("CrashLoopBackOff")
     );
     assert!(
-        !fires_on(&diagnosis, DiagCode::PodStuckWaiting, "pods/sbf/asterisk-0"),
-        "asterisk-0 waits as ContainerCreating — normal startup, not a defect"
+        !fires_on(&diagnosis, DiagCode::PodStuckWaiting, "pods/shop/switchboard-0"),
+        "switchboard-0 waits as ContainerCreating — normal startup, not a defect"
     );
 }
 
@@ -245,7 +245,7 @@ fn repeated_restarts_fire_and_a_stable_container_does_not() {
         fires_on(
             &diagnosis,
             DiagCode::HighRestartCount,
-            "pods/sbf/flaky-agent-6d8f9c7b44-x1q2z"
+            "pods/shop/flaky-agent-6d8f9c7b44-x1q2z"
         ),
         "seventeen restarts are over any threshold"
     );
@@ -261,7 +261,7 @@ fn repeated_restarts_fire_and_a_stable_container_does_not() {
         !fires_on(
             &diagnosis,
             DiagCode::HighRestartCount,
-            "pods/sbf/acd-rs-redis-66f544d5b-mplh5"
+            "pods/shop/queue-redis-66f544d5b-mplh5"
         ),
         "zero restarts are not high"
     );
@@ -274,7 +274,7 @@ fn a_pod_its_workload_expects_ready_fires_and_a_finished_job_pod_does_not() {
         fires_on(
             &diagnosis,
             DiagCode::PodNotReady,
-            "pods/sbf/flaky-agent-6d8f9c7b44-x1q2z"
+            "pods/shop/flaky-agent-6d8f9c7b44-x1q2z"
         ),
         "the deployment expects this pod ready and it is not"
     );
@@ -282,12 +282,12 @@ fn a_pod_its_workload_expects_ready_fires_and_a_finished_job_pod_does_not() {
         !fires_on(
             &diagnosis,
             DiagCode::PodNotReady,
-            "pods/sbf/cache-warm-jc7dd"
+            "pods/shop/cache-warm-jc7dd"
         ),
         "a Succeeded Job pod is done, not broken"
     );
     assert!(
-        !fires_on(&diagnosis, DiagCode::PodNotReady, "pods/sbf/debug-shell"),
+        !fires_on(&diagnosis, DiagCode::PodNotReady, "pods/shop/debug-shell"),
         "a ready pod is not a finding"
     );
 }
@@ -299,7 +299,7 @@ fn unreferenced_config_fires_and_referenced_or_token_managed_config_does_not() {
         fires_on(
             &diagnosis,
             DiagCode::OrphanedConfig,
-            "config_maps/sbf/abandoned-config"
+            "config_maps/shop/abandoned-config"
         ),
         "nothing references abandoned-config"
     );
@@ -307,7 +307,7 @@ fn unreferenced_config_fires_and_referenced_or_token_managed_config_does_not() {
         fires_on(
             &diagnosis,
             DiagCode::OrphanedConfig,
-            "secrets/sbf/devspace-cache-acd"
+            "secrets/shop/devspace-cache-acd"
         ),
         "nothing references the devspace cache secret"
     );
@@ -323,7 +323,7 @@ fn unreferenced_config_fires_and_referenced_or_token_managed_config_does_not() {
         !fires_on(
             &diagnosis,
             DiagCode::OrphanedConfig,
-            "secrets/sbf/sa-token-legacy"
+            "secrets/shop/sa-token-legacy"
         ),
         "a service-account token secret is the token controller's, exempted by type"
     );
@@ -334,12 +334,12 @@ fn a_pending_claim_fires_and_a_bound_one_does_not() {
     let diagnosis = example_diagnosis();
     let unbound = of_code(&diagnosis, DiagCode::UnboundClaim);
     assert_eq!(unbound.len(), 1, "exactly the pending orphan-cache claim");
-    assert_eq!(unbound[0].subject, "claims/sbf/orphan-cache");
+    assert_eq!(unbound[0].subject, "claims/shop/orphan-cache");
     assert!(
         !fires_on(
             &diagnosis,
             DiagCode::UnboundClaim,
-            "claims/sbf/acd-rs-redis-data"
+            "claims/shop/queue-redis-data"
         ),
         "a bound claim is healthy"
     );
@@ -352,7 +352,7 @@ fn an_unreferenced_claim_fires_and_the_mounted_one_does_not() {
         fires_on(
             &diagnosis,
             DiagCode::OrphanedClaim,
-            "claims/sbf/orphan-cache"
+            "claims/shop/orphan-cache"
         ),
         "no workload volume references orphan-cache"
     );
@@ -360,9 +360,9 @@ fn an_unreferenced_claim_fires_and_the_mounted_one_does_not() {
         !fires_on(
             &diagnosis,
             DiagCode::OrphanedClaim,
-            "claims/sbf/acd-rs-redis-data"
+            "claims/shop/queue-redis-data"
         ),
-        "acd-rs-redis mounts this claim"
+        "queue-redis mounts this claim"
     );
 }
 
@@ -376,7 +376,7 @@ fn two_services_selecting_one_workload_set_are_reported_once_together() {
         .get("services")
         .expect("the group names its services");
     assert!(
-        services.contains("sbf/asterisk-client") && services.contains("sbf/asterisk-headless"),
+        services.contains("shop/switchboard-client") && services.contains("shop/switchboard-headless"),
         "both services of the group are named: {services}"
     );
     assert!(
@@ -386,21 +386,21 @@ fn two_services_selecting_one_workload_set_are_reported_once_together() {
 }
 
 #[test]
-fn a_budget_guarding_nothing_fires_and_the_one_guarding_asterisk_does_not() {
+fn a_budget_guarding_nothing_fires_and_the_one_guarding_switchboard_does_not() {
     let diagnosis = example_diagnosis();
     let dangling = of_code(&diagnosis, DiagCode::PdbSelectsNothing);
     assert_eq!(dangling.len(), 1, "exactly the retired-workers budget");
     assert_eq!(
         dangling[0].subject,
-        "pod_disruption_budgets/sbf/retired-workers"
+        "pod_disruption_budgets/shop/retired-workers"
     );
     assert!(
         !fires_on(
             &diagnosis,
             DiagCode::PdbSelectsNothing,
-            "pod_disruption_budgets/sbf/asterisk"
+            "pod_disruption_budgets/shop/switchboard"
         ),
-        "the asterisk budget matches asterisk-0; firing on it would be a false claim"
+        "the switchboard budget matches switchboard-0; firing on it would be a false claim"
     );
 }
 
@@ -411,7 +411,7 @@ fn a_multi_replica_workload_without_a_budget_fires_and_a_covered_one_does_not() 
         fires_on(
             &diagnosis,
             DiagCode::NoPdbCoverage,
-            "workloads/sbf/deployment/storefront-server"
+            "workloads/shop/deployment/storefront-server"
         ),
         "two replicas, no covering budget"
     );
@@ -419,15 +419,15 @@ fn a_multi_replica_workload_without_a_budget_fires_and_a_covered_one_does_not() 
         !fires_on(
             &diagnosis,
             DiagCode::NoPdbCoverage,
-            "workloads/sbf/statefulset/asterisk"
+            "workloads/shop/statefulset/switchboard"
         ),
-        "the asterisk budget covers the asterisk template; firing would be a false claim"
+        "the switchboard budget covers the switchboard template; firing would be a false claim"
     );
     assert!(
         !fires_on(
             &diagnosis,
             DiagCode::NoPdbCoverage,
-            "workloads/sbf/deployment/flaky-agent"
+            "workloads/shop/deployment/flaky-agent"
         ),
         "one replica is DIAG-007's finding, not a coverage gap"
     );
@@ -437,13 +437,13 @@ fn a_multi_replica_workload_without_a_budget_fires_and_a_covered_one_does_not() 
 fn an_autoscaler_pinned_to_one_size_fires_and_a_real_range_does_not() {
     let diagnosis = example_diagnosis();
     let pinned = of_code(&diagnosis, DiagCode::HpaFixedRange);
-    assert_eq!(pinned.len(), 1, "exactly the asterisk autoscaler");
-    assert_eq!(pinned[0].subject, "horizontal_pod_autoscalers/sbf/asterisk");
+    assert_eq!(pinned.len(), 1, "exactly the switchboard autoscaler");
+    assert_eq!(pinned[0].subject, "horizontal_pod_autoscalers/shop/switchboard");
     assert!(
         !fires_on(
             &diagnosis,
             DiagCode::HpaFixedRange,
-            "horizontal_pod_autoscalers/sbf/storefront-server"
+            "horizontal_pod_autoscalers/shop/storefront-server"
         ),
         "1..3 is a range"
     );
@@ -456,7 +456,7 @@ fn an_autoscaler_aimed_at_nothing_is_an_error_and_an_aimed_one_is_not() {
     assert_eq!(missing.len(), 1, "exactly the ghost-scaler");
     assert_eq!(
         missing[0].subject,
-        "horizontal_pod_autoscalers/sbf/ghost-scaler"
+        "horizontal_pod_autoscalers/shop/ghost-scaler"
     );
     assert_eq!(
         missing[0].evidence.get("target_name").map(String::as_str),
@@ -466,9 +466,9 @@ fn an_autoscaler_aimed_at_nothing_is_an_error_and_an_aimed_one_is_not() {
         !fires_on(
             &diagnosis,
             DiagCode::HpaTargetMissing,
-            "horizontal_pod_autoscalers/sbf/asterisk"
+            "horizontal_pod_autoscalers/shop/switchboard"
         ),
-        "the asterisk statefulset exists; firing on its autoscaler would be a false claim"
+        "the switchboard statefulset exists; firing on its autoscaler would be a false claim"
     );
 }
 
@@ -477,13 +477,13 @@ fn a_job_short_of_its_completions_with_failures_fires_and_a_completed_one_does_n
     let diagnosis = example_diagnosis();
     let failed = of_code(&diagnosis, DiagCode::JobFailed);
     assert_eq!(failed.len(), 1, "exactly the reindex job");
-    assert_eq!(failed[0].subject, "jobs/sbf/reindex-29301120");
+    assert_eq!(failed[0].subject, "jobs/shop/reindex-29301120");
     assert_eq!(
         failed[0].evidence.get("failed").map(String::as_str),
         Some("3")
     );
     assert!(
-        !fires_on(&diagnosis, DiagCode::JobFailed, "jobs/sbf/cache-warm"),
+        !fires_on(&diagnosis, DiagCode::JobFailed, "jobs/shop/cache-warm"),
         "a job that reached its completions succeeded, whatever the retries cost"
     );
 }
@@ -493,12 +493,12 @@ fn a_suspended_cronjob_is_info_and_a_running_one_is_not() {
     let diagnosis = example_diagnosis();
     let suspended = of_code(&diagnosis, DiagCode::CronJobSuspended);
     assert_eq!(suspended.len(), 1, "exactly nightly-report");
-    assert_eq!(suspended[0].subject, "cron_jobs/sbf/nightly-report");
+    assert_eq!(suspended[0].subject, "cron_jobs/shop/nightly-report");
     assert!(
         !fires_on(
             &diagnosis,
             DiagCode::CronJobSuspended,
-            "cron_jobs/sbf/reindex"
+            "cron_jobs/shop/reindex"
         ),
         "an unsuspended cronjob is not a finding"
     );

@@ -44,8 +44,8 @@ fn a_deployment_pod_is_owned_exactly_through_its_observed_replicaset() {
         "pod -> replicaset -> deployment, every rung observed"
     );
     assert_eq!(
-        graph.owner_of("sbf/asterisk-0"),
-        Some("sbf/statefulset/asterisk"),
+        graph.owner_of("shop/switchboard-0"),
+        Some("shop/statefulset/switchboard"),
         "a statefulset pod names its workload directly"
     );
 
@@ -83,19 +83,19 @@ fn a_job_pod_chains_to_its_job_and_cronjob_and_a_bare_pod_stays_a_typed_fact() {
     assert!(
         !underived
             .iter()
-            .any(|fact| fact.pod == "sbf/cache-warm-jc7dd"),
+            .any(|fact| fact.pod == "shop/cache-warm-jc7dd"),
         "a pod whose job was observed is no longer underived: {underived:?}"
     );
     let job_edge = graph
         .edges()
         .find(|edge| {
-            edge.relation == EdgeRelation::OwnedBy && edge.from.key == "sbf/cache-warm-jc7dd"
+            edge.relation == EdgeRelation::OwnedBy && edge.from.key == "shop/cache-warm-jc7dd"
         })
         .expect("the job pod's ownership edge exists");
     assert_eq!(job_edge.to.kind, NodeKind::Job);
-    assert_eq!(job_edge.to.key, "sbf/cache-warm");
+    assert_eq!(job_edge.to.key, "shop/cache-warm");
     assert_eq!(
-        graph.owner_of("sbf/cache-warm-jc7dd"),
+        graph.owner_of("shop/cache-warm-jc7dd"),
         None,
         "a job is not a workload: DIAG-010's readiness expectation must not reach job pods"
     );
@@ -104,18 +104,18 @@ fn a_job_pod_chains_to_its_job_and_cronjob_and_a_bare_pod_stays_a_typed_fact() {
     let cron_edge = graph
         .edges()
         .find(|edge| {
-            edge.relation == EdgeRelation::OwnedBy && edge.from.key == "sbf/reindex-29301120"
+            edge.relation == EdgeRelation::OwnedBy && edge.from.key == "shop/reindex-29301120"
         })
         .expect("the cronjob's job has an ownership edge");
     assert_eq!(cron_edge.to.kind, NodeKind::CronJob);
-    assert_eq!(cron_edge.to.key, "sbf/reindex");
+    assert_eq!(cron_edge.to.key, "shop/reindex");
 
     let bare_pod = underived
         .iter()
-        .find(|fact| fact.pod == "sbf/debug-shell")
+        .find(|fact| fact.pod == "shop/debug-shell")
         .expect("the bare pod must be an underived-owner fact");
     assert_eq!(bare_pod.reason, UnderivedReason::NoOwnerDeclared);
-    assert_eq!(graph.owner_of("sbf/debug-shell"), None);
+    assert_eq!(graph.owner_of("shop/debug-shell"), None);
 }
 
 #[test]
@@ -320,7 +320,7 @@ fn a_replicaset_whose_deployment_is_gone_and_a_hashless_pod_both_stay_underived(
 #[test]
 fn restricting_to_a_namespace_keeps_its_objects_their_edges_and_the_nodes_they_reach() {
     let ir = example_ir();
-    let graph = InfraGraph::of(&ir).restricted_to("sbf");
+    let graph = InfraGraph::of(&ir).restricted_to("shop");
 
     assert!(
         graph
@@ -333,8 +333,8 @@ fn restricting_to_a_namespace_keeps_its_objects_their_edges_and_the_nodes_they_r
         graph
             .nodes()
             .iter()
-            .any(|node| node.kind == NodeKind::Node && node.key == "k3d-example-server-0"),
-        "the cluster node an sbf pod is scheduled on is kept as an edge endpoint"
+            .any(|node| node.kind == NodeKind::Node && node.key == "k3d-fixture-server-0"),
+        "the cluster node an shop pod is scheduled on is kept as an edge endpoint"
     );
     assert!(
         graph.edges().count() > 0,
@@ -344,7 +344,7 @@ fn restricting_to_a_namespace_keeps_its_objects_their_edges_and_the_nodes_they_r
         graph
             .underived_owners()
             .iter()
-            .all(|fact| fact.pod.starts_with("sbf/")),
+            .all(|fact| fact.pod.starts_with("shop/")),
         "underived-owner facts are filtered with their pods"
     );
 
@@ -361,9 +361,9 @@ fn the_selector_edge_carries_the_selector_and_the_env_edge_carries_its_site() {
     let selects = graph
         .edges()
         .find(|edge| {
-            edge.relation == EdgeRelation::Selects && edge.to.key == "sbf/statefulset/asterisk"
+            edge.relation == EdgeRelation::Selects && edge.to.key == "shop/statefulset/switchboard"
         })
-        .expect("a service selects the asterisk statefulset");
+        .expect("a service selects the switchboard statefulset");
     assert!(
         selects.sites[0].starts_with("selector["),
         "the edge's evidence is the selector itself: {:?}",
@@ -374,7 +374,7 @@ fn the_selector_edge_carries_the_selector_and_the_env_edge_carries_its_site() {
         .edges()
         .find(|edge| {
             edge.relation == EdgeRelation::ReadsKeyOf
-                && edge.from.key == "sbf/deployment/storefront-server"
+                && edge.from.key == "shop/deployment/storefront-server"
         })
         .expect("storefront-server reads a key of its secret");
     assert!(
@@ -396,7 +396,7 @@ fn the_mermaid_rendering_groups_by_namespace_and_leaves_the_runtime_layer_to_the
     assert!(mermaid.starts_with("flowchart TB\n"), "{mermaid}");
     assert!(
         mermaid.contains("subgraph ns0[\"namespace kube-system\"]")
-            && mermaid.contains("subgraph ns1[\"namespace sbf\"]"),
+            && mermaid.contains("subgraph ns1[\"namespace shop\"]"),
         "one subgraph per namespace, in name order: {mermaid}"
     );
     assert!(

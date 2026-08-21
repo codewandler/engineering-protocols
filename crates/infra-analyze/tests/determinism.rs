@@ -66,7 +66,7 @@ fn candidates_directions_and_the_html_page_render_byte_identically_across_two_ru
             directions_to_json(&ranked),
             directions_to_text(&ranked),
             render_html(&graph, &diagnosis, &all, None),
-            render_html(&graph, &diagnosis, &all, Some("sbf")),
+            render_html(&graph, &diagnosis, &all, Some("shop")),
         )
     };
     assert_eq!(

@@ -92,7 +92,7 @@ impl From<PropCode> for String {
 /// finding against the member.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Exception {
-    /// The nonconforming object, as an IR path: `workloads/sbf/deployment/acd-rs-redis`.
+    /// The nonconforming object, as an IR path: `workloads/shop/deployment/queue-redis`.
     pub subject: String,
     /// What it does instead, one line: ``image `redis:7-alpine` pulls from the default registry``.
     pub detail: String,

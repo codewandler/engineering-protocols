@@ -3189,7 +3189,7 @@ fn infra_graph_mermaid_groups_by_namespace_and_a_namespace_filter_narrows_it() {
     assert!(text.starts_with("flowchart TB"), "unfenced Mermaid: {text}");
     assert!(
         text.contains("subgraph ns0[\"namespace kube-system\"]")
-            && text.contains("subgraph ns1[\"namespace sbf\"]"),
+            && text.contains("subgraph ns1[\"namespace shop\"]"),
         "one subgraph per namespace: {text}"
     );
 
@@ -3199,12 +3199,12 @@ fn infra_graph_mermaid_groups_by_namespace_and_a_namespace_filter_narrows_it() {
         "--path",
         OBSERVATION,
         "--namespace",
-        "sbf",
+        "shop",
     ]);
     assert_eq!(code(&narrowed), 0, "{}", stderr(&narrowed));
     let text = stdout(&narrowed);
     assert!(
-        !text.contains("kube-system") && text.contains("namespace sbf"),
+        !text.contains("kube-system") && text.contains("namespace shop"),
         "the filter keeps one namespace: {text}"
     );
 }
@@ -3220,7 +3220,7 @@ fn infra_diagnose_reports_the_findings_and_exits_zero_because_a_diagnosis_is_not
     );
     let text = stdout(&output);
     assert!(
-        text.contains("INFRA-DIAG-008 error pods/sbf/flaky-agent-6d8f9c7b44-x1q2z"),
+        text.contains("INFRA-DIAG-008 error pods/shop/flaky-agent-6d8f9c7b44-x1q2z"),
         "the crash loop is reported with its code and severity: {text}"
     );
     assert!(
@@ -3310,7 +3310,7 @@ fn infra_inspect_properties_reports_the_workload_envelope_from_either_input() {
     assert_eq!(code(&from_bundle), 0, "{}", stderr(&from_bundle));
     let text = stdout(&from_bundle);
     assert!(
-        text.contains("sbf/deployment/flaky-agent replicas=1"),
+        text.contains("shop/deployment/flaky-agent replicas=1"),
         "the replica count is a property: {text}"
     );
     assert!(
@@ -3319,7 +3319,7 @@ fn infra_inspect_properties_reports_the_workload_envelope_from_either_input() {
     );
     assert!(
         text.contains("tag=latest"),
-        "asterisk's latest tag is stated: {text}"
+        "switchboard's latest tag is stated: {text}"
     );
 
     let from_ir = protocol(&[
@@ -3361,7 +3361,7 @@ fn infra_graph_html_is_self_contained_and_a_namespace_filter_scopes_it() {
         "--format",
         "html",
         "--namespace",
-        "sbf",
+        "shop",
     ]);
     assert_eq!(code(&scoped), 0, "{}", stderr(&scoped));
     assert!(
@@ -3382,7 +3382,7 @@ fn infra_view_writes_the_page_and_a_missing_browser_is_a_warning_not_a_failure()
             "--path",
             OBSERVATION,
             "--namespace",
-            "sbf",
+            "shop",
             "--out",
             out.to_str().expect("utf-8 path"),
         ])

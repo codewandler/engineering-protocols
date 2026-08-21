@@ -40,7 +40,7 @@ fn properties_carry_declared_and_observed_replicas_per_workload() {
 
     let storefront = all
         .iter()
-        .find(|entry| entry.workload == "sbf/deployment/storefront-server")
+        .find(|entry| entry.workload == "shop/deployment/storefront-server")
         .expect("storefront-server has properties");
     assert_eq!(storefront.replicas, Some(2));
     assert_eq!(storefront.observed_pods, 2);
@@ -51,24 +51,24 @@ fn properties_carry_declared_and_observed_replicas_per_workload() {
 fn properties_name_the_budgets_and_autoscalers_covering_each_workload() {
     let ir = example_ir();
     let all = properties(&ir);
-    let asterisk = all
+    let switchboard = all
         .iter()
-        .find(|entry| entry.workload == "sbf/statefulset/asterisk")
-        .expect("asterisk has properties");
+        .find(|entry| entry.workload == "shop/statefulset/switchboard")
+        .expect("switchboard has properties");
     assert_eq!(
-        asterisk.pod_disruption_budgets.as_deref(),
-        Some(&["sbf/asterisk".to_owned()][..]),
-        "the asterisk budget covers the asterisk template"
+        switchboard.pod_disruption_budgets.as_deref(),
+        Some(&["shop/switchboard".to_owned()][..]),
+        "the switchboard budget covers the switchboard template"
     );
     assert_eq!(
-        asterisk.horizontal_pod_autoscalers.as_deref(),
-        Some(&["sbf/asterisk".to_owned()][..]),
+        switchboard.horizontal_pod_autoscalers.as_deref(),
+        Some(&["shop/switchboard".to_owned()][..]),
         "the pinned autoscaler targets the statefulset"
     );
 
     let storefront = all
         .iter()
-        .find(|entry| entry.workload == "sbf/deployment/storefront-server")
+        .find(|entry| entry.workload == "shop/deployment/storefront-server")
         .expect("storefront-server has properties");
     assert_eq!(
         storefront.pod_disruption_budgets.as_deref(),
@@ -77,7 +77,7 @@ fn properties_name_the_budgets_and_autoscalers_covering_each_workload() {
     );
     assert_eq!(
         storefront.horizontal_pod_autoscalers.as_deref(),
-        Some(&["sbf/storefront-server".to_owned()][..])
+        Some(&["shop/storefront-server".to_owned()][..])
     );
 }
 
@@ -141,13 +141,13 @@ fn the_registry_candidate_names_the_dominant_registry_and_lists_every_exception(
     assert_eq!(
         registry.exceptions.len(),
         3,
-        "the ECR, localhost and registry.local images: {:?}",
+        "the example.com, localhost and registry.local images: {:?}",
         registry.exceptions
     );
     assert!(
         registry.exceptions.iter().any(|exception| exception.subject
-            == "workloads/sbf/statefulset/asterisk"
-            && exception.detail.contains("111122223333.dkr.ecr")),
+            == "workloads/shop/statefulset/switchboard"
+            && exception.detail.contains("registry.example.com")),
         "an exception names its subject and what it does instead: {:?}",
         registry.exceptions
     );
@@ -169,7 +169,7 @@ fn a_candidate_with_exceptions_reads_as_uniformity_with_exceptions_not_as_violat
     assert_eq!((coverage.holds_for, coverage.population), (2, 3));
     assert_eq!(
         coverage.exceptions[0].subject,
-        "workloads/sbf/deployment/storefront-server"
+        "workloads/shop/deployment/storefront-server"
     );
 
     let text = candidates_to_text(&mined);
@@ -270,7 +270,7 @@ fn the_directions_text_states_candidate_exceptions_without_prescribing() {
         "a candidate's direction restates the fact: {text}"
     );
     assert!(
-        text.contains("-> workloads/sbf/deployment/storefront-server"),
+        text.contains("-> workloads/shop/deployment/storefront-server"),
         "the exception is the subject to look at: {text}"
     );
 }
@@ -289,14 +289,14 @@ fn example_html(namespace: Option<&str>) -> String {
 fn the_html_page_sections_by_namespace_aggregates_pods_and_badges_by_worst_finding() {
     let page = example_html(None);
     assert!(page.contains("<h2>namespace kube-system</h2>"));
-    assert!(page.contains("<h2>namespace sbf</h2>"));
+    assert!(page.contains("<h2>namespace shop</h2>"));
     assert!(
         page.contains("deployment storefront-server — 0/2 ready"),
         "pods appear only aggregated on their workload: {}",
         &page[..600]
     );
     assert!(
-        !page.contains("debug-shell") || page.contains("pods/sbf/debug-shell"),
+        !page.contains("debug-shell") || page.contains("pods/shop/debug-shell"),
         "no pod boxes; a pod name may appear only inside a finding subject"
     );
     assert!(
@@ -324,16 +324,16 @@ fn the_namespace_filter_scopes_sections_findings_and_directions_alike() {
     let page = example_html(Some("kube-system"));
     assert!(page.contains("<h2>namespace kube-system</h2>"));
     assert!(
-        !page.contains("<h2>namespace sbf</h2>"),
+        !page.contains("<h2>namespace shop</h2>"),
         "only the requested namespace is rendered"
     );
     assert!(
         !page.contains("INFRA-DIAG-008"),
-        "sbf's crash loop must not leak into kube-system's page"
+        "shop's crash loop must not leak into kube-system's page"
     );
     assert!(
         !page.contains("flaky-agent"),
-        "no sbf subject appears anywhere on the filtered page"
+        "no shop subject appears anywhere on the filtered page"
     );
 
     let nowhere = example_html(Some("never-observed"));

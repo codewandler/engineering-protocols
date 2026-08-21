@@ -382,7 +382,7 @@ pub struct ResolvedPod {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct UnresolvedReference {
     /// Which IR entry holds the reference: its map name and key, such as
-    /// `workloads/sbf/deployment/frontend`.
+    /// `workloads/shop/deployment/frontend`.
     pub from: String,
     /// Where inside that entry, such as `containers[main].env[DB_PASSWORD]` or `selector`.
     pub site: String,

@@ -75,7 +75,7 @@ mapped and analyzed".
 9. **The orphan rules say what they checked.** A statefulset's `volumeClaimTemplates` claims
    and kubelet-projected configmaps reach pods outside the modelled sites, so `-011`/`-013`
    findings read "no env, envFrom or volume site … references", never "unused". The fixture's
-   `config-asterisk-0` (a real volumeClaimTemplate claim) fires `-013` under exactly that
+   `config-switchboard-0` (a real volumeClaimTemplate claim) fires `-013` under exactly that
    wording — a true statement about the modelled surface.
 10. **Model additions, IW2-shaped.** `ContainerStatus.waiting_reason` (verbatim kubelet
     vocabulary, not an enum that would erase the word an operator needs) and
@@ -212,7 +212,7 @@ Each applied, watched fail with the failing test named, reverted:
 |---|---|
 | each of the six new rule functions early-returned | its per-rule test **and** `every_registered_code_fires_at_least_once…`, naming the code |
 | unscanned budgets treated as an empty map | `the_new_rules_stay_silent_on_a_bundle_that_did_not_scan_their_kinds` |
-| budget selector AND weakened to OR | `a_budget_guarding_nothing_fires_and_the_one_guarding_asterisk_does_not` (two-label fixture selector) |
+| budget selector AND weakened to OR | `a_budget_guarding_nothing_fires_and_the_one_guarding_switchboard_does_not` (two-label fixture selector) |
 | exact ownership path skipped (always heuristic) | `a_deployment_pod_is_owned_exactly_through_its_observed_replicaset` |
 | fallback edge site relabelled `ownerReferences` | `on_a_bundle_without_replicasets_the_hash_fallback_derives_and_names_itself` |
 | replicaset→deployment existence check dropped | `a_pod_whose_scanned_replicaset_is_absent_or_deploymentless_is_handled_exactly` |
