@@ -9,6 +9,10 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.11.0-ground-truth-and-docs] — 2026-08-22
+
 ### Fixed
 
 - **`protocol evidence inspect` no longer refuses a record the day it is written.** The reference
