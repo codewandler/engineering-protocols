@@ -1,0 +1,763 @@
+/**
+ * The lab, drawn as an instrument panel.
+ *
+ * DARK ONLY, on purpose, and the same decision the landing page's hero makes: this is the brand's
+ * own field rather than a page rendered in the brand's colours. The colours below are therefore
+ * literals, not theme variables — a light rendering would need a second tuned palette for the
+ * gutter, the highlight overlay and nine ledger glyph colours, and a reader gets nothing from it
+ * that the dark one does not already give them. The navbar above still follows the site theme.
+ *
+ * The palette is `src/css/custom.css`'s, by hand:
+ *   #0f1418 the field · #161d24 a panel · #0b0f13 the sunken strip · #2b3540 a hairline
+ *   #d7dde3 text · #8b98a5 secondary · #3fb950 a verdict · #58a6ff motion · #d29922 advisory
+ *   #f85149 a refusal
+ *
+ * GEOMETRY: the lab is exactly the viewport below the navbar and never scrolls. Its three panels
+ * scroll inside themselves, which is what keeps a highlighted line, its IR row and the effect it
+ * caused visible at the same time. Below 997px it stops being a viewport and becomes a stack.
+ */
+
+.lab {
+  height: calc(100dvh - var(--ifm-navbar-height));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: #0f1418;
+  color: #d7dde3;
+  font-family: var(--ifm-font-family-monospace);
+}
+
+/* Fullscreened, the navbar is gone with the rest of the page, so the lab is the whole screen. */
+.lab:fullscreen {
+  height: 100dvh;
+}
+
+/* ------------------------------------------------------------------ *
+ * The toolbar
+ * ------------------------------------------------------------------ */
+
+.toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  height: 2.9rem;
+  padding: 0 0.7rem;
+  background-color: #161d24;
+  border-bottom: 1px solid #2b3540;
+}
+
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.tbutton {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  height: 1.85rem;
+  min-width: 1.85rem;
+  padding: 0 0.5rem;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 0.82rem;
+  line-height: 1;
+  color: #d7dde3;
+  background-color: #1b232b;
+  border: 1px solid #2b3540;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.tbutton:hover:not(:disabled) {
+  background-color: #232c36;
+  border-color: #3a4653;
+}
+
+.tbutton:disabled {
+  color: #55636f;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.tbutton:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 1px;
+}
+
+/* Play is the one button with the accent on it: it is the thing to press. */
+.tprimary {
+  color: #0f1418;
+  background-color: #3fb950;
+  border-color: #3fb950;
+  font-weight: 600;
+}
+
+.tprimary:hover:not(:disabled) {
+  background-color: #50c360;
+  border-color: #50c360;
+}
+
+.tlabel {
+  font-size: 0.74rem;
+  letter-spacing: 0.02em;
+}
+
+.toolbarMid {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+}
+
+.runTitle {
+  font-size: 0.78rem;
+  color: #c2ccd6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The honesty label. Amber is the site's "soon", which is exactly what this page is. */
+.draftTag {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding: 0.12rem 0.42rem;
+  color: #d29922;
+  background-color: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.toolbarEnd {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+}
+
+.keys {
+  font-size: 0.7rem;
+  color: #8b98a5;
+  white-space: nowrap;
+}
+
+.keys kbd {
+  font-family: inherit;
+  font-size: 0.68rem;
+  padding: 0.05rem 0.28rem;
+  color: #c2ccd6;
+  background-color: #1b232b;
+  border: 1px solid #2b3540;
+  border-radius: 3px;
+  box-shadow: none;
+}
+
+.exit {
+  font-size: 0.72rem;
+  color: #8b98a5;
+  white-space: nowrap;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(63, 185, 80, 0.42);
+}
+
+.exit:hover {
+  color: #3fb950;
+  text-decoration: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * The three panels
+ * ------------------------------------------------------------------ */
+
+/* The gap is the hairline: the grid's background shows through 1px of it. */
+.panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1.05fr);
+  gap: 1px;
+  background-color: #2b3540;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background-color: #0f1418;
+}
+
+.panelHead {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  padding: 0.5rem 0.75rem;
+  background-color: #161d24;
+  border-bottom: 1px solid #2b3540;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.panelLabel {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3fb950;
+}
+
+.panelTitle {
+  font-size: 0.74rem;
+  color: #c2ccd6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.panelMeta {
+  margin-left: auto;
+  font-size: 0.68rem;
+  color: #8b98a5;
+}
+
+.panelBody {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-color: #2b3540 #0f1418;
+}
+
+/* ------------------------------------------------------------------ *
+ * Left: the source
+ * ------------------------------------------------------------------ */
+
+.sourceBody {
+  background-color: #0f1418;
+}
+
+.source {
+  margin: 0;
+  padding: 0.4rem 0 1.5rem;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.73rem;
+  line-height: 1.55;
+  white-space: pre;
+  overflow: visible;
+}
+
+/* `max-content` with a `100%` floor is what makes the panel scroll sideways rather than clip: the
+   row is as wide as its longest line, and the highlight wash still reaches the right edge on the
+   short ones. This file's comments are long, and a code view that hides them is not a code view. */
+.row {
+  display: flex;
+  align-items: flex-start;
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+  padding-right: 1.2rem;
+  transition: background-color 200ms ease;
+}
+
+.gutter {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  flex: 0 0 auto;
+  width: 3.1rem;
+  background-color: #0f1418;
+  padding-right: 0.75rem;
+  text-align: right;
+  color: #55636f;
+  user-select: none;
+  border-right: 1px solid #1b232b;
+  transition: color 200ms ease, border-color 200ms ease;
+}
+
+.code {
+  flex: 0 0 auto;
+  padding-left: 0.7rem;
+  background: none;
+  border: 0;
+  font-size: inherit;
+  color: #d7dde3;
+  white-space: pre;
+}
+
+/* The highlight overlay: a wash across the row, a lit gutter, and a rule down the left edge of
+   the range. Blue, because blue is this palette's colour for motion. */
+.rowOn {
+  background-color: rgba(88, 166, 255, 0.1);
+}
+
+.rowOn .gutter {
+  color: #58a6ff;
+  border-right-color: #58a6ff;
+  background-image: linear-gradient(rgba(88, 166, 255, 0.1), rgba(88, 166, 255, 0.1));
+}
+
+/* Above the sticky gutter, which would otherwise paint over it. */
+.rowOn::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 2px;
+  background-color: #58a6ff;
+}
+
+/* The first line of the range gets one pass of a brighter wash as it becomes active, so a step
+   that lands where the last one did is still visibly a step. */
+.rowFirst {
+  animation: landed 620ms ease-out 1;
+}
+
+@keyframes landed {
+  0% {
+    background-color: rgba(88, 166, 255, 0.34);
+  }
+  100% {
+    background-color: rgba(88, 166, 255, 0.1);
+  }
+}
+
+/* The site's Prism theme, by hand. */
+.tComment {
+  color: #8b98a5;
+  font-style: italic;
+}
+
+.tKey {
+  color: #7ee787;
+}
+
+.tValue {
+  color: #a5d6ff;
+}
+
+.tPunct {
+  color: #8b98a5;
+}
+
+/* ------------------------------------------------------------------ *
+ * Middle: the intermediate layer
+ * ------------------------------------------------------------------ */
+
+.irBody {
+  padding: 0.4rem 0 1.5rem;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+/* Same rule as the source rows: as wide as the widest line, with a full-width floor, so a resolved
+   reference is read by scrolling rather than guessed from an ellipsis. */
+.irRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  padding-top: 0.16rem;
+  padding-bottom: 0.16rem;
+  padding-right: 1.2rem;
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+  transition: background-color 200ms ease;
+}
+
+.irRowOn {
+  background-color: rgba(88, 166, 255, 0.1);
+}
+
+.irRowOn::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: #58a6ff;
+}
+
+.irKind {
+  flex: 0 0 auto;
+  min-width: 4.6rem;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8b98a5;
+}
+
+.irLabel {
+  flex: 0 0 auto;
+  color: #e8eef4;
+}
+
+.irDetail {
+  flex: 0 0 auto;
+  color: #8b98a5;
+  white-space: nowrap;
+}
+
+/* One colour per kind of declaration, from the same three accents. */
+.k_system,
+.k_domain {
+  color: #58a6ff;
+}
+
+.k_group {
+  color: #55636f;
+}
+
+.k_type,
+.k_input {
+  color: #8b98a5;
+}
+
+.k_entity,
+.k_lifecycle {
+  color: #3fb950;
+}
+
+.k_command {
+  color: #7ee787;
+}
+
+.k_outcome {
+  color: #d29922;
+}
+
+.k_event {
+  color: #58a6ff;
+}
+
+.k_error {
+  color: #f85149;
+}
+
+.k_view {
+  color: #a5d6ff;
+}
+
+/* ------------------------------------------------------------------ *
+ * Right: run state, then the effects ledger
+ * ------------------------------------------------------------------ */
+
+.state {
+  flex: 0 0 auto;
+  padding: 0.65rem 0.8rem 0.75rem;
+  background-color: #0b0f13;
+  border-bottom: 1px solid #2b3540;
+}
+
+.stateTop {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.14rem 0.45rem;
+  border-radius: 4px;
+  border: 1px solid currentColor;
+}
+
+.chipDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+}
+
+.s_idle {
+  color: #8b98a5;
+  background-color: rgba(139, 152, 165, 0.1);
+}
+
+.s_running {
+  color: #58a6ff;
+  background-color: rgba(88, 166, 255, 0.1);
+}
+
+.s_running .chipDot {
+  animation: pulse 1200ms ease-in-out infinite;
+}
+
+.s_halted {
+  color: #d29922;
+  background-color: rgba(210, 153, 34, 0.1);
+}
+
+.s_done {
+  color: #3fb950;
+  background-color: rgba(63, 185, 80, 0.1);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.stateCount {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: #8b98a5;
+}
+
+.stateName {
+  margin-top: 0.5rem;
+  font-size: 0.86rem;
+  color: #e8eef4;
+}
+
+.stateNote {
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: #8b98a5;
+}
+
+.progress {
+  margin-top: 0.6rem;
+  height: 2px;
+  background-color: #1b232b;
+  overflow: hidden;
+}
+
+.progressFill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #3fb950 0%, #58a6ff 100%);
+  transition: width 240ms ease;
+}
+
+.runBody {
+  padding: 0.5rem 0 1.5rem;
+}
+
+.ledgerEmpty {
+  margin: 0;
+  padding: 1rem 0.85rem;
+  font-size: 0.72rem;
+  color: #55636f;
+}
+
+.ledger {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.entry {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.32rem 0.85rem;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  border-left: 2px solid transparent;
+}
+
+.entry + .entry {
+  border-top: 1px solid rgba(43, 53, 64, 0.55);
+}
+
+/* Entries written by the step now showing are the ones that just happened. */
+.entryNew {
+  animation: arrive 320ms ease-out 1;
+}
+
+@keyframes arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.entryGlyph {
+  flex: 0 0 auto;
+  width: 1rem;
+  text-align: center;
+  color: inherit;
+}
+
+.entryText {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: #d7dde3;
+  overflow-wrap: anywhere;
+}
+
+.entryDetail {
+  display: block;
+  margin-top: 0.12rem;
+  font-size: 0.68rem;
+  color: #8b98a5;
+}
+
+/* The glyph carries the colour; the line stays readable text. */
+.e_call {
+  color: #58a6ff;
+  border-left-color: rgba(88, 166, 255, 0.5);
+}
+
+.e_guard {
+  color: #8b98a5;
+}
+
+.e_accepted {
+  color: #3fb950;
+  border-left-color: rgba(63, 185, 80, 0.6);
+}
+
+.e_rejected {
+  color: #f85149;
+  border-left-color: rgba(248, 81, 73, 0.6);
+}
+
+.e_entity {
+  color: #3fb950;
+}
+
+.e_event {
+  color: #58a6ff;
+}
+
+.e_view {
+  color: #a5d6ff;
+}
+
+.e_nothing {
+  color: #d29922;
+  border-left-color: rgba(210, 153, 34, 0.5);
+}
+
+.e_note {
+  color: #55636f;
+}
+
+/* ------------------------------------------------------------------ *
+ * The footnote
+ * ------------------------------------------------------------------ */
+
+.footnote {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+  max-height: 7.5rem;
+  overflow: auto;
+  padding: 0.6rem 0.9rem;
+  background-color: #0b0f13;
+  border-top: 1px solid #2b3540;
+}
+
+.footnoteLabel {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #d29922;
+  padding-top: 0.1rem;
+}
+
+.footnote p {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.55;
+  color: #8b98a5;
+}
+
+.footnote code {
+  font-size: 0.95em;
+  padding: 0.02rem 0.22rem;
+  color: #a5d6ff;
+  background-color: rgba(88, 166, 255, 0.08);
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ *
+ * Narrow: a stack, not a viewport
+ * ------------------------------------------------------------------ */
+
+@media (max-width: 996px) {
+  .lab {
+    height: auto;
+    overflow: visible;
+  }
+
+  .toolbar {
+    position: sticky;
+    top: var(--ifm-navbar-height);
+    z-index: 5;
+    height: auto;
+    padding: 0.45rem 0.6rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .toolbarEnd {
+    margin-left: auto;
+  }
+
+  .keys {
+    display: none;
+  }
+
+  .panels {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    max-height: 68vh;
+  }
+
+  .panelHead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  .footnote {
+    max-height: none;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rowFirst,
+  .entryNew,
+  .s_running .chipDot {
+    animation: none;
+  }
+
+  .row,
+  .irRow,
+  .progressFill {
+    transition: none;
+  }
+}

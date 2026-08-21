@@ -1,0 +1,96 @@
+/**
+ * The lab launcher, on a documentation page.
+ *
+ * It reads as an instrument rather than as a call to action: a panel with a play glyph, one line of
+ * what it does, and the same amber `draft` tag the lab's own toolbar carries — a reader should know
+ * before clicking that what opens is a draft. Both themes, unlike the lab itself: this sits inside
+ * a documentation page, so it follows the page.
+ */
+
+.launch {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  margin: 0 0 1.5rem;
+  padding: 0.7rem 0.9rem;
+  font-family: var(--ifm-font-family-monospace);
+  color: var(--ifm-font-color-base);
+  text-decoration: none;
+  background-color: var(--ep-panel);
+  border: 1px solid var(--ep-line);
+  border-left: 2px solid var(--ep-accent-green);
+  border-radius: var(--ifm-global-radius);
+  transition: border-color var(--ifm-transition-slow) ease,
+    background-color var(--ifm-transition-slow) ease;
+}
+
+.launch:hover {
+  color: var(--ifm-font-color-base);
+  text-decoration: none;
+  background-color: var(--ep-panel-raised);
+  border-color: var(--ep-line-strong);
+  border-left-color: var(--ep-accent-green);
+}
+
+/* The play glyph, in the accent, on its own disc. It grows a hair on hover — the only motion. */
+.play {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  font-size: 0.85rem;
+  color: var(--ifm-color-primary);
+  background-color: rgba(63, 185, 80, 0.1);
+  border: 1px solid rgba(63, 185, 80, 0.35);
+  border-radius: 50%;
+  transition: transform var(--ifm-transition-slow) ease;
+}
+
+.launch:hover .play {
+  transform: scale(1.06);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.text strong {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ifm-heading-color);
+}
+
+.text span {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--ep-muted);
+}
+
+/* The same honesty tag the lab's toolbar carries, in the same amber. */
+.tag {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.12rem 0.42rem;
+  color: var(--ep-amber-text);
+  background-color: rgba(210, 153, 34, 0.1);
+  border: 1px solid rgba(210, 153, 34, 0.35);
+  border-radius: 4px;
+}
+
+@media (max-width: 570px) {
+  .launch {
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    margin-left: 0;
+  }
+}

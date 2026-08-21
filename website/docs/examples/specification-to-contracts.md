@@ -4,6 +4,8 @@ sidebar_position: 1
 description: One command from the billing specification, and the JSON Schema, OpenAPI, AsyncAPI and documentation actually generated from it.
 ---
 
+import LabLaunch from '@site/src/components/LabLaunch';
+
 # A specification and its contracts
 
 This page shows the central claim on real files: the specification is not a document *beside* the
@@ -12,6 +14,8 @@ repository: the source from `examples/billing/`, the output from `generated/`, k
 `cargo xtask generate --check` in CI.
 
 ## The source
+
+<LabLaunch />
 
 One command, from `examples/billing/domains/invoice.yaml`:
 
