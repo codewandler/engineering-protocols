@@ -1,0 +1,31 @@
+# Every expectation R12 requires, with the id it must carry.
+#
+# `specification:agent-charter-eval-cases` R12 states the rows as a table of kinds and matchers and
+# names no ids. `T2` ("every row listed above is present in the right document, and every one of
+# them is gating") cannot be checked against an unnamed row, and matching on a kind alone would let
+# two different bounds satisfy each other. So the ids are fixed here, once, and both the document
+# and the check read them from the same place.
+#
+# `T3` and `T4` also read this file: they are named-row assertions, and the name is the id.
+#
+# Format, tab-separated:
+#   <document>  <id>  <kind>  <tool>  <must-contain>  <severity>
+# `<tool>` is `-` where the kind takes none. `<must-contain>` is a literal that must appear inside
+# the expectation's `expect:` block; `-` where the kind's shape is the whole claim.
+# Every row is `gate`: R12 says "at least these gating expectations", and T2 checks the word.
+
+expectations.decomposer.trace.yaml	never-ran-a-move	tool.absent	Bash	protocol artifact move	gate
+expectations.decomposer.trace.yaml	created-through-the-cli	tool.called	Bash	protocol artifact new	gate
+expectations.decomposer.trace.yaml	validated-its-own-work	tool.called	Bash	protocol artifact validate	gate
+expectations.decomposer.trace.yaml	never-hand-wrote-an-artifact	tool.absent	Write	.engineering/planning	gate
+expectations.decomposer.trace.yaml	nothing-was-refused	permission.denied	-	exactly	gate
+expectations.decomposer.trace.yaml	the-decomposer-was-offered	env.agent_available	-	engineering-protocols:decomposer	gate
+expectations.decomposer.trace.yaml	a-subagent-ran	subagent.spawned	-	at_least	gate
+
+expectations.plan-reviewer.trace.yaml	never-ran-a-move	tool.absent	Bash	protocol artifact move	gate
+expectations.plan-reviewer.trace.yaml	never-created-an-artifact	tool.absent	Bash	protocol artifact new	gate
+expectations.plan-reviewer.trace.yaml	never-related-an-artifact	tool.absent	Bash	protocol artifact relate	gate
+expectations.plan-reviewer.trace.yaml	read-the-store-through-the-cli	tool.called	Bash	protocol artifact	gate
+expectations.plan-reviewer.trace.yaml	nothing-was-refused	permission.denied	-	exactly	gate
+expectations.plan-reviewer.trace.yaml	the-reviewer-was-offered	env.agent_available	-	engineering-protocols:plan-reviewer	gate
+expectations.plan-reviewer.trace.yaml	a-subagent-ran	subagent.spawned	-	at_least	gate

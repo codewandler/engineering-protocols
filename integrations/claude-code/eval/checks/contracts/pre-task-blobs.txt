@@ -1,0 +1,21 @@
+# The files W4.1 must not change, pinned to the revision it started from.
+#
+# `R9` ("run.sh and run-driven.sh are byte-identical to their pre-task state, and no Taskfile.yml
+# target was added"), `E3` ("the diff touches only those two files, and only the relation token on
+# those lines") and `L4` are all claims about a difference. A difference needs a base, and a base
+# read from `HEAD` moves every time somebody commits — so it is written down instead.
+#
+# The revision is the commit `run W4-1/1` was standing on when `establish_verifiers` wrote these
+# checks. A check reads the pre-task content with `git cat-file blob <rev>:<path>`, which needs no
+# hash of its own and cannot drift.
+#
+# Format: <mode>\t<revision>\t<path>
+#   identical   — the file's bytes at HEAD must equal its bytes at <revision>
+#   token-only  — the file may differ from <revision> only by `derived_from:epic:` becoming
+#                 `decomposes:epic:`; every other byte must be equal (E3)
+
+identical	b83c623	integrations/claude-code/eval/run.sh
+identical	b83c623	integrations/claude-code/eval/run-driven.sh
+identical	b83c623	Taskfile.yml
+token-only	b83c623	integrations/claude-code/agents/decomposer.md
+token-only	b83c623	integrations/claude-code/skills/planning/SKILL.md

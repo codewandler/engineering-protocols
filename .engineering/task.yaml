@@ -1,0 +1,37 @@
+# The task a `protocol drive` run walks — W4.1's governed dogfood run, and the first task document
+# this repository has ever written about itself.
+#
+# It names one story out of `.engineering/planning/` and nothing else. The story is the contract;
+# this file is only what a run needs in order to resolve a plan against it — the protocol, the
+# profile whose capabilities become the tool set at each state, and the facts nothing can observe
+# for the change.
+#
+# `profile: development.driven` and not `development.standard`, for the reason
+# `profiles/development-driven.yaml`'s header gives: the planning store has no tool surface other
+# than the `protocol` CLI, so under `development.standard` a driven `llm` step cannot create an
+# artifact at all and the run does not fail — it never moves. `development.driven` extends
+# `development.standard`, so `approval-gates` and its `review → complete` guard are unchanged, and
+# the run still stops at a person.
+id: W4-1
+kind: feature
+objective: agent-eval-cases
+
+protocol: adp/1
+profile: development.driven
+
+derived_from:
+  - story:agent-eval-cases
+
+constraints:
+  facts:
+    # The change is confined to `integrations/claude-code/` — the plugin's eval surface and the two
+    # agent charters. No crate's public API and no published contract moves.
+    change.public_contract: false
+    change.architectural: false
+  notes:
+    - The story is `story:agent-eval-cases` in `.engineering/planning/story/agent-eval-cases.md`; its
+      Acceptance section is the specification this run is measured against.
+    - Implementation surface is `integrations/claude-code/**`. Do not modify anything under
+      `crates/`, `website/`, or the workspace `Cargo.toml` — other work is in flight there.
+    - The story's own Open Question has a stated default — committed transcripts for the bounds, one
+      live run per release — and that default holds unless somebody records otherwise.

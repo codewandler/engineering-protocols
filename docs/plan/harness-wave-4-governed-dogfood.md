@@ -1,6 +1,11 @@
 # Harness wave 4 — the repository governed by its own driver
 
-> **Status: proposed, and sequenced by nothing yet. Its predecessor has now shipped.**
+> **Status: proposed. W4.1 has been run once — `W4-1/1`, 2026-08-21, and it stopped short of the
+> person it was meant to stop at.** The record is in § W4.1 below, under *The first run*; the wave's
+> other three items are untouched by it. Nothing about that run changes this page's standing: it is
+> still a proposal, and a proposal is not a work order however much of it has now happened.
+>
+> **Its predecessor has shipped.**
 > Wave 3 — the driver build, W3.0–W3.6 — is **delivered, 2026-08-21**: the acceptance for every item
 > is in [`harness-wave-2-driver-decision.md`](harness-wave-2-driver-decision.md) § *Wave 3 — built,
 > 2026-08-21*, together with a seventh item the review never saw (`protocol workflow render`). Every
@@ -45,8 +50,8 @@ reports what broke.
 |---|---|---|
 | **dogfood before portability** | W4.1 (one real story, driven) lands **before** W4.4 (a second real harness). Codex is last in this wave, not first | **an adapter proven on toy tasks tells you less than a driver proven on real work.** W3.5 already tests the *seam* with no model, so the marginal information in a second adapter is about the harness, not about the specification. The marginal information in a real story is about everything at once: the step map, the retry budgets, the approval pre-flight, the hook channel and whether an operator can resume. Adding a second harness first would double the surface under test before the first one has ever been run against something that could fail for a real reason |
 | the subject is **this repository's own backlog** | W4.1 drives a story out of the `.engineering/` store W4.0 landed — 33 artifacts under `initiative:the-repo-governs-itself`. `examples/planning-passkeys/` stays a fixture and is not driven | a fixture is a story somebody wrote to be drivable, so it cannot refute the claim under test. The claim is that a real story — with a gate that takes minutes, a diff across crates, and an acceptance line somebody argued about — is drivable |
-| **one small real story, not a representative one** | chosen for a bounded diff and a suite that already exists; named on this page when the wave opens | a large story tests the model's stamina and the wave's patience, not the driver's enforcement, and it fails for reasons this wave cannot fix. The wave is about whether the *mechanism* holds |
-| the operator is **in the loop by design**, not as a fallback | W4.1 runs `development.standard` with `--pause-on-approval`; the review becomes an `operator` step | D3: a headless run **refuses to start** when an approval is reachable, and `development.standard`'s `approval-gates` is reachable. The two ways to avoid the pause are both refused — dropping to `development.fast`, which deliberately cannot summon a human (`profiles/development-fast.yaml:25-27`), would test a weaker profile than the work deserves; auto-approving is refused under every flag by D3 |
+| **one small real story, not a representative one** | **named, 2026-08-21: `story:agent-eval-cases`** — 48 lines, and the smallest story in the store that both touches no crate (`integrations/claude-code/**`) and is not parked on somebody else's gate | a large story tests the model's stamina and the wave's patience, not the driver's enforcement, and it fails for reasons this wave cannot fix. The wave is about whether the *mechanism* holds. The disjoint surface is a second, smaller reason: a story whose diff lands where nothing else is being worked on is a story whose *failure* can only have come from the driver |
+| the operator is **in the loop by design**, not as a fallback | ~~W4.1 runs `development.standard`~~ **`development.driven`, with `--pause-on-approval`, taken 2026-08-21** — the choice the inline note in § W4.1 left open. The review is still an `operator` step and the pause is unchanged, because `development.driven` extends `development.standard` | D3: a headless run **refuses to start** when an approval is reachable, and `approval-gates` is reachable under both profiles. The two ways to avoid the pause are both refused — dropping to `development.fast`, which deliberately cannot summon a human (`profiles/development-fast.yaml:25-27`), would test a weaker profile than the work deserves; auto-approving is refused under every flag by D3. What forced the change off `development.standard` is not the pause but the shell: without `command.execute` a driven `llm` step cannot reach a single `protocol artifact` verb, and run `W4-1/1` made **48 allowed calls** through exactly that grant — 47 `protocol artifact`, one `protocol trace` |
 | ~~**the F13 answer is produced, not scheduled again**~~ **— produced by wave 3, and this row is kept as the record of why it was made an acceptance criterion** | **W3.6 ran the deliberate-denial case on 2026-08-21 and the answer is *yes, one-for-one*:** three hook refusals produced exactly three `permission_denials` entries, each naming its tool. It is written into design § 4.8 (*F13, answered*) and the gap-register row is **closed by code**. W4.2 is no longer the backstop for it | the review named the closing command in one sentence — one `claude -p` run with a denying hook, then read the last line — and a row whose closing command has been written down for two waves and never run is a row nobody intends to close. Making it an acceptance criterion is what got it run one wave earlier than this page expected |
 | **W4.3 produces a decision, not a build** | the design is written proposed-not-accepted; the wave's acceptance is *accepted / accepted-in-part / refused, with the reason recorded* | both shapes it could take are domain changes — a new `ArtifactStatus` variant, or a new mode on a write verb. That is the shape gap-register **D-5** already went through for `EvidenceKind`, and the lesson recorded there is that the decision belongs in the acceptance decision rather than being discovered during implementation |
 | the Codex facts are **an input, not a dependency** | the research was run in parallel and **has landed** — [`2026-08-21-codex-harness-research.md`](../reviews/2026-08-21-codex-harness-research.md), every fact labelled verified / documented / inferred / unknown. W4.4's three acceptance tiers stay, because a wave whose last item blocks on research nobody sequenced is a wave that does not close | it changed two things rather than confirming the plan: the adapter's input is the **session rollout JSONL**, not `codex exec --json` stdout, and the enforcement layer turns out to be **portable rather than Claude-specific** — Codex 0.145 ships a stable `PreToolUse` hook with the same decision contract. Both are recorded in W4.4 below rather than restated |
@@ -161,6 +166,154 @@ the lock and exits 0 (D3).
 * **a run that wedges is a recorded result.** If the driver cannot get a real story through, the
   wave records where it stopped, what the cursor said and which decision was wrong. That outcome
   closes this item; quietly retrying until it works does not.
+
+### The first run — `W4-1/1`, 2026-08-21: **blocked in `establish_verifiers`, and the last clause above is the one it lands on**
+
+The run happened. It was not faked, not scoped down and not retried until it worked, and **it did not
+reach the person it was supposed to stop at** — it stopped four states short of `review`, for two
+reasons the engine printed and neither of which is a defect in the engine. That is the outcome the
+acceptance line above admits, so this item is closed by it rather than left open, and everything
+below is the record the line asks for.
+
+```text
+$ protocol drive run --project . --plugin-dir integrations/claude-code \
+    --pause-on-approval --max-iterations 40            # no --map: the shipped map is selected by fitting
+run        W4-1/1
+map        step map development/default
+status     blocked
+state      establish_verifiers
+steps      5 run, 1 submitted
+moved      receive -> specify
+moved      specify -> decompose
+moved      decompose -> establish_verifiers
+blocked because:
+  - establish_verifiers -> implement: ? artifact specification (approved) — declared: specification:agent-charter-eval-cases (draft) [principle spec-driven]
+  - establish_verifiers -> implement: ✗ test.first_result == failed — test.first_result = passed [principle test-driven]
+resume with: protocol drive resume W4-1/1                                                  # exit 1
+```
+
+**The subject.** `story:agent-eval-cases` — *"The two planning agents, held to their charters by a
+run"*, `decomposes: epic:self-evaluation`, 48 lines. Its implementation surface is
+`integrations/claude-code/**`, which is what selected it: of the two stories in the store that are
+both near-smallest and touch no crate, the other — `story:native-plugin-eval` — says in its own Open
+Questions that it *"stays in draft until"* an early-access gate opens, so driving it would have
+measured a gate somebody else holds. The
+task document is `.engineering/task.yaml`, `id: W4-1`, `kind: feature`, `derived_from:
+story:agent-eval-cases`, and it declares `profile: development.driven` — which is the decision the
+inline note above left to whoever opened the wave, taken the way that note predicted, and confirmed
+by the run: `protocol resolve` reports `command.execute` allowed, and all 48 CLI invocations the four
+sessions were allowed — 47 `protocol artifact`, one `protocol trace` — went through the shell that
+grant opens.
+
+**What ran, per state.**
+
+| state | steps | outcome |
+|---|---|---|
+| `receive` | 1 `llm` | created `task:w4-1-agent-eval-cases` through `protocol artifact new`, body written by targeted `Edit`. Moved |
+| `specify` | 1 `llm` | created `specification:agent-charter-eval-cases`, status `draft`. Moved on `artifact.specification.exists` |
+| `decompose` | 1 `llm` | created **9** `task` artifacts, each related through `protocol artifact relate`. Moved (unguarded) |
+| `establish_verifiers` | 1 `llm` + 1 `command` | wrote **nine red shell checks — one per decomposed task** — under `integrations/claude-code/eval/checks/`, then the driver ran `cargo test --workspace`: **138 suites `ok`, 0 `FAILED`**. **Blocked** |
+| `implement` … `review` | — | never entered. The `operator` step was never reached |
+
+**The numbers, all read out of the run's own records.**
+
+| quantity | value | where it is |
+|---|---|---|
+| model sessions | 4, `is_error: false` in every one | `.engineering/runs/W4-1/1/transcripts/*.jsonl` |
+| resolved model | `claude-opus-5[1m]` — the CLI's default; the driver passes no `--model` | `claude_argv`, `crates/protocol-cli/src/drive.rs:1178-1211` |
+| turns / wall clock / cost | 224 turns, 34 m 39 s of session time, **$15.42** | terminal `result` events |
+| hook decisions | **80** — 69 allow, 11 deny | `hook-decisions.jsonl` |
+| … by hook | `driven-surface` 48 allow / 10 deny; `store-integrity` 21 allow / 1 deny | same |
+| `permission_denials` | **11**, summing the four terminal records: 3 / 3 / 2 / 3 | same four transcripts |
+| evidence submitted | **1** — `test_result`, `suite: unit`, `passed: 1`, `producer: verifier/test-runner`, `command: cargo test --workspace` | `snapshot.json` |
+| audit trail | 11 events: 3 `transition_performed`, 1 `evidence_produced`, 1 `transition_blocked` carrying both unmet reasons | `snapshot.json` |
+| store afterwards | 47 → **58** artifacts, `protocol artifact validate` **exit 0** | the verb |
+| files outside the intended surface | **0** — no tracked file was modified at all; every write is a new file under `.engineering/**` or `integrations/claude-code/eval/checks/**` | `git status` |
+
+**What held, stated as claims with their evidence.**
+
+* **Every transition was the engine's.** Three `Moved`, one `TransitionBlocked` with one line per
+  unmet requirement, all in the snapshot's audit trail rather than in the driver's log.
+* **The guards discriminated.** 69 allows and 11 denies is the shape the driven eval demands of
+  itself — a guard that denies everything audits as little as one that denies nothing. Every deny is
+  a `Bash` outside `protocol artifact …`/`protocol trace …` (`ls`, `find`, `cat`, and composed
+  command lines), except one: a `store-integrity` refusal of an `Edit` whose `new_string` rewrote
+  the machine-owned `id:` of an artifact's frontmatter.
+* **F13 holds on the shipped map, not only on the eval's.** 11 hook denies, 11 `permission_denials`
+  entries, one-for-one, each naming its tool — a second, independent confirmation of the answer
+  W3.6 produced, on a different step map and a different model.
+* **The auth was the login.** `apiKeySource: none` in all four sessions, with `ANTHROPIC_API_KEY`
+  unexported and `CLAUDE_CONFIG_DIR` pointed at a scratch home holding a copy of the credentials.
+* **`protocol trace check` decides these transcripts.** Run against
+  `eval/expectations.driven-step.trace.yaml` — a document written for the eval's step, not for these
+  — `decompose` is **conformant** (9 ok, 2 advisory gaps) and the other three contradict
+  `nothing-was-badly-refused-here`, whose bound is `at most 2` denials. `protocol trace evidence`
+  minted a `trace_conformance` record from the `decompose` transcript, `status: passed`,
+  `producer: verifier/trace-checker`.
+
+**What the run found, and it is about the step map rather than about the enforcement.** Five things,
+in the order they cost the run:
+
+1. **`drivers/development/default.yaml`'s only verifier is `cargo`, so a story whose tests are not
+   Rust tests cannot satisfy `test-driven` at all.** The `establish_verifiers` `llm` step did exactly
+   what it was asked — its own README says *"They are red, and red is the product"* — and wrote nine
+   failing shell checks, because that is the idiom the chosen story's acceptance is written in. The
+   step after it runs `cargo test --workspace`, which was green (138 `ok`), so `test.first_result`
+   was recorded `passed`, and `test.first_result` is the **first** outcome ever recorded and never
+   changes (`crates/aep-engine/src/execution.rs:366-378`). The run could not move afterwards by any
+   route. **This is the map's problem and not the workflow's**: the map is where a repository says
+   how evidence is obtained, and this one says `cargo` in every state that says anything.
+2. **An `llm` step is told what must hold *in* its state and never what guards the way *out* of
+   it.** `StepContext.requirements` is built from `Evaluation.requirements`
+   (`crates/aep-driver/src/run.rs:672-676`), which is documented as *"what must hold while in this
+   state"* (`crates/aep-engine/src/evaluate.rs:131-132`); the outgoing guard lives in
+   `Evaluation.transitions[].requirements` and is not passed. So the model was never told that
+   `implement` needed a red suite and an approved specification. It was not asked and it did not
+   guess, which is the correct order of blame.
+3. **Nothing in the run moves a specification to `approved`.** `protocol artifact new` leaves
+   `draft`, `spec-driven.before_implementation` wants `approved`
+   (`principles/development/spec-driven.yaml:20-25`), and the lifecycle is `draft → in_review →
+   approved` — two `protocol artifact move` calls that no prompt asks for and no step performs.
+4. **`diff.exists` is satisfied by `git diff` exiting zero, not by a diff existing.** Every file this
+   run produced is new, so `git --no-pager diff --stat HEAD` would have printed nothing and exited 0,
+   and `mint` writes a `ChangeSet` with all-zero counts on any zero exit
+   (`crates/protocol-cli/src/drive.rs:1274-1281`, which says so in its own comment). The run never
+   reached `implement`, so this one is a reading of the code rather than an observation of the run —
+   labelled as such deliberately.
+5. **The driver never checks a transcript, so this item's third acceptance bullet is not met by the
+   run — only by a person typing the verb afterwards.** That bullet asks for `protocol trace check`
+   over each `llm` step's transcript, `protocol trace evidence` submitting `trace_conformance`, and
+   the completion gate reading it. `drivers/development/default.yaml` contains **no `trace` step at
+   all**, so no `trace_conformance` record was minted by the run and nothing could have gated on one.
+   The two invocations quoted above were run by hand against the finished transcripts, which
+   demonstrates the verbs and not the gate. Closing this is a step-map change, and therefore the same
+   decision as finding 1 rather than a separate one.
+
+**One hermeticity gap, and it is not the one the eval guards against.** The `decompose` and
+`establish_verifiers` sessions' init events list **three MCP servers** — `claude.ai Google Drive`,
+`Gmail`, `Google Calendar`, all `status: needs-auth` — while `receive` and `specify` list none. There
+is no `.mcp.json` in the tree and no `mcpServers` key in the scratch config home, so these are
+account-level and arrive over the network: **a scratch `CLAUDE_CONFIG_DIR` cannot exclude them.**
+Nothing was reachable through them — the tool inventory is 28 in all four sessions and no `mcp__*`
+tool appears — and no expectation in any specification here asserts `mcp_servers == 0`, which is why
+this was found by reading a transcript rather than by a gate.
+
+**What this run does not say.** It says nothing about whether the mechanism can carry a story to
+`complete`, because it did not carry one. It says nothing about the retry budgets W4.2 asks about:
+**no step was retried, no state was re-entered, and no budget was touched** — `visits` is 1 for all
+four states and every `attempts` entry is 1, so the three numbers stay guesses and W4.2's acceptance
+line about them is untouched by this run. And it says nothing about `--pause-on-approval`'s resume
+line, which was printed as `resume with: protocol drive resume W4-1/1` by the **blocked** path
+(`crates/protocol-cli/src/drive.rs:611-613`) rather than by an `operator` pause, so W4.2's third item
+— *"nobody has read that line"* — is still true of the line it means.
+
+**Resuming it changes nothing on its own.** The cursor sits in `establish_verifiers` with both its
+steps done, so a resume re-takes the lock, asks for the transition, is refused for the same two
+reasons and exits 1 again. Making the run movable is a change to the step map, and *"changing a
+workflow, a profile or a principle to make the run go through"* is on this page's own
+**deliberately-not-in-this-wave** list. The next decision is therefore whether finding 1 is a defect
+in `drivers/development/default.yaml` — a map that can only drive Rust changes in a repository whose
+backlog is a third documents and plugin shell — and that is a decision, not a fix.
 
 ## W4.2 — hardening: the numbers wave 3 had to guess at
 

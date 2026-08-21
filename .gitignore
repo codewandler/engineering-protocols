@@ -34,3 +34,8 @@ generated/web/*/*.wasm
 # page fetches it at runtime rather than importing it, so a missing one is a state the lab shows
 # rather than a build that breaks.
 website/static/lab/
+
+# Governed runs write model transcripts here; they carry the running account’s MCP inventory and
+# per-run spend, which a public tree should not carry. The readable account of a run is its wave
+# page (docs/plan/). Decision recorded in docs/plan/gap-register.md — delete this line to reverse.
+.engineering/runs/

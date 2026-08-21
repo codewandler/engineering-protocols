@@ -55,6 +55,23 @@ belongs in the commit message or in `docs/design/`.
   the module — it is a build artifact and stays uncommitted, and a page opened without one says so
   rather than showing a run it did not do.
 
+### Changed
+
+- **The first governed run of a real story, and the record of where it stopped.** `protocol drive`
+  walked `story:agent-eval-cases` out of this repository's own `.engineering/` store under
+  `development.driven` and the shipped step map, with four headless model sessions, the plugin's
+  hooks as the enforcement arm and `cargo` as the verifier. It **blocked in `establish_verifiers`**
+  and never reached the person it was meant to stop at, for two reasons the engine printed: the
+  specification it had created was `draft` where `spec-driven` wants `approved`, and
+  `test.first_result` was `passed` where `test-driven` wants `failed` — because the model wrote its
+  failing tests as shell checks, which is the idiom the story's acceptance is written in, and
+  `drivers/development/default.yaml` can only run `cargo`. Nothing was changed to make the run go
+  through; the run is the finding. The enforcement half held and is recorded with numbers: 80 hook
+  decisions, 69 allow and 11 deny, and 11 `permission_denials` — one for one, a second independent
+  confirmation of F13 on a map the eval never touched. `protocol artifact validate` is exit 0 over
+  the 58 artifacts the run left. Record: `docs/plan/harness-wave-4-governed-dogfood.md` § W4.1,
+  *The first run*.
+
 ### Fixed
 
 - **Four things the documents invited an adopter to declare, which the engine then refused, ignored

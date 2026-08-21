@@ -1,0 +1,29 @@
+# Every row `run-agents.sh` must print, by id, with the statement it stands for.
+#
+# From `specification:agent-charter-eval-cases` R6 (D1–D9) and R9 (P1–P7), restated verbatim in
+# `task:agent-eval-decomposer-stage` and `task:agent-eval-reviewer-stage`.
+#
+# These ids are an interface, not a label. `R1` of the runner task is "the table contains every row
+# named in the two stage tasks, each named" — a check can only read that if the names are fixed
+# somewhere neither the runner nor the check owns alone. This is that somewhere.
+#
+# Format: <stage>\t<id>\t<statement>. `#` comments and blanks ignored.
+# `stage` is `decomposer` or `plan-reviewer`; it is what `O6` groups the uncovered rows by.
+
+decomposer	D1	created has at least two members
+decomposer	D2	every member of created has kind story
+decomposer	D3	every member of created is in the story lifecycle's initial status, read at run time
+decomposer	D4	every member of created carries a decomposes edge to epic:passkey-sign-in
+decomposer	D5	every artifact in the baseline still holds its baseline status
+decomposer	D6	every artifact in the baseline still has its baseline file digest
+decomposer	D7	protocol artifact validate exits 0 on the store
+decomposer	D8	the terminal record has is_error false and terminal_reason completed
+decomposer	D9	the run spawned at least one subagent
+
+plan-reviewer	P1	git status --porcelain in the scratch project is empty
+plan-reviewer	P2	protocol artifact validate exits 0
+plan-reviewer	P3	every artifact's status equals its post-stage-1 status
+plan-reviewer	P4	the terminal record has is_error false and terminal_reason completed
+plan-reviewer	P5	the session's final text is non-empty and names at least one artifact id from the store
+plan-reviewer	P6	at least one Bash call ran a read verb (list, board, graph or validate)
+plan-reviewer	P7	the run spawned at least one subagent
