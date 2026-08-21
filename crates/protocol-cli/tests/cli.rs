@@ -1593,16 +1593,84 @@ fn ess_synthesize_plans_the_normative_example_and_says_what_it_refuses() {
 }
 
 #[test]
-fn ess_synthesize_offers_exactly_one_target() {
-    // `--target` exists so a second language is a new value rather than a new surface — and only
-    // one value exists, because a target that parses before its emitter exists fails later and
-    // worse.
+fn ess_synthesize_offers_exactly_the_targets_whose_emitters_exist() {
+    // `--target` exists so a new emitter is a new value rather than a new surface — and exactly
+    // the values whose emitters exist are offered, because a target that parses before its
+    // emitter does fails later and worse.
     let help = stdout(&protocol(&["ess", "synthesize", "--help"]));
     assert!(help.contains("--target"), "{help}");
     assert!(help.contains("[default: rust]"), "{help}");
+    for target in ["- rust:", "- go:", "- web:"] {
+        assert!(help.contains(target), "`{target}` is missing from:\n{help}");
+    }
     assert!(
-        !help.to_lowercase().contains("go\n") && !help.contains("typescript"),
+        !help.contains("typescript") && !help.contains("- kotlin:"),
         "no target is scaffolded before its emitter exists: {help}"
+    );
+}
+
+#[test]
+fn ess_synthesize_for_the_browser_emits_a_page_and_the_plan_unchanged() {
+    // The seam's claim, from the outside: a third target changes what is emitted and not the plan,
+    // and what a browser could not carry comes back beside it rather than folded into it.
+    let output = protocol(&[
+        "ess",
+        "synthesize",
+        "--path",
+        SPECIFICATION,
+        "--target",
+        "web",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the synthesis report is valid JSON");
+    assert_eq!(parsed["target"], "web");
+    assert_eq!(parsed["generated"], 33, "the plan is the same plan");
+    assert_eq!(parsed["obligations"], 8);
+    assert_eq!(parsed["refused"], 4);
+    assert_eq!(
+        parsed["target_notes"]["refusals"]
+            .as_array()
+            .expect("target refusals")
+            .len(),
+        0,
+        "every command of billing lands on exactly one component"
+    );
+    assert_eq!(
+        parsed["target_notes"]["weakenings"]
+            .as_array()
+            .expect("target weakenings")
+            .len(),
+        6
+    );
+
+    let emitted: Vec<&str> = parsed["artifacts"]
+        .as_array()
+        .expect("artifacts is a list")
+        .iter()
+        .map(|artifact| artifact["path"].as_str().expect("a path"))
+        .collect();
+    for path in [
+        "index.html",
+        "bridge.js",
+        "catalog.json",
+        "PLAN.md",
+        "TARGET.md",
+    ] {
+        assert!(
+            emitted.contains(&path),
+            "`{path}` is missing from {emitted:?}"
+        );
+    }
+    assert!(
+        !emitted.iter().any(|path| {
+            std::path::Path::new(path)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("wasm"))
+        }),
+        "the compiled module is a build artifact and is never emitted: {emitted:?}"
     );
 }
 

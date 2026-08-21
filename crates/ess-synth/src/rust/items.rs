@@ -193,7 +193,7 @@ pub(super) fn command_contract(out: &mut String, emit: &Emit<'_>, command: &Reso
 
 /// One emitted event's field on an outcome's enum variant: the field identifier and the event it
 /// carries.
-pub(super) struct OutcomeEventField<'a> {
+pub(crate) struct OutcomeEventField<'a> {
     /// The variant field's identifier.
     pub field: String,
     /// The event the field carries.
@@ -205,7 +205,7 @@ pub(super) struct OutcomeEventField<'a> {
 /// Computed once and shared: the outcome enum declares these fields and a component's port
 /// matches on them to publish, and two renderers numbering duplicate events independently is how
 /// a pattern comes to name a field the variant does not have.
-pub(super) fn outcome_event_fields<'a>(
+pub(crate) fn outcome_event_fields<'a>(
     emit: &Emit<'_>,
     outcome: &'a ResolvedOutcome,
 ) -> Vec<OutcomeEventField<'a>> {

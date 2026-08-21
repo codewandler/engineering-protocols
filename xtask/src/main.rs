@@ -91,6 +91,27 @@ const SYNTH: &str = "generated/rust";
 /// way, and held to it by `no_two_tasks_own_one_committed_tree_unless_the_outer_carves_the_inner_out`.
 const SYNTH_GO: &str = "generated/go";
 
+/// Where the browser realizations the same specifications determine are committed.
+///
+/// A third sibling of [`SYNTH`], written by the same task from the same plan, and carved out of
+/// the projection task's orphan scan the same way. The compiled `.wasm` is deliberately **not**
+/// committed: it is a build artifact, and the check below builds it rather than trusting a binary
+/// nobody can diff.
+const SYNTH_WEB: &str = "generated/web";
+
+/// The hand-written host that links a realization into each committed browser bridge.
+///
+/// `(tree directory under SYNTH_WEB, host crate directory, the module file the host produces)`.
+/// The bridge chooses no realization — gap register D-2 — so the module it builds on its own
+/// refuses every command with the obligation it is owed. This host is what turns the same page
+/// into a running system, and the smoke test below drives *its* module, through the page's own
+/// glue.
+const WEB_REALIZATIONS: &[(&str, &str, &str)] =
+    &[("billing", "examples/billing-web", "billing_web_realized")];
+
+/// The target the browser realization is built for.
+const WASM: &str = "wasm32-unknown-unknown";
+
 /// The committed realization each synthesised workspace is linked with and judged through.
 ///
 /// `(workspace directory under SYNTH, source-workspace package)`. Wave 6's acceptance criterion
@@ -108,7 +129,7 @@ const REALIZATIONS: &[(&str, &str)] = &[("billing", "billing-realization")];
 /// Exactly the nested owners' roots, relative to [`PROJECTIONS`] — the ownership test refuses an
 /// entry here that no task owns, because an unowned exclusion is a hole in the drift check that
 /// nobody scans.
-const PROJECTION_EXCLUSIONS: &[&str] = &["go", "rust"];
+const PROJECTION_EXCLUSIONS: &[&str] = &["go", "rust", "web"];
 
 /// The example observation bundle, and the IR document committed beside it.
 ///
@@ -205,6 +226,7 @@ fn main() -> Result<()> {
                 &specifications,
                 &root.join(SYNTH),
                 &root.join(SYNTH_GO),
+                &root.join(SYNTH_WEB),
                 check,
             )
         }
@@ -784,12 +806,20 @@ struct Synthesized {
 /// the acceptance criterion the waves set is executed rather than asserted: a committed tree that
 /// drifted fails the diff, and one that matches but no longer compiles — a toolchain moved, a hand
 /// edit slipped through a force-add — fails the check that actually claims "this builds".
-fn synth(specifications: &[PathBuf], out: &Path, go_out: &Path, check: bool) -> Result<()> {
+fn synth(
+    specifications: &[PathBuf],
+    out: &Path,
+    go_out: &Path,
+    web_out: &Path,
+    check: bool,
+) -> Result<()> {
     let mut workspaces = Vec::new();
     let mut modules = Vec::new();
+    let mut pages = Vec::new();
     for specification in specifications {
         workspaces.push(synth_of(specification, "rust")?);
         modules.push(synth_of(specification, "go")?);
+        pages.push(synth_of(specification, "web")?);
     }
 
     // Filed under the example directory, exactly as the suites are: `generated/rust/billing/`
@@ -838,6 +868,39 @@ fn synth(specifications: &[PathBuf], out: &Path, go_out: &Path, check: bool) -> 
         "cargo xtask synth",
     )?;
 
+    // The browser tree needs the same two exclusions the Rust one does, and for the same reason:
+    // `cargo build` writes a lock file and a target directory beside the manifest, and neither is
+    // the emitter's. The compiled module lives under `target/` too, which is why nothing binary is
+    // ever part of the committed tree.
+    let mut web_expected = BTreeMap::new();
+    let mut web_excluded = Vec::new();
+    for page in &pages {
+        for (path, contents) in &page.artifacts {
+            web_expected.insert(format!("{}/{path}", page.directory), contents.clone());
+        }
+        web_excluded.push(format!("{}/Cargo.lock", page.directory));
+        web_excluded.push(format!("{}/target", page.directory));
+        // And the module itself, wherever a reader put it. The emitted `README.md` tells them to
+        // copy a realized build in beside `index.html`, because that is the page's last candidate
+        // path — so following the instructions the tree ships must not make the tree drift.
+        web_excluded.push(format!(
+            "{}/{}.wasm",
+            page.directory,
+            module_stem(&page.directory)
+        ));
+    }
+    web_expected.insert(INDEX.to_owned(), web_index(&pages));
+
+    sync(
+        web_out,
+        &web_expected,
+        check,
+        &web_excluded,
+        "synthesised browser realizations",
+        "the specifications",
+        "cargo xtask synth",
+    )?;
+
     for workspace in &workspaces {
         check_generated_workspace(&out.join(&workspace.directory))?;
     }
@@ -847,6 +910,286 @@ fn synth(specifications: &[PathBuf], out: &Path, go_out: &Path, check: bool) -> 
     for module in &modules {
         check_generated_module(&go_out.join(&module.directory))?;
     }
+    for page in &pages {
+        check_generated_page(&web_out.join(&page.directory), &page.directory)?;
+    }
+    Ok(())
+}
+
+// ---- the browser realization ----------------------------------------------------------------------
+
+/// Builds one committed browser tree, then holds the page and the module to each other.
+///
+/// Three questions, three messages. Does the emitted bridge still compile for the browser's
+/// target? Does the page call exactly the exports the module has — which is this format's version
+/// of a dangling reference, and the one nothing in HTML would refuse? And does the whole crossing
+/// still work end to end, driven through the page's own glue by the host that links a realization?
+fn check_generated_page(tree: &Path, directory: &str) -> Result<()> {
+    let release = build_for_the_browser(tree, &format!("ess-synth-web/{directory}"))?;
+    let bridge_module = release.join(format!("{}.wasm", bridge_module_stem(tree)?));
+    let bridge_exports = wasm_exports(&bridge_module)?;
+
+    let Some((_, host, host_module)) = WEB_REALIZATIONS
+        .iter()
+        .find(|(committed, _, _)| *committed == directory)
+    else {
+        // A committed tree with no host is a page nothing can drive, and this check would then be
+        // certifying a module against a page neither of them ever answered.
+        bail!(
+            "`{SYNTH_WEB}/{directory}` is committed and no entry of `WEB_REALIZATIONS` links a              realization into it, so nothing in the gate ever runs it"
+        );
+    };
+    let host_root = workspace_root().join(host);
+    let host_release =
+        build_for_the_browser(&host_root, &format!("ess-synth-web/{directory}-realized"))?;
+    let realized_path = host_release.join(format!("{host_module}.wasm"));
+    let realized_exports = wasm_exports(&realized_path)?;
+
+    let referenced = page_references(tree)?;
+    let offered: BTreeSet<String> = bridge_exports.union(&realized_exports).cloned().collect();
+    if referenced != offered {
+        let dangling: Vec<&String> = referenced.difference(&offered).collect();
+        let unused: Vec<&String> = offered.difference(&referenced).collect();
+        let mut detail = String::new();
+        if !dangling.is_empty() {
+            let _ = writeln!(
+                detail,
+                "the page calls {} export(s) no module has: {} — in HTML that fails at the \
+                 click, silently, which is why it is checked here",
+                dangling.len(),
+                dangling
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        if !unused.is_empty() {
+            let _ = writeln!(
+                detail,
+                "{} export(s) no page names: {} — an export nothing calls is a boundary that \
+                 has outlived its caller",
+                unused.len(),
+                unused
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+        bail!(
+            "`{SYNTH_WEB}/{directory}` and its module disagree about the boundary:\n{detail}\
+             that is a defect in `ess-synth`, not in any specification"
+        );
+    }
+    if !bridge_exports.is_subset(&realized_exports) {
+        bail!(
+            "`{host}` does not re-export the bridge's own boundary, so the page cannot drive \
+             it: {:?} are missing. A host's `cdylib` carries the `#[no_mangle]` items of \
+             every `rlib` it links; if it stopped, the page now answers two different modules",
+            bridge_exports
+                .difference(&realized_exports)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    smoke_the_boundary(tree, &host_root, &realized_path)
+}
+
+/// The module file name a reader is told to copy in beside the page.
+///
+/// Derived from the tree's own directory the way the emitter derives the crate name from the
+/// system: `billing` builds `billing-web`, which builds `billing_web.wasm`. Kept here rather than
+/// read off the tree because the exclusion list is computed before the tree is written, and a
+/// carve-out that needed the tree to exist would be a carve-out that does not apply on a first run.
+fn module_stem(directory: &str) -> String {
+    format!("{directory}_web").replace('-', "_")
+}
+
+/// The file name stem of the module one committed browser tree builds.
+///
+/// Derived from the tree rather than fixed here: the emitter names the bridge crate after the
+/// system, and this task is not the place a second answer to that question lives. Exactly one
+/// crate, by construction — a browser tab holds one system, and the transport between components
+/// is what the system crate already is.
+fn bridge_module_stem(tree: &Path) -> Result<String> {
+    let crates = tree.join("crates");
+    let mut found: Vec<String> = fs::read_dir(&crates)
+        .with_context(|| format!("reading {}", crates.display()))?
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| entry.path().is_dir())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    found.sort();
+    match found.len() {
+        1 => Ok(found[0].replace('-', "_")),
+        other => bail!(
+            "{} holds {other} crate(s) and a browser tree has exactly one: {}",
+            crates.display(),
+            found.join(", ")
+        ),
+    }
+}
+
+/// Builds one crate for `wasm32-unknown-unknown`, or says what is missing.
+///
+/// **Never skips.** A gate step that quietly passes without its toolchain reads exactly like a
+/// step that passed — the same rule the Go steps hold — so a missing target is a failure that
+/// names the one command that installs it.
+fn build_for_the_browser(crate_root: &Path, scratch: &str) -> Result<PathBuf> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let target_dir = workspace_root().join("target").join(scratch);
+    let output = std::process::Command::new(&cargo)
+        .args(["build", "--release", "--target", WASM])
+        .current_dir(crate_root)
+        .env("CARGO_TARGET_DIR", &target_dir)
+        .output()
+        .with_context(|| {
+            format!(
+                "running {cargo:?} build --target {WASM} in {}",
+                crate_root.display()
+            )
+        })?;
+    if !output.status.success() {
+        let reason = String::from_utf8_lossy(&output.stderr);
+        if reason.contains("target may not be installed")
+            || reason.contains("can't find crate for `core`")
+        {
+            bail!(
+                "the `{WASM}` target is not installed, and `cargo xtask synth` needs it: the \
+                 committed browser realization under `{SYNTH_WEB}/` is held to building for \
+                 it. Run `rustup target add {WASM}`. This check never skips — a skipped \
+                 check reads exactly like a passing one."
+            );
+        }
+        bail!(
+            "{} does not build for `{WASM}`:\n{}{reason}",
+            crate_root.display(),
+            String::from_utf8_lossy(&output.stdout),
+        );
+    }
+    Ok(target_dir.join(WASM).join("release"))
+}
+
+/// Every `ess_*` symbol one `WebAssembly` module exports.
+///
+/// Read out of the module's own export section rather than out of the source that produced it,
+/// because the question is what a browser will find — a `#[no_mangle]` item that the linker
+/// dropped is exactly the failure this catches. Filtered to the emitter's own prefix: `memory` is
+/// the module's, not a name any specification chose.
+fn wasm_exports(module: &Path) -> Result<BTreeSet<String>> {
+    let bytes = fs::read(module).with_context(|| format!("reading {}", module.display()))?;
+    if bytes.len() < 8 || &bytes[0..4] != b"\0asm" {
+        bail!("{} is not a WebAssembly module", module.display());
+    }
+    let mut at = 8;
+    let mut exports = BTreeSet::new();
+    while at < bytes.len() {
+        let id = bytes[at];
+        at += 1;
+        let size = leb128(&bytes, &mut at)
+            .with_context(|| format!("reading a section length in {}", module.display()))?;
+        let end = at + size;
+        if id == 7 {
+            let mut cursor = at;
+            let count = leb128(&bytes, &mut cursor).context("reading the export count")?;
+            for _ in 0..count {
+                let length = leb128(&bytes, &mut cursor).context("reading an export name")?;
+                let name = String::from_utf8_lossy(&bytes[cursor..cursor + length]).into_owned();
+                cursor += length + 1;
+                let _ = leb128(&bytes, &mut cursor).context("reading an export index")?;
+                if name.starts_with("ess_") {
+                    exports.insert(name);
+                }
+            }
+        }
+        at = end;
+    }
+    Ok(exports)
+}
+
+/// One unsigned LEB128 integer, as `WebAssembly`'s binary format spells every length.
+fn leb128(bytes: &[u8], at: &mut usize) -> Result<usize> {
+    let mut value = 0_usize;
+    let mut shift = 0;
+    loop {
+        let Some(byte) = bytes.get(*at).copied() else {
+            bail!("the module ends inside a number");
+        };
+        *at += 1;
+        value |= usize::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            return Ok(value);
+        }
+        shift += 7;
+        if shift > 63 {
+            bail!("a length in the module does not fit in 64 bits");
+        }
+    }
+}
+
+/// Every `ess_*` symbol the committed page and its glue name.
+fn page_references(tree: &Path) -> Result<BTreeSet<String>> {
+    let mut referenced = BTreeSet::new();
+    for file in ["index.html", "bridge.js"] {
+        let path = tree.join(file);
+        let text =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let bytes = text.as_bytes();
+        let mut at = 0;
+        while let Some(found) = text[at..].find("ess_") {
+            let start = at + found;
+            let mut end = start + 4;
+            while bytes
+                .get(end)
+                .is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+            {
+                end += 1;
+            }
+            referenced.insert(text[start..end].to_owned());
+            at = end;
+        }
+    }
+    Ok(referenced)
+}
+
+/// Runs the boundary smoke test: the page's own glue, the realized module, one Node process.
+///
+/// A boundary test and not a suite. The billing system's twenty-seven scenarios are the committed
+/// conformance suite's, and [`check_realization`] runs them natively against the same realization;
+/// what nothing else covers is the crossing this target adds. **Never skips**, for the reason
+/// [`go_tool`] does not.
+fn smoke_the_boundary(tree: &Path, host: &Path, module: &Path) -> Result<()> {
+    let script = host.join("smoke.mjs");
+    let output = std::process::Command::new("node")
+        .arg(&script)
+        .arg(tree.join("bridge.js"))
+        .arg(module)
+        .current_dir(workspace_root())
+        .output()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                anyhow::anyhow!(
+                    "`node` is not on PATH, and `cargo xtask synth` needs it: the committed \
+                     browser realization is proved by loading its module outside a browser \
+                     and driving it through the page's own glue ({}). Install Node 18 or \
+                     newer. This check never skips — a skipped check reads exactly like a \
+                     passing one.",
+                    script.display()
+                )
+            } else {
+                anyhow::Error::new(error).context(format!("running {}", script.display()))
+            }
+        })?;
+    if !output.status.success() {
+        bail!(
+            "the browser boundary no longer holds for `{}`:\n{}{}",
+            tree.display(),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    print!("{}", String::from_utf8_lossy(&output.stdout));
     Ok(())
 }
 
@@ -1132,6 +1475,62 @@ fn go_index(modules: &[Synthesized]) -> String {
             module.weakened,
             module.target_refused,
             directory = module.directory,
+        );
+    }
+    out
+}
+
+/// What `generated/web/README.md` opens with, one line per line.
+const WEB_INDEX_PREAMBLE: &[&str] = &[
+    "# Synthesised browser realizations",
+    "",
+    "**Do not edit these files.** They are synthesised from the specifications under",
+    "[`examples/`](../../examples) by `cargo xtask synth`, and CI fails if they differ from what",
+    "the specifications determine, if a tree stops building for `wasm32-unknown-unknown`, or if a",
+    "page calls an export its module does not have.",
+    "",
+    "This tree is the **third emitter** behind the synthesis seam, and the first one a person can",
+    "click. It is not a fourth rendering of the model: it is the *boundary* around the Rust",
+    "target's system — JSON in over linear memory, JSON out — beside a `catalog.json` the page",
+    "builds itself from. Nothing about any system is typed into the HTML: the command list, the",
+    "input forms, the event names, the views and the lifecycles all come from the catalogue, so a",
+    "specification that changes changes the page in the same regeneration.",
+    "",
+    "The plan did not change to admit it: each tree's `PLAN.md` and `plan.json` are",
+    "**byte-identical** to the ones in [`../rust`](../rust) and [`../go`](../go). What a browser",
+    "holds more weakly — a boundary that carries no types, instances observable only through",
+    "declared views, a number format narrower than the model's — is in each tree's `TARGET.md`.",
+    "",
+    "The compiled `.wasm` is **not committed**: it is a build artifact, and `cargo xtask synth`",
+    "builds it rather than trusting a binary nobody can diff. The bridge chooses no realization",
+    "(gap register D-2), so the module it builds alone answers every command with the obligation",
+    "it is owed; [`examples/billing-web`](../../examples/billing-web) is the hand-written host that",
+    "links one in, and the gate drives *its* module through the page's own `bridge.js`.",
+    "",
+    "| tree | generated from | generated | obligations | refused | weakened | target-refused | plan | target notes |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+];
+
+/// The index of `generated/web/`.
+fn web_index(pages: &[Synthesized]) -> String {
+    let mut out = String::new();
+    for line in WEB_INDEX_PREAMBLE {
+        out.push_str(line);
+        out.push('\n');
+    }
+    for page in pages {
+        let _ = writeln!(
+            out,
+            "| [`{directory}/`]({directory}) | {} | {} | {} | {} | {} | {} | \
+             [`{directory}/PLAN.md`]({directory}/PLAN.md) | \
+             [`{directory}/TARGET.md`]({directory}/TARGET.md) |",
+            page.provenance,
+            page.generated,
+            page.obligations,
+            page.refused,
+            page.weakened,
+            page.target_refused,
+            directory = page.directory,
         );
     }
     out
@@ -1508,7 +1907,7 @@ mod tests {
     use super::{
         contract_digest_in, generate, go_tool, schema, suite, synth, workspace_root, INDEX,
         NORMATIVE_EXAMPLE, PROJECTIONS, PROJECTION_EXCLUSIONS, SUITES, SUITE_SPECIFICATIONS, SYNTH,
-        SYNTH_GO, SYNTH_SPECIFICATIONS,
+        SYNTH_GO, SYNTH_SPECIFICATIONS, SYNTH_WEB,
     };
 
     /// A scratch tree with a freshly generated `schemas/generated/` in it.
@@ -1876,6 +2275,7 @@ mod tests {
             (SUITES, &[]),
             (SYNTH, &[]),
             (SYNTH_GO, &[]),
+            (SYNTH_WEB, &[]),
         ];
 
         let covered = |exclusions: &[&str], relative: &str| {
@@ -1923,30 +2323,29 @@ mod tests {
             .collect()
     }
 
-    /// A scratch root holding both freshly synthesised trees, already built once.
+    /// A scratch root holding all three freshly synthesised trees, already built once.
     ///
-    /// One root with the two owners under it, so a test naming a file says which target it is
-    /// about — `rust/billing/...` or `go/billing/...` — and the two checks are exercised together
-    /// the way the task runs them.
+    /// One root with the three owners under it, so a test naming a file says which target it is
+    /// about — `rust/billing/...`, `go/billing/...` or `web/billing/...` — and the checks are
+    /// exercised together the way the task runs them.
     fn synthed(name: &str) -> PathBuf {
         let out = std::env::temp_dir().join(name);
         std::fs::remove_dir_all(&out).ok();
-        synth(
-            &synth_specifications(),
-            &out.join("rust"),
-            &out.join("go"),
-            false,
-        )
-        .expect("both trees are written");
+        synth_both(&out, false).expect("all three trees are written");
         out
     }
 
-    /// Checks or rewrites both trees under one scratch root.
+    /// Checks or rewrites all three trees under one scratch root.
+    ///
+    /// One root with the three owners under it, which is also what makes the browser tree
+    /// buildable in a scratch directory: its manifest reaches the Rust target's crates by a
+    /// relative path, and the layout it expects is exactly this one.
     fn synth_both(out: &std::path::Path, check: bool) -> super::Result<()> {
         synth(
             &synth_specifications(),
             &out.join("rust"),
             &out.join("go"),
+            &out.join("web"),
             check,
         )
     }

@@ -1,0 +1,22 @@
+# generated from billing v3
+# model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
+# contract digest d2b48060b7ee32e8f23b1e28972fea39921a25fdcacd635fdf7bbb538e94f367
+# compiler 0.1.0 · generator 0.1.0
+# do not edit: regenerate with `protocol ess synthesize --target web`
+
+[package]
+name = "billing-web"
+description = "The `billing` system, v3, behind a WebAssembly boundary: JSON in, JSON out, and the catalogue a page renders itself from."
+version = "3.0.0"
+edition = "2021"
+
+# Both, and both are used. `cdylib` is what a browser instantiates. `rlib` is what a host crate links against to install its own realization — the exports below travel into that host's own `cdylib`, so a realized module and this one answer the same page.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Path dependencies into the Rust target's committed tree, and no third party at all: `cargo build` inside this tree is a gate step, and a step that resolves a crate is a step that reaches the network.
+[dependencies]
+billing-system = { path = "../../../../rust/billing/crates/billing-system" }
+billing-types = { path = "../../../../rust/billing/crates/billing-types" }
+email-service = { path = "../../../../rust/billing/crates/email-service" }
+invoice-service = { path = "../../../../rust/billing/crates/invoice-service" }

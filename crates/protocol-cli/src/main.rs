@@ -741,8 +741,8 @@ enum EssCommand {
         /// The specification: one file, or a directory holding `system.yaml` and `domains/`.
         #[arg(long, default_value = ".")]
         path: PathBuf,
-        /// The language to emit. One value today; the flag exists so a second target does not
-        /// change the surface.
+        /// What to emit. Three, and each is an emitter behind one language-neutral plan: the
+        /// choice never changes the plan, only what is made of it.
         #[arg(long, value_enum, default_value_t = EssSynthTarget::Rust)]
         target: EssSynthTarget,
         /// Where to write the workspace. Without it nothing is written and it is listed instead.
@@ -1083,19 +1083,21 @@ impl EssProjection {
     }
 }
 
-/// Which language `ess synthesize` emits.
+/// What `ess synthesize` emits.
 ///
-/// Two, and the second is what the flag was reserved for: the synthesis plan is language-neutral,
-/// so a target is a choice of emitter and never a choice of plan. `rust` stays the default because
-/// it is the target the committed workspace and its realization are built around. No further
-/// variants are scaffolded before their emitters exist — a `--target` that parses and then fails is
-/// worse than one that does not parse.
+/// Three, and the flag was reserved for exactly this: the synthesis plan is language-neutral, so a
+/// target is a choice of emitter and never a choice of plan. `rust` stays the default because it is
+/// the target the committed workspace and its realization are built around. No further variants are
+/// scaffolded before their emitters exist — a `--target` that parses and then fails is worse than
+/// one that does not parse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum EssSynthTarget {
     /// A standalone Rust workspace of semantic types.
     Rust,
     /// A standalone Go module of the same, with what Go cannot carry stated in `TARGET.md`.
     Go,
+    /// A `WebAssembly` module over the Rust workspace's system, and the page that drives it.
+    Web,
 }
 
 impl EssSynthTarget {
@@ -1104,6 +1106,7 @@ impl EssSynthTarget {
         match self {
             Self::Rust => ess_synth::Target::Rust,
             Self::Go => ess_synth::Target::Go,
+            Self::Web => ess_synth::Target::Web,
         }
     }
 

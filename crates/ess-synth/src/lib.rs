@@ -9,20 +9,26 @@
 //!    gets exactly one disposition: generated, an obligation with its contract, or a refusal with
 //!    its reason. Zero guessed business logic; the plan is where "what was not generated" becomes
 //!    a document instead of an absence.
-//! 2. **Emission** — per target. [`rust`] was the first, [`go`] is the second, and both consume a
-//!    finished plan through the same public surface. Everything language-shaped lives behind one
-//!    of those two module boundaries; nothing about either reaches back into the planner.
+//! 2. **Emission** — per target. [`rust`] was the first, [`go`] the second and [`web`] the third,
+//!    and all three consume a finished plan through the same public surface. Everything
+//!    target-shaped lives behind one of those three module boundaries; nothing about any of them
+//!    reaches back into the planner.
 //!
 //! [`synthesize`] runs both stages for Rust and [`synthesize_for`] for a chosen [`Target`],
 //! returning the whole output: the plan in its two canonical renderings beside the generated code,
 //! because code without its plan is code that cannot say what it deliberately is not.
 //!
-//! # The seam, proved
+//! # The seam, proved twice
 //!
-//! The plan did not change to admit the second target. Its two renderings are **byte-identical in
-//! both trees** — the same `PLAN.md`, the same `plan.json` — and a test holds them to it. What one
-//! target cannot carry is that target's to report, in a [`TargetReport`] beside the plan rather
-//! than folded into it: a capability it cannot represent at all is a refusal marked
+//! The plan did not change to admit the second target, and it did not change to admit the third.
+//! Its two renderings are **byte-identical in all three trees** — the same `PLAN.md`, the same
+//! `plan.json` — and a test holds them to it. The third is the harder proof: [`web`] is not a
+//! language at all but a *boundary*, JSON over linear memory plus a page that builds itself from a
+//! catalogue of the model, and a plan that had to move to admit it would never have been a fact
+//! about the model.
+//!
+//! What one target cannot carry is that target's to report, in a [`TargetReport`] beside the plan
+//! rather than folded into it: a capability it cannot represent at all is a refusal marked
 //! [`RefusalStage::Target`], and one it emits with a weaker guarantee is a [`TargetWeakening`]. A
 //! silent downgrade is neither, and there is no disposition for it.
 //!
@@ -37,6 +43,7 @@
 pub mod go;
 pub mod plan;
 pub mod rust;
+pub mod web;
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -66,10 +73,10 @@ pub const TARGET_MARKDOWN: &str = "TARGET.md";
 /// The same, for a tool.
 pub const TARGET_JSON: &str = "target.json";
 
-/// Which language a synthesis emits.
+/// What a synthesis emits.
 ///
-/// Two, and the enum is not an abstraction over "languages in general": each variant names a
-/// sibling module that consumes the plan, and adding a third means writing a third emitter, not
+/// Three, and the enum is not an abstraction over "targets in general": each variant names a
+/// sibling module that consumes the plan, and adding a fourth means writing a fourth emitter, not
 /// registering one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
@@ -77,6 +84,13 @@ pub enum Target {
     Rust,
     /// A standalone Go module — the second, chosen because it has no sum type.
     Go,
+    /// A WebAssembly module and the page that drives it — the third, and the first one a person
+    /// can click.
+    ///
+    /// Not a fourth language: it is the *boundary* around the first target's system — JSON in,
+    /// JSON out — plus a catalogue of the model that the page builds itself from. What it cannot
+    /// carry is a browser's limit rather than a language's, and it is in `TARGET.md` all the same.
+    Web,
 }
 
 impl Target {
@@ -85,6 +99,7 @@ impl Target {
         match self {
             Self::Rust => "rust",
             Self::Go => go::TARGET,
+            Self::Web => web::TARGET,
         }
     }
 }
@@ -238,6 +253,12 @@ pub fn synthesize(ir: &EssIr) -> Synthesis {
 /// One plan, computed the same way whatever the target, and two renderings of it in every tree.
 /// What differs between trees is the code and — for a target that could not carry everything — the
 /// [`TargetReport`] beside it.
+///
+/// # Panics
+///
+/// If an emitter emits a different set of capabilities than the plan marks generated minus what
+/// that target refused. That is a defect in this crate, not in any specification, and shipping it
+/// would make `PLAN.md` a lie about the tree beside it.
 pub fn synthesize_for(ir: &EssIr, target: Target) -> Synthesis {
     let plan = SynthesisPlan::of(ir);
     let mut artifacts = BTreeMap::new();
@@ -258,6 +279,13 @@ pub fn synthesize_for(ir: &EssIr, target: Target) -> Synthesis {
         }
         Target::Go => {
             let emission = go::workspace(ir, &plan);
+            for artifact in emission.artifacts {
+                insert(&mut artifacts, artifact);
+            }
+            Some(emission.report)
+        }
+        Target::Web => {
+            let emission = web::workspace(ir, &plan);
             for artifact in emission.artifacts {
                 insert(&mut artifacts, artifact);
             }

@@ -30,12 +30,12 @@
 //! (AGENTS.md § Dependencies).
 
 mod entity;
-mod items;
-mod layout;
-mod name;
+pub(crate) mod items;
+pub(crate) mod layout;
+pub(crate) mod name;
 mod obligation;
-mod port;
-mod system;
+pub(crate) mod port;
+pub(crate) mod system;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;

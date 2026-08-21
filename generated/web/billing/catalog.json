@@ -1,0 +1,979 @@
+{
+  "bindings": [
+    {
+      "command": "billing.email.SendEmail",
+      "delivered": {
+        "disposition": "generated"
+      },
+      "delivery": "at_least_once",
+      "escalation": "billing.email.DeliveryEscalated",
+      "event": "billing.invoice.InvoiceCreated",
+      "name": "notify-on-invoice-created",
+      "on_failure": "escalate",
+      "transformation": {
+        "disposition": "generated"
+      }
+    }
+  ],
+  "commands": [
+    {
+      "behavior": {
+        "contract": "given `billing.email.SendEmail` input, decide and enact exactly one outcome — `sent` otherwise, emits `billing.email.EmailSent`; `failed` externally decided (the provider rejects the recipient address), error `billing.email.Undeliverable`",
+        "disposition": "obligation",
+        "why": "decided outside the system: the provider rejects the recipient address"
+      },
+      "component": "email-service",
+      "dispatchable": true,
+      "display": "SendEmail",
+      "domain": "billing.email",
+      "input": [
+        {
+          "name": "recipient",
+          "optional": false,
+          "spelling": "billing.email.EmailAddress",
+          "type": {
+            "kind": "declared",
+            "name": "billing.email.EmailAddress"
+          },
+          "wire": "recipient"
+        },
+        {
+          "name": "template",
+          "optional": false,
+          "spelling": "billing.email.TemplateId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.email.TemplateId"
+          },
+          "wire": "template"
+        }
+      ],
+      "name": "billing.email.SendEmail",
+      "outcomes": [
+        {
+          "condition": "otherwise",
+          "error": null,
+          "moves": null,
+          "name": "sent",
+          "publishes": [
+            "billing.email.EmailSent"
+          ],
+          "summary": null
+        },
+        {
+          "condition": "externally decided (the provider rejects the recipient address)",
+          "error": "billing.email.Undeliverable",
+          "moves": null,
+          "name": "failed",
+          "publishes": [],
+          "summary": null
+        }
+      ]
+    },
+    {
+      "behavior": {
+        "contract": "given `billing.invoice.CancelInvoice` input, decide and enact exactly one outcome — `cancelled` otherwise, takes `cancel` of `billing.invoice.Invoice`, emits `billing.invoice.InvoiceCancelled`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`",
+        "disposition": "obligation",
+        "why": "the contract is declared; the algorithm is not"
+      },
+      "component": "invoice-service",
+      "dispatchable": true,
+      "display": "Cancel invoice",
+      "domain": "billing.invoice",
+      "input": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        }
+      ],
+      "name": "billing.invoice.CancelInvoice",
+      "outcomes": [
+        {
+          "condition": "otherwise",
+          "error": null,
+          "moves": {
+            "effect": {
+              "from": [
+                "Draft",
+                "Issued"
+              ],
+              "kind": "moves",
+              "to": "Cancelled",
+              "transition": "cancel"
+            },
+            "entity": "billing.invoice.Invoice"
+          },
+          "name": "cancelled",
+          "publishes": [
+            "billing.invoice.InvoiceCancelled"
+          ],
+          "summary": "The invoice is cancelled, from Draft or from Issued."
+        },
+        {
+          "condition": "from a state no declared move starts in",
+          "error": "billing.invoice.InvoiceStateConflict",
+          "moves": null,
+          "name": "wrong-state",
+          "publishes": [],
+          "summary": "The invoice is already Paid or already Cancelled, so nothing was cancelled."
+        }
+      ]
+    },
+    {
+      "behavior": {
+        "contract": "given `billing.invoice.CreateInvoice` input, decide and enact exactly one outcome — `accepted` when `amount.amount > 0`, creates `billing.invoice.Invoice`, emits `billing.invoice.InvoiceCreated`; `rejected` otherwise, error `billing.invoice.InvalidAmount`",
+        "disposition": "obligation",
+        "why": "the contract is declared; the algorithm is not"
+      },
+      "component": "invoice-service",
+      "dispatchable": true,
+      "display": "Create invoice",
+      "domain": "billing.invoice",
+      "input": [
+        {
+          "name": "customer_email",
+          "optional": false,
+          "spelling": "billing.invoice.Email",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Email"
+          },
+          "wire": "customer_email"
+        },
+        {
+          "name": "amount",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "amount"
+        }
+      ],
+      "name": "billing.invoice.CreateInvoice",
+      "outcomes": [
+        {
+          "condition": "when `amount.amount > 0`",
+          "error": null,
+          "moves": {
+            "effect": {
+              "kind": "creates"
+            },
+            "entity": "billing.invoice.Invoice"
+          },
+          "name": "accepted",
+          "publishes": [
+            "billing.invoice.InvoiceCreated"
+          ],
+          "summary": "The invoice is created in Draft."
+        },
+        {
+          "condition": "otherwise",
+          "error": "billing.invoice.InvalidAmount",
+          "moves": null,
+          "name": "rejected",
+          "publishes": [],
+          "summary": "The amount was not positive, and nothing was created."
+        }
+      ]
+    },
+    {
+      "behavior": {
+        "contract": "given `billing.invoice.IssueInvoice` input, decide and enact exactly one outcome — `issued` otherwise, takes `issue` of `billing.invoice.Invoice`, emits `billing.invoice.InvoiceIssued`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`",
+        "disposition": "obligation",
+        "why": "the contract is declared; the algorithm is not"
+      },
+      "component": "invoice-service",
+      "dispatchable": true,
+      "display": "Issue invoice",
+      "domain": "billing.invoice",
+      "input": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        }
+      ],
+      "name": "billing.invoice.IssueInvoice",
+      "outcomes": [
+        {
+          "condition": "otherwise",
+          "error": null,
+          "moves": {
+            "effect": {
+              "from": [
+                "Draft"
+              ],
+              "kind": "moves",
+              "to": "Issued",
+              "transition": "issue"
+            },
+            "entity": "billing.invoice.Invoice"
+          },
+          "name": "issued",
+          "publishes": [
+            "billing.invoice.InvoiceIssued"
+          ],
+          "summary": "The invoice leaves Draft and is now Issued."
+        },
+        {
+          "condition": "from a state no declared move starts in",
+          "error": "billing.invoice.InvoiceStateConflict",
+          "moves": null,
+          "name": "wrong-state",
+          "publishes": [],
+          "summary": "The invoice is not in Draft, so it was not issued."
+        }
+      ]
+    },
+    {
+      "behavior": {
+        "contract": "given `billing.invoice.PayInvoice` input, decide and enact exactly one outcome — `settled` when `amount.amount > 0`, takes `settle` of `billing.invoice.Invoice`, emits `billing.invoice.InvoicePaid`; `rejected` otherwise, error `billing.invoice.InvalidAmount`; `wrong-state` from a state no declared move starts in, error `billing.invoice.InvoiceStateConflict`",
+        "disposition": "obligation",
+        "why": "the contract is declared; the algorithm is not"
+      },
+      "component": "invoice-service",
+      "dispatchable": true,
+      "display": "Pay invoice",
+      "domain": "billing.invoice",
+      "input": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        },
+        {
+          "name": "amount",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "amount"
+        }
+      ],
+      "name": "billing.invoice.PayInvoice",
+      "outcomes": [
+        {
+          "condition": "when `amount.amount > 0`",
+          "error": null,
+          "moves": {
+            "effect": {
+              "from": [
+                "Issued"
+              ],
+              "kind": "moves",
+              "to": "Paid",
+              "transition": "settle"
+            },
+            "entity": "billing.invoice.Invoice"
+          },
+          "name": "settled",
+          "publishes": [
+            "billing.invoice.InvoicePaid"
+          ],
+          "summary": "The payment is accepted and the invoice becomes Paid."
+        },
+        {
+          "condition": "otherwise",
+          "error": "billing.invoice.InvalidAmount",
+          "moves": null,
+          "name": "rejected",
+          "publishes": [],
+          "summary": "The payment was not positive, so the invoice did not move."
+        },
+        {
+          "condition": "from a state no declared move starts in",
+          "error": "billing.invoice.InvoiceStateConflict",
+          "moves": null,
+          "name": "wrong-state",
+          "publishes": [],
+          "summary": "The invoice is not Issued, so the payment did not settle it."
+        }
+      ]
+    }
+  ],
+  "components": [
+    {
+      "accepts": [
+        "billing.email.SendEmail"
+      ],
+      "display": "email-service",
+      "name": "email-service",
+      "publishes": [
+        "billing.email.DeliveryEscalated",
+        "billing.email.EmailSent"
+      ],
+      "summary": "Sends what other contexts ask it to send."
+    },
+    {
+      "accepts": [
+        "billing.invoice.CancelInvoice",
+        "billing.invoice.CreateInvoice",
+        "billing.invoice.IssueInvoice",
+        "billing.invoice.PayInvoice"
+      ],
+      "display": "invoice-service",
+      "name": "invoice-service",
+      "publishes": [
+        "billing.invoice.InvoiceCancelled",
+        "billing.invoice.InvoiceCreated",
+        "billing.invoice.InvoiceIssued",
+        "billing.invoice.InvoicePaid"
+      ],
+      "summary": "Issues invoices and tracks payment."
+    }
+  ],
+  "conversions": [
+    {
+      "because": "An invoice's customer email is a deliverable address; the email context validates it again on the way out, so the invoice context does not have to know how.",
+      "from": "billing.invoice.Email",
+      "to": "billing.email.EmailAddress"
+    }
+  ],
+  "display": "billing",
+  "entities": [
+    {
+      "display": "Invoice",
+      "fields": [
+        {
+          "name": "total",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "total"
+        },
+        {
+          "name": "payee",
+          "optional": false,
+          "spelling": "billing.invoice.Payee",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Payee"
+          },
+          "wire": "payee"
+        },
+        {
+          "name": "channel",
+          "optional": false,
+          "spelling": "billing.invoice.Channel",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Channel"
+          },
+          "wire": "channel"
+        },
+        {
+          "name": "lines",
+          "optional": false,
+          "spelling": "List<billing.invoice.LineItem>",
+          "type": {
+            "kind": "list",
+            "of": {
+              "kind": "declared",
+              "name": "billing.invoice.LineItem"
+            }
+          },
+          "wire": "lines"
+        },
+        {
+          "name": "note",
+          "optional": true,
+          "spelling": "Optional<String>",
+          "type": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "string"
+            }
+          },
+          "wire": "note"
+        },
+        {
+          "name": "metadata",
+          "optional": false,
+          "spelling": "Map<String, String>",
+          "type": {
+            "key": "string",
+            "kind": "map",
+            "value": {
+              "kind": "primitive",
+              "name": "string"
+            }
+          },
+          "wire": "metadata"
+        },
+        {
+          "name": "issued_at",
+          "optional": true,
+          "spelling": "Optional<Timestamp>",
+          "type": {
+            "kind": "optional",
+            "of": {
+              "kind": "primitive",
+              "name": "timestamp"
+            }
+          },
+          "wire": "issued_at"
+        },
+        {
+          "name": "settlement_window",
+          "optional": false,
+          "spelling": "Duration",
+          "type": {
+            "kind": "primitive",
+            "name": "duration"
+          },
+          "wire": "settlement_window"
+        },
+        {
+          "name": "is_recurring",
+          "optional": false,
+          "spelling": "Boolean",
+          "type": {
+            "kind": "primitive",
+            "name": "boolean"
+          },
+          "wire": "is_recurring"
+        },
+        {
+          "name": "signature",
+          "optional": false,
+          "spelling": "Bytes",
+          "type": {
+            "kind": "primitive",
+            "name": "bytes"
+          },
+          "wire": "signature"
+        }
+      ],
+      "identity": {
+        "name": "invoice_id",
+        "optional": false,
+        "spelling": "billing.invoice.InvoiceId",
+        "type": {
+          "kind": "declared",
+          "name": "billing.invoice.InvoiceId"
+        },
+        "wire": "invoice_id"
+      },
+      "initial": "Draft",
+      "invariants": [
+        "total.amount >= 0"
+      ],
+      "name": "billing.invoice.Invoice",
+      "states": [
+        "Cancelled",
+        "Draft",
+        "Issued",
+        "Paid"
+      ],
+      "summary": null,
+      "terminal": [
+        "Cancelled",
+        "Paid"
+      ],
+      "transitions": [
+        {
+          "from": [
+            "Draft"
+          ],
+          "name": "issue",
+          "to": "Issued"
+        },
+        {
+          "from": [
+            "Issued"
+          ],
+          "name": "settle",
+          "to": "Paid"
+        },
+        {
+          "from": [
+            "Draft",
+            "Issued"
+          ],
+          "name": "cancel",
+          "to": "Cancelled"
+        }
+      ],
+      "views": [
+        "billing.invoice.InvoiceById",
+        "billing.invoice.OutstandingInvoices"
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "fields": [],
+      "name": "billing.email.Undeliverable",
+      "summary": "The address was rejected by the provider."
+    },
+    {
+      "fields": [
+        {
+          "name": "submitted",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "submitted"
+        }
+      ],
+      "name": "billing.invoice.InvalidAmount",
+      "summary": "The requested amount is not positive."
+    },
+    {
+      "fields": [
+        {
+          "name": "state",
+          "optional": false,
+          "spelling": "billing.invoice.Invoice.State",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Invoice.State"
+          },
+          "wire": "state"
+        }
+      ],
+      "name": "billing.invoice.InvoiceStateConflict",
+      "summary": "The invoice is not in a state this command acts from, so nothing moved."
+    }
+  ],
+  "events": [
+    {
+      "display": "Delivery escalated",
+      "fields": [
+        {
+          "name": "recipient",
+          "optional": false,
+          "spelling": "billing.email.EmailAddress",
+          "type": {
+            "kind": "declared",
+            "name": "billing.email.EmailAddress"
+          },
+          "wire": "recipient"
+        },
+        {
+          "name": "template",
+          "optional": false,
+          "spelling": "billing.email.TemplateId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.email.TemplateId"
+          },
+          "wire": "template"
+        }
+      ],
+      "name": "billing.email.DeliveryEscalated",
+      "summary": "Sending was given up on and handed to a person."
+    },
+    {
+      "display": "EmailSent",
+      "fields": [
+        {
+          "name": "message_id",
+          "optional": false,
+          "spelling": "billing.email.MessageId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.email.MessageId"
+          },
+          "wire": "message_id"
+        },
+        {
+          "name": "recipient",
+          "optional": false,
+          "spelling": "billing.email.EmailAddress",
+          "type": {
+            "kind": "declared",
+            "name": "billing.email.EmailAddress"
+          },
+          "wire": "recipient"
+        }
+      ],
+      "name": "billing.email.EmailSent",
+      "summary": null
+    },
+    {
+      "display": "InvoiceCancelled",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        }
+      ],
+      "name": "billing.invoice.InvoiceCancelled",
+      "summary": null
+    },
+    {
+      "display": "InvoiceCreated",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        },
+        {
+          "name": "customer_email",
+          "optional": false,
+          "spelling": "billing.invoice.Email",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Email"
+          },
+          "wire": "customer_email"
+        },
+        {
+          "name": "amount",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "amount"
+        }
+      ],
+      "name": "billing.invoice.InvoiceCreated",
+      "summary": null
+    },
+    {
+      "display": "InvoiceIssued",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        }
+      ],
+      "name": "billing.invoice.InvoiceIssued",
+      "summary": null
+    },
+    {
+      "display": "InvoicePaid",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        },
+        {
+          "name": "amount",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "amount"
+        }
+      ],
+      "name": "billing.invoice.InvoicePaid",
+      "summary": null
+    }
+  ],
+  "plan": {
+    "generated": 33,
+    "obligations": 8,
+    "refused": 4
+  },
+  "provenance": {
+    "compiler_version": "0.1.0",
+    "contract_digest": "d2b48060b7ee32e8f23b1e28972fea39921a25fdcacd635fdf7bbb538e94f367",
+    "generator_version": "0.1.0",
+    "source_digest": "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
+    "specification_version": "v3",
+    "system": "billing"
+  },
+  "summary": "Invoicing and the notification that follows it: the smallest system that still exercises every construct the model has — two bounded contexts, a command that can be refused, a command with an outcome its input cannot decide, both consistency levels, a state machine, actors, and a type of every kind.",
+  "system": "billing",
+  "types": {
+    "billing.email.EmailAddress": {
+      "display": "EmailAddress",
+      "invariants": [],
+      "kind": "newtype",
+      "of": {
+        "kind": "primitive",
+        "name": "string"
+      },
+      "spelling": "String"
+    },
+    "billing.email.MessageId": {
+      "display": "MessageId",
+      "invariants": [],
+      "kind": "newtype",
+      "of": {
+        "kind": "primitive",
+        "name": "uuid"
+      },
+      "spelling": "Uuid"
+    },
+    "billing.email.TemplateId": {
+      "display": "TemplateId",
+      "invariants": [],
+      "kind": "newtype",
+      "of": {
+        "kind": "primitive",
+        "name": "string"
+      },
+      "spelling": "String"
+    },
+    "billing.invoice.Channel": {
+      "display": "Delivery channel",
+      "kind": "enum",
+      "variants": [
+        "Email",
+        "Post",
+        "Portal"
+      ]
+    },
+    "billing.invoice.CompanyRef": {
+      "display": "CompanyRef",
+      "invariants": [],
+      "kind": "newtype",
+      "of": {
+        "kind": "primitive",
+        "name": "string"
+      },
+      "spelling": "String"
+    },
+    "billing.invoice.Email": {
+      "display": "Email",
+      "invariants": [],
+      "kind": "newtype",
+      "of": {
+        "kind": "primitive",
+        "name": "string"
+      },
+      "spelling": "String"
+    },
+    "billing.invoice.Invoice.State": {
+      "display": "State",
+      "kind": "enum",
+      "variants": [
+        "Cancelled",
+        "Draft",
+        "Issued",
+        "Paid"
+      ]
+    },
+    "billing.invoice.InvoiceId": {
+      "display": "InvoiceId",
+      "invariants": [],
+      "kind": "newtype",
+      "of": {
+        "kind": "primitive",
+        "name": "uuid"
+      },
+      "spelling": "Uuid"
+    },
+    "billing.invoice.LineItem": {
+      "display": "LineItem",
+      "fields": [
+        {
+          "name": "description",
+          "optional": false,
+          "spelling": "String",
+          "type": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "wire": "description"
+        },
+        {
+          "name": "quantity",
+          "optional": false,
+          "spelling": "Integer",
+          "type": {
+            "kind": "primitive",
+            "name": "integer"
+          },
+          "wire": "quantity"
+        },
+        {
+          "name": "unit_price",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "unit_price"
+        }
+      ],
+      "invariants": [],
+      "kind": "struct"
+    },
+    "billing.invoice.Money": {
+      "display": "Money",
+      "fields": [
+        {
+          "name": "amount",
+          "optional": false,
+          "spelling": "Decimal",
+          "type": {
+            "kind": "primitive",
+            "name": "decimal"
+          },
+          "wire": "amount"
+        },
+        {
+          "name": "currency",
+          "optional": false,
+          "spelling": "String",
+          "type": {
+            "kind": "primitive",
+            "name": "string"
+          },
+          "wire": "currency"
+        }
+      ],
+      "invariants": [
+        "amount >= 0"
+      ],
+      "kind": "struct"
+    },
+    "billing.invoice.Payee": {
+      "content": "value",
+      "display": "Payee",
+      "kind": "union",
+      "tag": "kind",
+      "variants": {
+        "company": {
+          "spelling": "billing.invoice.CompanyRef",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.CompanyRef"
+          }
+        },
+        "person": {
+          "spelling": "billing.invoice.Email",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Email"
+          }
+        }
+      }
+    }
+  },
+  "version": "v3",
+  "views": [
+    {
+      "component": "invoice-service",
+      "consistency": "eventual",
+      "display": "InvoiceById",
+      "entity": "billing.invoice.Invoice",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        },
+        {
+          "name": "total",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "total"
+        }
+      ],
+      "filter": null,
+      "name": "billing.invoice.InvoiceById",
+      "served": {
+        "contract": "a query answering `billing.invoice.InvoiceById` with rows projected from `billing.invoice.Invoice` at `eventual` consistency",
+        "disposition": "obligation",
+        "why": "how the projection is kept current is a storage decision"
+      },
+      "summary": null
+    },
+    {
+      "component": "invoice-service",
+      "consistency": "read_your_writes",
+      "display": "Outstanding invoices",
+      "entity": "billing.invoice.Invoice",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "optional": false,
+          "spelling": "billing.invoice.InvoiceId",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.InvoiceId"
+          },
+          "wire": "invoice_id"
+        },
+        {
+          "name": "total",
+          "optional": false,
+          "spelling": "billing.invoice.Money",
+          "type": {
+            "kind": "declared",
+            "name": "billing.invoice.Money"
+          },
+          "wire": "total"
+        }
+      ],
+      "filter": "state == Issued",
+      "name": "billing.invoice.OutstandingInvoices",
+      "served": {
+        "contract": "a query answering `billing.invoice.OutstandingInvoices` with rows projected from `billing.invoice.Invoice` at `read_your_writes` consistency, containing instances where `state == Issued`",
+        "disposition": "obligation",
+        "why": "how the projection is kept current is a storage decision"
+      },
+      "summary": null
+    }
+  ]
+}

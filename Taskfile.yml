@@ -9,7 +9,8 @@ tasks:
   check:
     desc: >-
       Format check, lint, test, doc check, schema check, projection check, suite check,
-      observation-IR check and synthesis check — everything CI runs.
+      observation-IR check and synthesis check — everything CI runs. The last one needs the Go
+      toolchain, the wasm32-unknown-unknown Rust target and Node beside Rust's own.
     cmds:
       - task: fmt-check
       - task: clippy
@@ -69,23 +70,25 @@ tasks:
       - cargo xtask suite --check
 
   # Beside `generate` for the reason `suite` is: `generated/` has one owner per subtree, and the
-  # synthesised trees under `generated/rust/` and `generated/go/` are the synth task's — the
-  # projection task's orphan scan carves both roots out, and `xtask`'s ownership test holds the
-  # carve-outs to the list of owners. This one also builds what it wrote: a tree that matches its
-  # specification byte for byte and no longer compiles is a claim nothing else checks.
+  # synthesised trees under `generated/rust/`, `generated/go/` and `generated/web/` are the synth
+  # task's — the projection task's orphan scan carves all three roots out, and `xtask`'s ownership
+  # test holds the carve-outs to the list of owners. This one also builds what it wrote: a tree
+  # that matches its specification byte for byte and no longer compiles is a claim nothing else
+  # checks.
   synth:
     desc: >-
-      Regenerate generated/rust/ and generated/go/ — the two trees the specifications determine,
-      from one language-neutral plan.
+      Regenerate generated/rust/, generated/go/ and generated/web/ — the three trees the
+      specifications determine, from one language-neutral plan.
     cmds:
       - cargo xtask synth
 
   synth-check:
     desc: >-
-      Fail if either synthesised tree differs from what the specifications determine, no longer
-      builds (cargo check; gofmt -l, go build, go vet), or no longer holds the committed suite —
-      the honest realization linkage must pass it and the corrupted one must fail it. Needs the Go
-      toolchain, and says so rather than skipping when it is absent.
+      Fail if any synthesised tree differs from what the specifications determine, no longer builds
+      (cargo check; gofmt -l, go build, go vet; cargo build --target wasm32-unknown-unknown), if the
+      emitted page calls an export its module does not have, or if the committed suite or the
+      browser boundary no longer holds. Needs the Go toolchain, the wasm32-unknown-unknown target
+      and Node, and says which is missing rather than skipping.
     cmds:
       - cargo xtask synth --check
 

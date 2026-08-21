@@ -1,0 +1,72 @@
+{
+  "provenance": {
+    "system": "billing",
+    "specification_version": "v3",
+    "source_digest": "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
+    "contract_digest": "d2b48060b7ee32e8f23b1e28972fea39921a25fdcacd635fdf7bbb538e94f367",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0"
+  },
+  "target": "web",
+  "weakenings": [
+    {
+      "guarantee": "the generated crate forbids `unsafe`, so the compiler closes the question rather than a reader checking it",
+      "instead": "a WebAssembly export is a `#[no_mangle]` item, and rustc's own `unsafe_code` lint flags one — so the bridge crate cannot declare `#![forbid(unsafe_code)]` and declares `#![deny(missing_docs)]` alone. It contains no `unsafe` block, no `unsafe fn` and no raw-pointer dereference; what is lost is the compiler closing the question, not the property",
+      "affects": [
+        "component_port",
+        "command_contract"
+      ]
+    },
+    {
+      "guarantee": "a move the lifecycle does not declare does not compile",
+      "instead": "the page speaks JSON, and JSON carries no type parameter: any declared command can be sent from any state, and an illegal move comes back as the declared refusal the behaviour answers with — at run time, from the system, rather than as a build that failed. The typed lifecycle still holds inside the system this bridge drives; it simply does not reach across the boundary",
+      "affects": [
+        "entity_lifecycle",
+        "command_contract"
+      ]
+    },
+    {
+      "guarantee": "the current state of every instance is observable",
+      "instead": "the synthesised system holds no entity store — where instances live is an obligation — so the page shows each declared view's rows beside the entity's declared lifecycle, and shows a per-instance state only where a view projects one. Deriving a state from the event log would be behaviour, and behaviour is not synthesised",
+      "affects": [
+        "entity_lifecycle",
+        "view_type"
+      ]
+    },
+    {
+      "guarantee": "an `Integer` is sixty-four bits wide, end to end",
+      "instead": "the bridge writes it as a JSON number, which is what the published wire contract fixes, and a browser reads every JSON number as a double — so a magnitude past 2^53 is rounded by the page. The bridge itself never truncates: a fraction, an exponent or an out-of-range magnitude arriving from the page is refused with the path it was found at",
+      "affects": [
+        "domain_type",
+        "command_contract",
+        "event_type",
+        "error_type",
+        "view_type"
+      ]
+    },
+    {
+      "guarantee": "a generated tree builds from exactly its committed bytes, outside this repository",
+      "instead": "this tree is a front end over the Rust target's crates, so its manifest names them by relative path — `../../rust/<system>/` from this tree's root, which is the layout `cargo xtask synth` commits. Copy both trees or neither; a browser realization on its own has no system to drive",
+      "affects": [
+        "domain_type",
+        "entity_lifecycle",
+        "command_contract",
+        "event_type",
+        "error_type",
+        "view_type",
+        "conversion",
+        "binding_transformation",
+        "binding_delivery",
+        "component_port"
+      ]
+    },
+    {
+      "guarantee": "a binding whose failure policy is `retry` is redelivered on the schedule the transport provides",
+      "instead": "the page is the transport's caller, and nothing here advances a clock: redelivery is a request a person makes, one occurrence at a time, and the duplicate `at_least_once` permits is something to watch rather than something to wait for. When to try again is a deployment decision the specification does not take, and this target does not take it either",
+      "affects": [
+        "binding_delivery"
+      ]
+    }
+  ],
+  "refusals": []
+}

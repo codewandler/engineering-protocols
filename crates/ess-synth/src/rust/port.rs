@@ -211,7 +211,7 @@ fn port_struct(
 
 /// The obligation traits the port's `B` must satisfy, in a deterministic order: accepted
 /// commands by name, then the views of owned domains by name.
-pub(super) fn bound_list(
+pub(crate) fn bound_list(
     ir: &EssIr,
     layout: &Layout,
     component: &ResolvedComponent,
@@ -319,7 +319,7 @@ fn query(out: &mut String, layout: &Layout, types: &str, view: &ess_compiler::ir
 }
 
 /// A declaration's absolute path from inside a component or system crate.
-pub(super) fn types_path(
+pub(crate) fn types_path(
     layout: &Layout,
     types: &str,
     declared: &ess_domain::name::QualifiedName,

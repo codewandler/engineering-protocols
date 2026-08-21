@@ -11,6 +11,48 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`protocol ess synthesize --target web` — the billing system in a browser, and the third
+  emitter behind one plan (ESS wave 7, W7.5).** The same specification now synthesises a
+  `WebAssembly` bridge and the page that drives it, committed under `generated/web/` and
+  drift-checked in the gate. Open it and you can send any declared command with a typed form,
+  watch the outcome it took, read the event log the transport published, redeliver an occurrence
+  to see the duplicate `at_least_once` explicitly permits, watch the binding invoke the next
+  command with the input it filled, and read every declared view's rows — all of it from the
+  model. **Nothing about any system is typed into the HTML.** The command list, the input controls,
+  the event names, the views and the lifecycles are all built at load time from a `catalog.json`
+  the module carries, so a specification that changes changes the page in the same regeneration
+  rather than leaving one artifact nobody regenerated.
+
+  The plan did not change to admit a target that is not a language: `PLAN.md` and `plan.json` are
+  byte-identical in all three trees. **No `wasm-bindgen`, no `wasm-pack`, no build tool and no
+  third-party crate** — the boundary is three exported functions passing JSON over linear memory
+  with fifty lines of hand-written glue, because `cargo build` inside the emitted tree is a
+  gate step and a step that resolves a crate is a step that reaches the network.
+
+  **The bridge chooses no realization.** Built on its own, every command answers with the typed
+  refusal naming the obligation the plan owes, and the page shows that obligation's contract beside
+  it — which is the honest empty state rather than an empty screen. A host crate that links one
+  implementation per obligation and exports `ess_realize` turns the same page into a running
+  system; `examples/billing-web/` is that host, forty lines, and gap register D-2 is untouched.
+
+  **What a browser cannot carry is written down.** `TARGET.md` beside the plan carries six
+  weakenings, none of them about a language: a `#[no_mangle]` export is flagged by rustc's own
+  `unsafe_code` lint, so this one generated crate cannot declare `#![forbid(unsafe_code)]` (it
+  contains no `unsafe`); a JSON boundary carries no type parameter, so an illegal lifecycle move is
+  a run-time refusal here rather than a build that failed; instances are observable only as far as
+  a declared view projects them, because the synthesised system holds no entity store; an
+  `Integer` past 2^53 is rounded by the browser, not by the bridge; the tree is a front end over
+  the Rust target's crates rather than standalone; and redelivery is a request a person makes,
+  because nothing here advances a clock. A command no component accepts is a **target-stage
+  refusal**: the page lists it, says why there is no form, and emits nothing to dispatch it.
+
+  The gate builds the module for `wasm32-unknown-unknown`, checks that the page calls exactly the
+  exports the module has — a page naming an export that does not exist is HTML's version of a
+  dangling reference, and nothing in a browser would refuse it — and then loads the realized module
+  outside a browser with Node, through the page's own `bridge.js`, and holds seventeen claims about
+  one round trip. `task check` now needs the `wasm32-unknown-unknown` target and Node beside the Go
+  toolchain, and says which is missing rather than skipping.
+
 - **`protocol ess synthesize --target go` — a second emitter, and the proof that the synthesis
   plan is language-neutral (ESS wave 7, W7.3).** The same specification now synthesises a
   standard-library-only Go module beside the Rust workspace, committed under `generated/go/` and

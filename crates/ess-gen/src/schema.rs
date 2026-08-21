@@ -59,6 +59,25 @@ use crate::schema::types::{Attribution, Message, Node};
 /// The dialect every emitted document declares.
 pub const DIALECT: &str = "https://json-schema.org/draft/2020-12/schema";
 
+/// Where a tagged union's variant value sits beside its tag, on the wire.
+///
+/// Public because a wire layout is one decision for every projection of one model, and a second
+/// answer to it is a second wire format. This module argues the layout at length — adjacent
+/// tagging, `value` unless the tag is itself called `value` — and `ess-synth`'s browser target
+/// reads the answer from here rather than re-deriving it, so a JSON document the page posts and a
+/// JSON Schema a consumer validates against cannot disagree about where a variant's payload sits.
+pub fn union_content_key(tag: &str) -> &'static str {
+    types::content_key(tag)
+}
+
+/// What a field is called on the wire: its declared `wire:` name, or its own.
+///
+/// Public for [`union_content_key`]'s reason: the property key a document carries is one decision,
+/// and a projection that recomputed it would be a projection that spells a renamed field twice.
+pub fn wire_field_name(field: &ess_compiler::ir::ResolvedField) -> &str {
+    types::wire_name(field)
+}
+
 /// JSON Schema per command input, event payload and error payload.
 pub struct JsonSchema;
 

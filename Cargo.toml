@@ -26,7 +26,18 @@ members = [
 # `[workspace]` root so `cargo check` inside one never reaches this manifest, and excluding them here
 # is what keeps that true if that inner header is ever lost — a generated crate silently joining the
 # source workspace would put generated code under the source gate's lints and versions.
-exclude = ["generated/rust/billing"]
+exclude = [
+    "generated/rust/billing",
+    # The browser realization and the host that links one into it, excluded for two different
+    # reasons that land in the same place. The generated bridge is an output, like every tree under
+    # `generated/`. `examples/billing-web` is hand-written and still cannot be a member: a
+    # WebAssembly export is a `#[no_mangle]` item, which rustc's `unsafe_code` lint flags, and
+    # `[workspace.lints.rust] unsafe_code = "forbid"` below is invariant 12 for the other fifteen
+    # crates. `cargo xtask synth` builds both for `wasm32-unknown-unknown` and runs the boundary
+    # smoke test, so neither is outside the gate.
+    "generated/web/billing",
+    "examples/billing-web",
+]
 
 [workspace.package]
 version = "0.1.0"

@@ -1,0 +1,40 @@
+# The host that links the hand-written realization into the generated browser bridge.
+#
+# Forty lines of Rust, and the arrow points the way it always points here: hand-written code
+# satisfies generated interfaces by import, never the other way round. The bridge under
+# `generated/web/billing/` names no realization and chooses none (gap register D-2); this crate is
+# one caller of its `install` seam, and a second realization would be a second crate beside this
+# one rather than an entry in a registry.
+#
+# ## Why it is not a member of the source workspace
+#
+# `[workspace.lints.rust] unsafe_code = "forbid"` — invariant 12 — and a WebAssembly export is a
+# `#[no_mangle]` item, which rustc's own `unsafe_code` lint flags. Admitting this crate as a member
+# would mean lifting that lint for the other fourteen, so it carries its own `[workspace]` root
+# instead, exactly as the generated trees do. It is not therefore ungated: `cargo xtask synth`
+# builds it for `wasm32-unknown-unknown` and then runs the boundary smoke test against the module
+# it produces.
+[package]
+name = "billing-web-realized"
+description = "The synthesised billing browser bridge, linked with the hand-written realization of every obligation."
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/codewandler/engineering-protocols"
+authors = ["Timo Friedl <1379383+timofriedlberlin@users.noreply.github.com>"]
+publish = false
+
+# Its own root: see above. Nothing is inherited from the source workspace, so nothing here is
+# governed by a lint set it cannot satisfy.
+[workspace]
+
+# A `cdylib` and only that: this crate exists to be instantiated by a browser. The bridge's own
+# `#[no_mangle]` exports travel out of its `rlib` and into this module, so the page cannot tell the
+# two apart — which is the point.
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+billing-web = { path = "../../generated/web/billing/crates/billing-web" }
+billing-realization = { path = "../billing-realization" }

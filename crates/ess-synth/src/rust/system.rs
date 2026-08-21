@@ -670,7 +670,7 @@ fn constructor(
 }
 
 /// The generic parameter names of the component fields, in component order.
-fn components_generics(ir: &EssIr) -> Vec<String> {
+pub(crate) fn components_generics(ir: &EssIr) -> Vec<String> {
     ir.components
         .keys()
         .map(|component| format!("{}Behaviors", name::pascal(&component.to_string())))

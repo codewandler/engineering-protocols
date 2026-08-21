@@ -44,9 +44,12 @@ See the status table in [`README.md`](README.md); keep it accurate when you land
 is the per-wave record of what actually shipped — read it before believing any prose about progress.
 
 **Every crate in the workspace is implemented and gated. There are no skeletons left.** The most
-recent tag is `0.6.1-ess-wave-6.5`; `task check` (nine steps) currently passes 89 suites and 1654
-tests, with 0 clippy warnings and 0 rustdoc warnings. The gate now needs the **Go toolchain** as
-well as Rust's: two of the nine steps build the second emitter's committed module.
+recent tag is `0.6.1-ess-wave-6.5`; `task check` (nine steps) currently passes 90 suites and 1672
+tests, with 0 clippy warnings and 0 rustdoc warnings. The gate now needs three toolchains beside
+Rust's own: the **Go toolchain**, the **`wasm32-unknown-unknown` target** and **Node**. Two of the
+nine steps build the second and third emitters' committed trees, and none of those checks skips
+when its toolchain is absent — it fails and names it, because a skipped check reads exactly like a
+passing one.
 
 * **AEP — the protocol; the v0.2 scope is implemented.** `aep-domain`, `aep-schema`, `aep-engine`,
   `aep-contract`, `aep-backend-memory`, `aep-conformance`, `adp-domain`, `aop-domain`,
@@ -61,14 +64,19 @@ well as Rust's: two of the nine steps build the second emitter's committed modul
   `0.3.1-ess-wave-2`), `ess-gen` (four projections behind one `Generator` trait,
   `0.3.2-ess-wave-3`), `ess-conformance` (the specification as oracle: synthesis, runner, evidence,
   `0.4.0-ess-wave-4`), `ess-diff` (semantic delta and impact closure, `0.5.0-ess-wave-5`) and
-  `ess-synth` (language-neutral synthesis plan, **two** emitters behind one seam: wave 6's Rust
+  `ess-synth` (language-neutral synthesis plan, **three** emitters behind one seam: wave 6's Rust
   workspace — whose linkage with the hand-written realization in `examples/billing-realization`
   passes the committed billing suite unchanged, and fails the deliberately corrupted linkage at
-  the one scenario that exists to catch it — and wave 7's Go module, W7.3, which is the test of
-  the neutrality claim: the plan's two renderings are byte-identical in both trees, and what Go
-  holds more weakly or cannot represent at all is stated in a `TARGET.md` beside the plan, never
-  folded into it). `generated/` holds the committed projections and both synthesised trees,
-  `suites/generated/` the committed conformance suites; all drift-checked in the gate.
+  the one scenario that exists to catch it — wave 7's Go module, W7.3, which is the test of
+  the neutrality claim, and wave 7's browser realization, W7.5, which is the harder test of it
+  because it is not a language at all: a `WebAssembly` bridge over the Rust target's system, JSON
+  over linear memory with three exports and no build tool, beside a page whose command forms,
+  event log, view tables and lifecycles are built at load time from an emitted `catalog.json` —
+  nothing about any system is typed into its HTML. The plan's two renderings are byte-identical in
+  all three trees, and what a target holds more weakly or cannot represent at all is stated in a
+  `TARGET.md` beside the plan, never folded into it). `generated/` holds the committed projections
+  and all three synthesised trees, `suites/generated/` the committed conformance suites; all
+  drift-checked in the gate.
 * **Infra — observed infrastructure as a second instance of the ESS pattern.** Three crates:
   `infra-domain` (the k8s observation subset, raw→validated, eleven `INFRA-*` refusal codes,
   secrets only ever as digests — IW1), `infra-compiler` (the content-addressed `infra-ir/1`
@@ -170,7 +178,13 @@ enforcement here that you cannot point at.
 12. **No `unsafe`** (`unsafe_code = "forbid"`).
     *Enforced by* that lint in `[workspace.lints.rust]`. `forbid` cannot be lifted by an inner
     `allow`, so this one is closed rather than merely checked — again, for the thirteen members that
-    opt in.
+    opt in. **One crate cannot declare it and says so**: a `WebAssembly` export is a `#[no_mangle]`
+    item, which rustc's own `unsafe_code` lint flags, so the emitted browser bridge under
+    `generated/web/` and the host that links a realization into it (`examples/billing-web`, excluded
+    from the workspace for exactly this reason) declare `#![deny(missing_docs)]` alone. Neither
+    contains an `unsafe` block, an `unsafe fn` or a raw-pointer dereference; the property holds and
+    the compiler is no longer the thing closing it, which is a named weakening in the bridge's own
+    `TARGET.md` and a test in `crates/ess-synth/tests/web.rs`.
 13. **Identity is opaque.** An `EntityId` is never parsed for meaning. A human-readable key belongs in
     the `EntityLocator`; the moment code reads structure out of an id, identity has become a key again.
     *Enforced by* the type: `EntityId(String)` has a private field and no structural accessor, and
@@ -213,19 +227,26 @@ Nine steps, all nine of which CI also runs, in this order:
 7. `suite-check` — `cargo xtask suite --check`, which fails if the committed conformance suites under
    `suites/generated/` differ from what the specifications produce. A suite is a contract an
    implementation is checked against, so a stale one certifies the wrong thing.
-8. `synth-check` — `cargo xtask synth --check`, which fails if either committed synthesised tree —
-   `generated/rust/` and `generated/go/`, two emitters behind one language-neutral plan — differs
-   from what the specifications determine, if a matching tree no longer builds (`cargo check` for
-   the Rust workspace; `gofmt -l` empty, `go build ./...` and `go vet ./...` for the Go module), or
-   if the committed billing suite no longer holds against the workspace linked with
-   `examples/billing-realization`: the honest linkage must pass all 27 scenarios and the
-   deliberately corrupted one must fail exactly the scenario that exists to catch it. A tree that
-   matches its specification and still fails here is a defect in `ess-synth` or in the realization,
-   not in any specification.
+8. `synth-check` — `cargo xtask synth --check`, which fails if any committed synthesised tree —
+   `generated/rust/`, `generated/go/` and `generated/web/`, three emitters behind one
+   language-neutral plan — differs from what the specifications determine; if a matching tree no
+   longer builds (`cargo check` for the Rust workspace; `gofmt -l` empty, `go build ./...` and
+   `go vet ./...` for the Go module; `cargo build --release --target wasm32-unknown-unknown` for
+   the browser bridge and for the host that links a realization into it); if the emitted page calls
+   an export its module does not have, or the module exports one no page names — HTML's version of
+   a dangling reference, checked against the compiled module's own export table because nothing in
+   a browser would refuse it; if the committed billing suite no longer holds against the workspace
+   linked with `examples/billing-realization`, where the honest linkage must pass all 27 scenarios
+   and the deliberately corrupted one must fail exactly the scenario that exists to catch it; or if
+   the browser boundary no longer holds — the realized module is loaded outside a browser through
+   the page's own `bridge.js` and driven through one round trip, and seventeen claims about it must
+   stand. A tree that matches its specification and still fails here is a defect in `ess-synth` or
+   in the realization, not in any specification.
 
-   **It needs the Go toolchain**, and says so rather than skipping when it is absent — a check that
-   quietly passes without its toolchain reads exactly like a check that passed. `cargo test` needs
-   it too, because `xtask`'s own tests write both trees and build them.
+   **It needs the Go toolchain, the `wasm32-unknown-unknown` target and Node**, and says which is
+   missing rather than skipping — a check that quietly passes without its toolchain reads exactly
+   like a check that passed. `cargo test` needs all three too, because `xtask`'s own tests write
+   all three trees and build them.
 
 Land nothing that does not pass all nine.
 
@@ -294,9 +315,14 @@ only by violating it.
   `$ref` or calls an API — `jsonschema` is built with `default-features = false` for exactly that
   reason. The Go steps hold the same line by construction: the generated module has no
   dependencies, and every `go` invocation runs with `GOPROXY=off` and `GOTOOLCHAIN=local`, so
-  neither a dependency nor a `go` directive can make the toolchain fetch anything. Keep it that
-  way: a gate that needs the network is a gate that goes red for reasons that have nothing to do
-  with the change.
+  neither a dependency nor a `go` directive can make the toolchain fetch anything. The browser
+  target holds it the same way, and it is the reason that target has **no `wasm-bindgen`**: that
+  crate needs a cargo-installed CLI pinned to its own version, and the emitted tree would then
+  resolve third-party crates inside a gate step. It emits its own JSON reader, writer and base64
+  codec instead — about seven hundred fixed lines, the same bytes for every specification — and its
+  manifest carries nothing but path dependencies into the Rust target's tree, which a test asserts.
+  Keep it that way: a gate that needs the network is a gate that goes red for reasons that have
+  nothing to do with the change.
 
 ## Changelog
 

@@ -638,7 +638,7 @@ fn variant(tag: &str, label: &str, payload: &ResolvedTypeRef) -> Node {
 }
 
 /// Where a variant's value sits beside its tag.
-fn content_key(tag: &str) -> &'static str {
+pub(crate) fn content_key(tag: &str) -> &'static str {
     if tag == CONTENT {
         CONTENT_WHEN_TAKEN
     } else {

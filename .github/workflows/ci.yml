@@ -39,6 +39,15 @@ jobs:
         with:
           go-version: "1.21"
 
+      # The same step writes the browser realization and then builds it, so `cargo test` needs the
+      # WebAssembly target and Node as well. Neither is optional: the check names what is missing
+      # rather than skipping, because a skipped check reads exactly like a passing one.
+      - run: rustup target add wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - uses: Swatinem/rust-cache@v2
 
       # Ordered cheapest-first, as the Taskfile is: formatting tells you in seconds, tests take
@@ -145,15 +154,19 @@ jobs:
       - name: Check generated conformance suites
         run: cargo xtask suite --check
 
-  # Its own job for the reason `suites` is, plus two of its own: this check also runs `cargo
-  # check` *inside* each committed workspace, and then the committed billing suite against that
-  # workspace linked with `examples/billing-realization` — so it fails for three distinguishable
-  # reasons. Either tree drifted from its specification (fix: `cargo xtask synth`); a tree matches
-  # and no longer builds — `cargo check` for the Rust workspace, `gofmt -l` / `go build` / `go vet`
-  # for the Go module — which is a defect in `ess-synth` rather than in any specification; or the
-  # linked system no longer holds the suite: the honest linkage must pass all 27 scenarios and the
-  # deliberately corrupted one must fail exactly the scenario that exists to catch it. Folded into
-  # the gate, all three would read as "one of nine steps failed".
+  # Its own job for the reason `suites` is, plus three of its own: this check also runs `cargo
+  # check` *inside* each committed workspace, then the committed billing suite against that
+  # workspace linked with `examples/billing-realization`, then the browser boundary — so it fails
+  # for four distinguishable reasons. A tree drifted from its specification (fix: `cargo xtask
+  # synth`); a tree matches and no longer builds — `cargo check` for the Rust workspace,
+  # `gofmt -l` / `go build` / `go vet` for the Go module, `cargo build --target
+  # wasm32-unknown-unknown` for the browser bridge — which is a defect in `ess-synth` rather than
+  # in any specification; the emitted page calls an export its module does not have, which is this
+  # format's dangling reference and fails at the click rather than at the build; or a linked system
+  # no longer holds — the honest linkage must pass all 27 scenarios, the deliberately corrupted one
+  # must fail exactly the scenario that exists to catch it, and the realized WebAssembly module
+  # must still answer the page. Folded into the gate, all four would read as "one of nine steps
+  # failed".
   synthesis:
     name: Synthesised trees up to date
     runs-on: ubuntu-latest
@@ -171,9 +184,19 @@ jobs:
         with:
           go-version: "1.21"
 
+      # The third emitter's tree is a WebAssembly module and the page that drives it, so this job
+      # needs the target it builds for and a JavaScript runtime to load the result outside a
+      # browser. The smoke test imports the committed `bridge.js` rather than reimplementing the
+      # boundary, which is what makes it a test of the page's own glue.
+      - run: rustup target add wasm32-unknown-unknown
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check the synthesised Rust and Go trees
+      - name: Check the synthesised Rust, Go and browser trees
         run: cargo xtask synth --check
 
   # Its own job because it is its own toolchain, which a step in `gate` cannot be. `rust-version =
