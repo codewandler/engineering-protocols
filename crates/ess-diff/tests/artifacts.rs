@@ -1,7 +1,8 @@
 //! The artifact half of `ess impact`: which generated artifacts a delta owes, proven on the
 //! fixture pair.
 //!
-//! Wave 7 (W7.1). The fixture's four changes must narrow the owed artifacts to a **strict subset**
+//! Wave 7 (W7.1, counts updated by W7.2). The fixture's six changes must narrow the owed
+//! artifacts to a **strict subset**
 //! of what the model derives, with a path explaining each — a closure that owed everything for
 //! every change would be indistinguishable from one that owed nothing, which is the same argument
 //! the scenario tests already make one granularity up. And a change to the system header must owe
@@ -20,7 +21,7 @@ use ess_diff::{
 };
 use support::compiled;
 
-/// The four-change report over the fixture pair, with no suite and no committed tree: the artifact
+/// The six-change report over the fixture pair, with no suite and no committed tree: the artifact
 /// answer must stand on the models alone.
 fn catalog_report() -> ess_diff::EssImpact {
     impact(
@@ -48,16 +49,16 @@ fn owed(report: &ess_diff::EssImpact) -> &BTreeMap<ArtifactId, ArtifactObligatio
 }
 
 #[test]
-fn the_four_change_delta_owes_a_strict_subset_of_the_artifacts() {
+fn the_six_change_delta_owes_a_strict_subset_of_the_artifacts() {
     let report = catalog_report();
     let owed = owed(&report);
 
     // The fixture is load-bearing only while both sides of "strict" hold: something owed,
     // something not.
-    assert_eq!(report.churn.semantic_changes_total, 4);
+    assert_eq!(report.churn.semantic_changes_total, 6);
     assert!(
         !owed.is_empty(),
-        "four changes that owe no artifact would mean the slices miss everything"
+        "six changes that owe no artifact would mean the slices miss everything"
     );
     assert!(
         owed.len() < report.churn.generated_artifacts_total,
@@ -149,6 +150,72 @@ fn a_grant_change_owes_the_documents_that_read_grants_and_not_the_ones_that_do_n
 }
 
 #[test]
+fn the_two_predicate_edits_narrow_the_artifacts_differently_and_both_subsets_are_named() {
+    // W7.2's artifact answer. The entity edit reaches every command schema, because each command's
+    // outcome acts on the entity; the guard edit reaches only the command it guards. Both leave
+    // the type schemas alone — a `Money` schema renders a struct, not an invariant of the entity
+    // that holds one — and the difference between the two subsets is what proves the closure is
+    // walking the graph rather than owing a fixed set.
+    let report = catalog_report();
+    let owed = owed(&report);
+
+    let reasons_naming = |id: &ArtifactId, change: &str| -> usize {
+        match owed.get(id) {
+            Some(ArtifactObligation::SliceMoved { reasons }) => reasons
+                .iter()
+                .filter(|reason| reason.change.to_string() == change)
+                .count(),
+            _ => 0,
+        }
+    };
+    let entity_edit = "entity/catalog.pricing.PriceList/invariants-changed";
+    let guard_edit = "command/catalog.pricing.CreatePriceList/outcome-condition-changed/created";
+
+    // The entity edit: every command's schema rests on the entity its outcomes act on.
+    for path in [
+        "schema/commands/catalog.pricing.CreatePriceList.schema.json",
+        "schema/commands/catalog.pricing.PublishPriceList.schema.json",
+        "schema/commands/catalog.pricing.RetirePriceList.schema.json",
+        "docs/domains/catalog.pricing.md",
+    ] {
+        assert!(
+            reasons_naming(&projection(path), entity_edit) > 0,
+            "`{path}` rests on the entity whose invariant moved, so the edit must be among its \
+             reasons"
+        );
+    }
+    // The guard edit: only the guarded command's own schema, not its siblings'.
+    assert!(
+        reasons_naming(
+            &projection("schema/commands/catalog.pricing.CreatePriceList.schema.json"),
+            guard_edit
+        ) > 0,
+        "the guarded command's schema is owed by its own guard"
+    );
+    assert_eq!(
+        reasons_naming(
+            &projection("schema/commands/catalog.pricing.PublishPriceList.schema.json"),
+            guard_edit
+        ),
+        0,
+        "a sibling command's schema does not rest on this command, and listing it would blur the \
+         two subsets into one"
+    );
+    // Neither predicate edit reaches a type schema.
+    for change in [entity_edit, guard_edit] {
+        assert_eq!(
+            reasons_naming(
+                &projection("schema/types/catalog.pricing.Money.schema.json"),
+                change
+            ),
+            0,
+            "`{change}` is not in the Money schema's slice: a struct schema renders no invariant \
+             of the entity that holds one"
+        );
+    }
+}
+
+#[test]
 fn an_owed_artifacts_path_explains_the_membership_hop_by_hop() {
     // Design §24 at artifact granularity: `Money` is owed by the `Currency` changes through
     // exactly one hop — its own field — and the path must say so, because the path is what a
@@ -199,7 +266,7 @@ fn whole_model_artifacts_are_owed_by_any_change_at_all() {
         };
         assert_eq!(
             reasons.len(),
-            4,
+            6,
             "one reason per change for `{id}`: {reasons:?}"
         );
     }
@@ -233,28 +300,76 @@ fn a_change_to_the_system_header_owes_every_artifact() {
 
 #[test]
 fn a_model_that_moved_in_an_uncompared_family_owes_every_artifact() {
-    // Mechanism 6 for artifacts. A binding's payload mapping is not compared by the delta, so no
-    // change entry can name it — and although every slice's *digest* would move, no closure can
-    // be seeded at a construct the delta does not know changed.
+    // Mechanism 6 for artifacts, on what remains uncompared after W7.2: a conversion's stated
+    // reason has no change family, so no change entry can name it — and although every slice's
+    // *digest* would move, no closure can be seeded at a construct the delta does not know
+    // changed. (A binding's mapping, which this test used before W7.2, now arrives as a named
+    // change entry instead — see `an_erased_binding_mapping_narrows_the_artifacts_by_name`.)
     let before = compiled("examples/billing");
     let mut after = before.clone();
-    let settled = after
-        .bindings
-        .values_mut()
-        .next()
-        .expect("billing declares bindings");
-    settled.mapping.clear();
+    let conversion = after
+        .conversions
+        .first_mut()
+        .expect("billing declares conversions");
+    conversion.because = "a different justification".to_owned();
 
     let report = impact(&before, &after, None, None).expect("one system");
     assert!(
         report.delta.is_empty(),
-        "the delta has no entry for a mapping change: {:?}",
+        "the delta has no entry for a conversion change: {:?}",
         report.delta
     );
     let ArtifactAnswer::Whole { because } = &report.artifacts else {
         panic!("an uncompared move owes everything: {:?}", report.artifacts);
     };
     assert_eq!(*because, WholeAnswer::UncomparedFamilyChanged);
+}
+
+#[test]
+fn an_erased_binding_mapping_narrows_the_artifacts_by_name() {
+    // The artifact half of mechanism 6's shrink. Before W7.2 this exact mutation owed all of
+    // billing's artifacts as an uncompared move; now the delta names it and the answer narrows —
+    // the AsyncAPI documents read bindings and are owed, and a type schema that rests on no
+    // binding is not.
+    let before = compiled("examples/billing");
+    let mut after = before.clone();
+    let binding = after
+        .bindings
+        .values_mut()
+        .next()
+        .expect("billing declares bindings");
+    assert!(
+        !binding.mapping.is_empty(),
+        "the binding fills something, or there is nothing to erase"
+    );
+    binding.mapping.clear();
+
+    let report = impact(&before, &after, None, None).expect("one system");
+    let ids: Vec<String> = report
+        .delta
+        .changes()
+        .iter()
+        .map(|change| change.id().to_string())
+        .collect();
+    assert!(
+        ids.iter()
+            .all(|id| id.starts_with("binding/notify-on-invoice-created/mapping-removed/")),
+        "each erased mapping entry has a name: {ids:?}"
+    );
+    assert!(!ids.is_empty(), "the erasure is at least one change");
+
+    let owed = owed(&report);
+    assert!(
+        owed.contains_key(&projection("asyncapi/invoice-service.yaml")),
+        "the AsyncAPI document reads bindings, so it is owed: {:?}",
+        owed.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        !owed.contains_key(&projection(
+            "schema/types/billing.invoice.InvoiceId.schema.json"
+        )),
+        "a type schema rests on no binding, and listing it anyway would drown the answer"
+    );
 }
 
 #[test]

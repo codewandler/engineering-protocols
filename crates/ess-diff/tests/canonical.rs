@@ -18,11 +18,12 @@ use ess_compiler::ir::EssIr;
 use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
 use ess_conformance::scenario::{
-    ActorRef, CommandRef, ComponentRef, DeclaredTypeRef, DomainRef, ErrorRef, EventRef,
+    ActorRef, BindingRef, CommandRef, ComponentRef, DeclaredTypeRef, DomainRef, EntityRef,
+    ErrorRef, EventRef, ViewRef,
 };
 use ess_diff::change::{
-    ActorChange, ChangeCategory, ComponentChange, ErrorChange, EventChange, SemanticChange,
-    SystemChange, TypeChange,
+    ActorChange, BindingChange, ChangeCategory, CommandChange, ComponentChange, EntityChange,
+    ErrorChange, EventChange, SemanticChange, SystemChange, TypeChange, ViewChange,
 };
 use ess_diff::{diff, EssDelta, RawEssDelta};
 use ess_domain::name::{QualifiedName, Version};
@@ -119,6 +120,8 @@ fn the_changes_are_written_in_the_category_order_and_not_the_alphabet() {
         vec![
             ChangeCategory::Type,
             ChangeCategory::Type,
+            ChangeCategory::Entity,
+            ChangeCategory::Command,
             ChangeCategory::Actor,
             ChangeCategory::Actor
         ]
@@ -243,6 +246,20 @@ fn a_system_still_has_no_naming_a_document_can_set() {
              compare them",
             ir.naming
         );
+    }
+}
+
+#[test]
+fn a_binding_still_has_one_delivery_a_document_can_write() {
+    // Why `BindingChange` has no `delivery-changed` kind. `Delivery` has one inhabitant —
+    // `at_least_once` is the only guarantee this build implements — so a change kind for it would
+    // be a refusal that cannot fire, the defect class
+    // `docs/reviews/2026-08-20-guard-efficacy-review.md` was written about. The match below is
+    // exhaustive without a wildcard: when the model gains a second delivery word, this stops
+    // compiling and points at the change kind that then has to exist and the comparison
+    // `compare_bindings` then has to make.
+    match ess_domain::binding::Delivery::AtLeastOnce {
+        ess_domain::binding::Delivery::AtLeastOnce => {}
     }
 }
 
@@ -529,6 +546,316 @@ fn component_changes() -> Vec<ComponentChange> {
     ]
 }
 
+/// One of every `EntityChange`.
+fn entity_changes() -> Vec<EntityChange> {
+    let (was, is) = pair();
+    vec![
+        EntityChange::Added,
+        EntityChange::Removed,
+        EntityChange::DomainChanged {
+            before: DomainRef::new(name("a.b")),
+            after: DomainRef::new(name("a.c")),
+        },
+        EntityChange::IdentityRenamed {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::IdentityTypeChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::IdentityWireNameChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::IdentityDisplayNameChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::IdentitySummaryChanged {
+            before: None,
+            after: None,
+        },
+        EntityChange::FieldAdded {
+            field: "f".to_owned(),
+            type_ref: is.clone(),
+        },
+        EntityChange::FieldRemoved {
+            field: "f".to_owned(),
+        },
+        EntityChange::FieldTypeChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::FieldWireNameChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::FieldDisplayNameChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::FieldSummaryChanged {
+            field: "f".to_owned(),
+            before: None,
+            after: None,
+        },
+        EntityChange::FieldOrderChanged {
+            before: vec![was.clone()],
+            after: vec![is.clone()],
+        },
+        EntityChange::InitialStateChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::TerminalAdded {
+            state: "S".to_owned(),
+        },
+        EntityChange::TerminalRemoved {
+            state: "S".to_owned(),
+        },
+        EntityChange::TransitionAdded {
+            transition: "t".to_owned(),
+        },
+        EntityChange::TransitionRemoved {
+            transition: "t".to_owned(),
+        },
+        EntityChange::TransitionRouteChanged {
+            transition: "t".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::InvariantsChanged {
+            before: vec![was.clone()],
+            after: vec![is.clone()],
+        },
+        EntityChange::WireNameChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        EntityChange::DisplayNameChanged {
+            before: was,
+            after: is,
+        },
+        EntityChange::SummaryChanged {
+            before: None,
+            after: None,
+        },
+    ]
+}
+
+/// One of every `CommandChange`.
+fn command_changes() -> Vec<CommandChange> {
+    let (was, is) = pair();
+    vec![
+        CommandChange::Added,
+        CommandChange::Removed,
+        CommandChange::DomainChanged {
+            before: DomainRef::new(name("a.b")),
+            after: DomainRef::new(name("a.c")),
+        },
+        CommandChange::InputAdded {
+            field: "f".to_owned(),
+            type_ref: is.clone(),
+        },
+        CommandChange::InputRemoved {
+            field: "f".to_owned(),
+        },
+        CommandChange::InputTypeChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        CommandChange::InputWireNameChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        CommandChange::InputDisplayNameChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        CommandChange::InputSummaryChanged {
+            field: "f".to_owned(),
+            before: None,
+            after: None,
+        },
+        CommandChange::InputOrderChanged {
+            before: vec![was.clone()],
+            after: vec![is.clone()],
+        },
+        CommandChange::OutcomeAdded {
+            outcome: "o".to_owned(),
+        },
+        CommandChange::OutcomeRemoved {
+            outcome: "o".to_owned(),
+        },
+        CommandChange::OutcomeConditionChanged {
+            outcome: "o".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        CommandChange::OutcomeSubjectChanged {
+            outcome: "o".to_owned(),
+            before: None,
+            after: Some(is.clone()),
+        },
+        CommandChange::OutcomeEmitsChanged {
+            outcome: "o".to_owned(),
+            before: vec![was.clone()],
+            after: vec![is.clone()],
+        },
+        CommandChange::OutcomePayloadChanged {
+            outcome: "o".to_owned(),
+            before: vec![was.clone()],
+            after: vec![is.clone()],
+        },
+        CommandChange::OutcomeErrorChanged {
+            outcome: "o".to_owned(),
+            before: None,
+            after: Some(is.clone()),
+        },
+        CommandChange::OutcomeSummaryChanged {
+            outcome: "o".to_owned(),
+            before: None,
+            after: None,
+        },
+        CommandChange::OutcomeOrderChanged {
+            before: vec![was.clone()],
+            after: vec![is.clone()],
+        },
+        CommandChange::WireNameChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        CommandChange::DisplayNameChanged {
+            before: was,
+            after: is,
+        },
+        CommandChange::SummaryChanged {
+            before: None,
+            after: None,
+        },
+    ]
+}
+
+/// One of every `ViewChange`.
+fn view_changes() -> Vec<ViewChange> {
+    let (was, is) = pair();
+    vec![
+        ViewChange::Added,
+        ViewChange::Removed,
+        ViewChange::DomainChanged {
+            before: DomainRef::new(name("a.b")),
+            after: DomainRef::new(name("a.c")),
+        },
+        ViewChange::SourceChanged {
+            before: EntityRef::new(name("a.b.E")),
+            after: EntityRef::new(name("a.b.F")),
+        },
+        ViewChange::FieldAdded {
+            field: "f".to_owned(),
+            type_ref: is.clone(),
+        },
+        ViewChange::FieldRemoved {
+            field: "f".to_owned(),
+        },
+        ViewChange::FieldTypeChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        ViewChange::FieldWireNameChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        ViewChange::FieldDisplayNameChanged {
+            field: "f".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        ViewChange::FieldSummaryChanged {
+            field: "f".to_owned(),
+            before: None,
+            after: None,
+        },
+        ViewChange::FieldOrderChanged {
+            before: vec![was.clone()],
+            after: vec![is.clone()],
+        },
+        ViewChange::FilterChanged {
+            before: None,
+            after: Some(is.clone()),
+        },
+        ViewChange::ConsistencyChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        ViewChange::WireNameChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        ViewChange::DisplayNameChanged {
+            before: was,
+            after: is,
+        },
+        ViewChange::SummaryChanged {
+            before: None,
+            after: None,
+        },
+    ]
+}
+
+/// One of every `BindingChange`.
+fn binding_changes() -> Vec<BindingChange> {
+    let (was, is) = pair();
+    vec![
+        BindingChange::Added,
+        BindingChange::Removed,
+        BindingChange::EventChanged {
+            before: EventRef::new(name("a.b.E")),
+            after: EventRef::new(name("a.b.F")),
+        },
+        BindingChange::CommandChanged {
+            before: CommandRef::new(name("a.b.C")),
+            after: CommandRef::new(name("a.b.D")),
+        },
+        BindingChange::MappingAdded {
+            target: "t".to_owned(),
+            value: is.clone(),
+        },
+        BindingChange::MappingRemoved {
+            target: "t".to_owned(),
+        },
+        BindingChange::MappingValueChanged {
+            target: "t".to_owned(),
+            before: was.clone(),
+            after: is.clone(),
+        },
+        BindingChange::FailureChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        BindingChange::WireNameChanged {
+            before: was.clone(),
+            after: is.clone(),
+        },
+        BindingChange::DisplayNameChanged {
+            before: was,
+            after: is,
+        },
+        BindingChange::SummaryChanged {
+            before: None,
+            after: None,
+        },
+    ]
+}
+
 /// One `SemanticChange` per variant of every family, with a subject each.
 fn one_of_every_change() -> Vec<SemanticChange> {
     let mut all = Vec::new();
@@ -545,6 +872,22 @@ fn one_of_every_change() -> Vec<SemanticChange> {
             .into_iter()
             .map(|changed| SemanticChange::Type {
                 subject: DeclaredTypeRef::new(name("witness.a.T")),
+                changed,
+            }),
+    );
+    all.extend(
+        entity_changes()
+            .into_iter()
+            .map(|changed| SemanticChange::Entity {
+                subject: EntityRef::new(name("witness.a.N")),
+                changed,
+            }),
+    );
+    all.extend(
+        command_changes()
+            .into_iter()
+            .map(|changed| SemanticChange::Command {
+                subject: CommandRef::new(name("witness.a.C")),
                 changed,
             }),
     );
@@ -573,12 +916,30 @@ fn one_of_every_change() -> Vec<SemanticChange> {
             }),
     );
     all.extend(
+        view_changes()
+            .into_iter()
+            .map(|changed| SemanticChange::View {
+                subject: ViewRef::new(name("witness.a.V")),
+                changed,
+            }),
+    );
+    all.extend(
         component_changes()
             .into_iter()
             .map(|changed| SemanticChange::Component {
                 subject: ComponentRef::new(
                     ess_domain::component::ComponentName::new("a-service")
                         .expect("a component name"),
+                ),
+                changed,
+            }),
+    );
+    all.extend(
+        binding_changes()
+            .into_iter()
+            .map(|changed| SemanticChange::Binding {
+                subject: BindingRef::new(
+                    ess_domain::binding::BindingName::new("a-binding").expect("a binding name"),
                 ),
                 changed,
             }),
@@ -594,7 +955,7 @@ fn a_change_is_spelt_the_same_way_in_its_id_and_in_the_document() {
     // `kind()` and generated by serde's `rename_all`, and this is the only thing keeping the two in
     // step.
     let all = one_of_every_change();
-    assert!(all.len() >= 65, "only {} variants were built", all.len());
+    assert!(all.len() >= 139, "only {} variants were built", all.len());
 
     for change in &all {
         let value = serde_json::to_value(change).expect("a change serialises");
@@ -735,13 +1096,13 @@ fn a_delta_naming_two_systems_is_refused_on_the_way_in_as_well() {
 }
 
 #[test]
-fn a_document_with_four_defects_reports_four() {
-    // Invariant 3, at this document's own conversion: a delta with four doctored ids reports four
+fn a_document_with_six_defects_reports_six() {
+    // Invariant 3, at this document's own conversion: a delta with six doctored ids reports six
     // errors, not the first one. The fixture reaches the state the rule is load-bearing in — every
-    // one of the four changes is edited — before it asserts the count.
+    // one of the six changes is edited — before it asserts the count.
     let mut document = document();
     let total = document["changes"].as_array().expect("a list").len();
-    assert_eq!(total, 4, "the fixture pair holds four changes");
+    assert_eq!(total, 6, "the fixture pair holds six changes");
     for index in 0..total {
         document["changes"][index]["id"] = serde_json::json!("system/catalog/version-changed");
     }
@@ -757,8 +1118,8 @@ fn a_document_with_four_defects_reports_four() {
             // suffix match reads as though `.id` were a file extension.
             .filter(|error| error.location.rsplit('.').next() == Some("id"))
             .count(),
-        4,
-        "four edits, four errors: {errors}"
+        6,
+        "six edits, six errors: {errors}"
     );
 }
 

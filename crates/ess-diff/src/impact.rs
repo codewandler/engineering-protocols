@@ -36,7 +36,7 @@
 //! | 3 | [`SemanticChange::subject`] returns `Option`, and the `None` arm — a change to the specification itself, which names no construct — is [`Whole`](Invalidation::Whole) | a change the graph cannot seed a closure from cannot fall through as *nothing* |
 //! | 4 | a suite whose dependency set names a construct **neither** revision's graph has a node for is [`Whole`](Invalidation::Whole) | an incomplete graph walk cannot silently make a scenario unreachable, which is the one way a narrowing could be wrong and look right |
 //! | 5 | [`impact()`] runs the comparison itself, from the same two [`EssIr`]s it builds the graph from, and refuses a suite whose digest is not the `before` revision's | a delta and a graph cannot be about different pairs, and a suite cannot be narrowed against a revision it was not produced from |
-//! | 6 | [`impact()`] compares the canonical form of the construct families the delta does **not** read — entities, commands, views, bindings, conversions, workloads — and any difference there is [`Whole`](Invalidation::Whole) | a change to an uncompared construct (an outcome's guard, a payload mapping, a lifecycle) cannot arrive as an empty delta narrowing to nothing, which would be a survival claim about a model that moved |
+//! | 6 | [`impact()`] compares the canonical form of everything the delta does **not** read — the conversions, the workloads, and each domain's naming — and any difference there is [`Whole`](Invalidation::Whole) | a change to an uncompared construct cannot arrive as an empty delta narrowing to nothing, which would be a survival claim about a model that moved. W7.2 moved entities, commands, views and bindings out of this arm and into change entries; what remains here is what still has no family |
 //!
 //! `tests/impact.rs` breaks each of 3, 4, 5 and 6 and watches it fail.
 //!
@@ -334,14 +334,16 @@ pub enum WholeAnswer {
     },
     /// The model moved in a family this comparison does not read.
     ///
-    /// The delta compares six families; entities, commands, views, bindings, conversions and the
-    /// topology are deliberately not among them (wave 5's boundary, W7.2's work). For those, this
-    /// engine checks canonical **equality** only: equal means nothing there moved and the
-    /// narrowing stands, different means *something* moved that no change entry can name — an
-    /// outcome's guard, a payload mapping, a lifecycle — and a closure cannot be seeded at a
-    /// construct the delta does not know changed. So it is not narrowed at all. When W7.2 teaches
-    /// the delta a family, changes there start arriving as entries and stop landing here — the
-    /// arm shrinks by construction rather than by being remembered.
+    /// The delta compares ten families since W7.2 — entities, commands, views and bindings joined
+    /// wave 5's six, so an outcome's guard, a payload mapping and a lifecycle now arrive as change
+    /// entries instead of landing here. What is left with no family is the conversions, the
+    /// workloads, and each domain's naming. For those, this engine checks canonical **equality**
+    /// only: equal means nothing there moved and the narrowing stands, different means *something*
+    /// moved that no change entry can name, and a closure cannot be seeded at a construct the
+    /// delta does not know changed. So it is not narrowed at all. When a later slice teaches the
+    /// delta one of the remaining families, changes there start arriving as entries and stop
+    /// landing here — the arm shrinks by construction rather than by being remembered. If nothing
+    /// remains one day, the arm stays: it is the backstop for the construct the model gains next.
     UncomparedFamilyChanged,
 }
 
@@ -360,9 +362,9 @@ impl fmt::Display for WholeAnswer {
                  the one way a narrowing is wrong and looks right"
             ),
             Self::UncomparedFamilyChanged => f.write_str(
-                "the model moved in a family this delta does not compare — an entity, a command, \
-                 a view, a binding, a conversion or the topology — so no change entry can name \
-                 what moved, and no closure can be seeded at it",
+                "the model moved in a family this delta does not compare — a conversion, the \
+                 topology, or a domain's naming — so no change entry can name what moved, and no \
+                 closure can be seeded at it",
             ),
         }
     }
@@ -626,11 +628,12 @@ pub struct GeneratedTree {
 
 /// Counts a delta and a closure produce, without pretending to know effort.
 ///
-/// Design §26, restricted to what this slice can count. The four §26 names that are absent —
-/// `public_contracts_changed`, `state_machine_changes`, `binding_changes`, `topology_changes` —
-/// each count a construct family the delta does not compare yet, so each would be a number that is
-/// zero because nothing produces it rather than because nothing happened. A metric that cannot move
-/// is worse than a missing one: it reads as evidence.
+/// Design §26, restricted to what this slice can count. Of §26's four further names,
+/// `topology_changes` still counts a family the delta does not compare, so it stays absent — a
+/// number that is zero because nothing produces it reads as evidence. `state_machine_changes` and
+/// `binding_changes` became countable in W7.2 and are deliberately still not counted: a consumer
+/// filtering the delta by category gets the number without a second field that can disagree with
+/// the list, which is the same argument `ChangeKind` lost one level down.
 ///
 /// `conformance_scenarios_invalidated` is §26's `conformance_scenarios_potentially_affected` with
 /// the word changed, and the word is the wave's decision: *potentially affected* is a hedge that
@@ -814,17 +817,32 @@ pub fn impact(
 /// The canonical form of everything the delta does not compare, for mechanism 6's equality check.
 ///
 /// Serialisation is the comparison because equality is all that is asked: which construct differs
-/// and in which direction is exactly the question wave 5 deliberately does not answer for these
-/// families, and D-1 already settled that canonical equality is the decidable, cheap fragment. The
-/// keys and every map inside are ordered (`BTreeMap` throughout the IR), so two calls over equal
-/// models produce equal bytes.
+/// and in which direction is exactly the question the delta deliberately does not answer for what
+/// is left here, and D-1 already settled that canonical equality is the decidable, cheap fragment.
+/// The keys and every map inside are ordered (`BTreeMap` throughout the IR), so two calls over
+/// equal models produce equal bytes.
+///
+/// W7.2 shrank this from six families to what remains uncompared:
+///
+/// * **conversions** and **workloads** — no change family reads them yet;
+/// * each **domain's naming** — a domain document can set a wire name, a display name and a
+///   summary, and no family compares a domain. Only the naming: a domain's *membership* sets are
+///   derived from the constructs' own `domain:` declarations, every one of which is compared by
+///   its own family, so serialising them here would send every construct added or removed to
+///   `Whole` and erase the narrowing this module exists to produce.
+///
+/// Entities, commands, views and bindings left this list the day their families started producing
+/// change entries — the arm shrank by construction, exactly as the `UncomparedFamilyChanged`
+/// documentation said it would.
 fn uncompared_families(ir: &EssIr) -> String {
+    let domain_namings: BTreeMap<&QualifiedName, &ess_domain::name::Naming> = ir
+        .domains
+        .iter()
+        .map(|(name, domain)| (name, &domain.naming))
+        .collect();
     serde_json::to_string(&serde_json::json!({
-        "bindings": ir.bindings,
-        "commands": ir.commands,
         "conversions": ir.conversions,
-        "entities": ir.entities,
-        "views": ir.views,
+        "domain_namings": domain_namings,
         "workloads": ir.workloads,
     }))
     .unwrap_or_else(|error| {

@@ -44,6 +44,14 @@ entities:
     fields:
       - name: headline
         type: catalog.pricing.Headline
+      - name: floor
+        type: catalog.pricing.Money
+
+    # CHANGE 5 (with `after/`). The later revision states `floor.amount > 0` — a strictly stronger
+    # condition, which the delta reports as *changed* and nothing more: which of two predicates is
+    # stronger is a proof, not a comparison.
+    invariants:
+      - floor.amount >= 0
 
     lifecycle:
       initial: Draft
@@ -58,6 +66,12 @@ entities:
           to: Retired
 
 errors:
+  - name: catalog.pricing.InvalidPrice
+    summary: The floor price is not one a price list may carry.
+    fields:
+      - name: submitted
+        type: catalog.pricing.Money
+
   - name: catalog.pricing.PriceListStateConflict
     summary: The price list is not in a state this command acts from, so nothing moved.
     fields:
@@ -74,14 +88,25 @@ commands:
     input:
       - name: headline
         type: catalog.pricing.Headline
+      - name: floor
+        type: catalog.pricing.Money
 
     outcomes:
+      # CHANGE 6 (with `after/`). The later revision guards this branch with `floor.amount >= 1`,
+      # a canonically different predicate — so the delta says the condition *changed*, and only
+      # that. A guard rewritten with different spacing would resolve to the same predicate and
+      # would not be a change at all.
       - name: created
+        when: floor.amount > 0
         creates: catalog.pricing.PriceList
         instance: price_list_id
         emits:
           - catalog.pricing.PriceListCreated
         summary: The price list is created in Draft, at the headline price it was given.
+
+      - name: rejected
+        error: catalog.pricing.InvalidPrice
+        summary: The floor price was not positive, and nothing was created.
 
   - name: catalog.pricing.PublishPriceList
 

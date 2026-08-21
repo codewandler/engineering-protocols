@@ -1,14 +1,15 @@
 //! The closure from a delta to what a committed suite owes again.
 //!
-//! The fixture pair under `examples/revision-pair/` differs by exactly four changes, and its
-//! specification obliges nine scenarios — so this file can assert *which* scenarios each of the four
-//! puts back to owed, rather than that some number of them did. That distinction is the whole reason
-//! the fixture exists: an impact engine's failure mode is a plausible answer nobody checks.
+//! The fixture pair under `examples/revision-pair/` differs by exactly six changes, and its
+//! specification obliges ten scenarios — so this file can assert *which* scenarios each change
+//! puts back to owed, rather than that some number of them did. That distinction is the whole
+//! reason the fixture exists: an impact engine's failure mode is a plausible answer nobody checks.
 //!
 //! It also breaks the four fail-closed mechanisms that can be broken from outside the crate and
 //! watches each one fail: a suite from the wrong revision, a suite from another system, a scenario
 //! resting on a construct no graph has a node for, and a model that moved in a family the delta
-//! does not compare.
+//! still does not compare — the topology, and a domain's naming, now that W7.2 moved entities,
+//! commands, views and bindings out of that arm and into named change entries.
 
 mod support;
 
@@ -32,7 +33,7 @@ fn catalog_suite() -> ConformanceSuite {
     synthesize(&compiled("examples/revision-pair/before")).suite
 }
 
-/// The impact of the fixture pair's four changes on the suite the earlier revision obliges.
+/// The impact of the fixture pair's six changes on the suite the earlier revision obliges.
 fn catalog_impact() -> EssImpact {
     impact(
         &compiled("examples/revision-pair/before"),
@@ -64,15 +65,74 @@ fn owed_by(report: &EssImpact, change: &str) -> BTreeSet<String> {
 }
 
 #[test]
-fn the_suite_the_fixture_obliges_is_nine_scenarios_and_the_delta_is_four_changes() {
+fn the_suite_the_fixture_obliges_is_ten_scenarios_and_the_delta_is_six_changes() {
     // Asserted before anything is measured against it. Every count below is a fraction of these two
     // numbers, so a fixture that quietly stopped obliging scenarios would make every other test in
     // this file pass by reporting nothing.
     let report = catalog_impact();
 
-    assert_eq!(report.churn.conformance_scenarios_total, Some(9));
-    assert_eq!(report.churn.semantic_changes_total, 4);
+    assert_eq!(report.churn.conformance_scenarios_total, Some(10));
+    assert_eq!(report.churn.semantic_changes_total, 6);
     assert_eq!(report.churn.actor_grants_changed, 2);
+}
+
+#[test]
+fn an_edited_entity_invariant_owes_every_scenario_that_rests_on_the_entity_and_no_other() {
+    // The entity-side half of what W7.2 delivers: this edit used to arrive as an empty delta and
+    // fall to the fail-closed catch-all, owing all ten scenarios with no name. Now it is a change
+    // entry, the closure seeds at the entity, and the one scenario that never touches a price
+    // list — the rejected creation, which brings nothing into existence — is not owed by it.
+    let report = catalog_impact();
+    let owed = owed_by(
+        &report,
+        "entity/catalog.pricing.PriceList/invariants-changed",
+    );
+
+    assert_eq!(
+        owed.len(),
+        9,
+        "nine of the ten scenarios create, move or refuse-to-move a price list: {owed:?}"
+    );
+    assert!(
+        !owed.contains("catalog.pricing.CreatePriceList/outcome/rejected"),
+        "the rejected creation touches no instance, so the invariant edit does not reach it - \
+         this absence is the narrowing: {owed:?}"
+    );
+    assert!(owed.contains("catalog.pricing.CreatePriceList/outcome/created"));
+    assert!(owed.contains(
+        "catalog.pricing.PriceList/transition/retire/by/catalog.pricing.RetirePriceList/retired"
+    ));
+}
+
+#[test]
+fn an_edited_outcome_guard_owes_every_scenario_because_every_scenario_creates_through_it() {
+    // The command-side half. Every scenario in this fixture either exercises `CreatePriceList` or
+    // needs an instance it created, so the honest narrowing for this particular change is no
+    // narrowing at all — asserted as the full set *with the dependency checked per scenario*, so
+    // this fails if the closure ever gets there by accident rather than through the graph.
+    let report = catalog_impact();
+    let owed = owed_by(
+        &report,
+        "command/catalog.pricing.CreatePriceList/outcome-condition-changed/created",
+    );
+
+    assert_eq!(owed.len(), 10, "{owed:?}");
+    let suite = catalog_suite();
+    for id in &owed {
+        let scenario = suite
+            .scenario(&ScenarioId::parse(id).expect("a scenario id"))
+            .expect("the suite holds it");
+        assert!(
+            scenario.source.iter().any(|construct| {
+                construct.to_string() == "command catalog.pricing.CreatePriceList"
+                    || construct
+                        .to_string()
+                        .starts_with("outcome catalog.pricing.CreatePriceList/")
+            }),
+            "`{id}` is owed by the guard edit, so its own dependency set must name the command \
+             or one of its branches"
+        );
+    }
 }
 
 #[test]
@@ -89,7 +149,7 @@ fn taking_a_grant_from_an_actor_owes_only_the_scenarios_that_act_as_that_actor()
     assert_eq!(
         owed.len(),
         4,
-        "four of the nine scenarios act as the auditor: {owed:?}"
+        "four of the ten scenarios act as the auditor: {owed:?}"
     );
     assert!(owed.contains("catalog.pricing.RetirePriceList/outcome/retired"));
     assert!(
@@ -113,19 +173,19 @@ fn taking_a_grant_from_an_actor_owes_only_the_scenarios_that_act_as_that_actor()
 }
 
 #[test]
-fn a_variant_removed_from_an_enum_reaches_the_entity_that_holds_it_three_declarations_away() {
+fn a_variant_removed_from_an_enum_reaches_the_entity_that_holds_it_transitively() {
     // Design §24's requirement, on the fixture: `Currency` is not named by the entity, by the
-    // command, or by seven of the nine scenarios. It is reached through `Money` and `Headline`, and
-    // the path is what makes the answer checkable rather than assertable.
+    // command, or by most of the ten scenarios. It is reached through `Money`, and the path is
+    // what makes the answer checkable rather than assertable.
     let report = catalog_impact();
     let change = "type/catalog.pricing.Currency/variant-removed/GBP";
     let owed = owed_by(&report, change);
 
     assert_eq!(
         owed.len(),
-        9,
-        "every scenario in this fixture creates or moves a price list, and a price list holds a \
-         headline priced in a currency: {owed:?}"
+        10,
+        "every scenario in this fixture either handles a price list priced in a currency or \
+         submits a floor price in one: {owed:?}"
     );
 
     let Some(Invalidation::Narrowed { scenarios }) = &report.invalidation else {
@@ -150,11 +210,11 @@ fn a_variant_removed_from_an_enum_reaches_the_entity_that_holds_it_three_declara
         vec![
             "type catalog.pricing.Money has a field of type type catalog.pricing.Currency"
                 .to_owned(),
-            "type catalog.pricing.Headline wraps type catalog.pricing.Money".to_owned(),
-            "entity catalog.pricing.PriceList has a field of type type catalog.pricing.Headline"
+            "entity catalog.pricing.PriceList has a field of type type catalog.pricing.Money"
                 .to_owned(),
         ],
-        "the answer has to be readable as an argument, not as a verdict"
+        "the answer has to be readable as an argument, not as a verdict — and it is the shortest \
+         argument, through the floor price, not the longer one through the headline's wrapper"
     );
 }
 
@@ -260,7 +320,7 @@ fn a_suite_produced_from_the_later_revision_is_refused_rather_than_narrowed() {
     let before = compiled("examples/revision-pair/before");
     let after = compiled("examples/revision-pair/after");
     let later = synthesize(&after).suite;
-    assert_eq!(later.len(), 9, "the later suite is a real suite");
+    assert_eq!(later.len(), 10, "the later suite is a real suite");
 
     let refusal =
         impact(&before, &after, Some(&later), None).expect_err("the wrong suite is refused");
@@ -360,12 +420,11 @@ fn a_suite_resting_on_a_construct_no_graph_has_a_node_for_owes_the_whole_suite()
 }
 
 #[test]
-fn a_change_in_a_family_the_delta_does_not_compare_owes_the_whole_suite() {
-    // Fail-closed mechanism 6, reached with the construct that motivated it: an outcome's
-    // `payload:` mapping lives in the command family, which wave 5 deliberately does not compare.
-    // Erasing one produces two different models and an **empty** delta — no change entry has a
-    // vocabulary for it — and an empty delta narrowing to nothing would be a survival claim about
-    // a model that moved. So it is not narrowed at all.
+fn an_erased_payload_mapping_is_named_by_the_delta_and_narrowed_rather_than_owing_everything() {
+    // The mutation the wave-5 fail-closed test used to make, with W7.2's opposite outcome: an
+    // outcome's `payload:` lives in the command family, which the delta now compares, so erasing
+    // one arrives as a named change entry and a *narrowing* — the catch-all no longer fires for
+    // it. This is the shrink of mechanism 6, proven by the construct that motivated the mechanism.
     let before = compiled("examples/billing");
     let mut after = compiled("examples/billing");
     let settled = after
@@ -386,10 +445,55 @@ fn a_change_in_a_family_the_delta_does_not_compare_owes_the_whole_suite() {
     let report = impact(&before, &after, Some(&suite), None)
         .expect("one system, and the earlier one's suite");
 
+    let ids: Vec<String> = report
+        .delta
+        .changes()
+        .iter()
+        .map(|change| change.id().to_string())
+        .collect();
+    assert_eq!(
+        ids,
+        vec!["command/billing.invoice.PayInvoice/outcome-payload-changed/settled".to_owned()],
+        "the edit that used to arrive as an empty delta now has a name"
+    );
+    let Some(Invalidation::Narrowed { .. }) = &report.invalidation else {
+        panic!(
+            "a change the delta can name is narrowed through the graph, not owed whole: {:?}",
+            report.invalidation
+        );
+    };
+    assert!(
+        report
+            .churn
+            .conformance_scenarios_invalidated
+            .expect("a suite was given")
+            > 0,
+        "the command moved, so something that rests on it is owed"
+    );
+}
+
+#[test]
+fn a_change_in_a_family_the_delta_still_does_not_compare_owes_the_whole_suite() {
+    // Fail-closed mechanism 6, on what remains after W7.2's shrink: the topology has no change
+    // family, so flipping one workload's statelessness produces two different models and an
+    // **empty** delta — no change entry has a vocabulary for it — and an empty delta narrowing to
+    // nothing would be a survival claim about a model that moved. So it is not narrowed at all.
+    let before = compiled("examples/billing");
+    let mut after = compiled("examples/billing");
+    let workload = after
+        .workloads
+        .values_mut()
+        .next()
+        .expect("billing declares workloads");
+    workload.stateless = !workload.stateless;
+
+    let suite = synthesize(&before).suite;
+    let report = impact(&before, &after, Some(&suite), None)
+        .expect("one system, and the earlier one's suite");
+
     assert!(
         report.delta.is_empty(),
-        "the delta has no entry for it, which is exactly why narrowing is not entitled to an \
-         answer: {:?}",
+        "the delta has no entry for a topology change: {:?}",
         report.delta
     );
     let Some(Invalidation::Whole { because }) = &report.invalidation else {
@@ -404,6 +508,42 @@ fn a_change_in_a_family_the_delta_does_not_compare_owes_the_whole_suite() {
         Some(suite.len()),
         "every scenario, because none of them can honestly be said to stand"
     );
+}
+
+#[test]
+fn a_domains_naming_moving_owes_the_whole_suite_because_no_family_compares_a_domain() {
+    // The gap W7.2 closed while shrinking the catch-all: a domain document can set a wire name, a
+    // display name and a summary, no family compares a domain, and until this slice the
+    // uncompared-family check did not read domain naming either — so this exact edit produced an
+    // empty delta *and* an empty narrowing, which was a survival claim about a model that moved.
+    // Only the naming is checked, deliberately: a domain's membership sets are derived from the
+    // constructs' own declarations, each compared by its own family, and folding them in here
+    // would send every added type to `Whole` and erase the narrowing.
+    let before = compiled("examples/billing");
+    let mut after = compiled("examples/billing");
+    let domain = after
+        .domains
+        .values_mut()
+        .next()
+        .expect("billing declares domains");
+    domain.naming.display = Some("Renamed on the page".to_owned());
+
+    let suite = synthesize(&before).suite;
+    let report = impact(&before, &after, Some(&suite), None)
+        .expect("one system, and the earlier one's suite");
+
+    assert!(
+        report.delta.is_empty(),
+        "the delta has no entry for a domain naming change: {:?}",
+        report.delta
+    );
+    let Some(Invalidation::Whole { because }) = &report.invalidation else {
+        panic!(
+            "a model that moved where no comparison reads owes everything: {:?}",
+            report.invalidation
+        );
+    };
+    assert_eq!(*because, ess_diff::WholeAnswer::UncomparedFamilyChanged);
 }
 
 #[test]

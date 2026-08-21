@@ -159,15 +159,19 @@ that removes a currency reports one narrowing.
 ```console
 $ protocol ess diff --from examples/revision-pair/before --to examples/revision-pair/after
 catalog v2 → v2
-  before  bc6f70b3dc81a99d67c95510139c121d21bbef19f229f46ac7887551b31811d8
-  after   3e5ba8c16baf2d7d7316fd64fab88b6706cd3d6020562bd602ba1def8c196180
+  before  9aa886fb68a2447af40c92cf53ed260af0d102507ac87e73a8e31fb7d20a0916
+  after   2dcf59ba04dd2fb953218bf8c60146d4efd4fca8282af8cd53c2063f4f4616be
 
-4 change(s): 2 widening, 2 narrowing, 0 other
+6 change(s): 2 widening, 2 narrowing, 2 other
 
   widens   type catalog.pricing.Currency: variant `CHF` added
            type/catalog.pricing.Currency/variant-added/CHF
   narrows  type catalog.pricing.Currency: variant `GBP` removed
            type/catalog.pricing.Currency/variant-removed/GBP
+  changes  entity catalog.pricing.PriceList: invariants [floor.amount >= 0] → [floor.amount > 0]
+           entity/catalog.pricing.PriceList/invariants-changed
+  changes  command catalog.pricing.CreatePriceList: outcome `created` is decided by `when floor.amount >= 1`, was `when floor.amount > 0`
+           command/catalog.pricing.CreatePriceList/outcome-condition-changed/created
   narrows  actor catalog.pricing.Auditor: may no longer invoke `catalog.pricing.RetirePriceList`
            actor/catalog.pricing.Auditor/grant-removed/catalog.pricing.RetirePriceList
   widens   actor catalog.pricing.PricingManager: may invoke `catalog.pricing.RetirePriceList`
@@ -175,7 +179,7 @@ catalog v2 → v2
 ```
 
 [`examples/revision-pair/`](../../examples/revision-pair/) is that pair. Its two halves differ by
-exactly those four changes and by a great deal of text that means nothing: the domain file has a
+exactly those six changes and by a great deal of text that means nothing: the domain file has a
 different name, every top-level block is in a different order, every comment is rewritten, and one
 naming default is written out on one side and left implicit on the other.
 
@@ -186,9 +190,13 @@ is reported as *changed*, which says the revisions differ here and that no direc
 difference — a rewritten invariant is `changed`, even when the new one is strictly stronger, because
 saying so would be a proof rather than a comparison.
 
-**Six construct families are compared:** the system header, types, events, errors, actors and
-components. Entities, commands, views, bindings, topology and conversions are not, yet — their
-invariants and conditions are predicates, and that is where an undecidable answer starts.
+**Ten construct families are compared:** the system header, types, entities, commands, events,
+errors, views, actors, components and bindings. Where a construct carries a predicate — an entity
+invariant, an outcome's `when:`, a view's filter — the comparison is canonical *equality* over the
+parsed predicate: two spellings the parser normalises to one form are no change, anything else is
+*changed*, and no direction is ever derived, because whether one predicate implies another is a
+proof rather than a comparison. Conversions and the topology have no change family yet; a move
+there still puts everything back to owed, stated as such.
 
 **Nothing is inferred to be a rename.** `InvoiceCreated` removed and `InvoiceIssued` added is reported
 as a removal and an addition, however similar the names look: a rename and a delete-plus-create have

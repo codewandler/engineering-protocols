@@ -29,6 +29,11 @@ predicate that canonicalisation cannot recognise reports as *changed* and costs 
 the cheap error. This unblocks entities, commands, views and bindings joining the delta as a later
 slice of `ess-diff`, with the four directional relations staying exactly where they are.
 
+**Executed by code, 2026-08-21 (ESS W7.2).** The four families are compared; the canonical form is
+the parsed `Predicate` exactly as the compiler resolves it (the parser's own simplifications, no
+reordering, no rewrite rules), plus the author's statement where the model keeps one. See
+`docs/plan/ess-wave-7-closing-the-loop.md` § W7.2.
+
 ### D-2 — linking two implementations that claim one obligation is an error
 
 The synthesis design (§20–§21) proposes `link` over obligation implementations and separately

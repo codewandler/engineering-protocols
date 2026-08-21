@@ -59,14 +59,25 @@ commands:
     input:
       - name: headline
         type: catalog.pricing.Headline
+      - name: floor
+        type: catalog.pricing.Money
 
     outcomes:
+      # CHANGE 6. The earlier revision guards this branch with `floor.amount > 0`; this one asks
+      # for at least a whole unit. Canonically different predicates, so the delta says the
+      # condition *changed* — and nothing about which guard admits more, because that would be a
+      # proof and not a comparison.
       - name: created
+        when: floor.amount >= 1
         creates: catalog.pricing.PriceList
         instance: price_list_id
         emits:
           - catalog.pricing.PriceListCreated
         summary: The price list is created in Draft, at the headline price it was given.
+
+      - name: rejected
+        error: catalog.pricing.InvalidPrice
+        summary: The floor price was not positive, and nothing was created.
 
 # CHANGE 3 and CHANGE 4. The authority to retire a price list moves from the auditor to the pricing
 # manager: one grant added and one grant removed, which are the only two ways this slice can say a
@@ -108,6 +119,12 @@ errors:
       - name: state
         type: catalog.pricing.PriceList.State
 
+  - name: catalog.pricing.InvalidPrice
+    summary: The floor price is not one a price list may carry.
+    fields:
+      - name: submitted
+        type: catalog.pricing.Money
+
 types:
   # CHANGE 1 and CHANGE 2. `CHF` is accepted where it was not, and `GBP` is not accepted where it
   # was. `EUR` and `USD` keep their relative order, so nothing is reported about the ordering.
@@ -146,6 +163,15 @@ entities:
     fields:
       - name: headline
         type: catalog.pricing.Headline
+      - name: floor
+        type: catalog.pricing.Money
+
+    # CHANGE 5. The earlier revision states `floor.amount >= 0`; this one refuses a free price
+    # list. Strictly stronger — and the delta says *changed*, no more, because "stronger" is a
+    # proof about two predicates and this comparison only ever asks whether they are canonically
+    # the same.
+    invariants:
+      - floor.amount > 0
 
     lifecycle:
       initial: Draft

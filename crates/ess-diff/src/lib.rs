@@ -28,22 +28,33 @@
 //! model, so a change to the renderer looks like a change to the system, and a semantic change that
 //! this renderer happens not to project looks like nothing at all.
 //!
-//! # Six construct families, and why not the other seven
+//! # Ten construct families, and what predicate comparison is allowed to mean
 //!
-//! This is wave 5's first slice, and it covers **system, types, events, errors, actors and
-//! components** — the six whose comparison is a walk over values that are equal or are not.
+//! Wave 5's first slice compared **system, types, events, errors, actors and components** — the six
+//! whose comparison is a walk over values that are equal or are not — and excluded entities,
+//! commands, views and bindings because their invariants, guards and filters are
+//! [`Predicate`](aep_domain::predicate::Predicate)s. W7.2 brought the four in by executing gap
+//! register D-1: the wave-5 record conflated two questions, and only one of them is hard.
 //!
-//! Entities, commands, views, bindings, topology and conversions are deliberately absent. An
-//! entity's `invariants` and a command outcome's `condition` are [`Predicate`](aep_domain::predicate::Predicate)s,
-//! and comparing two predicates for anything beyond inequality is where an undecidable answer lives:
-//! "is `amount > 0` weaker than `amount >= 1`" is a proof obligation, not a field comparison.
-//! Choosing the six families that need no unknowns is the point of the slice, not a shortcut, and it
-//! is why there is no `Unknown` in [`SemanticRelation`]. Wanting one is the signal that a comparator
-//! has reached past the boundary.
+//! Predicate **implication** — does the new `when:` accept everything the old one did — is
+//! undecidable in general and stays refused: "is `amount > 0` weaker than `amount >= 1`" is a proof
+//! obligation, not a field comparison, and it is why there is no `Unknown` in [`SemanticRelation`].
+//! Predicate **equality after canonicalisation** is decidable and cheap, and it is all a delta
+//! needs. The canonical form is the parsed `Predicate` itself, exactly as the compiler resolves it:
+//! the parser's own simplifications applied (`not not p` is `p`, an empty `all` is *always*, a
+//! singleton `all`/`any` is its child), and nothing else — no reordering of `all`/`any` children,
+//! no algebraic rewriting. Canonically equal is silence; canonically different is
+//! [`Changed`](SemanticRelation::Changed) with no direction, and the closure invalidates through it
+//! like through any other change. A rewritten-but-equivalent predicate this cannot recognise
+//! reports as *changed* and costs a re-run, which is the cheap error; the expensive one —
+//! recognising too much — has no code path, because nothing reads a predicate beyond `==`.
 //!
-//! The boundary is respected *inside* the six, too: a named type's own invariants are predicates as
-//! well, so [`TypeChange::InvariantsChanged`] reports **that** they differ and never that one
-//! implies the other.
+//! Where the model keeps the author's own statement beside the parsed predicate (an entity's or a
+//! type's invariants), the statement is part of the canonical form too: a documentation projection
+//! quotes it, so a reworded statement over an unchanged predicate is a model that moved.
+//!
+//! What still has no family — conversions, workloads, and each domain's naming — stays behind the
+//! fail-closed equality check in [`mod@crate::impact`] (mechanism 6), owed whole when it moves.
 //!
 //! # Four relations, and everything else is `Changed`
 //!
@@ -114,8 +125,9 @@ pub mod raw;
 pub mod render;
 
 pub use change::{
-    ActorChange, ChangeCategory, ChangeId, ComponentChange, ErrorChange, EventChange,
-    SemanticChange, SemanticRelation, SystemChange, TypeChange,
+    ActorChange, BindingChange, ChangeCategory, ChangeId, CommandChange, ComponentChange,
+    EntityChange, ErrorChange, EventChange, SemanticChange, SemanticRelation, SystemChange,
+    TypeChange, ViewChange,
 };
 pub use delta::{DeltaFormat, EssDelta, EssRevisionRef, SUPPORTED_DELTA_FORMATS};
 pub use diff::{diff, DiffRefusal};

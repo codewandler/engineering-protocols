@@ -1,4 +1,4 @@
-//! The comparison itself: six walks over two IRs, and one refusal.
+//! The comparison itself: ten walks over two IRs, and one refusal.
 //!
 //! # Identity, and why nothing here infers a rename
 //!
@@ -32,15 +32,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use ess_compiler::ir::{EssIr, ResolvedBody, ResolvedField, ResolvedType, ResolvedTypeRef};
-use ess_conformance::scenario::{
-    ActorRef, CommandRef, ComponentRef, DeclaredTypeRef, DomainRef, ErrorRef, EventRef,
+use ess_compiler::ir::{
+    EssIr, ResolvedBinding, ResolvedBody, ResolvedCommand, ResolvedCondition, ResolvedEntity,
+    ResolvedField, ResolvedInstance, ResolvedOutcome, ResolvedPayload, ResolvedSubject,
+    ResolvedType, ResolvedTypeRef, ResolvedView,
 };
+use ess_conformance::scenario::{
+    ActorRef, BindingRef, CommandRef, ComponentRef, DeclaredTypeRef, DomainRef, EntityRef,
+    ErrorRef, EventRef, ViewRef,
+};
+use ess_domain::entity::StateMachine;
 use ess_domain::name::{Naming, QualifiedName};
 
 use crate::change::{
-    ActorChange, ComponentChange, ErrorChange, EventChange, SemanticChange, SystemChange,
-    TypeChange,
+    ActorChange, BindingChange, CommandChange, ComponentChange, EntityChange, ErrorChange,
+    EventChange, SemanticChange, SystemChange, TypeChange, ViewChange,
 };
 use crate::delta::{EssDelta, EssRevisionRef};
 
@@ -104,10 +110,14 @@ pub fn diff(before: &EssIr, after: &EssIr) -> Result<EssDelta, DiffRefusal> {
     let mut changes = Vec::new();
     system_changes(before, after, &mut changes);
     type_changes(before, after, &mut changes);
+    entity_changes(before, after, &mut changes);
+    command_changes(before, after, &mut changes);
     event_changes(before, after, &mut changes);
     error_changes(before, after, &mut changes);
+    view_changes(before, after, &mut changes);
     actor_changes(before, after, &mut changes);
     component_changes(before, after, &mut changes);
+    binding_changes(before, after, &mut changes);
 
     Ok(EssDelta::new(
         EssRevisionRef::of(before),
@@ -152,14 +162,31 @@ enum NamingDelta {
 
 /// Every difference between two namings of one construct.
 fn naming_deltas(before: &Naming, after: &Naming, fallback: &str) -> Vec<NamingDelta> {
+    naming_deltas_between(before, after, fallback, fallback)
+}
+
+/// [`naming_deltas`] where the two sides fall back to different names.
+///
+/// One caller: an entity's identity field, whose own name is the fallback and can itself have been
+/// renamed. Everything keyed by name shares one fallback, because the key is the same on both
+/// sides by construction.
+fn naming_deltas_between(
+    before: &Naming,
+    after: &Naming,
+    before_fallback: &str,
+    after_fallback: &str,
+) -> Vec<NamingDelta> {
     let mut deltas = Vec::new();
-    let (was, is) = (wire_name(before, fallback), wire_name(after, fallback));
+    let (was, is) = (
+        wire_name(before, before_fallback),
+        wire_name(after, after_fallback),
+    );
     if was != is {
         deltas.push(NamingDelta::Wire(was.to_owned(), is.to_owned()));
     }
     let (was, is) = (
-        display_name(before, fallback),
-        display_name(after, fallback),
+        display_name(before, before_fallback),
+        display_name(after, after_fallback),
     );
     if was != is {
         deltas.push(NamingDelta::Display(was.to_owned(), is.to_owned()));
@@ -265,7 +292,7 @@ fn field_deltas(
     }
 }
 
-// ---- the six families ------------------------------------------------------------------------
+// ---- the ten families ------------------------------------------------------------------------
 
 /// The specification itself: version, naming, summary.
 fn system_changes(before: &EssIr, after: &EssIr, changes: &mut Vec<SemanticChange>) {
@@ -788,6 +815,715 @@ fn component_changes(before: &EssIr, after: &EssIr, changes: &mut Vec<SemanticCh
                 }
             }
             (None, None) => unreachable!("a key came from one of the two maps"),
+        }
+    }
+}
+
+// ---- the four families W7.2 added -------------------------------------------------------------
+
+/// What decides an outcome, rendered canonically.
+///
+/// A `when:` renders through [`Predicate`](aep_domain::predicate::Predicate)'s own `Display`, which
+/// is the canonical compact form — the IR keeps no author spelling for a guard, so two guards that
+/// differ only in formatting are one predicate and never reach a renderer at all.
+fn written_condition(condition: &ResolvedCondition) -> String {
+    match condition {
+        ResolvedCondition::When { predicate } => format!("when {predicate}"),
+        ResolvedCondition::Otherwise => "otherwise".to_owned(),
+        ResolvedCondition::External { cause } => format!("external: {cause}"),
+        ResolvedCondition::WrongState => "wrong-state".to_owned(),
+    }
+}
+
+/// What an outcome does to which entity, rendered with every part that decides equality.
+fn written_subject(subject: &ResolvedSubject) -> String {
+    let entity = EntityRef::from(&subject.entity);
+    let effect = match &subject.effect {
+        ess_compiler::ir::ResolvedEffect::Creates => format!("creates {entity}"),
+        ess_compiler::ir::ResolvedEffect::Moves { transition } => {
+            format!(
+                "moves {entity} via {} ({})",
+                transition.name,
+                written_route(transition)
+            )
+        }
+        ess_compiler::ir::ResolvedEffect::Updates => format!("updates {entity}"),
+    };
+    let instance = match &subject.instance {
+        ResolvedInstance::Supplied { field } => {
+            format!("instance from input `{}`", field.name)
+        }
+        ResolvedInstance::Observed { event, field } => {
+            format!(
+                "instance observed in {}.{}",
+                EventRef::from(event),
+                field.name
+            )
+        }
+    };
+    format!("{effect}, {instance}")
+}
+
+/// One determined payload field per line: which event field, and where its value comes from.
+fn written_payload(payload: &[ResolvedPayload]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for entry in payload {
+        let event = EventRef::from(&entry.event);
+        for field in &entry.fields {
+            let source = match &field.value {
+                ess_compiler::ir::ResolvedPayloadValue::InputField { field: name, .. } => {
+                    format!("input.{name}")
+                }
+                ess_compiler::ir::ResolvedPayloadValue::Literal { value } => {
+                    format!("literal `{value}`")
+                }
+            };
+            let conversion = field
+                .conversion
+                .as_ref()
+                .map(|reason| format!(" via `{reason}`"))
+                .unwrap_or_default();
+            lines.push(format!("{event}.{} <- {source}{conversion}", field.target));
+        }
+    }
+    lines
+}
+
+/// Where a binding fills one command input from, rendered with the conversion when one is crossed.
+fn written_mapping(mapping: &ess_compiler::ir::ResolvedMapping) -> String {
+    let source = match &mapping.value {
+        ess_compiler::ir::ResolvedMappingValue::EventField { field, .. } => {
+            format!("event.{field}")
+        }
+        ess_compiler::ir::ResolvedMappingValue::Literal { value } => format!("literal `{value}`"),
+    };
+    let conversion = mapping
+        .conversion
+        .as_ref()
+        .map(|reason| format!(" via `{reason}`"))
+        .unwrap_or_default();
+    format!("{source}{conversion}")
+}
+
+/// A binding's failure policy in one word, with the event an escalation publishes beside it.
+fn written_failure(binding: &ResolvedBinding) -> String {
+    match binding.on_failure() {
+        ess_compiler::ir::ResolvedFailure::Retry => "retry".to_owned(),
+        ess_compiler::ir::ResolvedFailure::Drop => "drop".to_owned(),
+        ess_compiler::ir::ResolvedFailure::Escalate { emits } => {
+            format!("escalate, publishing `{}`", EventRef::from(emits))
+        }
+    }
+}
+
+/// A transition's route: every state it may start in, and the one it ends in.
+fn written_route(transition: &ess_domain::entity::Transition) -> String {
+    let from: Vec<String> = transition.from.iter().map(ToString::to_string).collect();
+    format!("{} -> {}", from.join(", "), transition.to)
+}
+
+/// Every difference between two lifecycles, except the state set.
+///
+/// The state set is deliberately not compared here: it is exactly the variant set of the
+/// synthesised `<Entity>.State` enum, which lives in the IR's type map and is compared by the type
+/// family — `type/<Entity>.State/variant-added` already names a state that arrived, and a second
+/// report here would be one edit reported twice.
+fn lifecycle_changes(was: &StateMachine, is: &StateMachine, push: &mut impl FnMut(EntityChange)) {
+    if was.initial != is.initial {
+        push(EntityChange::InitialStateChanged {
+            before: was.initial.to_string(),
+            after: is.initial.to_string(),
+        });
+    }
+    for state in is.terminal.difference(&was.terminal) {
+        push(EntityChange::TerminalAdded {
+            state: state.to_string(),
+        });
+    }
+    for state in was.terminal.difference(&is.terminal) {
+        push(EntityChange::TerminalRemoved {
+            state: state.to_string(),
+        });
+    }
+
+    let declared: BTreeMap<&str, &ess_domain::entity::Transition> = was
+        .transitions
+        .iter()
+        .map(|transition| (transition.name.as_str(), transition))
+        .collect();
+    let now: BTreeMap<&str, &ess_domain::entity::Transition> = is
+        .transitions
+        .iter()
+        .map(|transition| (transition.name.as_str(), transition))
+        .collect();
+    for name in keys(&declared, &now) {
+        match (declared.get(name), now.get(name)) {
+            (None, Some(_)) => push(EntityChange::TransitionAdded {
+                transition: (*name).to_owned(),
+            }),
+            (Some(_), None) => push(EntityChange::TransitionRemoved {
+                transition: (*name).to_owned(),
+            }),
+            (Some(old), Some(new)) => {
+                if old.from != new.from || old.to != new.to {
+                    push(EntityChange::TransitionRouteChanged {
+                        transition: (*name).to_owned(),
+                        before: written_route(old),
+                        after: written_route(new),
+                    });
+                }
+            }
+            (None, None) => unreachable!("a key came from one of the two maps"),
+        }
+    }
+}
+
+/// Every difference between the two revisions' entities.
+fn entity_changes(before: &EssIr, after: &EssIr, changes: &mut Vec<SemanticChange>) {
+    for name in keys(&before.entities, &after.entities) {
+        let subject = EntityRef::new(name.clone());
+        let mut push = |changed: EntityChange| {
+            changes.push(SemanticChange::Entity {
+                subject: subject.clone(),
+                changed,
+            });
+        };
+        match (before.entities.get(name), after.entities.get(name)) {
+            (None, Some(_)) => push(EntityChange::Added),
+            (Some(_), None) => push(EntityChange::Removed),
+            (Some(was), Some(is)) => compare_entities(was, is, name, &mut push),
+            (None, None) => unreachable!("a key came from one of the two maps"),
+        }
+    }
+}
+
+/// One entity against its counterpart.
+fn compare_entities(
+    was: &ResolvedEntity,
+    is: &ResolvedEntity,
+    name: &QualifiedName,
+    push: &mut impl FnMut(EntityChange),
+) {
+    let (owned, owns) = (DomainRef::from(&was.domain), DomainRef::from(&is.domain));
+    if owned != owns {
+        push(EntityChange::DomainChanged {
+            before: owned,
+            after: owns,
+        });
+    }
+
+    // The identity is one field, not a member of `fields`, so it is compared by position rather
+    // than by name — which is why a renamed identity is the one rename this crate reports.
+    if was.identity.name != is.identity.name {
+        push(EntityChange::IdentityRenamed {
+            before: was.identity.name.clone(),
+            after: is.identity.name.clone(),
+        });
+    }
+    if was.identity.type_ref != is.identity.type_ref {
+        push(EntityChange::IdentityTypeChanged {
+            before: was.identity.type_ref.to_string(),
+            after: is.identity.type_ref.to_string(),
+        });
+    }
+    for delta in naming_deltas_between(
+        &was.identity.naming,
+        &is.identity.naming,
+        &was.identity.name,
+        &is.identity.name,
+    ) {
+        match delta {
+            NamingDelta::Wire(a, b) => push(EntityChange::IdentityWireNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Display(a, b) => push(EntityChange::IdentityDisplayNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Summary(a, b) => push(EntityChange::IdentitySummaryChanged {
+                before: a,
+                after: b,
+            }),
+        }
+    }
+
+    field_deltas(&was.fields, &is.fields, |delta| match delta {
+        FieldDelta::Added(field, type_ref) => push(EntityChange::FieldAdded { field, type_ref }),
+        FieldDelta::Removed(field) => push(EntityChange::FieldRemoved { field }),
+        FieldDelta::TypeChanged(field, a, b) => push(EntityChange::FieldTypeChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Wire(field, a, b) => push(EntityChange::FieldWireNameChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Display(field, a, b) => push(EntityChange::FieldDisplayNameChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Summary(field, a, b) => push(EntityChange::FieldSummaryChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Reordered(a, b) => push(EntityChange::FieldOrderChanged {
+            before: a,
+            after: b,
+        }),
+    });
+
+    lifecycle_changes(&was.lifecycle, &is.lifecycle, push);
+
+    // Canonical equality over the whole `Invariant` — the parsed predicate *and* the statement the
+    // author wrote. The model keeps both and a documentation projection quotes the statement, so a
+    // reworded statement over an unchanged predicate is a model that moved, reported as changed —
+    // the cheap error. The comparison never reads the predicates' content beyond equality, so no
+    // direction can come out of it (gap register D-1).
+    if was.invariants != is.invariants {
+        push(EntityChange::InvariantsChanged {
+            before: was
+                .invariants
+                .iter()
+                .map(|invariant| invariant.statement.clone())
+                .collect(),
+            after: is
+                .invariants
+                .iter()
+                .map(|invariant| invariant.statement.clone())
+                .collect(),
+        });
+    }
+
+    for delta in naming_deltas(&was.naming, &is.naming, name.local()) {
+        match delta {
+            NamingDelta::Wire(a, b) => push(EntityChange::WireNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Display(a, b) => push(EntityChange::DisplayNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Summary(a, b) => push(EntityChange::SummaryChanged {
+                before: a,
+                after: b,
+            }),
+        }
+    }
+}
+
+/// Every difference between the two revisions' commands.
+fn command_changes(before: &EssIr, after: &EssIr, changes: &mut Vec<SemanticChange>) {
+    for name in keys(&before.commands, &after.commands) {
+        let subject = CommandRef::new(name.clone());
+        let mut push = |changed: CommandChange| {
+            changes.push(SemanticChange::Command {
+                subject: subject.clone(),
+                changed,
+            });
+        };
+        match (before.commands.get(name), after.commands.get(name)) {
+            (None, Some(_)) => push(CommandChange::Added),
+            (Some(_), None) => push(CommandChange::Removed),
+            (Some(was), Some(is)) => compare_commands(was, is, name, &mut push),
+            (None, None) => unreachable!("a key came from one of the two maps"),
+        }
+    }
+}
+
+/// One command against its counterpart.
+fn compare_commands(
+    was: &ResolvedCommand,
+    is: &ResolvedCommand,
+    name: &QualifiedName,
+    push: &mut impl FnMut(CommandChange),
+) {
+    let (owned, owns) = (DomainRef::from(&was.domain), DomainRef::from(&is.domain));
+    if owned != owns {
+        push(CommandChange::DomainChanged {
+            before: owned,
+            after: owns,
+        });
+    }
+
+    field_deltas(&was.input, &is.input, |delta| match delta {
+        FieldDelta::Added(field, type_ref) => push(CommandChange::InputAdded { field, type_ref }),
+        FieldDelta::Removed(field) => push(CommandChange::InputRemoved { field }),
+        FieldDelta::TypeChanged(field, a, b) => push(CommandChange::InputTypeChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Wire(field, a, b) => push(CommandChange::InputWireNameChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Display(field, a, b) => push(CommandChange::InputDisplayNameChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Summary(field, a, b) => push(CommandChange::InputSummaryChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Reordered(a, b) => push(CommandChange::InputOrderChanged {
+            before: a,
+            after: b,
+        }),
+    });
+
+    outcome_changes(&was.outcomes, &is.outcomes, push);
+
+    for delta in naming_deltas(&was.naming, &is.naming, name.local()) {
+        match delta {
+            NamingDelta::Wire(a, b) => push(CommandChange::WireNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Display(a, b) => push(CommandChange::DisplayNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Summary(a, b) => push(CommandChange::SummaryChanged {
+                before: a,
+                after: b,
+            }),
+        }
+    }
+}
+
+/// Every difference between two outcome lists, keyed by the outcome's name.
+///
+/// `test_strategy` is deliberately not compared: it is a pure function of the condition
+/// ([`OutcomeCondition::test_strategy`](ess_domain::command::OutcomeCondition::test_strategy),
+/// applied once by the resolver), so a strategy that moved is a condition that moved, already
+/// reported — and two reports of one edit is the `Modified`-beside-the-detail defect this crate's
+/// change model refuses.
+fn outcome_changes(
+    was: &[ResolvedOutcome],
+    is: &[ResolvedOutcome],
+    push: &mut impl FnMut(CommandChange),
+) {
+    let declared: BTreeMap<&str, &ResolvedOutcome> = was
+        .iter()
+        .map(|outcome| (outcome.name.as_str(), outcome))
+        .collect();
+    let now: BTreeMap<&str, &ResolvedOutcome> = is
+        .iter()
+        .map(|outcome| (outcome.name.as_str(), outcome))
+        .collect();
+
+    for name in keys(&declared, &now) {
+        match (declared.get(name), now.get(name)) {
+            (None, Some(_)) => push(CommandChange::OutcomeAdded {
+                outcome: (*name).to_owned(),
+            }),
+            (Some(_), None) => push(CommandChange::OutcomeRemoved {
+                outcome: (*name).to_owned(),
+            }),
+            (Some(old), Some(new)) => {
+                // Canonical equality, per D-1: a `when:` rewritten with different spacing resolves
+                // to the same predicate and is silent here; anything canonically different is
+                // *changed*, and nothing below reads a predicate's content beyond `==`.
+                if old.condition != new.condition {
+                    push(CommandChange::OutcomeConditionChanged {
+                        outcome: (*name).to_owned(),
+                        before: written_condition(&old.condition),
+                        after: written_condition(&new.condition),
+                    });
+                }
+                if old.subject != new.subject {
+                    push(CommandChange::OutcomeSubjectChanged {
+                        outcome: (*name).to_owned(),
+                        before: old.subject.as_ref().map(written_subject),
+                        after: new.subject.as_ref().map(written_subject),
+                    });
+                }
+                if old.emits != new.emits {
+                    let written = |handles: &[ess_compiler::ir::EventHandle]| -> Vec<String> {
+                        handles
+                            .iter()
+                            .map(|handle| EventRef::from(handle).to_string())
+                            .collect()
+                    };
+                    push(CommandChange::OutcomeEmitsChanged {
+                        outcome: (*name).to_owned(),
+                        before: written(&old.emits),
+                        after: written(&new.emits),
+                    });
+                }
+                if old.payload != new.payload {
+                    push(CommandChange::OutcomePayloadChanged {
+                        outcome: (*name).to_owned(),
+                        before: written_payload(&old.payload),
+                        after: written_payload(&new.payload),
+                    });
+                }
+                if old.error != new.error {
+                    let written = |handle: &Option<ess_compiler::ir::ErrorHandle>| {
+                        handle
+                            .as_ref()
+                            .map(|handle| ErrorRef::from(handle).to_string())
+                    };
+                    push(CommandChange::OutcomeErrorChanged {
+                        outcome: (*name).to_owned(),
+                        before: written(&old.error),
+                        after: written(&new.error),
+                    });
+                }
+                if old.summary != new.summary {
+                    push(CommandChange::OutcomeSummaryChanged {
+                        outcome: (*name).to_owned(),
+                        before: old.summary.clone(),
+                        after: new.summary.clone(),
+                    });
+                }
+            }
+            (None, None) => unreachable!("a key came from one of the two maps"),
+        }
+    }
+
+    // Order over the outcomes both sides declare, for the reason a field list's order is: a
+    // conditional outcome is decided in declaration order, so two `when:` branches swapped is a
+    // real difference — and inserting one necessarily moves the rest, which the addition already
+    // reports.
+    let common = |outcomes: &[ResolvedOutcome], other: &BTreeMap<&str, &ResolvedOutcome>| {
+        outcomes
+            .iter()
+            .filter(|outcome| other.contains_key(outcome.name.as_str()))
+            .map(|outcome| outcome.name.as_str().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let (was_order, is_order) = (common(was, &now), common(is, &declared));
+    if was_order != is_order {
+        push(CommandChange::OutcomeOrderChanged {
+            before: was_order,
+            after: is_order,
+        });
+    }
+}
+
+/// Every difference between the two revisions' views.
+fn view_changes(before: &EssIr, after: &EssIr, changes: &mut Vec<SemanticChange>) {
+    for name in keys(&before.views, &after.views) {
+        let subject = ViewRef::new(name.clone());
+        let mut push = |changed: ViewChange| {
+            changes.push(SemanticChange::View {
+                subject: subject.clone(),
+                changed,
+            });
+        };
+        match (before.views.get(name), after.views.get(name)) {
+            (None, Some(_)) => push(ViewChange::Added),
+            (Some(_), None) => push(ViewChange::Removed),
+            (Some(was), Some(is)) => compare_views(was, is, name, &mut push),
+            (None, None) => unreachable!("a key came from one of the two maps"),
+        }
+    }
+}
+
+/// One view against its counterpart.
+///
+/// `assertion_style` is not compared: it is a pure function of the consistency
+/// ([`Consistency::assertion_style`](ess_domain::view::Consistency::assertion_style), applied once
+/// by the resolver), so a style that moved is a consistency that moved, already reported.
+fn compare_views(
+    was: &ResolvedView,
+    is: &ResolvedView,
+    name: &QualifiedName,
+    push: &mut impl FnMut(ViewChange),
+) {
+    let (owned, owns) = (DomainRef::from(&was.domain), DomainRef::from(&is.domain));
+    if owned != owns {
+        push(ViewChange::DomainChanged {
+            before: owned,
+            after: owns,
+        });
+    }
+    let (projected, projects) = (EntityRef::from(&was.source), EntityRef::from(&is.source));
+    if projected != projects {
+        push(ViewChange::SourceChanged {
+            before: projected,
+            after: projects,
+        });
+    }
+
+    field_deltas(&was.fields, &is.fields, |delta| match delta {
+        FieldDelta::Added(field, type_ref) => push(ViewChange::FieldAdded { field, type_ref }),
+        FieldDelta::Removed(field) => push(ViewChange::FieldRemoved { field }),
+        FieldDelta::TypeChanged(field, a, b) => push(ViewChange::FieldTypeChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Wire(field, a, b) => push(ViewChange::FieldWireNameChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Display(field, a, b) => push(ViewChange::FieldDisplayNameChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Summary(field, a, b) => push(ViewChange::FieldSummaryChanged {
+            field,
+            before: a,
+            after: b,
+        }),
+        FieldDelta::Reordered(a, b) => push(ViewChange::FieldOrderChanged {
+            before: a,
+            after: b,
+        }),
+    });
+
+    // Canonical equality over the parsed filters, `None` meaning every instance. D-1's rule again:
+    // equal is silence, different is *changed*, and nothing reads the predicates further.
+    if was.filter != is.filter {
+        push(ViewChange::FilterChanged {
+            before: was.filter.as_ref().map(ToString::to_string),
+            after: is.filter.as_ref().map(ToString::to_string),
+        });
+    }
+    if was.consistency != is.consistency {
+        push(ViewChange::ConsistencyChanged {
+            before: was.consistency.as_str().to_owned(),
+            after: is.consistency.as_str().to_owned(),
+        });
+    }
+
+    for delta in naming_deltas(&was.naming, &is.naming, name.local()) {
+        match delta {
+            NamingDelta::Wire(a, b) => push(ViewChange::WireNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Display(a, b) => push(ViewChange::DisplayNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Summary(a, b) => push(ViewChange::SummaryChanged {
+                before: a,
+                after: b,
+            }),
+        }
+    }
+}
+
+/// Every difference between the two revisions' bindings.
+fn binding_changes(before: &EssIr, after: &EssIr, changes: &mut Vec<SemanticChange>) {
+    for name in keys(&before.bindings, &after.bindings) {
+        let subject = BindingRef::new(name.clone());
+        let mut push = |changed: BindingChange| {
+            changes.push(SemanticChange::Binding {
+                subject: subject.clone(),
+                changed,
+            });
+        };
+        match (before.bindings.get(name), after.bindings.get(name)) {
+            (None, Some(_)) => push(BindingChange::Added),
+            (Some(_), None) => push(BindingChange::Removed),
+            (Some(was), Some(is)) => compare_bindings(was, is, &mut push),
+            (None, None) => unreachable!("a key came from one of the two maps"),
+        }
+    }
+}
+
+/// One binding against its counterpart.
+///
+/// `delivery` is not compared, because [`Delivery`](ess_domain::binding::Delivery) has one
+/// inhabitant and a change kind nothing can produce is a refusal that cannot fire —
+/// `a_binding_still_has_one_delivery_a_document_can_write` in `tests/canonical.rs` asserts the gap
+/// is still there. The mapping's *order* is the invoked command's declaration order by
+/// construction, so it is not compared either: a mapping reordered without an entry changing is a
+/// command input reordered, reported on the command.
+fn compare_bindings(
+    was: &ResolvedBinding,
+    is: &ResolvedBinding,
+    push: &mut impl FnMut(BindingChange),
+) {
+    let (reacted, reacts) = (EventRef::from(&was.event), EventRef::from(&is.event));
+    if reacted != reacts {
+        push(BindingChange::EventChanged {
+            before: reacted,
+            after: reacts,
+        });
+    }
+    let (was_invoked, is_invoked) = (
+        CommandRef::from(&was.command),
+        CommandRef::from(&is.command),
+    );
+    if was_invoked != is_invoked {
+        push(BindingChange::CommandChanged {
+            before: was_invoked,
+            after: is_invoked,
+        });
+    }
+
+    let declared: BTreeMap<&str, &ess_compiler::ir::ResolvedMapping> = was
+        .mapping
+        .iter()
+        .map(|mapping| (mapping.target.as_str(), mapping))
+        .collect();
+    let now: BTreeMap<&str, &ess_compiler::ir::ResolvedMapping> = is
+        .mapping
+        .iter()
+        .map(|mapping| (mapping.target.as_str(), mapping))
+        .collect();
+    for target in keys(&declared, &now) {
+        match (declared.get(target), now.get(target)) {
+            (None, Some(new)) => push(BindingChange::MappingAdded {
+                target: (*target).to_owned(),
+                value: written_mapping(new),
+            }),
+            (Some(_), None) => push(BindingChange::MappingRemoved {
+                target: (*target).to_owned(),
+            }),
+            (Some(old), Some(new)) => {
+                // The whole resolved entry, not the source name alone: a narrower comparison would
+                // have to decide which differences count, and deciding that wrongly is silence
+                // about a model that moved.
+                if old != new {
+                    push(BindingChange::MappingValueChanged {
+                        target: (*target).to_owned(),
+                        before: written_mapping(old),
+                        after: written_mapping(new),
+                    });
+                }
+            }
+            (None, None) => unreachable!("a key came from one of the two maps"),
+        }
+    }
+
+    if was.failure != is.failure || was.escalation != is.escalation {
+        push(BindingChange::FailureChanged {
+            before: written_failure(was),
+            after: written_failure(is),
+        });
+    }
+
+    for delta in naming_deltas(&was.naming, &is.naming, was.name.as_str()) {
+        match delta {
+            NamingDelta::Wire(a, b) => push(BindingChange::WireNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Display(a, b) => push(BindingChange::DisplayNameChanged {
+                before: a,
+                after: b,
+            }),
+            NamingDelta::Summary(a, b) => push(BindingChange::SummaryChanged {
+                before: a,
+                after: b,
+            }),
         }
     }
 }

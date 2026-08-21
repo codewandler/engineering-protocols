@@ -1,10 +1,12 @@
 //! The fixture pair, compiled from the files it actually lives in.
 //!
-//! `examples/revision-pair/` is two revisions of one specification that differ by **exactly four
-//! changes, one per relation** — a grant added, a grant removed, an enum variant added, an enum
-//! variant removed. It is the deliverable of this slice, not the type: the failure mode of a diff is
-//! producing a plausible answer nobody checks, which is the same failure mode as a schema that
-//! accepts everything, and this repository has shipped that defect three times.
+//! `examples/revision-pair/` is two revisions of one specification that differ by **exactly six
+//! changes** — a grant added, a grant removed, an enum variant added, an enum variant removed
+//! (one per direction the four directional relations can take), and since W7.2 two predicate
+//! edits, one on the entity's invariants and one on a command outcome's `when:`, each *changed*
+//! with no direction. It is the deliverable of this slice, not the type: the failure mode of a
+//! diff is producing a plausible answer nobody checks, which is the same failure mode as a schema
+//! that accepts everything, and this repository has shipped that defect three times.
 //!
 //! So this file asserts the delta's *content*, change by change, and not that it is non-empty. A
 //! test that only counted four would pass against an engine that reported four wrong things.
@@ -12,7 +14,7 @@
 //! The pair is also built so that a text diff of it lies in both directions: the `after` revision
 //! renames its domain file, reorders every top-level block, rewrites every comment, and writes out
 //! one naming default and then leaves it out. `git diff` reports most of the file; the delta reports
-//! four changes.
+//! six changes.
 
 use std::path::{Path, PathBuf};
 
@@ -20,7 +22,7 @@ use ess_compiler::ir::EssIr;
 use ess_compiler::resolve::compile;
 use ess_compiler::source::SourceMap;
 use ess_conformance::scenario::EssSemanticRef;
-use ess_diff::change::{ActorChange, SemanticChange, TypeChange};
+use ess_diff::change::{ActorChange, CommandChange, EntityChange, SemanticChange, TypeChange};
 use ess_diff::{diff, DiffRefusal, RawEssDelta, SemanticRelation};
 use ess_domain::spec::{RawSpecFile, Specification};
 use ess_domain::system::Source;
@@ -103,7 +105,7 @@ fn change(delta: &ess_diff::EssDelta, id: &str) -> SemanticChange {
 }
 
 #[test]
-fn the_fixture_pair_differs_by_exactly_four_changes() {
+fn the_fixture_pair_differs_by_exactly_six_changes() {
     let delta = delta();
 
     let held: Vec<String> = delta
@@ -113,17 +115,83 @@ fn the_fixture_pair_differs_by_exactly_four_changes() {
         .collect();
     assert_eq!(
         delta.len(),
-        4,
-        "the pair is built to differ by four changes and nothing else; it reported:\n  {}",
+        6,
+        "the pair is built to differ by six changes and nothing else; it reported:\n  {}",
         held.join("\n  ")
     );
     assert_eq!(delta.count(SemanticRelation::Expanded), 2);
     assert_eq!(delta.count(SemanticRelation::Narrowed), 2);
     assert_eq!(
         delta.count(SemanticRelation::Changed),
-        0,
-        "one change per relation, so nothing is left over"
+        2,
+        "the two predicate edits are *changed* and carry no direction — the only thing a \
+         predicate comparison is allowed to say"
     );
+}
+
+#[test]
+fn rewriting_an_entitys_invariant_is_changed_and_quotes_both_statements() {
+    // CHANGE 5, and the entity-side half of gap register D-1 executed: before W7.2 this edit fell
+    // into the fail-closed catch-all and owed everything without a name. `floor.amount > 0` is
+    // strictly stronger than `floor.amount >= 0`, and saying so would be a proof — so the delta
+    // says they differ, quotes both as the author wrote them, and stops.
+    let delta = delta();
+    let change = change(
+        &delta,
+        "entity/catalog.pricing.PriceList/invariants-changed",
+    );
+
+    let SemanticChange::Entity { subject, changed } = &change else {
+        panic!("an invariant edit is an entity change, and this is {change:?}");
+    };
+    assert_eq!(subject.to_string(), "catalog.pricing.PriceList");
+    assert_eq!(
+        changed,
+        &EntityChange::InvariantsChanged {
+            before: vec!["floor.amount >= 0".to_owned()],
+            after: vec!["floor.amount > 0".to_owned()],
+        }
+    );
+    assert_eq!(
+        change.relation(),
+        SemanticRelation::Changed,
+        "a strictly stronger invariant is still only `changed`: no direction follows from a \
+         predicate comparison"
+    );
+    assert_eq!(
+        change.subject(),
+        Some(EssSemanticRef::Entity {
+            name: subject.clone()
+        }),
+        "the subject is the semantic name the impact closure seeds at"
+    );
+}
+
+#[test]
+fn rewriting_an_outcomes_when_is_changed_and_renders_both_guards_canonically() {
+    // CHANGE 6, the command-side half. The guard moved from `floor.amount > 0` to
+    // `floor.amount >= 1`; the delta names the branch, renders both predicates in canonical form,
+    // and claims no direction — whether the new guard accepts everything the old one did is
+    // exactly the implication this comparison refuses to attempt.
+    let delta = delta();
+    let change = change(
+        &delta,
+        "command/catalog.pricing.CreatePriceList/outcome-condition-changed/created",
+    );
+
+    let SemanticChange::Command { subject, changed } = &change else {
+        panic!("a guard edit is a command change, and this is {change:?}");
+    };
+    assert_eq!(subject.to_string(), "catalog.pricing.CreatePriceList");
+    assert_eq!(
+        changed,
+        &CommandChange::OutcomeConditionChanged {
+            outcome: "created".to_owned(),
+            before: "when floor.amount > 0".to_owned(),
+            after: "when floor.amount >= 1".to_owned(),
+        }
+    );
+    assert_eq!(change.relation(), SemanticRelation::Changed);
 }
 
 #[test]
