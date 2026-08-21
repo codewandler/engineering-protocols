@@ -78,8 +78,9 @@ use serde_json::Value;
 use trace_domain::code::{TraceCode, ValidationErrors};
 use trace_domain::digest::digest_of_bytes;
 use trace_domain::ir::{
-    AdapterRef, AssistantRequest, EventKind, LoadedPlugin, ModelUsage, OpaqueEvent, RateLimitState,
-    Recorded, RunOutcome, RunUsage, SessionStart, ToolCall, ToolResult, TraceEvent, TraceIr,
+    AdapterRef, AssistantRequest, EventKind, LoadedPlugin, McpServer, ModelUsage, OpaqueEvent,
+    RateLimitState, Recorded, RunOutcome, RunUsage, SessionStart, ToolCall, ToolResult, TraceEvent,
+    TraceIr,
 };
 
 /// This adapter, and the harness versions it was written against.
@@ -254,6 +255,7 @@ fn session_start(value: &Value) -> SessionStart {
         skills: names_at(value, "skills"),
         agents: names_at(value, "agents"),
         plugins: plugins_at(value),
+        mcp_servers: mcp_servers_at(value),
     }
 }
 
@@ -606,6 +608,25 @@ fn plugins_at(value: &Value) -> Option<Vec<LoadedPlugin>> {
                 version: text_at(entry, "version"),
                 source: text_at(entry, "source"),
                 path: text_at(entry, "path"),
+            })
+            .collect(),
+    )
+}
+
+/// The MCP servers the session was given, each with the status the harness reported.
+///
+/// Absent and empty stay different all the way down: no `mcp_servers` key yields [`None`] and an
+/// empty array yields `Some(vec![])`, because `env.mcp_servers` reads the first as *undecidable*
+/// and the second as *hermetic*. An entry that is a bare string keeps its name and answers
+/// nothing about status, which is [`name_of`]'s rule applied one level out.
+fn mcp_servers_at(value: &Value) -> Option<Vec<McpServer>> {
+    let entries = value.get("mcp_servers")?.as_array()?;
+    Some(
+        entries
+            .iter()
+            .map(|entry| McpServer {
+                name: name_of(entry),
+                status: text_at(entry, "status"),
             })
             .collect(),
     )

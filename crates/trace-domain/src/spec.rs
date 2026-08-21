@@ -147,7 +147,7 @@ pub enum ToolAvailability {
 
 /// The v1 expectation vocabulary.
 ///
-/// Fifty kinds across five families, each decidable from a transcript alone. The wire form is
+/// Fifty-one kinds across five families, each decidable from a transcript alone. The wire form is
 /// externally tagged under `expect:` and keeps the design's dotted names verbatim —
 /// `expect: {tool.called: {…}}` — so a kind this build does not implement is refused *by name*
 /// and every kind's own parameters get `deny_unknown_fields`, which a flattened form cannot have
@@ -232,6 +232,29 @@ pub enum ExpectationKind {
     EnvToolAvailable {
         /// Which claim about the offered list this expectation makes.
         availability: ToolAvailability,
+    },
+    /// How many MCP servers the opening record lists, bounded — and at `{at_most: 0}`, the only
+    /// mechanical statement of *this run reached nothing outside itself*.
+    ///
+    /// A scratch configuration directory does not make a session hermetic. Account-level MCP
+    /// servers are attached to the **login**, arrive over the network, and appear in the opening
+    /// record of a run whose config home contains no `mcpServers` key and whose tree contains no
+    /// `.mcp.json` — so no directory the runner controls can exclude them. Observed: two of the
+    /// four sessions of governed run `W4-1/1` listed three, every one `needs-auth`.
+    ///
+    /// `needs-auth` is why this is a count and not a tool assertion. Such a server exposes no
+    /// tool, so the tool inventory is identical with and without it and
+    /// [`EnvToolAvailable`](Self::EnvToolAvailable) cannot see it at all. One re-authentication
+    /// between two runs turns that into a reachable network surface with nothing in the
+    /// specification standing in the way.
+    ///
+    /// `unk` when the harness records no server list — absence of evidence is not hermeticity,
+    /// and a bound that read a missing field as zero would report its blindest case as its best
+    /// one.
+    #[serde(rename = "env.mcp_servers")]
+    EnvMcpServers {
+        /// How many servers are acceptable. `{at_most: 0}` is the hermetic claim.
+        count: CountBound,
     },
     /// The **resolved** model matches — what the alias on the command line turned into, not what
     /// was typed.
@@ -771,6 +794,7 @@ impl ExpectationKind {
             Self::EnvSkillAvailable { .. } => "env.skill_available",
             Self::EnvAgentAvailable { .. } => "env.agent_available",
             Self::EnvToolAvailable { .. } => "env.tool_available",
+            Self::EnvMcpServers { .. } => "env.mcp_servers",
             Self::EnvModel { .. } => "env.model",
             Self::EnvPermissionMode { .. } => "env.permission_mode",
             Self::EnvApiKeySource { .. } => "env.api_key_source",
@@ -835,6 +859,7 @@ impl ExpectationKind {
         "env.agent_available",
         "env.api_key_source",
         "env.exclusive",
+        "env.mcp_servers",
         "env.model",
         "env.output_style",
         "env.permission_mode",
@@ -1026,8 +1051,8 @@ mod tests {
     fn every_kind_names_itself_and_the_published_list_holds_them_all() {
         assert_eq!(
             ExpectationKind::NAMES.len(),
-            50,
-            "the vocabulary is fifty kinds; a new one must be published here to be writable"
+            51,
+            "the vocabulary is fifty-one kinds; a new one must be published here to be writable"
         );
         let mut sorted = ExpectationKind::NAMES.to_vec();
         sorted.sort_unstable();

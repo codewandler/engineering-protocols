@@ -111,6 +111,7 @@ fn evaluate(kind: &ExpectationKind, ir: &TraceIr) -> Outcome {
             })
         }
         ExpectationKind::EnvToolAvailable { availability } => env_tool_available(ir, availability),
+        ExpectationKind::EnvMcpServers { count } => env_mcp_servers(ir, *count),
         ExpectationKind::EnvModel { equals } => {
             env_field(ir, "model", equals, |start| start.model.as_deref())
         }
@@ -645,6 +646,32 @@ fn env_tools_only(ir: &TraceIr, expected: &std::collections::BTreeSet<String>) -
         parts.push(format!("{} not offered", missing.join(", ")));
     }
     contradicted(at, parts.join("; "))
+}
+
+/// How many MCP servers the opening record listed, against a bound.
+///
+/// The count is exact and never a lower bound, so [`decide_count`] is not reached for: the
+/// opening record either lists the servers or does not, and an opaque event later in the run
+/// cannot add one to a list that was written before the first turn.
+///
+/// The gap names both numbers. A reader of *"3 MCP server(s), expected at most 0"* knows what to
+/// go and look at without opening the transcript, and the names are deliberately **not** in the
+/// note: they are account-level, they end up in a committed report, and the count is the whole
+/// claim.
+fn env_mcp_servers(ir: &TraceIr, bound: CountBound) -> Outcome {
+    let (at, start) = match session(ir) {
+        Ok(found) => found,
+        Err(outcome) => return outcome,
+    };
+    let Some(servers) = &start.mcp_servers else {
+        return unknown_field("mcp_servers");
+    };
+    let observed = servers.len() as u64;
+    if bound.holds(observed) {
+        holds(at, format!("{observed} MCP server(s), bound {bound}"))
+    } else {
+        contradicted(at, format!("{observed} MCP server(s), expected {bound}"))
+    }
 }
 
 // --- the skill -----------------------------------------------------------------------------
@@ -1444,7 +1471,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     use trace_domain::ir::{
-        AdapterRef, EventKind, OpaqueEvent, RunOutcome, RunUsage, ToolResult, TraceEvent,
+        AdapterRef, EventKind, McpServer, OpaqueEvent, RunOutcome, RunUsage, ToolResult, TraceEvent,
     };
     use trace_domain::matcher::{FieldMatcher, ScalarValue};
 
@@ -1539,7 +1566,7 @@ mod tests {
     // prevent: a kind that reports `ok` because it is not looking. A positive case alone would
     // pass for a checker whose every arm returned `ok`.
     //
-    // That the *document* can express all fifty is a separate claim, checked where it
+    // That the *document* can express all fifty-one is a separate claim, checked where it
     // belongs — in `trace_domain::raw`'s own tests, against the wire form.
 
     /// The committed transcript of eval run `7hTYjT`: 36 events, 2026-08-21.
@@ -1741,6 +1768,20 @@ mod tests {
                     availability: ToolAvailability::Only {
                         tools: names(&["Read", "Glob", "Grep"]),
                     },
+                },
+                Verdict::Gap,
+            ),
+            // Run `7hTYjT` listed `mcp_servers: []` — an empty list, not an absent field, which
+            // is what makes the hermetic bound decidable here at all.
+            case(
+                ExpectationKind::EnvMcpServers {
+                    count: CountBound::at_most(0),
+                },
+                Verdict::Ok,
+            ),
+            case(
+                ExpectationKind::EnvMcpServers {
+                    count: CountBound::at_least(1),
                 },
                 Verdict::Gap,
             ),
@@ -2785,6 +2826,92 @@ mod tests {
         );
     }
 
+    /// An opening record listing `count` MCP servers under synthetic names.
+    ///
+    /// Synthetic deliberately. The run this kind was written from listed three account-level
+    /// servers by name, and a committed fixture is not where an account's server names, ids or
+    /// addresses belong — the count is the whole claim, so the count is all the fixture carries.
+    fn session_with_mcp_servers(count: usize) -> TraceIr {
+        let servers = (0..count)
+            .map(|index| McpServer {
+                name: format!("server-{index}"),
+                status: Some("needs-auth".to_owned()),
+            })
+            .collect();
+        ir(vec![TraceEvent::new(
+            1,
+            None,
+            EventKind::SessionStart(Box::new(SessionStart {
+                mcp_servers: Some(servers),
+                ..SessionStart::default()
+            })),
+        )])
+    }
+
+    #[test]
+    fn the_hermetic_mcp_bound_holds_at_zero_and_names_what_it_saw_when_it_does_not() {
+        let hermetic = evaluate(
+            &ExpectationKind::EnvMcpServers {
+                count: CountBound::at_most(0),
+            },
+            &session_with_mcp_servers(0),
+        );
+        assert_eq!(
+            hermetic.verdict(),
+            Verdict::Ok,
+            "a session given no MCP server is the hermetic case: {}",
+            hermetic.detail()
+        );
+
+        // The observation the register row was opened for: two of the four sessions of governed
+        // run `W4-1/1` listed three account-level servers, every one `needs-auth`, in a run whose
+        // `CLAUDE_CONFIG_DIR` was a scratch directory with no `mcpServers` key and whose tree had
+        // no `.mcp.json`. They arrive with the login, so no directory the runner controls can
+        // exclude them — which is why the bound has to be asserted rather than assumed.
+        let leaked = evaluate(
+            &ExpectationKind::EnvMcpServers {
+                count: CountBound::at_most(0),
+            },
+            &session_with_mcp_servers(3),
+        );
+        assert_eq!(leaked.verdict(), Verdict::Gap);
+        assert!(
+            leaked.detail().contains("3 MCP server(s)") && leaked.detail().contains("at most 0"),
+            "a gap must name the count it saw and the bound it broke, or the reader has to open \
+             the transcript to learn either: {}",
+            leaked.detail()
+        );
+    }
+
+    #[test]
+    fn an_opening_record_that_lists_no_mcp_servers_at_all_is_undecidable_not_hermetic() {
+        // The whole lesson of the row. A harness that stopped recording `mcp_servers` would turn
+        // this bound into the greenest row in the report while saying nothing, and *"the field is
+        // gone"* is exactly the case a hermeticity claim must not read as *"nothing was there"*.
+        let silent = ir(vec![TraceEvent::new(
+            1,
+            None,
+            EventKind::SessionStart(Box::new(SessionStart {
+                model: Some("claude-sonnet-5".to_owned()),
+                ..SessionStart::default()
+            })),
+        )]);
+        let outcome = evaluate(
+            &ExpectationKind::EnvMcpServers {
+                count: CountBound::at_most(0),
+            },
+            &silent,
+        );
+        assert!(
+            matches!(
+                &outcome,
+                Outcome::Undecidable(UnknownReason::FieldAbsent { field }) if field == "mcp_servers"
+            ),
+            "an absent server list decided something: {}",
+            outcome.detail()
+        );
+    }
+
     #[test]
     fn an_environment_expectation_over_a_transcript_with_no_session_start_is_undecidable() {
         let headless = ir(Vec::new());
@@ -2804,6 +2931,9 @@ mod tests {
                 availability: ToolAvailability::NotOffered {
                     tool: "Task".to_owned(),
                 },
+            },
+            ExpectationKind::EnvMcpServers {
+                count: CountBound::at_most(0),
             },
         ] {
             assert!(

@@ -113,7 +113,7 @@ named obligation for a human. Nothing reaches a cluster. See
 [Check infrastructure](../guides/check-infrastructure.md).
 
 **Agent runs.** The `trace-*` crates read a run transcript, normalize it to `trace-ir/1`, and hold
-it against an authored `trace-spec/1` document of 50 possible expectation kinds. Same three values,
+it against an authored `trace-spec/1` document of 51 possible expectation kinds. Same three values,
 and a passing check mints an AEP evidence record. See
 [Check a transcript](../guides/check-a-transcript.md).
 

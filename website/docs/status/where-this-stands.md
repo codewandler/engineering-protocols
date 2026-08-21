@@ -105,7 +105,7 @@ the repository after a specification and a cluster, and taking the same shape: a
 `trace-spec/1` document, a content-addressed `trace-ir/1`, and `ok`/`gap`/`unk` verdicts where the
 third value means the adapter did not understand the event.
 
-`protocol trace check|inspect|evidence`, **50 expectation kinds**, and two severities: an
+`protocol trace check|inspect|evidence`, **51 expectation kinds**, and two severities: an
 expectation gates by default, `Advisory` is evaluated and reported and gates nothing. `trace
 evidence` mints an AEP record of kind `trace_conformance` — a summary, never the citations.
 

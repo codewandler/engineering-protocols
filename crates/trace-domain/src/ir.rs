@@ -188,6 +188,21 @@ impl EventKind {
     }
 }
 
+/// An MCP server the session was given.
+///
+/// Recorded with its status and not only its name, because the two answer different questions and
+/// the interesting case makes them disagree: a server the session cannot authenticate to still
+/// **exists**, is still named in the opening record, and is still a reach outside the sandbox the
+/// run was supposed to be. A count of names is what `env.mcp_servers` bounds; the status is what
+/// tells the reader why nobody noticed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct McpServer {
+    /// Its name, as the harness lists it.
+    pub name: String,
+    /// What the harness said about connecting to it — `connected`, `needs-auth`, `failed`.
+    pub status: Option<String>,
+}
+
 /// A plugin the harness loaded.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LoadedPlugin {
@@ -231,6 +246,12 @@ pub struct SessionStart {
     pub agents: Option<Vec<String>>,
     /// The plugins loaded.
     pub plugins: Option<Vec<LoadedPlugin>>,
+    /// The MCP servers the session was given.
+    ///
+    /// [`None`] and `Some(vec![])` are different facts and the distinction is the whole point:
+    /// an empty list is a harness that told us it gave the session no server, and an absent field
+    /// is a harness that did not say. Only the first is evidence of a hermetic run.
+    pub mcp_servers: Option<Vec<McpServer>>,
 }
 
 /// One tool call the model made.

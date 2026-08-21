@@ -9,7 +9,19 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`env.mcp_servers` — the fifty-first expectation kind, and the first thing that can say a
+  session was hermetic.** A scratch `CLAUDE_CONFIG_DIR` isolates a directory: it keeps the
+  operator's plugins, skills and output style out, and it does not keep out account-level MCP
+  servers, which are attached to the login and arrive over the network. Two of the four model
+  sessions of governed run `W4-1/1` listed three of them in their init event, in a config home
+  with no `mcpServers` key and a tree with no `.mcp.json`. All three were `status: needs-auth`
+  and exposed no tool, so the inventory was 28 with servers and without — which is why
+  `env.tool_available` cannot see this and why the new kind is a bound on a count. `{count:
+  {at_most: 0}}` is the hermetic claim; a missing field is `unk` and never `ok`, because absence
+  of evidence is not hermeticity. The init event's `mcp_servers` is lifted into `trace-ir/1` as
+  `SessionStart.mcp_servers`, with an absent field and an empty list kept apart all the way down.
 
 ## [0.11.0-ground-truth-and-docs] — 2026-08-22
 

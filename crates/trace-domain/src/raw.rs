@@ -338,6 +338,9 @@ pub enum RawExpectationKind {
     /// false}}`, or `{env.tool_available: {only: [Read, Glob, Grep]}}`.
     #[serde(rename = "env.tool_available")]
     EnvToolAvailable(RawToolAvailable),
+    /// `{env.mcp_servers: {count: {at_most: 0}}}`
+    #[serde(rename = "env.mcp_servers")]
+    EnvMcpServers(RawCount),
     /// `{env.model: {equals: …}}`
     #[serde(rename = "env.model")]
     EnvModel(RawEquals),
@@ -841,7 +844,7 @@ fn at_kind(location: &str, kind: &str) -> String {
 /// recorded and the expectation is dropped — a validated [`ExpectationKind`] is one a checker can
 /// evaluate.
 ///
-/// One `match` over all fifty, deliberately: this is the seam where the wire vocabulary and
+/// One `match` over all fifty-one, deliberately: this is the seam where the wire vocabulary and
 /// [`ExpectationKind::NAMES`] meet, and splitting it into families would hide the exhaustiveness
 /// that makes a missing kind a compile error rather than a silent gap. It is long for that
 /// reason and no other.
@@ -892,6 +895,13 @@ fn kind_of(
             })
         }
         RawExpectationKind::EnvToolAvailable(written) => tool_available(written, location, errors),
+        RawExpectationKind::EnvMcpServers(written) => Some(ExpectationKind::EnvMcpServers {
+            count: count_of(
+                written.count,
+                &at(location, "env.mcp_servers", "count"),
+                errors,
+            )?,
+        }),
         RawExpectationKind::EnvModel(written) => Some(ExpectationKind::EnvModel {
             equals: stated(
                 written.equals,
@@ -2028,6 +2038,10 @@ expectations:
         (
             "env.exclusive",
             "{env.exclusive: {plugins: [engineering-protocols]}}",
+        ),
+        (
+            "env.mcp_servers",
+            "{env.mcp_servers: {count: {at_most: 0}}}",
         ),
         ("env.model", "{env.model: {equals: claude-sonnet-5}}"),
         ("env.output_style", "{env.output_style: {equals: default}}"),

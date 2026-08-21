@@ -83,7 +83,7 @@ cache use, per-step timing), each `gate` or `advisory`:
       args: {command: {contains: "protocol artifact new"}}
 ```
 
-The report is one row per expectation and this specification declares forty-one, so the command
+The report is one row per expectation and this specification declares forty-two, so the command
 below takes the first twelve lines rather than abridging by hand:
 
 ```bash
@@ -249,7 +249,7 @@ what it cost and what broke, is `docs/plan/harness-wave-4-governed-dogfood.md` Â
 
 The checker and IR live in `crates/trace-domain` and `crates/trace-spec`; the specification
 format is published as `schemas/generated/trace-spec.schema.json`; the worked specification is
-`integrations/claude-code/eval/expectations.trace.yaml`, whose forty-one expectations are checked
+`integrations/claude-code/eval/expectations.trace.yaml`, whose forty-two expectations are checked
 against two committed transcripts by the ordinary test suite. Design and acceptance:
 `docs/design/transcript-conformance-design-v0.1.md`, `docs/plan/trace-wave-1-transcript-checker.md`.
 The driver is `crates/aep-driver` behind `protocol drive`, its enforcement arm is the plugin's

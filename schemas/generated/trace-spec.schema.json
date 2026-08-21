@@ -354,6 +354,19 @@
           "additionalProperties": false
         },
         {
+          "description": "`{env.mcp_servers: {count: {at_most: 0}}}`",
+          "type": "object",
+          "required": [
+            "env.mcp_servers"
+          ],
+          "properties": {
+            "env.mcp_servers": {
+              "$ref": "#/definitions/RawCount"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
           "description": "`{env.model: {equals: …}}`",
           "type": "object",
           "required": [

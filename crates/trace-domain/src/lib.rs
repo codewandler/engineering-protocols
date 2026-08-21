@@ -9,7 +9,7 @@
 //! |---|---|---|---|
 //! | observation | — (the model is authored) | a cluster scan, out of process | **an agent-run transcript** |
 //! | normalized IR | `EssIr` | `infra-ir/1`, content-addressed | [`trace-ir/1`](ir), content-addressed |
-//! | authored expectations | the specification itself | `infra-spec/1`, twelve kinds | [`trace-spec/1`](spec), fifty kinds |
+//! | authored expectations | the specification itself | `infra-spec/1`, twelve kinds | [`trace-spec/1`](spec), fifty-one kinds |
 //! | verdicts | pass / fail / unsupported | `ok` / `gap` / `unk` | `ok` / `gap` / `unk` |
 //! | the third value means | the scenario could not be executed | the snapshot cannot decide | **the adapter did not understand the event** |
 //!
@@ -22,7 +22,7 @@
 //! | module | contents |
 //! |---|---|
 //! | [`ir`] | the harness-neutral event IR: seven recognised event families, one opaque one, and the derived census |
-//! | [`spec`] | the expectation vocabulary: fifty kinds, severity, and the `unk` policy |
+//! | [`spec`] | the expectation vocabulary: fifty-one kinds, severity, and the `unk` policy |
 //! | [`matcher`] | bounds, field matchers and call selectors — the whole of the language, and no more of it |
 //! | [`raw`] | the permissive half, and the `TryFrom` that is the only way into a [`spec::TraceSpec`] |
 //! | [`code`] | the `TRACE-` refusal registry and the accumulator |
@@ -59,9 +59,9 @@ pub mod spec;
 pub use code::{TraceCode, ValidationError, ValidationErrors};
 pub use digest::{digest_of_bytes, digest_of_canonical};
 pub use ir::{
-    parse_timestamp_ms, AdapterRef, AssistantRequest, Census, EventKind, LoadedPlugin, ModelUsage,
-    OpaqueEvent, RateLimitState, Recorded, RunOutcome, RunUsage, SessionStart, Step, ToolCall,
-    ToolResult, ToolTraffic, TraceEvent, TraceIr, IR_FORMAT,
+    parse_timestamp_ms, AdapterRef, AssistantRequest, Census, EventKind, LoadedPlugin, McpServer,
+    ModelUsage, OpaqueEvent, RateLimitState, Recorded, RunOutcome, RunUsage, SessionStart, Step,
+    ToolCall, ToolResult, ToolTraffic, TraceEvent, TraceIr, IR_FORMAT,
 };
 pub use matcher::{
     glob_matches, text_of, CallSelector, CountBound, FieldMatcher, RangeBound, ResultMatcher,
