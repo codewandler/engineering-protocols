@@ -190,12 +190,15 @@ use std::collections::BTreeMap;
 
 use ess_compiler::ir::{
     CommandHandle, EssIr, ResolvedActor, ResolvedCommand, ResolvedComponent, ResolvedCondition,
-    ResolvedEffect, ResolvedError, ResolvedOutcome, TypeHandle,
+    ResolvedEffect, ResolvedError, ResolvedOutcome, ResolvedView, TypeHandle, ViewHandle,
 };
 use ess_domain::binding::Delivery;
+use ess_domain::component::Reach;
+use ess_domain::view::Consistency;
 use serde_json::{json, Map, Value};
 
 use crate::artifact::{Artifact, Generator};
+use crate::http::{self, status, CONFLICT, READ, REFUSED, UPSTREAM};
 use ess_compiler::refs::{ActorRef, BindingRef, ComponentRef, EssSemanticRef};
 
 use crate::provenance::{Provenance, ProvenanceMint, SlicedProvenance};
@@ -222,24 +225,6 @@ const REFERENCE: &str = "$ref";
 /// The pointer prefix [`types`] emits, because the `schema` projection keeps its definitions in
 /// `$defs`. No `components.schemas` document uses it, so every one of them is retargeted.
 const DEFS: &str = "#/$defs/";
-
-/// The branch was taken; its events reach consumers elsewhere.
-const TAKEN: &str = "202";
-
-/// The input was understood and refused on domain grounds.
-const REFUSED: &str = "422";
-
-/// Something outside the request refused; the input was acceptable.
-const UPSTREAM: &str = "502";
-
-/// The input was acceptable and the subject was in a state the command does not act from.
-///
-/// A `409` and not a `422`, and the difference is what a caller does next. `422` says the request
-/// was wrong and resending it unchanged is pointless; `409` says the request was fine and the world
-/// was not — the same invoice, issued before it was paid, would have been accepted. That is exactly
-/// what a `wrong_state:` branch declares, and it is the first thing in this model that has ever
-/// distinguished the two.
-const CONFLICT: &str = "409";
 
 /// Who the specification permits to invoke each command, as [`EssIr::grants`] answers it.
 ///
@@ -283,6 +268,26 @@ impl Generator for OpenApi {
             })
             .collect()
     }
+}
+
+/// One component's document as JSON, which is what a server that answers it serves.
+///
+/// The same document the committed YAML projection carries — same title, same paths, same
+/// schemas, same provenance — rendered in the other dialect `OpenAPI` 3.1 permits. Not a second
+/// document: `tests/openapi.rs` parses both and compares the values, so a change that reached one
+/// and not the other fails rather than shipping a server whose published contract disagrees with
+/// the committed one.
+///
+/// JSON rather than YAML on the wire because every HTTP client parses JSON and `application/yaml`
+/// is a media type a caller has to go and find a library for. The provenance is `info`'s
+/// `x-ess-provenance`, which survives the crossing where the YAML file's comment header does not.
+pub fn json(ir: &EssIr, component: &ResolvedComponent) -> String {
+    let mint = ProvenanceMint::new(ir);
+    let sliced = component_slice(ir, component, &mint);
+    let mut out = serde_json::to_string_pretty(&document(ir, component, &sliced.provenance))
+        .unwrap_or_else(|error| panic!("an OpenAPI document serialises as JSON: {error}"));
+    out.push('\n');
+    out
 }
 
 /// The slice one component's document derives from: the component, every actor and every binding.
@@ -343,6 +348,8 @@ fn document(ir: &EssIr, component: &ResolvedComponent, provenance: &Provenance) 
             description: description(ir, component),
             version: ir.version.to_string(),
             provenance: provenance.clone(),
+            reached_by: (component.reached_by == Reach::Network)
+                .then(|| component.reached_by.as_str()),
         },
         tags: tags(ir, component),
         paths: paths(ir, component),
@@ -370,6 +377,16 @@ fn description(ir: &EssIr, component: &ResolvedComponent) -> String {
          Events emitted by a branch are published to consumers through the event transport; they \
          are not returned here.",
     );
+    if component.reached_by == Reach::Network {
+        text.push_str(
+            "\n\nThis component declares `reached_by: network`, so its callers are not deployed \
+             with it and this contract is the surface they reach it through. That declaration is \
+             also why the views its domains declare have paths here: a GET under `views` per \
+             projection, answering every row it holds. There is no page size, no cursor, no \
+             ordering and no filter parameter, because the specification states none — a view's \
+             filter is part of the projection, not of the request.",
+        );
+    }
     text
 }
 
@@ -399,50 +416,20 @@ fn tags(ir: &EssIr, component: &ResolvedComponent) -> Vec<Tag> {
 /// names, rather than one keeping the short path: a path whose meaning depends on which other
 /// commands exist is a path that changes when an unrelated command is added.
 fn paths(ir: &EssIr, component: &ResolvedComponent) -> BTreeMap<String, PathItem> {
-    let mut claimed: BTreeMap<String, Vec<&CommandHandle>> = BTreeMap::new();
-    for handle in &component.accepts {
-        claimed
-            .entry(conventional_path(ir, ir.command(handle)))
-            .or_default()
-            .push(handle);
-    }
-
     // Once for the document rather than once per operation: the IR holds `may` on the actor, so the
     // question a path asks — who may invoke *this* command — is an inversion, and inverting it per
     // operation would make the cost quadratic in a specification with many actors.
     let grants = ir.grants();
 
-    let mut out = BTreeMap::new();
-    for (path, handles) in claimed {
-        let contested = handles.len() > 1;
-        for handle in handles {
-            let key = if contested {
-                format!("/commands/{}", ir.command(handle).name)
-            } else {
-                path.clone()
-            };
-            out.insert(
-                key,
-                PathItem {
-                    post: operation(ir, handle, &grants),
-                },
-            );
+    let mut out: BTreeMap<String, PathItem> = BTreeMap::new();
+    for route in http::routes(ir, component) {
+        let item = out.entry(route.path).or_default();
+        match route.serves {
+            http::Served::Command(handle) => item.post = Some(operation(ir, handle, &grants)),
+            http::Served::View(handle) => item.get = Some(query(ir, handle)),
         }
     }
     out
-}
-
-/// `/{domain wire name}/commands/{command wire name}`.
-///
-/// The domain segment is what makes the path unique without a qualified name in a URL; the
-/// `commands` segment is what keeps the path from reading as a collection resource.
-fn conventional_path(ir: &EssIr, command: &ResolvedCommand) -> String {
-    let domain = ir.domain(&command.domain);
-    format!(
-        "/{}/commands/{}",
-        domain.naming.wire_or(&domain.name),
-        command.naming.wire_or(&command.name)
-    )
 }
 
 /// One command, as an operation.
@@ -455,10 +442,67 @@ fn operation(ir: &EssIr, handle: &CommandHandle, grants: &Grants<'_>) -> Operati
         description: command.naming.summary.clone(),
         tags: vec![domain.naming.wire_or(&domain.name).to_owned()],
         may_invoke: may_invoke(handle, grants),
+        consistency: None,
         parameters: idempotency(ir, command).into_iter().collect(),
         request_body: request_body(command),
         responses: responses(command),
     }
+}
+
+/// One view, as an operation.
+///
+/// It exists only because the component declares that something outside the process reaches it —
+/// see [`http::routes`]. What it does *not* carry is as deliberate as what it does: no page size,
+/// no cursor, no ordering and no filter parameter, because the model states none of them. The
+/// view's filter is declared in the specification and is a property of the projection, not of the
+/// request, so a caller cannot vary it and the document does not pretend otherwise.
+fn query(ir: &EssIr, handle: &ViewHandle) -> Operation {
+    let view = ir.view(handle);
+    let domain = ir.domain(&view.domain);
+    Operation {
+        id: view.name.to_string(),
+        summary: Some(view.naming.display_or(&view.name).to_owned()),
+        description: view.naming.summary.clone(),
+        tags: vec![domain.naming.wire_or(&domain.name).to_owned()],
+        may_invoke: Vec::new(),
+        consistency: Some(view.consistency.as_str()),
+        parameters: Vec::new(),
+        request_body: None,
+        responses: [(
+            READ.to_owned(),
+            Response {
+                description: view_description(ir, view),
+                content: Some(content(json!({"$ref": reference(&view_key(view))}))),
+            },
+        )]
+        .into_iter()
+        .collect(),
+    }
+}
+
+/// What the specification says about one view, as the response's required description.
+fn view_description(ir: &EssIr, view: &ResolvedView) -> String {
+    let mut parts = vec![format!(
+        "Every row of `{}`, a projection of `{}`.",
+        view.name,
+        ir.entity(&view.source).name
+    )];
+    if let Some(filter) = &view.filter {
+        parts.push(format!("Contains the instances where `{filter}` holds."));
+    } else {
+        parts.push("Contains every instance.".to_owned());
+    }
+    parts.push(match view.consistency {
+        Consistency::ReadYourWrites => {
+            "Read-your-writes: a caller that has just issued a command sees its effect here."
+                .to_owned()
+        }
+        Consistency::Eventual => {
+            "Eventually consistent: a row may not yet reflect a command that has already returned."
+                .to_owned()
+        }
+    });
+    parts.join(" ")
 }
 
 /// The actors the specification permits to invoke this command, by qualified name.
@@ -594,21 +638,6 @@ fn responses(command: &ResolvedCommand) -> BTreeMap<String, Response> {
         .collect()
 }
 
-/// Which status an outcome is.
-///
-/// The whole mapping, in one place, so that "which HTTP status does a refusal get" has exactly one
-/// answer in this crate.
-fn status(outcome: &ResolvedOutcome) -> &'static str {
-    match (&outcome.condition, outcome.error.is_some()) {
-        (ResolvedCondition::External { .. }, true) => UPSTREAM,
-        (ResolvedCondition::WrongState, true) => CONFLICT,
-        (ResolvedCondition::When { .. } | ResolvedCondition::Otherwise, true) => REFUSED,
-        // An external branch that emits rather than errors is still a branch that was taken; what
-        // decided it does not change what happened.
-        (_, false) => TAKEN,
-    }
-}
-
 /// What a status means here, for the response's required description.
 fn meaning(status: &str) -> &'static str {
     match status {
@@ -668,10 +697,55 @@ fn schemas(ir: &EssIr, component: &ResolvedComponent) -> BTreeMap<String, Fragme
         }
     }
 
+    for route in http::routes(ir, component) {
+        let http::Served::View(handle) = route.serves else {
+            continue;
+        };
+        let view = ir.view(handle);
+        out.insert(
+            row_key(view),
+            embedded(&types::message(&Message::of_view(view))),
+        );
+        out.insert(view_key(view), written(view_schema(view)));
+        roots.extend(types::field_leaves(&view.fields));
+    }
+
     for (name, definition) in types::definitions(ir, roots) {
         out.insert(name, embedded(&definition));
     }
     out
+}
+
+/// The response body for one view: the rows, under a key.
+///
+/// An object rather than a bare array, because a bare array is a body with nowhere to put a second
+/// fact — and the first one a view will need is how much of the projection this answer is. There is
+/// no such fact today and none is invented here; what the shape buys is that adding one later is
+/// not a breaking change to every client.
+fn view_schema(view: &ResolvedView) -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "description": format!("The rows of `{}`.", view.name),
+        "required": ["rows"],
+        "properties": {
+            "rows": {
+                "type": "array",
+                "description": "Every row the projection holds, in the order it holds them.",
+                "items": {"$ref": reference(&row_key(view))},
+            },
+        },
+    })
+}
+
+/// The `components.schemas` key for one view's row.
+fn row_key(view: &ResolvedView) -> String {
+    format!("{}.Row", view.name)
+}
+
+/// The `components.schemas` key for one view's response body.
+fn view_key(view: &ResolvedView) -> String {
+    format!("{}.Response", view.name)
 }
 
 /// The response body for one outcome.
@@ -950,6 +1024,14 @@ struct Info {
     /// everything that round-trips YAML, and it is a tool that asks which model a document came from.
     #[serde(rename = "x-ess-provenance")]
     provenance: Provenance,
+    /// Where the specification says this component's callers are.
+    ///
+    /// Present only where the specification said something — an absent keyword is the model's
+    /// silence, and writing `in_process` into every document would put a deployment claim in
+    /// thirty-six contracts no author made. Where it says `network`, this document is not
+    /// documentation of an internal surface: it is the surface.
+    #[serde(rename = "x-ess-reached-by", skip_serializing_if = "Option::is_none")]
+    reached_by: Option<&'static str>,
 }
 
 /// One domain, as a grouping.
@@ -960,10 +1042,19 @@ struct Tag {
     description: Option<String>,
 }
 
-/// One path. Exactly one method, because one path is one command.
-#[derive(Debug, serde::Serialize)]
+/// One path, and the one method it answers.
+///
+/// Both fields are optional and exactly one is ever set, because a path is one construct: a
+/// command's path is a `POST` and a view's is a `GET`, and the two cannot collide — the segment
+/// between the domain and the name is `commands` for one and `views` for the other. Two fields
+/// rather than an enum so that the emitted YAML keeps `OpenAPI`'s own spelling, where the method is
+/// the key.
+#[derive(Debug, Default, serde::Serialize)]
 struct PathItem {
-    post: Operation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    get: Option<Operation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    post: Option<Operation>,
 }
 
 /// One command, exposed.
@@ -984,6 +1075,14 @@ struct Operation {
     /// prove it. See the module documentation's "What this refuses to guess".
     #[serde(rename = "x-ess-may-invoke", skip_serializing_if = "Vec::is_empty")]
     may_invoke: Vec<String>,
+    /// How soon a view reflects a command that has already returned.
+    ///
+    /// An annotation and not a header, because it is a property of the projection rather than of
+    /// this request: `eventual` says a caller may read a row that does not yet reflect its own
+    /// write, and `read_your_writes` says it may not. A `Cache-Control` here would claim a caching
+    /// policy the model does not state. Absent on a command, which projects nothing.
+    #[serde(rename = "x-ess-consistency", skip_serializing_if = "Option::is_none")]
+    consistency: Option<&'static str>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     parameters: Vec<Parameter>,
     #[serde(rename = "requestBody", skip_serializing_if = "Option::is_none")]

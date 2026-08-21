@@ -17,6 +17,7 @@ protocol ess conform run --suite suites/generated/billing/suite.json --target bi
 | suite | checks | scenarios | no scenario | generated from |
 | --- | --- | --- | --- | --- |
 | [`billing/suite.json`](billing/suite.json) | billing v3 (model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861, contract digest d2b48060b7ee32e8f23b1e28972fea39921a25fdcacd635fdf7bbb538e94f367) | 29 | 0 | [`examples/billing`](../../examples/billing) |
+| [`gatepass/suite.json`](gatepass/suite.json) | gatepass v1 (model digest f2e0f8ff51c077fa1c713d8151544379bafac36a5a927e71c685042d53ab6e61, contract digest e6e58e055d24f8f494dcff274f55e723d967f9d1f9aea16641bb8dacbb71171e) | 12 | 5 | [`examples/gatepass`](../../examples/gatepass) |
 | [`oracle-fixture/suite.json`](oracle-fixture/suite.json) | oracle v1 (model digest 4288d50a003fa7d5b39743327880aa7e2f97ff6d9408f8a5ddb908c8b6af79ee, contract digest 9c8f1b65057d7378da54f3072e27e6bb046abd22265bbdf1c1caadb94ecaa1bd) | 31 | 6 | [`examples/oracle-fixture`](../../examples/oracle-fixture) |
 
 ## What no scenario covers
@@ -30,6 +31,21 @@ in a diff instead.
 ### `billing`
 
 Every construct produced a scenario, and nothing is refused.
+
+### `gatepass`
+
+| code | element | the scenario that is missing |
+| --- | --- | --- |
+| `ESS-SYNTH-011` | `entity gatepass.visit.Visit` | `gatepass.visit.Visit/invariant/after/gatepass.visit.AdmitVisitor/admitted` |
+| `ESS-SYNTH-011` | `entity gatepass.visit.Visit` | `gatepass.visit.Visit/invariant/after/gatepass.visit.AdmitVisitor/admitted` |
+| `ESS-SYNTH-011` | `entity gatepass.visit.Visit` | `gatepass.visit.Visit/invariant/after/gatepass.visit.RegisterVisit/registered` |
+| `ESS-SYNTH-011` | `entity gatepass.visit.Visit` | `gatepass.visit.Visit/invariant/after/gatepass.visit.SignOutVisitor/signed-out` |
+| `ESS-SYNTH-011` | `entity gatepass.visit.Visit` | `gatepass.visit.Visit/invariant/after/gatepass.visit.SignOutVisitor/signed-out` |
+
+What would close them:
+
+* declare a view that holds an instance in this state, or the invariant cannot be read after this branch
+* publish the fields the invariant reads in a view of this entity, or state the invariant over what one already publishes
 
 ### `oracle-fixture`
 

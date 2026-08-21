@@ -38,6 +38,7 @@
 //! plan's two renderings are byte-identical in both trees, which is the seam proving itself.
 
 mod entity;
+mod http;
 mod items;
 mod layout;
 mod name;
@@ -95,6 +96,13 @@ pub(crate) struct Emit<'a> {
     /// a compile error: a hand-maintained list is a list that is wrong the first time a renderer
     /// stops needing something.
     imports: RefCell<BTreeSet<String>>,
+    /// The subset of them imported for a side effect and never named.
+    ///
+    /// One package needs it — `embed`, which a `//go:embed` directive requires present and which
+    /// no line then mentions, so Go's unused-import rule refuses the ordinary form. Kept beside
+    /// the paths rather than as a second block, because `gofmt` sorts one block by path and a
+    /// blank import sorts with the rest.
+    blank: RefCell<BTreeSet<String>>,
 }
 
 impl<'a> Emit<'a> {
@@ -111,6 +119,7 @@ impl<'a> Emit<'a> {
             package,
             domain,
             imports: RefCell::new(BTreeSet::new()),
+            blank: RefCell::new(BTreeSet::new()),
         }
     }
 
@@ -129,6 +138,83 @@ impl<'a> Emit<'a> {
     /// Any name of another package, as spelled from inside this one.
     pub fn qualify(&self, package: &Package, name: &str) -> String {
         layout::qualify(package, name, self.package, &mut self.imports.borrow_mut())
+    }
+
+    /// Records an import this file needs that no reference collected on its own — a
+    /// standard-library package, always, because every generated package reaches this crate's own
+    /// layout instead.
+    pub fn import(&self, path: &str) {
+        self.imports.borrow_mut().insert(path.to_owned());
+    }
+
+    /// Records an import taken for its side effect alone, which Go spells `_ "path"`.
+    pub fn import_blank(&self, path: &str) {
+        self.imports.borrow_mut().insert(path.to_owned());
+        self.blank.borrow_mut().insert(path.to_owned());
+    }
+
+    /// One variant type of an enum or a tagged union, spelled from inside this package.
+    pub fn reference_variant(&self, declared: &QualifiedName, variant: &str) -> String {
+        self.qualify(
+            self.layout.package_of(declared),
+            self.layout.variant(declared, variant),
+        )
+    }
+
+    /// A newtype's constructor, spelled from inside this package.
+    pub fn reference_ctor(&self, declared: &QualifiedName) -> String {
+        self.qualify(self.layout.package_of(declared), self.layout.ctor(declared))
+    }
+
+    /// A command's outcome interface, spelled from inside this package.
+    pub fn reference_outcome(&self, command: &QualifiedName) -> String {
+        self.qualify(
+            self.layout.package_of(command),
+            self.layout.outcome(command),
+        )
+    }
+
+    /// One variant of a command's outcome, spelled from inside this package.
+    pub fn reference_outcome_variant(&self, command: &QualifiedName, outcome: &str) -> String {
+        self.qualify(
+            self.layout.package_of(command),
+            self.layout.outcome_variant(command, outcome),
+        )
+    }
+
+    /// One specification primitive's Go type, spelled from inside this package.
+    pub fn primitive_type(&self, primitive: ess_domain::types::Primitive) -> String {
+        self.go_type(&ResolvedTypeRef::Primitive { name: primitive })
+    }
+
+    /// The constructor of a primitive that has no standard-library equivalent.
+    ///
+    /// # Panics
+    ///
+    /// For the four primitives that map onto a Go type directly: they have no constructor, and
+    /// asking for one is a defect in the caller rather than a fact about a specification.
+    pub fn primitive_ctor(&self, primitive: ess_domain::types::Primitive) -> String {
+        use ess_domain::types::Primitive;
+        let wrapper = match primitive {
+            Primitive::Decimal => "NewDecimal",
+            Primitive::Timestamp => "NewTimestamp",
+            Primitive::Duration => "NewDuration",
+            Primitive::Uuid => "NewUuid",
+            other => panic!("`{other:?}` maps onto a Go type directly and has no constructor"),
+        };
+        self.qualify(self.layout.primitives(), wrapper)
+    }
+
+    /// The finished file at a chosen path, for a package that holds more than one.
+    pub fn file_at(
+        &self,
+        path: impl Into<String>,
+        provenance: &Provenance,
+        doc: &str,
+        body: &str,
+    ) -> Artifact {
+        let artifact = self.file(provenance, doc, body);
+        Artifact::new(path, artifact.contents)
     }
 
     /// The typed refusal an owed seam answers with, spelled from inside this package.
@@ -164,9 +250,14 @@ impl<'a> Emit<'a> {
         let _ = writeln!(out, "package {}", self.package.name);
         let imports = self.imports.borrow();
         if !imports.is_empty() {
+            let blank = self.blank.borrow();
             out.push_str("\nimport (\n");
             for import in imports.iter() {
-                let _ = writeln!(out, "\t{import:?}");
+                if blank.contains(import) {
+                    let _ = writeln!(out, "\t_ {import:?}");
+                } else {
+                    let _ = writeln!(out, "\t{import:?}");
+                }
             }
             out.push_str(")\n");
         }
@@ -238,7 +329,45 @@ pub fn workspace(ir: &EssIr, plan: &SynthesisPlan) -> Emission {
         &mut covered,
         &mut stubbed,
     ));
+    artifacts.extend(http::server_package(
+        ir,
+        plan,
+        &layout,
+        &refusals,
+        &mut covered,
+    ));
 
+    assert_bijection(plan, &refusals, &covered, &stubbed);
+
+    Emission {
+        artifacts,
+        report: TargetReport {
+            provenance: provenance.clone(),
+            target: TARGET,
+            weakenings: weakenings(ir, &refusals),
+            refusals: refusals
+                .iter()
+                .map(|(capability, detail)| TargetRefusal {
+                    capability: capability.clone(),
+                    detail: detail.clone(),
+                })
+                .collect(),
+        },
+    }
+}
+
+/// Holds the emitter to the plan: emitted is exactly generated minus target-refused, and stubbed
+/// is exactly owed minus target-refused.
+///
+/// Its own function rather than a tail of [`workspace`], because the two assertions are one claim —
+/// the plan and the module are the same statement in two renderings — and a reader checking that
+/// claim should not have to read an artifact list first.
+fn assert_bijection(
+    plan: &SynthesisPlan,
+    refusals: &TargetRefusals,
+    covered: &BTreeSet<Capability>,
+    stubbed: &BTreeSet<Capability>,
+) {
     let refused: BTreeSet<Capability> = refusals
         .iter()
         .map(|(capability, _)| capability.clone())
@@ -249,7 +378,7 @@ pub fn workspace(ir: &EssIr, plan: &SynthesisPlan) -> Emission {
         .cloned()
         .collect();
     assert_eq!(
-        covered, planned,
+        covered, &planned,
         "the Go emitter emitted a different set of capabilities than the plan marks generated \
          and this target did not refuse; that is a defect in ess-synth, and shipping it would \
          make PLAN.md a lie about the module"
@@ -260,27 +389,11 @@ pub fn workspace(ir: &EssIr, plan: &SynthesisPlan) -> Emission {
         .filter(|capability| !refused.contains(capability))
         .collect();
     assert_eq!(
-        stubbed, owed,
+        stubbed, &owed,
         "the Go emitter's stubs are not exactly the plan's obligations minus what this target \
          refused; that is a defect in ess-synth, and shipping it would break the promise that \
          every owed capability is visible twice — in the plan, and as a typed refusal in the code"
     );
-
-    Emission {
-        artifacts,
-        report: TargetReport {
-            provenance: provenance.clone(),
-            target: TARGET,
-            weakenings: weakenings(),
-            refusals: refusals
-                .iter()
-                .map(|(capability, detail)| TargetRefusal {
-                    capability: capability.clone(),
-                    detail: detail.clone(),
-                })
-                .collect(),
-        },
-    }
 }
 
 /// `true` when the module needs the refusal type at all: something is owed, or there is an
@@ -295,8 +408,25 @@ fn wants_obligations(ir: &EssIr, plan: &SynthesisPlan) -> bool {
 /// fact about the language, and repeating it against forty capabilities would bury the two rows a
 /// reader has to act on. Each rule names the capability kinds it touches, so the parity question —
 /// *what is different about my command contracts* — is still answerable from the table.
-fn weakenings() -> Vec<TargetWeakening> {
-    vec![
+///
+/// Two rows are conditional on the specification declaring a served surface at all, because a
+/// weakening naming a capability kind this module has no instance of is a row a reader has to check
+/// and then discard. Everything else here is a fact about Go and holds whatever the specification
+/// says.
+fn weakenings(ir: &EssIr, refusals: &TargetRefusals) -> Vec<TargetWeakening> {
+    let serves = !http::served(ir, refusals).is_empty();
+    let mut exhaustive_affects = vec![
+        CapabilityKind::DomainType,
+        CapabilityKind::EntityLifecycle,
+        CapabilityKind::CommandContract,
+        CapabilityKind::ComponentPort,
+        CapabilityKind::BindingDelivery,
+    ];
+    if serves {
+        exhaustive_affects.push(CapabilityKind::ComponentTransport);
+        exhaustive_affects.sort();
+    }
+    let mut out = vec![
         TargetWeakening {
             guarantee: "handling a closed set of variants is exhaustive: a `match` that forgets \
                         one does not compile"
@@ -307,13 +437,7 @@ fn weakenings() -> Vec<TargetWeakening> {
                       through. Go has no exhaustiveness check and none can be emitted; every \
                       generated sealed interface says so in its own doc comment"
                 .to_owned(),
-            affects: vec![
-                CapabilityKind::DomainType,
-                CapabilityKind::EntityLifecycle,
-                CapabilityKind::CommandContract,
-                CapabilityKind::ComponentPort,
-                CapabilityKind::BindingDelivery,
-            ],
+            affects: exhaustive_affects,
         },
         TargetWeakening {
             guarantee: "a value of a generated type exists only where a generated constructor or \
@@ -362,7 +486,25 @@ fn weakenings() -> Vec<TargetWeakening> {
                 CapabilityKind::ViewType,
             ],
         },
-    ]
+    ];
+    if serves {
+        out.push(TargetWeakening {
+            guarantee: "a JSON object leaves this system with its members in the order the \
+                        specification declares them"
+                .to_owned(),
+            instead: "the served bodies are built as `map[string]any` and written by \
+                      `encoding/json`, which sorts a map's keys — so a body's members come out \
+                      alphabetical here and in declaration order in the first target. The two are \
+                      the same *value*, no published contract states an order, and every consumer \
+                      that parses rather than greps is unaffected; what is lost is the ability to \
+                      compare two applications' bodies byte for byte, which is why the gate \
+                      compares them as values. Emitting a writer that kept the order would mean \
+                      emitting a second JSON writer beside the standard library's"
+                .to_owned(),
+            affects: vec![CapabilityKind::ComponentTransport],
+        });
+    }
+    out
 }
 
 /// The module file at the generated root.

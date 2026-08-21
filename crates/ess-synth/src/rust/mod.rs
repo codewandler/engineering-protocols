@@ -30,12 +30,15 @@
 //! (AGENTS.md § Dependencies).
 
 mod entity;
+pub(crate) mod http;
 pub(crate) mod items;
+pub(crate) mod json;
 pub(crate) mod layout;
 pub(crate) mod name;
 mod obligation;
 pub(crate) mod port;
 pub(crate) mod system;
+pub(crate) mod wire;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -131,6 +134,7 @@ pub fn workspace(ir: &EssIr, plan: &SynthesisPlan) -> Vec<Artifact> {
         &mut covered,
         &mut stubbed,
     ));
+    artifacts.extend(http::server_crate(ir, plan, &layout, &mut covered));
 
     let planned: BTreeSet<Capability> = plan.generated().cloned().collect();
     assert_eq!(
@@ -198,6 +202,9 @@ fn workspace_manifest(ir: &EssIr, layout: &Layout, provenance: &Provenance) -> A
     }
     if !ir.components.is_empty() || !ir.bindings.is_empty() {
         members.push(layout.system_package().to_owned());
+    }
+    if !http::served(ir).is_empty() {
+        members.push(layout.server_package().to_owned());
     }
     members.sort();
     let mut out = provenance.commented_for("#", REGENERATE);

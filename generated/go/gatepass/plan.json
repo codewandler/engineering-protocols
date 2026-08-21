@@ -1,0 +1,245 @@
+{
+  "provenance": {
+    "system": "gatepass",
+    "specification_version": "v1",
+    "source_digest": "f2e0f8ff51c077fa1c713d8151544379bafac36a5a927e71c685042d53ab6e61",
+    "contract_digest": "e6e58e055d24f8f494dcff274f55e723d967f9d1f9aea16641bb8dacbb71171e",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0"
+  },
+  "scope": {
+    "profile": "component-skeletons",
+    "planner_version": "0.1.0"
+  },
+  "capabilities": [
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.Badge",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.Building",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.Deposit",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.EmployeeId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.Host",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.VendorRef",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.Visit.State",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.VisitId",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "domain_type",
+      "source": "gatepass.visit.VisitorName",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "entity_lifecycle",
+      "source": "gatepass.visit.Visit",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "gatepass.visit.AdmitVisitor",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "gatepass.visit.AdmitVisitor",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "unspecified_algorithm"
+        },
+        "contract": "given `gatepass.visit.AdmitVisitor` input, decide and enact exactly one outcome — `admitted` otherwise, takes `arrive` of `gatepass.visit.Visit`, emits `gatepass.visit.VisitorAdmitted`; `wrong-state` from a state no declared move starts in, error `gatepass.visit.VisitStateConflict`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "gatepass.visit.RegisterVisit",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "gatepass.visit.RegisterVisit",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "unspecified_algorithm"
+        },
+        "contract": "given `gatepass.visit.RegisterVisit` input, decide and enact exactly one outcome — `registered` when `expected_minutes > 0`, creates `gatepass.visit.Visit`, emits `gatepass.visit.VisitRegistered`; `refused` otherwise, error `gatepass.visit.InvalidVisitLength`"
+      }
+    },
+    {
+      "kind": "command_contract",
+      "source": "gatepass.visit.SignOutVisitor",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "command_behavior",
+      "source": "gatepass.visit.SignOutVisitor",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "unspecified_algorithm"
+        },
+        "contract": "given `gatepass.visit.SignOutVisitor` input, decide and enact exactly one outcome — `signed-out` otherwise, takes `depart` of `gatepass.visit.Visit`, emits `gatepass.visit.VisitorDeparted`; `wrong-state` from a state no declared move starts in, error `gatepass.visit.VisitStateConflict`"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "gatepass.visit.VisitRegistered",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "gatepass.visit.VisitorAdmitted",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "event_type",
+      "source": "gatepass.visit.VisitorDeparted",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "gatepass.visit.InvalidVisitLength",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "error_type",
+      "source": "gatepass.visit.VisitStateConflict",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "gatepass.visit.ExpectedVisits",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "gatepass.visit.ExpectedVisits",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "projection_maintenance"
+        },
+        "contract": "a query answering `gatepass.visit.ExpectedVisits` with rows projected from `gatepass.visit.Visit` at `read_your_writes` consistency, containing instances where `state == Expected`"
+      }
+    },
+    {
+      "kind": "view_type",
+      "source": "gatepass.visit.VisitById",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "view_query",
+      "source": "gatepass.visit.VisitById",
+      "disposition": {
+        "disposition": "obligation",
+        "reason": {
+          "class": "projection_maintenance"
+        },
+        "contract": "a query answering `gatepass.visit.VisitById` with rows projected from `gatepass.visit.Visit` at `eventual` consistency"
+      }
+    },
+    {
+      "kind": "actor_grants",
+      "source": "gatepass.visit.Receptionist",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_caller_identity",
+        "stage": "planning",
+        "detail": "may invoke `gatepass.visit.AdmitVisitor`, `gatepass.visit.RegisterVisit`, `gatepass.visit.SignOutVisitor`; a grant is checked against a caller identity, which types do not carry, and enforcement belongs to the layer that knows who is calling"
+      }
+    },
+    {
+      "kind": "actor_grants",
+      "source": "gatepass.visit.SecurityAuditor",
+      "disposition": {
+        "disposition": "refused",
+        "reason": "needs_caller_identity",
+        "stage": "planning",
+        "detail": "observes only; it may invoke no command; a grant is checked against a caller identity, which types do not carry, and enforcement belongs to the layer that knows who is calling"
+      }
+    },
+    {
+      "kind": "component_port",
+      "source": "pass-service",
+      "disposition": {
+        "disposition": "generated"
+      }
+    },
+    {
+      "kind": "component_transport",
+      "source": "pass-service",
+      "disposition": {
+        "disposition": "generated"
+      }
+    }
+  ]
+}

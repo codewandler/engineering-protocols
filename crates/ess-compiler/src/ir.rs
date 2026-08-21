@@ -78,7 +78,7 @@ use aep_domain::facts::FactPath;
 use aep_domain::predicate::Predicate;
 use ess_domain::binding::{BindingName, Delivery, Failure};
 use ess_domain::command::{OutcomeName, TestStrategy};
-use ess_domain::component::ComponentName;
+use ess_domain::component::{ComponentName, Reach};
 use ess_domain::entity::{EntitySpec, Invariant, StateMachine, StateName, Transition};
 use ess_domain::name::{Naming, QualifiedName, Version};
 use ess_domain::topology::{Replicas, Resource};
@@ -1001,8 +1001,27 @@ pub struct ResolvedComponent {
     pub accepts: BTreeSet<CommandHandle>,
     /// The events it publishes.
     pub publishes: BTreeSet<EventHandle>,
+    /// Where the callers of its surface are.
+    ///
+    /// Left out of the serialisation when it is the unstated default, which is what keeps a
+    /// specification that says nothing about reach digesting exactly as it did before the word
+    /// existed: the model digest is the serialised IR, and a field that appears everywhere to say
+    /// "nothing was said" would have moved every committed artifact in the repository for a
+    /// statement no author made.
+    #[serde(skip_serializing_if = "unstated_reach")]
+    pub reached_by: Reach,
     /// What it is called on the wire, and shown as.
     pub naming: Naming,
+}
+
+/// `true` where a component's reach is the unstated default.
+///
+/// A free function rather than a method on [`Reach`], because `skip_serializing_if` hands the field
+/// by reference and there is no by-value form of the attribute. The lint below is asking for a
+/// signature serde does not accept, so it is allowed here and nowhere else.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn unstated_reach(reach: &Reach) -> bool {
+    reach.is_in_process()
 }
 
 /// One component's runtime requirements, with the component resolved.

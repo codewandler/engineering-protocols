@@ -154,10 +154,10 @@ jobs:
       - name: Check generated conformance suites
         run: cargo xtask suite --check
 
-  # Its own job for the reason `suites` is, plus three of its own: this check also runs `cargo
+  # Its own job for the reason `suites` is, plus four of its own: this check also runs `cargo
   # check` *inside* each committed workspace, then the committed billing suite against that
-  # workspace linked with `examples/billing-realization`, then the browser boundary — so it fails
-  # for four distinguishable reasons. A tree drifted from its specification (fix: `cargo xtask
+  # workspace linked with `examples/billing-realization`, then the browser boundary, then the
+  # dual-target demonstration — so it fails for five distinguishable reasons. A tree drifted from its specification (fix: `cargo xtask
   # synth`); a tree matches and no longer builds — `cargo check` for the Rust workspace,
   # `gofmt -l` / `go build` / `go vet` for the Go module, `cargo build --target
   # wasm32-unknown-unknown` for the browser bridge — which is a defect in `ess-synth` rather than
@@ -165,8 +165,11 @@ jobs:
   # format's dangling reference and fails at the click rather than at the build; or a linked system
   # no longer holds — the honest linkage must pass all 27 scenarios, the deliberately corrupted one
   # must fail exactly the scenario that exists to catch it, and the realized WebAssembly module
-  # must still answer the page. Folded into the gate, all four would read as "one of nine steps
-  # failed".
+  # must still answer the page; or the two applications synthesised from `examples/gatepass` no
+  # longer behave as one system — this step builds both, starts each on an ephemeral port, and
+  # compares their startup records outside `runtime`, every status, every body as a value, and the
+  # two documents they publish about themselves byte for byte. Folded into the gate, all five would
+  # read as "one of nine steps failed".
   synthesis:
     name: Synthesised trees up to date
     runs-on: ubuntu-latest
@@ -196,7 +199,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Check the synthesised Rust, Go and browser trees
+      - name: Check the synthesised Rust, Go and browser trees, and run the dual-target demonstration
         run: cargo xtask synth --check
 
   # Its own job because it is its own toolchain, which a step in `gate` cannot be. `rust-version =

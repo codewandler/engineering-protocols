@@ -21,7 +21,7 @@ use ess_domain::binding::{BindingName, BindingSpec, Delivery, Failure, MappingSo
 use ess_domain::command::{
     CommandSpec, ErrorSpec, EventSpec, Outcome, OutcomeCondition, OutcomeName, PayloadSource,
 };
-use ess_domain::component::{ComponentName, ComponentSpec};
+use ess_domain::component::{ComponentName, ComponentSpec, Reach};
 use ess_domain::domain::DomainSpec;
 use ess_domain::entity::{EntitySpec, StateMachine, StateName, Transition};
 use ess_domain::name::{Naming, QualifiedName, Version};
@@ -1069,6 +1069,7 @@ fn a_component_accepting_a_command_nobody_declares_is_reported_once_as_never_val
             owns: [name(DOMAIN)].into_iter().collect(),
             accepts: [name("shop.orders.Place")].into_iter().collect(),
             publishes: BTreeSet::new(),
+            reached_by: Reach::default(),
             naming: Naming::default(),
         }],
         ..Fixture::default()
@@ -1158,6 +1159,7 @@ fn a_defect_this_pass_reports_is_not_reported_again_by_the_bridge() {
             owns: [name(DOMAIN)].into_iter().collect(),
             accepts: [name("shop.orders.Place")].into_iter().collect(),
             publishes: BTreeSet::new(),
+            reached_by: Reach::default(),
             naming: Naming::default(),
         }],
         ..Fixture::default()
@@ -1191,6 +1193,7 @@ fn a_reference_to_a_declaration_that_itself_failed_to_resolve_is_reported_once()
             owns: [name(DOMAIN)].into_iter().collect(),
             accepts: [name("shop.orders.Place")].into_iter().collect(),
             publishes: BTreeSet::new(),
+            reached_by: Reach::default(),
             naming: Naming::default(),
         }],
         ..Fixture::default()

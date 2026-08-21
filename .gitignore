@@ -13,3 +13,18 @@ generated/rust/*/target/
 website/node_modules
 website/build
 website/.docusaurus
+
+# Written by `cargo build` inside the synthesised browser realizations (cargo xtask synth). The
+# committed tree is source-only for the reason the Rust one is — and the compiled `.wasm` is a
+# build artifact, never a committed binary: the gate builds it and holds the page to its exports.
+generated/web/*/Cargo.lock
+generated/web/*/target/
+
+# The hand-written host that links a realization into the generated bridge. Its dependencies are
+# all path dependencies, so its lock file is the toolchain's answer rather than anything to review.
+examples/billing-web/Cargo.lock
+examples/billing-web/target/
+
+# The module a reader copies in beside the page, as the tree's own README tells them to: it is the
+# page's last candidate path, and a build artifact either way.
+generated/web/*/*.wasm

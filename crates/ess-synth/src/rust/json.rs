@@ -1,12 +1,16 @@
-//! The one file of the emitted bridge that is not derived from any model.
+//! The one emitted file that is not derived from any model.
 //!
-//! JSON is the boundary this target crosses, and crossing it needs a reader, a writer and a
-//! base64 codec. All three are fixed per emitter version — the same bytes whatever the
-//! specification — exactly as the Rust target's `primitives` module is, and for a second reason
-//! that is a gate property rather than a preference: the emitted tree must build with **zero
-//! third-party crates**, because `cargo build` inside it is a step of `task check` and a step
-//! that resolves a crate is a step that reaches the network (AGENTS.md § Dependencies). `serde`
-//! would have bought a parser and cost that.
+//! JSON is the boundary two of this crate's targets cross — the browser bridge and the HTTP
+//! server — and crossing it needs a reader, a writer and a base64 codec. All three are fixed per
+//! emitter version, the same bytes whatever the specification and whatever the target, exactly as
+//! the Rust target's `primitives` module is; and for a second reason that is a gate property
+//! rather than a preference: the emitted tree must build with **zero third-party crates**, because
+//! `cargo build` inside it is a step of `task check` and a step that resolves a crate is a step
+//! that reaches the network (AGENTS.md § Dependencies). `serde` would have bought a parser and
+//! cost that.
+//!
+//! Shared rather than emitted twice: two copies of a JSON reader are two answers to "what is a
+//! valid `Bytes`", and this crate has already paid once for a mapping that existed in two places.
 //!
 //! The renderings match the published wire contracts rather than being invented here: `Bytes` is
 //! base64 with padding, `Decimal`, `Timestamp`, `Duration` and `Uuid` are strings, because the
@@ -15,7 +19,7 @@
 
 /// The body of the emitted `json` module.
 pub(crate) const JSON: &str = r#"
-//! JSON at the browser boundary: a reader, a writer, and the base64 codec `Bytes` needs.
+//! JSON at this system's boundary: a reader, a writer, and the base64 codec `Bytes` needs.
 //!
 //! Written here rather than taken from a crate because this workspace has no dependencies: it is
 //! built inside a gate that reaches no network. The surface is exactly what the generated `wire`
@@ -23,11 +27,10 @@ pub(crate) const JSON: &str = r#"
 
 use std::fmt;
 
-/// How deep a document from the page may nest before it is refused.
+/// How deep a document from a caller may nest before it is refused.
 ///
-/// A browser can post anything, and a recursive reader with no limit turns a hostile document
-/// into a stack overflow — which in WebAssembly is a trap the page cannot catch and cannot
-/// report. Sixty-four is far past any model this emitter can produce: the specification's own
+/// A caller can send anything, and a recursive reader with no limit turns a hostile document
+/// into a stack overflow — which is a crash the process cannot catch and cannot report. Sixty-four is far past any model this emitter can produce: the specification's own
 /// type references are refused past thirty-two.
 const DEPTH: usize = 64;
 
@@ -472,7 +475,7 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 
 /// A value that was not what the model's declaration says it is.
 ///
-/// Carries the path it was reached at, because a page posting a nested command input gets one
+/// Carries the path it was reached at, because a caller sending a nested command input gets one
 /// message and "expected a string" without a path is a message nobody can act on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodeError {

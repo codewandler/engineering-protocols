@@ -27,11 +27,11 @@ use ess_compiler::ir::{
 use ess_domain::name::QualifiedName;
 use ess_domain::types::Primitive;
 
-use crate::rust::items::outcome_event_fields;
-use crate::rust::layout::Layout as RustLayout;
-use crate::rust::{name, Emit};
+use ess_compiler::ir::EssIr;
 
-use super::Bridge;
+use super::items::outcome_event_fields;
+use super::layout::Layout as RustLayout;
+use super::{name, Emit};
 
 /// A place expression, parenthesised when it needs to be.
 ///
@@ -50,41 +50,41 @@ fn place(expr: &str) -> String {
 ///
 /// The whole name and never the local one: `billing.invoice.Email` and `billing.email.Email` are
 /// two declarations, and a wire function that named only the last segment would silently be one.
-pub(super) fn ident(name: &QualifiedName) -> String {
+pub(crate) fn ident(name: &QualifiedName) -> String {
     name::value_ident(&name::type_fragment(&name.to_string()))
 }
 
 /// The emitted `wire` module.
-pub(super) fn module(bridge: &Bridge<'_>) -> String {
+pub(crate) fn module(surface: &dyn Surface) -> String {
     let mut out = String::new();
     out.push_str(HEADER);
 
-    for declared in bridge.ir.types.values() {
-        if !bridge.presents_type(&declared.name) {
+    for declared in surface.ir().types.values() {
+        if !surface.presents_type(&declared.name) {
             continue;
         }
-        named_type(&mut out, bridge, declared);
+        named_type(&mut out, surface, declared);
     }
-    for event in bridge.ir.events.values() {
-        if bridge.presents_event(&event.name) {
-            event_encoder(&mut out, bridge, event);
+    for event in surface.ir().events.values() {
+        if surface.presents_event(&event.name) {
+            event_encoder(&mut out, surface, event);
         }
     }
-    for error in bridge.ir.errors.values() {
-        if bridge.presents_error(&error.name) {
-            error_encoder(&mut out, bridge, error);
+    for error in surface.ir().errors.values() {
+        if surface.presents_error(&error.name) {
+            error_encoder(&mut out, surface, error);
         }
     }
-    for view in bridge.ir.views.values() {
-        if bridge.presents_view(&view.name) {
-            view_encoder(&mut out, bridge, view);
+    for view in surface.ir().views.values() {
+        if surface.presents_view(&view.name) {
+            view_encoder(&mut out, surface, view);
         }
     }
-    for command in bridge.ir.commands.values() {
-        if bridge.presents_command(&command.name) {
-            command_encoder(&mut out, bridge, command);
-            command_decoder(&mut out, bridge, command);
-            outcome_encoder(&mut out, bridge, command);
+    for command in surface.ir().commands.values() {
+        if surface.presents_command(&command.name) {
+            command_encoder(&mut out, surface, command);
+            command_decoder(&mut out, surface, command);
+            outcome_encoder(&mut out, surface, command);
         }
     }
     out
@@ -101,14 +101,18 @@ const HEADER: &str = "//! Every generated declaration, as JSON, in the rendering
 // ---- named types ------------------------------------------------------------------------------
 
 /// One declared type's pair of wire functions.
-fn named_type(out: &mut String, bridge: &Bridge<'_>, declared: &ess_compiler::ir::ResolvedType) {
-    type_encoder(out, bridge, declared);
-    type_decoder(out, bridge, declared);
+fn named_type(out: &mut String, surface: &dyn Surface, declared: &ess_compiler::ir::ResolvedType) {
+    type_encoder(out, surface, declared);
+    type_decoder(out, surface, declared);
 }
 
 /// One declared type, written.
-fn type_encoder(out: &mut String, bridge: &Bridge<'_>, declared: &ess_compiler::ir::ResolvedType) {
-    let path = bridge.path(&declared.name);
+fn type_encoder(
+    out: &mut String,
+    surface: &dyn Surface,
+    declared: &ess_compiler::ir::ResolvedType,
+) {
+    let path = surface.path(&declared.name);
     let ident = ident(&declared.name);
     let name = &declared.name;
 
@@ -164,8 +168,12 @@ fn type_encoder(out: &mut String, bridge: &Bridge<'_>, declared: &ess_compiler::
 }
 
 /// One declared type, read.
-fn type_decoder(out: &mut String, bridge: &Bridge<'_>, declared: &ess_compiler::ir::ResolvedType) {
-    let path = bridge.path(&declared.name);
+fn type_decoder(
+    out: &mut String,
+    surface: &dyn Surface,
+    declared: &ess_compiler::ir::ResolvedType,
+) {
+    let path = surface.path(&declared.name);
     let ident = ident(&declared.name);
     let name = &declared.name;
 
@@ -181,7 +189,7 @@ fn type_decoder(out: &mut String, bridge: &Bridge<'_>, declared: &ess_compiler::
             let _ = writeln!(
                 out,
                 "    Ok({path}({}))",
-                decode_value(bridge, "value", "at", of, 0)
+                decode_value(surface, "value", "at", of, 0)
             );
         }
         ResolvedBody::Struct { fields, .. } => {
@@ -191,7 +199,7 @@ fn type_decoder(out: &mut String, bridge: &Bridge<'_>, declared: &ess_compiler::
                     out,
                     "        {}: {},",
                     name::value_ident(&field.name),
-                    decode_member(bridge, field, position)
+                    decode_member(surface, field, position)
                 );
             }
             out.push_str("    })\n");
@@ -234,7 +242,7 @@ fn type_decoder(out: &mut String, bridge: &Bridge<'_>, declared: &ess_compiler::
                     out,
                     "        {label:?} => {path}::{}({}),",
                     name::pascal(label),
-                    decode_member(bridge, &carried, position)
+                    decode_member(surface, &carried, position)
                 );
             }
             let _ = writeln!(
@@ -262,33 +270,33 @@ fn variant_list(variants: &[String]) -> String {
 // ---- declarations that are records of fields ----------------------------------------------------
 
 /// One event's encoder.
-fn event_encoder(out: &mut String, bridge: &Bridge<'_>, event: &ResolvedEvent) {
+fn event_encoder(out: &mut String, surface: &dyn Surface, event: &ResolvedEvent) {
     record_encoder(
         out,
         &format!("encode_event_{}", ident(&event.name)),
-        &bridge.path(&event.name),
+        &surface.path(&event.name),
         &format!("the event `{}`", event.name),
         &event.fields,
     );
 }
 
 /// One declared error's encoder.
-fn error_encoder(out: &mut String, bridge: &Bridge<'_>, error: &ResolvedError) {
+fn error_encoder(out: &mut String, surface: &dyn Surface, error: &ResolvedError) {
     record_encoder(
         out,
         &format!("encode_error_{}", ident(&error.name)),
-        &bridge.path(&error.name),
+        &surface.path(&error.name),
         &format!("the declared error `{}`", error.name),
         &error.fields,
     );
 }
 
 /// One view row's encoder.
-fn view_encoder(out: &mut String, bridge: &Bridge<'_>, view: &ResolvedView) {
+fn view_encoder(out: &mut String, surface: &dyn Surface, view: &ResolvedView) {
     record_encoder(
         out,
         &format!("encode_view_{}", ident(&view.name)),
-        &bridge.path(&view.name),
+        &surface.path(&view.name),
         &format!("one row of the view `{}`", view.name),
         &view.fields,
     );
@@ -333,19 +341,19 @@ fn record_encoder(
 // ---- commands ------------------------------------------------------------------------------------
 
 /// One command input's encoder, for the record the transport keeps of what a binding passed.
-fn command_encoder(out: &mut String, bridge: &Bridge<'_>, command: &ResolvedCommand) {
+fn command_encoder(out: &mut String, surface: &dyn Surface, command: &ResolvedCommand) {
     record_encoder(
         out,
         &format!("encode_command_{}", ident(&command.name)),
-        &bridge.path(&command.name),
+        &surface.path(&command.name),
         &format!("the input of `{}`", command.name),
         &command.input,
     );
 }
 
 /// One command input's decoder.
-fn command_decoder(out: &mut String, bridge: &Bridge<'_>, command: &ResolvedCommand) {
-    let path = bridge.path(&command.name);
+fn command_decoder(out: &mut String, surface: &dyn Surface, command: &ResolvedCommand) {
+    let path = surface.path(&command.name);
     let _ = write!(
         out,
         "\n/// Reads the input of `{}` from JSON.\n///\n/// # Errors\n///\n/// \
@@ -360,7 +368,7 @@ fn command_decoder(out: &mut String, bridge: &Bridge<'_>, command: &ResolvedComm
             out,
             "        {}: {},",
             name::value_ident(&field.name),
-            decode_member(bridge, field, position)
+            decode_member(surface, field, position)
         );
     }
     out.push_str("    })\n}\n");
@@ -384,12 +392,12 @@ fn command_decoder(out: &mut String, bridge: &Bridge<'_>, command: &ResolvedComm
 /// The refusal is rendered beside the success and never below it, which is design §8 reaching the
 /// page: a browser that can only show the happy path is a consumer that handles only the happy
 /// path.
-fn outcome_encoder(out: &mut String, bridge: &Bridge<'_>, command: &ResolvedCommand) {
-    let path = bridge.path(&command.name);
-    let domain = bridge.ir.domain(&command.domain).name.clone();
+fn outcome_encoder(out: &mut String, surface: &dyn Surface, command: &ResolvedCommand) {
+    let path = surface.path(&command.name);
+    let domain = surface.ir().domain(&command.domain).name.clone();
     let emit = Emit {
-        ir: bridge.ir,
-        layout: bridge.layout.rust(),
+        ir: surface.ir(),
+        layout: surface.layout(),
         domain: &domain,
     };
     let _ = write!(
@@ -590,7 +598,7 @@ fn encode_key(primitive: Primitive, expr: &str) -> String {
 }
 
 /// One field of an object being read, absence included where the declaration permits it.
-fn decode_member(bridge: &Bridge<'_>, field: &ResolvedField, position: usize) -> String {
+fn decode_member(surface: &dyn Surface, field: &ResolvedField, position: usize) -> String {
     let wire = ess_gen::schema::wire_field_name(field);
     let at = format!("at{position}");
     let member = format!("member{position}");
@@ -601,14 +609,14 @@ fn decode_member(bridge: &Bridge<'_>, field: &ResolvedField, position: usize) ->
             "match value.member({wire:?}) {{\n            None | Some(json::Value::Null) => \
              None,\n            Some({member}) => {{\n                let {at} = json::nested(at, \
              {wire:?});\n                Some({})\n            }}\n        }}",
-            decode_value(bridge, &member, &format!("&{at}"), of, position)
+            decode_value(surface, &member, &format!("&{at}"), of, position)
         );
     }
     format!(
         "{{\n            let {at} = json::nested(at, {wire:?});\n            let {member} = \
          json::member_at(value, at, {wire:?})?;\n            {}\n        }}",
         decode_value(
-            bridge,
+            surface,
             &member,
             &format!("&{at}"),
             &field.type_ref,
@@ -619,20 +627,20 @@ fn decode_member(bridge: &Bridge<'_>, field: &ResolvedField, position: usize) ->
 
 /// The expression that reads one value of a declared type from JSON.
 fn decode_value(
-    bridge: &Bridge<'_>,
+    surface: &dyn Surface,
     value: &str,
     at: &str,
     type_ref: &ResolvedTypeRef,
     depth: usize,
 ) -> String {
     match type_ref {
-        ResolvedTypeRef::Primitive { name } => decode_primitive(bridge, *name, value, at),
+        ResolvedTypeRef::Primitive { name } => decode_primitive(surface, *name, value, at),
         ResolvedTypeRef::Declared { name } => {
             format!("decode_{}({value}, {at})?", ident(name.name()))
         }
         ResolvedTypeRef::Optional { of } => format!(
             "if matches!({value}, json::Value::Null) {{ None }} else {{ Some({}) }}",
-            decode_value(bridge, value, at, of, depth + 1)
+            decode_value(surface, value, at, of, depth + 1)
         ),
         ResolvedTypeRef::List { of } => {
             let items = format!("items{depth}");
@@ -645,7 +653,7 @@ fn decode_value(
                  \"an array\")?.iter().enumerate() {{\n                    let {nested} = \
                  json::nested({at}, &{index}.to_string());\n                    \
                  {items}.push({});\n                }}\n                {items}\n            }}",
-                decode_value(bridge, &element, &format!("&{nested}"), of, depth + 1)
+                decode_value(surface, &element, &format!("&{nested}"), of, depth + 1)
             )
         }
         ResolvedTypeRef::Map { key, value: held } => {
@@ -659,16 +667,16 @@ fn decode_value(
                  object\")? {{\n                    let {nested} = json::nested({at}, \
                  {entry});\n                    {entries}.insert({}, {});\n                \
                  }}\n                {entries}\n            }}",
-                decode_key(bridge, *key, &entry, &nested),
-                decode_value(bridge, &element, &format!("&{nested}"), held, depth + 1)
+                decode_key(surface, *key, &entry, &nested),
+                decode_value(surface, &element, &format!("&{nested}"), held, depth + 1)
             )
         }
     }
 }
 
 /// One primitive, read.
-fn decode_primitive(bridge: &Bridge<'_>, primitive: Primitive, value: &str, at: &str) -> String {
-    let primitives = format!("{}::primitives", bridge.types);
+fn decode_primitive(surface: &dyn Surface, primitive: Primitive, value: &str, at: &str) -> String {
+    let primitives = format!("{}::primitives", surface.types());
     match primitive {
         Primitive::String => format!("json::text_at({value}, {at}, \"a string\")?.to_owned()"),
         Primitive::Boolean => format!("json::bool_at({value}, {at}, \"a boolean\")?"),
@@ -694,8 +702,8 @@ fn decode_primitive(bridge: &Bridge<'_>, primitive: Primitive, value: &str, at: 
 }
 
 /// One map key, read back out of the string JSON always spells it as.
-fn decode_key(bridge: &Bridge<'_>, primitive: Primitive, key: &str, at: &str) -> String {
-    let primitives = format!("{}::primitives", bridge.types);
+fn decode_key(surface: &dyn Surface, primitive: Primitive, key: &str, at: &str) -> String {
+    let primitives = format!("{}::primitives", surface.types());
     match primitive {
         Primitive::String => format!("{key}.clone()"),
         Primitive::Boolean => format!("json::key_bool({key}, {at})?"),
@@ -708,7 +716,36 @@ fn decode_key(bridge: &Bridge<'_>, primitive: Primitive, key: &str, at: &str) ->
     }
 }
 
-/// A declaration's path from inside the bridge crate.
-pub(super) fn path(layout: &RustLayout, types: &str, declared: &QualifiedName) -> String {
-    crate::rust::port::types_path(layout, types, declared)
+/// A declaration's path from inside a crate that names the types crate `types`.
+pub(crate) fn path(layout: &RustLayout, types: &str, declared: &QualifiedName) -> String {
+    super::port::types_path(layout, types, declared)
+}
+
+/// What a target that crosses JSON has to answer before this module can write its codecs.
+///
+/// The seam that lets one wire emitter serve two targets. The browser bridge presents a subset of
+/// the plan — what it refuses at the target stage gets no encoder — and the HTTP server presents
+/// what its component's surface reaches. Neither answer belongs in this module, and a copy of it
+/// per target would be a second place for "which types cross this boundary" to be decided.
+pub(crate) trait Surface {
+    /// The resolved model.
+    fn ir(&self) -> &EssIr;
+    /// Where the Rust target put everything.
+    fn layout(&self) -> &RustLayout;
+    /// The types crate, as a path spells it from inside the emitting crate.
+    fn types(&self) -> &str;
+    /// A declaration's path from inside the emitting crate.
+    fn path(&self, declared: &QualifiedName) -> String {
+        path(self.layout(), self.types(), declared)
+    }
+    /// `true` when values of this declared type cross the boundary.
+    fn presents_type(&self, declared: &QualifiedName) -> bool;
+    /// `true` when this event crosses it.
+    fn presents_event(&self, declared: &QualifiedName) -> bool;
+    /// `true` when this declared error crosses it.
+    fn presents_error(&self, declared: &QualifiedName) -> bool;
+    /// `true` when this view's rows cross it.
+    fn presents_view(&self, declared: &QualifiedName) -> bool;
+    /// `true` when this command's input and outcome cross it.
+    fn presents_command(&self, declared: &QualifiedName) -> bool;
 }

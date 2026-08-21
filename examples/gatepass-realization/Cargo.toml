@@ -1,0 +1,34 @@
+# The hand-written half of the synthesised gatepass workspace: one implementation per obligation in
+# `generated/rust/gatepass/PLAN.md`, the linker that assembles them (gap register D-2), and the
+# binary that hands the assembled system to the generated HTTP surface.
+#
+# It lives beside the specification it realizes, *outside* `generated/`, because that boundary is
+# absolute: hand-written code satisfies generated interfaces by import, and the generated tree stays
+# fully disposable. The dependencies below are path dependencies into the excluded generated
+# workspace — outputs this crate consumes, never members of the source workspace.
+#
+# The Go half of the same demonstration is `examples/gatepass-go-realization/`, which is a Go module
+# rather than a crate for the same reason: a realization is written in the language of the tree it
+# links into.
+[package]
+name = "gatepass-realization"
+description = "Hand-written obligation implementations for the synthesised gatepass workspace, the linker that assembles them, and the binary that serves the surface the specification determines."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[dependencies]
+gatepass-types = { path = "../../generated/rust/gatepass/crates/gatepass-types" }
+gatepass-system = { path = "../../generated/rust/gatepass/crates/gatepass-system" }
+gatepass-server = { path = "../../generated/rust/gatepass/crates/gatepass-server" }
+pass-service = { path = "../../generated/rust/gatepass/crates/pass-service" }
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

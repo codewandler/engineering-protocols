@@ -501,6 +501,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "gatepass-realization"
+version = "0.1.0"
+dependencies = [
+ "gatepass-server",
+ "gatepass-system",
+ "gatepass-types",
+ "pass-service",
+ "serde_json",
+]
+
+[[package]]
+name = "gatepass-server"
+version = "1.0.0"
+dependencies = [
+ "gatepass-system",
+ "gatepass-types",
+ "pass-service",
+]
+
+[[package]]
+name = "gatepass-system"
+version = "1.0.0"
+dependencies = [
+ "gatepass-types",
+ "pass-service",
+]
+
+[[package]]
+name = "gatepass-types"
+version = "1.0.0"
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -921,6 +953,13 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "pass-service"
+version = "1.0.0"
+dependencies = [
+ "gatepass-types",
 ]
 
 [[package]]

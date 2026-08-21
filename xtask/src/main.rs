@@ -53,11 +53,18 @@ const PROJECTIONS: &str = "generated";
 
 /// The specifications a conformance suite is committed for.
 ///
-/// Two, not one. `examples/billing/` is the normative example, and the suite for it is what design
-/// §38 asks to be committed. `examples/oracle-fixture/` is here because `ess-conformance`'s fault
-/// matrix names scenario ids from it — `handoff-on-placed/binding/flow` and its siblings — and an id
-/// a matrix refers to has to be an id that cannot change by accident.
-const SUITE_SPECIFICATIONS: &[&str] = &["examples/billing", "examples/oracle-fixture"];
+/// Three, not one. `examples/billing/` is the normative example, and the suite for it is what
+/// design §38 asks to be committed. `examples/oracle-fixture/` is here because `ess-conformance`'s
+/// fault matrix names scenario ids from it — `handoff-on-placed/binding/flow` and its siblings —
+/// and an id a matrix refers to has to be an id that cannot change by accident.
+/// `examples/gatepass/` is the dual-target demonstration, and its suite is committed on the same
+/// rule every other committed artifact follows: a specification this repository ships is a
+/// specification whose derived documents are reviewable.
+const SUITE_SPECIFICATIONS: &[&str] = &[
+    "examples/billing",
+    "examples/gatepass",
+    "examples/oracle-fixture",
+];
 
 /// Where those suites are committed.
 ///
@@ -67,11 +74,18 @@ const SUITE_SPECIFICATIONS: &[&str] = &["examples/billing", "examples/oracle-fix
 /// output tree with a drift check and a CI job of its own.
 const SUITES: &str = "suites/generated";
 
-/// The specifications a Rust workspace is synthesised for.
+/// The specifications a tree is synthesised for, and the targets each is emitted into.
 ///
-/// One: the normative example is the specification wave 6 closes its loop against, and a second
-/// workspace is committed the day a second specification earns one.
-const SYNTH_SPECIFICATIONS: &[&str] = &["examples/billing"];
+/// Two, and not both into all three. The normative example is the specification wave 6 closes its
+/// loop against and it is emitted into every target. `examples/gatepass/` is the dual-target
+/// demonstration: a component whose own words say its callers are not deployed with it, so both
+/// emitted applications serve the same HTTP surface. It is deliberately **not** emitted for the
+/// browser — that target contains a system in one tab, and a surface reached over a network is one
+/// a page would *call* rather than contain, which is a fourth target rather than this one.
+const SYNTH_SPECIFICATIONS: &[(&str, &[&str])] = &[
+    ("examples/billing", &["rust", "go", "web"]),
+    ("examples/gatepass", &["rust", "go"]),
+];
 
 /// Where those workspaces are committed.
 ///
@@ -112,17 +126,125 @@ const WEB_REALIZATIONS: &[(&str, &str, &str)] =
 /// The target the browser realization is built for.
 const WASM: &str = "wasm32-unknown-unknown";
 
+/// The demonstrations the gate executes: one specification, two synthesised applications, one
+/// surface.
+///
+/// The proof W7.5 owes, and it is run rather than asserted. Both binaries are built from the
+/// committed trees plus their hand-written realizations, started on ephemeral ports, driven through
+/// the same exchanges, and compared — their startup records outside `runtime`, their status codes,
+/// their bodies as values, and the two documents they publish about themselves byte for byte.
+const DEMONSTRATIONS: &[Demonstration] = &[Demonstration {
+    directory: "gatepass",
+    component: "pass-service",
+    package: "gatepass-realization",
+    binary: "gatepass-server",
+    module: "examples/gatepass-go-realization",
+    command: "./cmd/gatepass-server",
+    exchanges: &[
+        Exchange {
+            what: "a visit is registered",
+            method: "POST",
+            path: "/visits/commands/register-visit",
+            body: Some(
+                r#"{"visitor":"Ada Lovelace","building":"North","host":{"kind":"employee","value":"e-42"},"expected_minutes":90,"expected_stay":"PT90M","deposit":{"amount":"25.00","currency":"EUR"},"escorts":["Grace Hopper"],"notes":{"badge":"visitor"},"on_watchlist":false}"#,
+            ),
+            status: 202,
+        },
+        Exchange {
+            what: "a visit of no length is refused, on domain grounds",
+            method: "POST",
+            path: "/visits/commands/register-visit",
+            body: Some(
+                r#"{"visitor":"Nobody At All","building":"South","host":{"kind":"contractor","value":"v-9"},"expected_minutes":0,"expected_stay":"PT0M","deposit":{"amount":"0.00","currency":"EUR"},"escorts":[],"notes":{},"on_watchlist":true}"#,
+            ),
+            status: 422,
+        },
+        Exchange {
+            what: "the read-your-writes projection holds the visit that was just registered",
+            method: "GET",
+            path: "/visits/views/expected",
+            body: None,
+            status: 200,
+        },
+        Exchange {
+            what: "and so does the unfiltered one, with every field the row declares",
+            method: "GET",
+            path: "/visits/views/by-id",
+            body: None,
+            status: 200,
+        },
+        Exchange {
+            what: "a body the schema refuses is a bad request, not a domain refusal",
+            method: "POST",
+            path: "/visits/commands/register-visit",
+            body: Some(r#"{"visitor":"Ada Lovelace"}"#),
+            status: 400,
+        },
+        Exchange {
+            what: "a path the contract does not declare is answered by neither",
+            method: "GET",
+            path: "/visits/commands/cancel-visit",
+            body: None,
+            status: 404,
+        },
+        Exchange {
+            what: "and a declared path under an undeclared method is a 405",
+            method: "GET",
+            path: "/visits/commands/register-visit",
+            body: None,
+            status: 405,
+        },
+    ],
+}];
+
+/// One dual-target demonstration.
+struct Demonstration {
+    /// The tree under `generated/rust/` and `generated/go/`, which is the example's directory name.
+    directory: &'static str,
+    /// The served component, whose surface both applications answer.
+    component: &'static str,
+    /// The source-workspace package holding the Rust realization and its binary.
+    package: &'static str,
+    /// That package's binary.
+    binary: &'static str,
+    /// The Go realization module, relative to the repository root.
+    module: &'static str,
+    /// The command inside it that links the realization into the generated surface.
+    command: &'static str,
+    /// What both applications are driven through, in order.
+    exchanges: &'static [Exchange],
+}
+
+/// One request both applications answer, and the status the contract says they answer it with.
+struct Exchange {
+    /// What this exchange proves, for the line the gate prints.
+    what: &'static str,
+    /// The method.
+    method: &'static str,
+    /// The path.
+    path: &'static str,
+    /// The body, where the request has one.
+    body: Option<&'static str>,
+    /// The status both must answer with.
+    status: u16,
+}
+
 /// The committed realization each synthesised workspace is linked with and judged through.
 ///
-/// `(workspace directory under SYNTH, source-workspace package)`. Wave 6's acceptance criterion
-/// is executed here rather than asserted: the realization package's tests run the committed
-/// conformance suite — unchanged, digest-checked against the workspace's plan — against the
-/// system its linker assembles, and also hold that the deliberately corrupted linkage fails
-/// exactly the scenario that exists to catch it. The tests already run in the gate's `test`
-/// step; they run here too because "the generated code passes the generated tests" is this
-/// tree's acceptance criterion, and a check named `synth` that did not check it would certify
+/// `(workspace directory under SYNTH, source-workspace package)`. Wave 6's acceptance criterion is
+/// executed here rather than asserted: `billing-realization`'s tests run the committed conformance
+/// suite — unchanged, digest-checked against the workspace's plan — against the system its linker
+/// assembles, and also hold that the deliberately corrupted linkage fails exactly the scenario that
+/// exists to catch it. `gatepass-realization`'s hold its linker's obligation list equal to the
+/// committed plan's, so a specification change that moves an obligation fails here rather than
+/// leaving a linker resolving a list that no longer exists. The tests already run in the gate's
+/// `test` step; they run here too because "the generated code passes the tests it did not write" is
+/// this tree's acceptance criterion, and a check named `synth` that did not check it would certify
 /// bytes rather than behaviour.
-const REALIZATIONS: &[(&str, &str)] = &[("billing", "billing-realization")];
+const REALIZATIONS: &[(&str, &str)] = &[
+    ("billing", "billing-realization"),
+    ("gatepass", "gatepass-realization"),
+];
 
 /// The subtrees of `generated/` the projection task does not own.
 ///
@@ -218,9 +340,9 @@ fn main() -> Result<()> {
         Command::Fmt { check } => fmt(check),
         Command::Synth { check } => {
             let root = workspace_root();
-            let specifications: Vec<PathBuf> = SYNTH_SPECIFICATIONS
+            let specifications: Vec<(PathBuf, &[&str])> = SYNTH_SPECIFICATIONS
                 .iter()
-                .map(|specification| root.join(specification))
+                .map(|(specification, targets)| (root.join(specification), *targets))
                 .collect();
             synth(
                 &specifications,
@@ -228,7 +350,14 @@ fn main() -> Result<()> {
                 &root.join(SYNTH_GO),
                 &root.join(SYNTH_WEB),
                 check,
-            )
+            )?;
+            // After the trees are settled and built, never inside `synth`: a demonstration is a
+            // property of the *committed* applications — the two binaries a reader can start — and
+            // running it against a scratch copy would be running it against something nobody ships.
+            for demonstration in DEMONSTRATIONS {
+                demonstrate(demonstration)?;
+            }
+            Ok(())
         }
     }
 }
@@ -807,7 +936,7 @@ struct Synthesized {
 /// drifted fails the diff, and one that matches but no longer compiles — a toolchain moved, a hand
 /// edit slipped through a force-add — fails the check that actually claims "this builds".
 fn synth(
-    specifications: &[PathBuf],
+    specifications: &[(PathBuf, &[&str])],
     out: &Path,
     go_out: &Path,
     web_out: &Path,
@@ -816,10 +945,19 @@ fn synth(
     let mut workspaces = Vec::new();
     let mut modules = Vec::new();
     let mut pages = Vec::new();
-    for specification in specifications {
-        workspaces.push(synth_of(specification, "rust")?);
-        modules.push(synth_of(specification, "go")?);
-        pages.push(synth_of(specification, "web")?);
+    for (specification, targets) in specifications {
+        for target in *targets {
+            let synthesised = synth_of(specification, target)?;
+            match *target {
+                "rust" => workspaces.push(synthesised),
+                "go" => modules.push(synthesised),
+                "web" => pages.push(synthesised),
+                other => bail!(
+                    "`{other}` is not an emission target `cargo xtask synth` knows; the emitters \
+                     are `rust`, `go` and `web`"
+                ),
+            }
+        }
     }
 
     // Filed under the example directory, exactly as the suites are: `generated/rust/billing/`
@@ -912,6 +1050,495 @@ fn synth(
     }
     for page in &pages {
         check_generated_page(&web_out.join(&page.directory), &page.directory)?;
+    }
+    Ok(())
+}
+
+// ---- the dual-target demonstration -------------------------------------------------------------
+
+/// Runs one demonstration: two applications, one specification, one surface.
+///
+/// The claim W7.5 makes is not "both trees compile" — `synth-check` already had that — but "both
+/// *behave the same way through the surface the specification determines*", and behaviour is only
+/// ever checked by running it. So both binaries are built from the committed trees plus their
+/// hand-written realizations, started on an ephemeral port each, driven through the same exchanges,
+/// and compared four ways: the startup record outside `runtime`, the status of every answer, every
+/// body as a value, and the two documents they publish about themselves byte for byte.
+///
+/// **Never skips.** A missing toolchain fails and names itself, exactly as every other step here
+/// does. Ephemeral ports throughout, a generous readiness timeout, and both children reaped by a
+/// guard whose `Drop` runs on every path out of this function.
+fn demonstrate(demonstration: &Demonstration) -> Result<()> {
+    let root = workspace_root();
+    let rust_binary = build_rust_demonstration(demonstration, &root)?;
+    let go_binary = build_go_demonstration(demonstration, &root)?;
+
+    let mut rust = Application::start("rust", &rust_binary, &root)?;
+    let mut go = Application::start("go", &go_binary, &root)?;
+
+    let rust_startup = rust.startup()?;
+    let go_startup = go.startup()?;
+    compare_startup(demonstration, &rust_startup, &go_startup)?;
+
+    for exchange in demonstration.exchanges {
+        let from_rust = rust.exchange(exchange)?;
+        let from_go = go.exchange(exchange)?;
+        if from_rust.status != exchange.status || from_go.status != exchange.status {
+            bail!(
+                "`{} {}` — {} — was answered {} by the Rust application and {} by the Go one; the \
+                 committed contract declares {}. A status is the outcome the specification \
+                 declares, so two applications answering differently means one of them is not \
+                 serving this specification",
+                exchange.method,
+                exchange.path,
+                exchange.what,
+                from_rust.status,
+                from_go.status,
+                exchange.status
+            );
+        }
+        let rust_body = parse_body(&from_rust, "rust", exchange)?;
+        let go_body = parse_body(&from_go, "go", exchange)?;
+        // Values rather than bytes: a JSON object is unordered, and the two languages build one
+        // through two writers. What must agree is what the body *says* — every member, at every
+        // depth, including the order of any array, because an array's order is a claim.
+        if rust_body != go_body {
+            bail!(
+                "`{} {}` — {} — was answered with two different bodies:\n  rust: {}\n  go:   {}",
+                exchange.method,
+                exchange.path,
+                exchange.what,
+                from_rust.body,
+                from_go.body
+            );
+        }
+    }
+
+    compare_documents(demonstration, &root, &mut rust, &mut go)?;
+
+    println!(
+        "dual-target demonstration for `{}`: {} exchange(s) answered identically by both \
+         applications, one startup record outside `runtime`, both published documents byte-identical",
+        demonstration.directory,
+        demonstration.exchanges.len()
+    );
+    Ok(())
+}
+
+/// Builds the Rust half: the committed workspace linked with its hand-written realization.
+fn build_rust_demonstration(demonstration: &Demonstration, root: &Path) -> Result<PathBuf> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let target = root.join("target/ess-synth-demonstration");
+    let output = std::process::Command::new(&cargo)
+        .args([
+            "build",
+            "--package",
+            demonstration.package,
+            "--bin",
+            demonstration.binary,
+        ])
+        .current_dir(root)
+        .env("CARGO_TARGET_DIR", &target)
+        .output()
+        .with_context(|| format!("running {cargo:?} build --bin {}", demonstration.binary))?;
+    if !output.status.success() {
+        bail!(
+            "`{}` does not build, so the Rust half of the demonstration cannot run:\n{}{}",
+            demonstration.binary,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(target.join("debug").join(demonstration.binary))
+}
+
+/// Builds the Go half: the committed module linked with its hand-written realization.
+fn build_go_demonstration(demonstration: &Demonstration, root: &Path) -> Result<PathBuf> {
+    let module = root.join(demonstration.module);
+    let binary = root
+        .join("target/ess-synth-demonstration")
+        .join(format!("{}-go", demonstration.binary));
+    if let Some(parent) = binary.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+    }
+    // The hand-written half is held to the same bar the generated one is. It is not emitted, so
+    // `gofmt` may legitimately rewrite it — which is exactly why the check belongs here: a
+    // realization that drifts out of `gofmt` or fails `go vet` is a realization nobody would
+    // notice, because nothing else in this repository compiles it.
+    let formatting = go_tool("gofmt", &["-l", "."], &module, "checking the formatting")?;
+    let unformatted = String::from_utf8_lossy(&formatting.stdout);
+    if !unformatted.trim().is_empty() {
+        bail!(
+            "`gofmt` would rewrite {} file(s) in `{}`:\n{unformatted}run `gofmt -w .` there",
+            unformatted.split_whitespace().count(),
+            demonstration.module
+        );
+    }
+    let vetting = go_tool("go", &["vet", "./..."], &module, "vetting")?;
+    if !vetting.status.success() {
+        bail!(
+            "`go vet ./...` fails in `{}`:\n{}{}",
+            demonstration.module,
+            String::from_utf8_lossy(&vetting.stdout),
+            String::from_utf8_lossy(&vetting.stderr)
+        );
+    }
+    let output = go_tool(
+        "go",
+        &[
+            "build",
+            "-o",
+            &binary.to_string_lossy(),
+            demonstration.command,
+        ],
+        &module,
+        "building the Go half of the demonstration",
+    )?;
+    if !output.status.success() {
+        bail!(
+            "`{}` does not build, so the Go half of the demonstration cannot run:\n{}{}",
+            demonstration.module,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(binary)
+}
+
+/// One running application, and the promise that it is reaped.
+///
+/// The child is killed and waited for by [`Drop`], so every path out of [`demonstrate`] — including
+/// the `?` on the first comparison that fails — leaves no process behind. A gate that leaks a
+/// listener leaks it into the next job.
+struct Application {
+    /// Which target it was synthesised into, for a message.
+    language: &'static str,
+    /// The process.
+    child: std::process::Child,
+    /// Its standard output, which is where the startup record arrives.
+    lines: std::sync::mpsc::Receiver<String>,
+    /// The port it bound, once the record has been read.
+    port: u16,
+}
+
+/// How long to wait for an application to say it is listening.
+///
+/// Generous on purpose: this runs on CI machines under load, and a readiness timeout that is tight
+/// enough to be occasionally wrong is a flaky gate, which is worse than a slow one.
+const READY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long to wait for one answer.
+const ANSWER: std::time::Duration = std::time::Duration::from_secs(30);
+
+impl Application {
+    /// Starts one on an ephemeral port and begins reading its standard output.
+    fn start(language: &'static str, binary: &Path, root: &Path) -> Result<Self> {
+        let mut child = std::process::Command::new(binary)
+            .current_dir(root)
+            // Port 0, always: two applications run side by side here and a fixed port would make
+            // this step fail whenever anything else on the machine happened to hold it.
+            .env("PORT", "0")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .with_context(|| format!("starting {}", binary.display()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .context("the application was started with a piped standard output")?;
+        let (sender, lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            use std::io::BufRead as _;
+            for line in std::io::BufReader::new(stdout).lines() {
+                let Ok(line) = line else { return };
+                if sender.send(line).is_err() {
+                    return;
+                }
+            }
+        });
+        Ok(Self {
+            language,
+            child,
+            lines,
+            port: 0,
+        })
+    }
+
+    /// Reads the three startup lines, and learns the port from them.
+    fn startup(&mut self) -> Result<Vec<serde_json::Value>> {
+        let mut record = Vec::new();
+        for expected in ["system.starting", "surface.serving", "system.ready"] {
+            let line = self.lines.recv_timeout(READY).with_context(|| {
+                format!(
+                    "the {} application did not write its `{expected}` line within {} seconds; a \
+                     startup record is how this step learns the port, so there is nothing to \
+                     connect to",
+                    self.language,
+                    READY.as_secs()
+                )
+            })?;
+            let value: serde_json::Value = serde_json::from_str(&line).with_context(|| {
+                format!(
+                    "the {} application's startup line is not JSON: {line}",
+                    self.language
+                )
+            })?;
+            if value["event"] != serde_json::Value::String(expected.to_owned()) {
+                bail!(
+                    "the {} application wrote `{}` where the startup record declares `{expected}`",
+                    self.language,
+                    value["event"]
+                );
+            }
+            record.push(value);
+        }
+        self.port = u16::try_from(
+            record[1]["runtime"]["port"]
+                .as_u64()
+                .context("the `surface.serving` line carries the port it bound in `runtime`")?,
+        )
+        .context("a port is sixteen bits")?;
+        Ok(record)
+    }
+
+    /// Sends one request and reads the whole answer.
+    fn exchange(&mut self, exchange: &Exchange) -> Result<Answer> {
+        request(
+            self.port,
+            exchange.method,
+            exchange.path,
+            exchange.body,
+            self.language,
+        )
+    }
+}
+
+impl Drop for Application {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// One answer, as much of it as this step reads.
+struct Answer {
+    /// The status code.
+    status: u16,
+    /// The media type the answer declared.
+    content_type: String,
+    /// The body.
+    body: String,
+}
+
+/// One HTTP/1.1 request, over a fresh connection.
+///
+/// Hand-written for the reason everything else in this repository is: `task check` takes no
+/// dependency it does not need, and a client that sends one request and reads one answer is sixty
+/// lines. Both applications answer `Connection: close`, so the body is whatever arrives before the
+/// socket does.
+fn request(
+    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    language: &str,
+) -> Result<Answer> {
+    use std::io::{Read as _, Write as _};
+
+    let address = format!("127.0.0.1:{port}");
+    let mut stream = std::net::TcpStream::connect(&address)
+        .with_context(|| format!("connecting to the {language} application at {address}"))?;
+    stream
+        .set_read_timeout(Some(ANSWER))
+        .context("setting a read timeout")?;
+    let mut head = format!("{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n");
+    if let Some(body) = body {
+        let _ = write!(
+            head,
+            "Content-Type: application/json\r\nContent-Length: {}\r\n",
+            body.len()
+        );
+    }
+    head.push_str("\r\n");
+    stream
+        .write_all(head.as_bytes())
+        .with_context(|| format!("sending {method} {path} to the {language} application"))?;
+    if let Some(body) = body {
+        stream
+            .write_all(body.as_bytes())
+            .with_context(|| format!("sending the body of {method} {path}"))?;
+    }
+    stream.flush().context("flushing the request")?;
+
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).with_context(|| {
+        format!("reading the {language} application's answer to {method} {path}")
+    })?;
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    let (head, body) = text
+        .split_once("\r\n\r\n")
+        .with_context(|| format!("the {language} answer to {method} {path} has no header break"))?;
+    let mut lines = head.split("\r\n");
+    let status_line = lines
+        .next()
+        .with_context(|| format!("the {language} answer to {method} {path} has no status line"))?;
+    let status: u16 = status_line
+        .split(' ')
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .with_context(|| format!("`{status_line}` is not an HTTP status line"))?;
+    let content_type = lines
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-type")
+                .then(|| value.trim().to_owned())
+        })
+        .unwrap_or_default();
+    Ok(Answer {
+        status,
+        content_type,
+        body: body.to_owned(),
+    })
+}
+
+/// One answer's body, as a value.
+fn parse_body(answer: &Answer, language: &str, exchange: &Exchange) -> Result<serde_json::Value> {
+    serde_json::from_str(&answer.body).with_context(|| {
+        format!(
+            "the {language} application's answer to `{} {}` is not JSON: {}",
+            exchange.method, exchange.path, answer.body
+        )
+    })
+}
+
+/// Holds two startup records to being the same record outside `runtime`.
+fn compare_startup(
+    demonstration: &Demonstration,
+    rust: &[serde_json::Value],
+    go: &[serde_json::Value],
+) -> Result<()> {
+    for (position, (left, right)) in rust.iter().zip(go).enumerate() {
+        let stripped_left = without_runtime(left)?;
+        let stripped_right = without_runtime(right)?;
+        if stripped_left != stripped_right {
+            bail!(
+                "the two applications synthesised from `{}` disagree about startup line {}:\n  \
+                 rust: {stripped_left}\n  go:   {stripped_right}\nEverything outside `runtime` is \
+                 derived from the specification, so a difference here is a difference in what the \
+                 two believe they are",
+                demonstration.directory,
+                position + 1
+            );
+        }
+    }
+    Ok(())
+}
+
+/// One startup line without the member that is a fact about the process rather than the model.
+///
+/// It **removes** `runtime` and refuses a line that has none, rather than comparing a chosen list
+/// of members: a normalizer that listed what to compare would silently stop comparing a member the
+/// record gains tomorrow, which is exactly the drift this whole step exists to catch.
+fn without_runtime(line: &serde_json::Value) -> Result<serde_json::Value> {
+    let mut object = line
+        .as_object()
+        .context("a startup line is a JSON object")?
+        .clone();
+    object
+        .remove("runtime")
+        .context("a startup line carries a `runtime` member holding what is true of the process")?;
+    Ok(serde_json::Value::Object(object))
+}
+
+/// Holds the two published documents to being the committed bytes, on both applications.
+fn compare_documents(
+    demonstration: &Demonstration,
+    root: &Path,
+    rust: &mut Application,
+    go: &mut Application,
+) -> Result<()> {
+    for (path, committed, media) in [
+        (
+            "/openapi.json",
+            root.join(SYNTH)
+                .join(demonstration.directory)
+                .join("crates")
+                .join(format!("{}-server", demonstration.directory))
+                .join("src")
+                .join(format!("{}.openapi.json", demonstration.component)),
+            "application/json",
+        ),
+        (
+            "/docs",
+            root.join(SYNTH)
+                .join(demonstration.directory)
+                .join("crates")
+                .join(format!("{}-server", demonstration.directory))
+                .join("src")
+                .join(format!("{}.docs.md", demonstration.component)),
+            "text/markdown; charset=utf-8",
+        ),
+    ] {
+        let exchange = Exchange {
+            what: "the document the surface publishes about itself",
+            method: "GET",
+            path,
+            body: None,
+            status: 200,
+        };
+        let from_rust = rust.exchange(&exchange)?;
+        let from_go = go.exchange(&exchange)?;
+        let expected = fs::read_to_string(&committed)
+            .with_context(|| format!("reading {}", committed.display()))?;
+        for (language, answer) in [("rust", &from_rust), ("go", &from_go)] {
+            if answer.status != 200 {
+                bail!(
+                    "the {language} application answered `GET {path}` with {}",
+                    answer.status
+                );
+            }
+            if answer.content_type != media {
+                bail!(
+                    "the {language} application serves `{path}` as `{}` where the other serves \
+                     `{media}`",
+                    answer.content_type
+                );
+            }
+            if answer.body != expected {
+                bail!(
+                    "the {language} application serves `{path}` with bytes that are not the \
+                     committed {}'s. A served document that is not the reviewed one is a contract \
+                     nobody approved",
+                    committed.display()
+                );
+            }
+        }
+        // Asserted separately from the comparison against the committed file, because two
+        // applications agreeing on the wrong bytes and two applications disagreeing are different
+        // defects and deserve different sentences.
+        if from_rust.body != from_go.body {
+            bail!(
+                "the two applications publish different bytes at `{path}`, so a caller reading the \
+                 contract gets a different answer depending on which one it reached"
+            );
+        }
+        // The Go tree carries its own copy, embedded from its own package directory. It must be
+        // the same file: two committed copies of one document are two documents the moment one is
+        // regenerated and the other is not.
+        let go_copy = root
+            .join(SYNTH_GO)
+            .join(demonstration.directory)
+            .join("server")
+            .join(committed.file_name().unwrap_or_default());
+        let go_committed = fs::read_to_string(&go_copy)
+            .with_context(|| format!("reading {}", go_copy.display()))?;
+        if go_committed != expected {
+            bail!(
+                "{} and {} are two copies of one document and their bytes differ",
+                committed.display(),
+                go_copy.display()
+            );
+        }
     }
     Ok(())
 }
@@ -1208,9 +1835,10 @@ fn check_realization(workspace: &str, package: &str) -> Result<()> {
         .with_context(|| format!("running {cargo:?} test --package {package}"))?;
     if !output.status.success() {
         bail!(
-            "the committed suite no longer holds against `generated/rust/{workspace}` linked \
-             with `{package}` — either the honest linkage fails a scenario it must pass, or the \
-             corrupted one no longer fails the scenario that exists to catch it:\n{}{}",
+            "`generated/rust/{workspace}` linked with `{package}` no longer holds what that \
+             realization asserts about it — a scenario of the committed suite, the plan's \
+             obligation list, or the corrupted linkage failing exactly the scenario that exists \
+             to catch it:\n{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
@@ -1447,6 +2075,43 @@ const GO_INDEX_PREAMBLE: &[&str] = &[
     "is a fact about the model. Standard library only, and a module path under the reserved",
     "`example.invalid` domain, so nothing here can be mistaken for something publishable.",
     "",
+    "## The second transport, and the record two applications write",
+    "",
+    "A component whose specification says `reached_by: network` has callers that are not",
+    "deployed with it, so its surface exists on a wire. *Which* wire is derived rather than",
+    "chosen: this repository projects exactly one contract for a command surface — the OpenAPI",
+    "document under [`generated/openapi/`](../openapi) — and an OpenAPI document is an HTTP",
+    "contract, so a server speaking anything else would contradict the document committed beside",
+    "it. The emitted surface answers exactly the paths that document declares, plus",
+    "`GET /openapi.json` and `GET /docs`, which serve the committed contract and the committed",
+    "prose byte for byte. A path the contract does not declare is a 404; a declared path under",
+    "another method is a 405; neither is a status the contract declares, because both are facts",
+    "about a transport rather than about a command.",
+    "",
+    "**The startup record.** Every served application writes three lines of JSON to standard",
+    "output before it answers anything, and every member of them is derived from the",
+    "specification — except `runtime`, which is the process's own: the language it was",
+    "synthesised into, the address it bound and the port it took.",
+    "",
+    "| line | carries |",
+    "| --- | --- |",
+    "| `system.starting` | the system, its version, the model digest, the contract digest, every component, and the plan's disposition counts |",
+    "| `surface.serving` | the served component, its declared reach, the transport, the number of routes, and every route as method, path, what it serves and the construct it serves |",
+    "| `system.ready` | the system, and how many surfaces this process serves |",
+    "",
+    "The split is the whole comparison. Two applications synthesised from one specification must",
+    "agree on every byte **outside** `runtime`, and `cargo xtask synth` starts both, reads their",
+    "records, strips `runtime` and compares — so a member that moved into `runtime` to make a",
+    "comparison pass would be a member that stopped being compared, and a member the record",
+    "gains tomorrow is compared without anyone editing the comparison.",
+    "",
+    "The Go half of a served surface is `net/http` and `encoding/json`, both standard library, and",
+    "generated codecs beside them: a generated type carries an unexported field, which",
+    "`encoding/json` cannot see, and exporting it would undo the distinctness the newtype encoding",
+    "exists for. The hand-written realization that links into it is a module of its own —",
+    "[`examples/gatepass-go-realization`](../../examples/gatepass-go-realization) — reaching this",
+    "tree through a filesystem `replace`, so nothing here resolves over a network either.",
+    "",
     "| module | generated from | generated | obligations | refused | weakened | target-refused | plan | target notes |",
     "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
 ];
@@ -1562,6 +2227,36 @@ const SYNTH_INDEX_PREAMBLE: &[&str] = &[
     "D-2). `cargo xtask synth` then executes the committed conformance suite, unchanged, against",
     "that linked system: 27 of 27 scenarios must pass, and the deliberately corrupted variant",
     "beside the honest one must fail exactly the scenario that exists to catch it.",
+    "",
+    "## The second transport, and the record two applications write",
+    "",
+    "A component whose specification says `reached_by: network` has callers that are not",
+    "deployed with it, so its surface exists on a wire. *Which* wire is derived rather than",
+    "chosen: this repository projects exactly one contract for a command surface — the OpenAPI",
+    "document under [`generated/openapi/`](../openapi) — and an OpenAPI document is an HTTP",
+    "contract, so a server speaking anything else would contradict the document committed beside",
+    "it. The emitted surface answers exactly the paths that document declares, plus",
+    "`GET /openapi.json` and `GET /docs`, which serve the committed contract and the committed",
+    "prose byte for byte. A path the contract does not declare is a 404; a declared path under",
+    "another method is a 405; neither is a status the contract declares, because both are facts",
+    "about a transport rather than about a command.",
+    "",
+    "**The startup record.** Every served application writes three lines of JSON to standard",
+    "output before it answers anything, and every member of them is derived from the",
+    "specification — except `runtime`, which is the process's own: the language it was",
+    "synthesised into, the address it bound and the port it took.",
+    "",
+    "| line | carries |",
+    "| --- | --- |",
+    "| `system.starting` | the system, its version, the model digest, the contract digest, every component, and the plan's disposition counts |",
+    "| `surface.serving` | the served component, its declared reach, the transport, the number of routes, and every route as method, path, what it serves and the construct it serves |",
+    "| `system.ready` | the system, and how many surfaces this process serves |",
+    "",
+    "The split is the whole comparison. Two applications synthesised from one specification must",
+    "agree on every byte **outside** `runtime`, and `cargo xtask synth` starts both, reads their",
+    "records, strips `runtime` and compares — so a member that moved into `runtime` to make a",
+    "comparison pass would be a member that stopped being compared, and a member the record",
+    "gains tomorrow is compared without anyone editing the comparison.",
     "",
     "| workspace | generated from | generated | obligations | refused | plan |",
     "| --- | --- | --- | --- | --- | --- |",
@@ -2315,11 +3010,11 @@ mod tests {
 
     // ---- the synthesised workspaces --------------------------------------------------------------
 
-    /// The specifications a workspace is synthesised for, read where they live.
-    fn synth_specifications() -> Vec<PathBuf> {
+    /// The specifications a tree is synthesised for, read where they live, with their targets.
+    fn synth_specifications() -> Vec<(PathBuf, &'static [&'static str])> {
         SYNTH_SPECIFICATIONS
             .iter()
-            .map(|specification| workspace_root().join(specification))
+            .map(|(specification, targets)| (workspace_root().join(specification), *targets))
             .collect()
     }
 

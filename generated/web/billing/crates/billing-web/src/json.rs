@@ -4,7 +4,7 @@
 // compiler 0.1.0 · generator 0.1.0
 // do not edit: regenerate with `protocol ess synthesize --target web`
 
-//! JSON at the browser boundary: a reader, a writer, and the base64 codec `Bytes` needs.
+//! JSON at this system's boundary: a reader, a writer, and the base64 codec `Bytes` needs.
 //!
 //! Written here rather than taken from a crate because this workspace has no dependencies: it is
 //! built inside a gate that reaches no network. The surface is exactly what the generated `wire`
@@ -12,11 +12,10 @@
 
 use std::fmt;
 
-/// How deep a document from the page may nest before it is refused.
+/// How deep a document from a caller may nest before it is refused.
 ///
-/// A browser can post anything, and a recursive reader with no limit turns a hostile document
-/// into a stack overflow — which in WebAssembly is a trap the page cannot catch and cannot
-/// report. Sixty-four is far past any model this emitter can produce: the specification's own
+/// A caller can send anything, and a recursive reader with no limit turns a hostile document
+/// into a stack overflow — which is a crash the process cannot catch and cannot report. Sixty-four is far past any model this emitter can produce: the specification's own
 /// type references are refused past thirty-two.
 const DEPTH: usize = 64;
 
@@ -461,7 +460,7 @@ const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwx
 
 /// A value that was not what the model's declaration says it is.
 ///
-/// Carries the path it was reached at, because a page posting a nested command input gets one
+/// Carries the path it was reached at, because a caller sending a nested command input gets one
 /// message and "expected a string" without a path is a message nobody can act on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodeError {

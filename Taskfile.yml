@@ -78,7 +78,8 @@ tasks:
   synth:
     desc: >-
       Regenerate generated/rust/, generated/go/ and generated/web/ — the three trees the
-      specifications determine, from one language-neutral plan.
+      specifications determine, from one language-neutral plan — then run the dual-target
+      demonstration against the two applications the committed trees and their realizations build.
     cmds:
       - cargo xtask synth
 
@@ -86,9 +87,11 @@ tasks:
     desc: >-
       Fail if any synthesised tree differs from what the specifications determine, no longer builds
       (cargo check; gofmt -l, go build, go vet; cargo build --target wasm32-unknown-unknown), if the
-      emitted page calls an export its module does not have, or if the committed suite or the
-      browser boundary no longer holds. Needs the Go toolchain, the wasm32-unknown-unknown target
-      and Node, and says which is missing rather than skipping.
+      emitted page calls an export its module does not have, if the committed suite or the browser
+      boundary no longer holds, or if the two applications synthesised from examples/gatepass stop
+      behaving as one system — both are started on ephemeral ports and their startup records,
+      statuses, bodies and published documents are compared. Needs the Go toolchain, the
+      wasm32-unknown-unknown target and Node, and says which is missing rather than skipping.
     cmds:
       - cargo xtask synth --check
 

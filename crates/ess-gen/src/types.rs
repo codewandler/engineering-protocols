@@ -145,7 +145,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ess_compiler::ir::{
     ResolvedBody, ResolvedCommand, ResolvedError, ResolvedEvent, ResolvedField, ResolvedType,
-    ResolvedTypeRef, TypeHandle,
+    ResolvedTypeRef, ResolvedView, TypeHandle,
 };
 use ess_compiler::EssIr;
 use ess_domain::entity::Invariant;
@@ -673,6 +673,9 @@ pub(crate) const EVENT_PAYLOAD: &str = "event-payload";
 /// An error's payload, as a message.
 pub(crate) const ERROR_PAYLOAD: &str = "error-payload";
 
+/// One row of a view, as a message.
+pub(crate) const VIEW_ROW: &str = "view-row";
+
 /// One message that crosses this system's boundary.
 ///
 /// Shared rather than per projection because the *payload* is the thing the three projections
@@ -729,6 +732,21 @@ impl<'a> Message<'a> {
         }
     }
 
+    /// One row of a view.
+    ///
+    /// A message like the other three, and for the same reason: a row crosses the system's boundary
+    /// the moment a component declares it is reached from outside, and a projection that described
+    /// it its own way would be the fourth copy of the type mapping this crate exists to prevent.
+    pub(crate) fn of_view(view: &'a ResolvedView) -> Self {
+        Self {
+            kind: VIEW_ROW,
+            name: &view.name,
+            title: format!("{} row", view.naming.display_or(&view.name)),
+            description: view.naming.summary.clone(),
+            fields: &view.fields,
+        }
+    }
+
     /// Which subdirectory a document describing this message belongs in.
     ///
     /// Derived from the kind rather than stored beside it, so the two cannot disagree.
@@ -736,6 +754,7 @@ impl<'a> Message<'a> {
         match self.kind {
             COMMAND_INPUT => "commands",
             EVENT_PAYLOAD => "events",
+            VIEW_ROW => "views",
             _ => "errors",
         }
     }

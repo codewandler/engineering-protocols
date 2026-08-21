@@ -20,6 +20,7 @@ members = [
     "crates/infra-domain",
     "crates/protocol-cli",
     "examples/billing-realization",
+    "examples/gatepass-realization",
     "xtask",
 ]
 # The synthesised workspaces under `generated/rust/` are outputs, not members: each carries its own
@@ -28,6 +29,7 @@ members = [
 # source workspace would put generated code under the source gate's lints and versions.
 exclude = [
     "generated/rust/billing",
+    "generated/rust/gatepass",
     # The browser realization and the host that links one into it, excluded for two different
     # reasons that land in the same place. The generated bridge is an output, like every tree under
     # `generated/`. `examples/billing-web` is hand-written and still cannot be a member: a

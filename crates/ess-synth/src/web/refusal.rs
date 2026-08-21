@@ -1,6 +1,6 @@
 //! What a browser cannot reach, decided before a line is emitted.
 //!
-//! One rule, and it is about the *page* rather than about the language: a command is sent through
+//! Two rules, and neither is about a language. The first is about the *page*: a command is sent through
 //! the port of the component that accepts it, so a command the specification does not land on
 //! exactly one component has no port to be sent to. The page still lists it — a surface that
 //! silently omits a declared command reads as complete and is not — and offers no form for it,
@@ -9,6 +9,13 @@
 //! It is [`RefusalStage::Target`](crate::plan::RefusalStage::Target) and not a planning refusal
 //! because the *contract* is generated: the Rust target emits the input type and the outcome enum
 //! whatever the topology says. What no target can do with it and this one cannot is dispatch it.
+//!
+//! The second is about the *tab*: a component declared `reached_by: network` has a surface that
+//! exists on a wire, and this target holds the system in the page rather than across one. A tab
+//! cannot bind a socket, and a page that reached the surface over `fetch` would be reaching a
+//! server this tree does not contain. So the transport is refused here and served by the other two
+//! targets — which is precisely the distinction [`RefusalStage::Target`] exists to make: switching
+//! targets dissolves it.
 
 use std::collections::BTreeMap;
 
@@ -75,6 +82,23 @@ impl TargetRefusals {
                     source,
                 },
                 detail,
+            );
+        }
+        for component in ir.components.values() {
+            let source = component.name.to_string();
+            if !plan.is_generated(CapabilityKind::ComponentTransport, &source) {
+                continue;
+            }
+            refused.insert(
+                Capability {
+                    kind: CapabilityKind::ComponentTransport,
+                    source,
+                },
+                "the specification says this component's callers are not deployed with it, so its \
+                 surface is served over HTTP — and this target is a page holding the system in one \
+                 tab, which binds no socket. A page that fetched the surface instead would be \
+                 reaching a server this tree does not contain"
+                    .to_owned(),
             );
         }
         Self { refused }

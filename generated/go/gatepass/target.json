@@ -1,0 +1,64 @@
+{
+  "provenance": {
+    "system": "gatepass",
+    "specification_version": "v1",
+    "source_digest": "f2e0f8ff51c077fa1c713d8151544379bafac36a5a927e71c685042d53ab6e61",
+    "contract_digest": "e6e58e055d24f8f494dcff274f55e723d967f9d1f9aea16641bb8dacbb71171e",
+    "compiler_version": "0.1.0",
+    "generator_version": "0.1.0"
+  },
+  "target": "go",
+  "weakenings": [
+    {
+      "guarantee": "handling a closed set of variants is exhaustive: a `match` that forgets one does not compile",
+      "instead": "the set stays closed — an undeclared variant cannot implement the sealed interface's unexported marker from another package — but a `switch` over it is not checked, so a consumer that forgets a variant compiles and falls through. Go has no exhaustiveness check and none can be emitted; every generated sealed interface says so in its own doc comment",
+      "affects": [
+        "domain_type",
+        "entity_lifecycle",
+        "command_contract",
+        "binding_delivery",
+        "component_port",
+        "component_transport"
+      ]
+    },
+    {
+      "guarantee": "a value of a generated type exists only where a generated constructor or transition produced one",
+      "instead": "Go gives every type a zero value that no constructor has to produce, so `Email{}`, an invoice resting in a state nothing moved it to, and a nil variant of a sealed interface are all spellable from any package. The unexported field stops a *populated* value being forged; nothing in the language stops the empty one existing",
+      "affects": [
+        "domain_type",
+        "entity_lifecycle",
+        "command_contract",
+        "event_type",
+        "error_type",
+        "view_type"
+      ]
+    },
+    {
+      "guarantee": "refining a runtime state into the typed lifecycle is total: every declared state has an arm and no other state can reach it",
+      "instead": "the snapshot's state field is a sealed interface, whose zero value is nil and names no declared state — the previous row's weakening, reaching this one. Refinement therefore answers `(value, ok)`, and a caller that ignores the second result gets the interface's own zero value",
+      "affects": [
+        "entity_lifecycle"
+      ]
+    },
+    {
+      "guarantee": "every generated type compares by value",
+      "instead": "Go defines `==` only for comparable types, so a generated type carrying a list, a map or bytes cannot be compared at all — and no deep comparison is emitted in its place, because a hand-written equality is behaviour, and behaviour is not synthesised",
+      "affects": [
+        "domain_type",
+        "entity_lifecycle",
+        "command_contract",
+        "event_type",
+        "error_type",
+        "view_type"
+      ]
+    },
+    {
+      "guarantee": "a JSON object leaves this system with its members in the order the specification declares them",
+      "instead": "the served bodies are built as `map[string]any` and written by `encoding/json`, which sorts a map's keys — so a body's members come out alphabetical here and in declaration order in the first target. The two are the same *value*, no published contract states an order, and every consumer that parses rather than greps is unaffected; what is lost is the ability to compare two applications' bodies byte for byte, which is why the gate compares them as values. Emitting a writer that kept the order would mean emitting a second JSON writer beside the standard library's",
+      "affects": [
+        "component_transport"
+      ]
+    }
+  ],
+  "refusals": []
+}

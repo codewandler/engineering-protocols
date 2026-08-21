@@ -316,9 +316,11 @@ already promises; and `proptest` phase 1 lands with the model changes it was que
 
 ## ESS wave 7 — the loop closed over generated code
 
-> **Scheduled, 2026-08-20, by operator instruction: run 7.1 through 7.4, then stop.** 7.5 exists on
-> the gap register as D-3 (attested evidence) and is *not* scheduled — it adds a dependency class,
-> and that acceptance is Timo's, not a wave's. Starts after wave 6.5 and the public-docs sweep.
+> **Scheduled, 2026-08-20, by operator instruction: run 7.1 through 7.4, then stop.** Re-scoped
+> since: 7.3 acquired a browser continuation, 7.4 stays deferred, and **7.5 is the dual-target
+> demonstration**, scheduled and delivered by operator instruction on 2026-08-21. Attested evidence
+> — what an earlier draft of this page called 7.5 — is not scheduled at all: it lives on the gap
+> register as D-3, it adds a dependency class, and that acceptance is Timo's, not a wave's.
 
 ### W7.1 The diff learns about generated artifacts
 
@@ -342,16 +344,27 @@ bindings enter the six-family comparison, which stops being six.
 > **Delivered.** See [`ess-wave-7-closing-the-loop.md`](ess-wave-7-closing-the-loop.md) § W7.3:
 > `generated/go/` is committed and gated (`gofmt -l`, `go build`, `go vet`), the plan's two
 > renderings are byte-identical in both trees, and what Go holds more weakly or cannot represent
-> at all is in each module's `TARGET.md`. The dual-target *demonstration* the paragraph below
-> anticipated — one application in `examples/` synthesised to both, two binaries with
-> semantically identical log output serving the same API — is **not** part of it: it needs an
-> application specification that does not exist and a runtime neither emitter produces, so it is
-> a slice of its own rather than a criterion this wave quietly failed. W7.4 stays deferred.
+> at all is in each module's `TARGET.md`. A third emitter followed under § W7.3b — the browser,
+> which is not a language at all. The dual-target *demonstration* the paragraph below anticipated
+> was **not** part of either, and became the slice of its own it deserved: W7.5, delivered.
+> W7.4 stays deferred.
 
 **Go, by decision** — reversible, and chosen *because* it lacks sum types: every outcome enum and
 tagged union forces the emitter to either encode honestly or refuse at the target stage, which is
 the first real test of "a target-specific refusal never masquerades as unsynthesizable". The plan
 does not change; that is the whole point of the seam, and W7.3 fails if it has to.
+
+### W7.5 One specification, two applications, one surface
+
+> **Delivered.** See [`ess-wave-7-closing-the-loop.md`](ess-wave-7-closing-the-loop.md) § W7.5.
+> `examples/gatepass/` is the application, and the model gained one word to make its transport
+> derivable: a component may say `reached_by: network`, which states where its callers are and
+> names no protocol. What follows is a derivation rather than a choice — this repository projects
+> exactly one contract for a command surface, the `OpenAPI` document, and that is an HTTP
+> contract. Both synthesised applications serve exactly the routes it declares, publish it and the
+> committed documentation at `/openapi.json` and `/docs`, and write the same startup record outside
+> a `runtime` member that is each process's own. `cargo xtask synth` starts both on ephemeral ports
+> and compares all of it.
 
 ### W7.4 Obligations become artifacts, and tasks
 

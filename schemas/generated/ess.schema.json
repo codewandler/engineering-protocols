@@ -870,6 +870,15 @@
             }
           ]
         },
+        "reached_by": {
+          "description": "Who reaches its accepted commands and the views its domains declare.\n\nUnstated is [`Reach::InProcess`] — the shape every specification here had before the word existed, and the one a reader assumes when nothing says otherwise.",
+          "default": "in_process",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Reach"
+            }
+          ]
+        },
         "summary": {
           "description": "What it is, in one line.",
           "default": null,
@@ -1380,6 +1389,25 @@
         }
       },
       "additionalProperties": false
+    },
+    "Reach": {
+      "description": "Where the callers of a component's surface are.\n\n# A fact about the system, not a protocol\n\nThe model has no transport construct and this is not one: neither variant names a wire format, a port, a path or a verb. What it states is who issues the commands — a question a specification answers about its own design, and the one thing a generator cannot infer. `invoice-service` and `email-service` in the normative example are reached in process, and that is why the one transport their bindings determine is an in-process log; a component reached across a network has callers that are not deployed with it, and its surface has to exist on a wire.\n\n# What follows from `network`, and what does not\n\nWhich wire is *derived*, never chosen: this repository projects exactly one contract for a component's command surface — the `OpenAPI` document `ess-gen` writes for every component — and an `OpenAPI` document is an HTTP contract. So a `network` surface is served over HTTP because that is the only contract that already exists for it, and a synthesised server that spoke anything else would contradict the document committed beside it. No variant here says `http`, and adding one would be the transport DSL design §7 sketches and this model has not taken.",
+      "oneOf": [
+        {
+          "description": "Every caller is deployed with it, so the surface never leaves the process.\n\nThe default, and the only reading of silence that does not invent a deployment: a specification that has not said where its callers are has not said its surface crosses anything.",
+          "type": "string",
+          "enum": [
+            "in_process"
+          ]
+        },
+        {
+          "description": "At least one caller is not deployed with it, so the surface crosses a process boundary.\n\nThe declaration that makes the published `OpenAPI` document load-bearing rather than documentary: something outside has to issue these commands, and the only way it can is over the contract.",
+          "type": "string",
+          "enum": [
+            "network"
+          ]
+        }
+      ]
     },
     "StateName": {
       "description": "One state of an entity's lifecycle, in UpperCamelCase, such as `Draft`.",

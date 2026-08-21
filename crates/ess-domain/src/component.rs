@@ -15,15 +15,18 @@
 //! | it accepts a command another component owns the domain of | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
 //! | two components own the same domain | [`ConflictingDeclaration`](ValidationCode::ConflictingDeclaration) |
 //! | it owns nothing, accepts nothing and publishes nothing | [`EmptyDeclaration`](ValidationCode::EmptyDeclaration) |
+//! | it is [`reached_by: network`](Reach::Network) and no route follows — it accepts no command and owns no domain that declares a view | [`EmptyDeclaration`](ValidationCode::EmptyDeclaration) |
 //!
 //! # Where each rule lives
 //!
-//! The last row is the only one a component can answer alone, so it is [`ComponentSpec::validate`]
+//! The sixth row is the only one a component can answer alone, so it is [`ComponentSpec::validate`]
 //! and it runs during conversion: an empty component never reaches a
 //! [`Specification`](crate::spec::Specification). The three reference rules need the domains,
 //! commands and events the whole specification declares — [`ComponentSpec::validate_references`].
 //! The two conflicts need the *other* components as well, which no component has in hand, so they
-//! are [`validate_components`], and that function runs all five.
+//! are [`validate_components`]. So does the last row, for a third reason: a view is declared inside
+//! a domain, so "does anything I own project a row" is a question about the domains and not about
+//! the component. That function runs all six.
 //!
 //! # Ownership is what makes a conflict a conflict
 //!
@@ -83,12 +86,89 @@ pub struct RawComponentSpec {
     /// The events it publishes.
     #[serde(default)]
     pub publishes: RawComponentSurface,
+    /// Who reaches its accepted commands and the views its domains declare.
+    ///
+    /// Unstated is [`Reach::InProcess`] — the shape every specification here had before the word
+    /// existed, and the one a reader assumes when nothing says otherwise.
+    #[serde(default)]
+    pub reached_by: Reach,
     /// What it is called on the wire and shown as.
     #[serde(default)]
     pub naming: Naming,
     /// What it is, in one line.
     #[serde(default)]
     pub summary: Option<String>,
+}
+
+/// Where the callers of a component's surface are.
+///
+/// # A fact about the system, not a protocol
+///
+/// The model has no transport construct and this is not one: neither variant names a wire format,
+/// a port, a path or a verb. What it states is who issues the commands — a question a specification
+/// answers about its own design, and the one thing a generator cannot infer. `invoice-service` and
+/// `email-service` in the normative example are reached in process, and that is why the one
+/// transport their bindings determine is an in-process log; a component reached across a network
+/// has callers that are not deployed with it, and its surface has to exist on a wire.
+///
+/// # What follows from `network`, and what does not
+///
+/// Which wire is *derived*, never chosen: this repository projects exactly one contract for a
+/// component's command surface — the `OpenAPI` document `ess-gen` writes for every component — and
+/// an `OpenAPI` document is an HTTP contract. So a `network` surface is served over HTTP because
+/// that is the only contract that already exists for it, and a synthesised server that spoke
+/// anything else would contradict the document committed beside it. No variant here says `http`,
+/// and adding one would be the transport DSL design §7 sketches and this model has not taken.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum Reach {
+    /// Every caller is deployed with it, so the surface never leaves the process.
+    ///
+    /// The default, and the only reading of silence that does not invent a deployment: a
+    /// specification that has not said where its callers are has not said its surface crosses
+    /// anything.
+    #[default]
+    InProcess,
+    /// At least one caller is not deployed with it, so the surface crosses a process boundary.
+    ///
+    /// The declaration that makes the published `OpenAPI` document load-bearing rather than
+    /// documentary: something outside has to issue these commands, and the only way it can is over
+    /// the contract.
+    Network,
+}
+
+impl Reach {
+    /// The two words `reached_by:` accepts, in the order [`Reach`] declares them.
+    pub const ALL: &'static [Reach] = &[Reach::InProcess, Reach::Network];
+
+    /// The word a document writes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::InProcess => "in_process",
+            Self::Network => "network",
+        }
+    }
+
+    /// `true` where the surface never leaves the process — the unstated default.
+    ///
+    /// Used by the IR to leave the default out of the resolved model's serialisation, so a
+    /// specification that says nothing about reach digests exactly as it did before the word
+    /// existed.
+    pub fn is_in_process(self) -> bool {
+        matches!(self, Self::InProcess)
+    }
 }
 
 /// What a component owns.
@@ -126,6 +206,8 @@ pub struct ComponentSpec {
     pub accepts: BTreeSet<QualifiedName>,
     /// The events it publishes.
     pub publishes: BTreeSet<QualifiedName>,
+    /// Where the callers of its surface are.
+    pub reached_by: Reach,
     /// What it is called on the wire, and what a person is shown.
     pub naming: Naming,
 }
@@ -215,6 +297,7 @@ impl TryFrom<RawComponentSpec> for ComponentSpec {
             owns: raw.owns.domains.into_iter().collect(),
             accepts: raw.accepts.commands.into_iter().collect(),
             publishes: raw.publishes.events.into_iter().collect(),
+            reached_by: raw.reached_by,
             naming: Naming {
                 summary: raw.naming.summary.or(raw.summary),
                 ..raw.naming
@@ -245,6 +328,42 @@ impl ComponentSpec {
                 ),
             );
         }
+        errors
+    }
+
+    /// Checks that a surface declared reachable from outside has something to serve.
+    ///
+    /// `projecting` is the set of domains that declare at least one view, which is what makes this
+    /// a whole-specification rule rather than one a component could answer alone: a view lives
+    /// inside a domain document, and a component holds only the domain's name.
+    ///
+    /// [`Reach::Network`] is a promise that something outside issues commands here or reads a row
+    /// from here. A component that accepts no command and owns no domain projecting a view has no
+    /// route to serve, so the promise is a contract with no operations in it — an endpoint list
+    /// nobody can call, published as if it could be. It is refused rather than emitted empty,
+    /// because an empty surface is the shape a rename leaves behind and it reads exactly like a
+    /// component whose commands have not been written yet.
+    pub fn validate_reach(&self, projecting: &BTreeSet<QualifiedName>) -> ValidationErrors {
+        let mut errors = ValidationErrors::new();
+        if self.reached_by != Reach::Network {
+            return errors;
+        }
+        if !self.accepts.is_empty() || self.owns.iter().any(|domain| projecting.contains(domain)) {
+            return errors;
+        }
+        errors.push(
+            ValidationError::new(
+                ValidationCode::EmptyDeclaration,
+                format!("component {}", self.name),
+                format!(
+                    "`{}` is reached over a network and serves nothing: it accepts no command,                      and no domain it owns declares a view",
+                    self.name
+                ),
+            )
+            .with_hint(
+                "a surface reachable from outside is one somebody calls; give it a command to                  accept or a view to project, or say `reached_by: in_process`",
+            ),
+        );
         errors
     }
 
@@ -329,10 +448,12 @@ pub fn validate_components(
     domains: &BTreeSet<QualifiedName>,
     commands: &BTreeSet<QualifiedName>,
     events: &BTreeSet<QualifiedName>,
+    projecting: &BTreeSet<QualifiedName>,
 ) -> ValidationErrors {
     let mut errors = ValidationErrors::new();
     for component in components.values() {
         errors.extend(component.validate_references(domains, commands, events));
+        errors.extend(component.validate_reach(projecting));
     }
 
     let ownership = ownership(components, domains);
@@ -541,7 +662,106 @@ publishes:
     }
 
     fn check(components: &BTreeMap<ComponentName, ComponentSpec>) -> ValidationErrors {
-        validate_components(components, &domains(), &commands(), &events())
+        validate_components(
+            components,
+            &domains(),
+            &commands(),
+            &events(),
+            &projecting(),
+        )
+    }
+
+    /// The domains that declare a view. `billing.email` declares none, which is what makes the
+    /// reach rule's refusal reachable at all.
+    fn projecting() -> BTreeSet<QualifiedName> {
+        names(["billing.invoice"])
+    }
+
+    #[test]
+    fn a_component_says_nothing_about_reach_unless_it_says_something_about_reach() {
+        assert_eq!(
+            invoice_service().reached_by,
+            Reach::InProcess,
+            "silence is not a deployment: a component that has not said where its callers are has \
+             not said its surface crosses anything"
+        );
+    }
+
+    #[test]
+    fn a_component_reached_over_a_network_that_serves_nothing_is_refused() {
+        // The fixture has to reach the state the rule is about: `billing.email` declares no view
+        // (see `projecting`), and this component accepts no command, so both halves of the
+        // disjunction are false and the refusal is the rule's rather than an accident.
+        let component = component(
+            "\
+component: relay-service
+owns:
+  domains:
+    - billing.email
+publishes:
+  events:
+    - billing.email.EmailSent
+reached_by: network
+",
+        );
+        let email = QualifiedName::new("billing.email").expect("a valid name");
+        assert!(
+            component.accepts.is_empty() && !projecting().contains(&email),
+            "the fixture must reach the state where the rule decides anything"
+        );
+        let errors = check(&catalogue([component]));
+        let error = errors
+            .as_slice()
+            .iter()
+            .find(|error| error.code == ValidationCode::EmptyDeclaration)
+            .expect("a network surface with no route is refused");
+        assert!(
+            error.message.contains("serves nothing"),
+            "the refusal names what is missing: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn a_component_reached_over_a_network_that_only_projects_a_view_is_accepted() {
+        // The read-only half, and the reason the rule is a disjunction rather than "accepts
+        // nothing": a component that answers queries and takes no command is a legitimate surface.
+        let component = component(
+            "\
+component: ledger-view
+owns:
+  domains:
+    - billing.invoice
+reached_by: network
+",
+        );
+        assert!(
+            component.accepts.is_empty(),
+            "the fixture only holds if the component accepts nothing"
+        );
+        let errors = component.validate_reach(&projecting());
+        assert!(
+            errors.is_empty(),
+            "a domain that projects a row is a surface: {errors}"
+        );
+    }
+
+    #[test]
+    fn a_reach_the_model_does_not_declare_is_refused_by_the_word() {
+        let refused: Result<RawComponentSpec, _> = serde_yaml::from_str(
+            "\
+component: invoice-service
+owns:
+  domains:
+    - billing.invoice
+reached_by: grpc
+",
+        );
+        let error = refused.expect_err("`grpc` is not one of the two words the model has");
+        assert!(
+            error.to_string().contains("in_process") && error.to_string().contains("network"),
+            "the refusal lists the words that exist: {error}"
+        );
     }
 
     #[test]
@@ -900,7 +1120,8 @@ accepts:
 ",
             ),
         ]);
-        let errors = validate_components(&components, &domains, &commands, &events());
+        let errors =
+            validate_components(&components, &domains, &commands, &events(), &projecting());
         assert!(
             errors.is_empty(),
             "`billing.invoice.draft.SubmitDraft` sits in both namespaces, and the inner one owns \

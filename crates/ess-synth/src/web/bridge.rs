@@ -26,8 +26,8 @@ use crate::plan::{accepting_components, CapabilityKind, REGENERATE};
 use crate::rust::layout::Layout as RustLayout;
 use crate::rust::{event_variants, name, port, system as rust_system};
 
-use super::wire::ident;
 use super::{Bridge, EXPORTS, REALIZE};
+use crate::rust::wire::ident;
 
 /// One binding whose delivery the plan generates, and the component it lands on.
 struct Delivery<'a> {

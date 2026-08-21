@@ -2101,6 +2101,7 @@ impl<'a> Resolver<'a> {
                 resolved.insert(
                     component.name.clone(),
                     ResolvedComponent {
+                        reached_by: component.reached_by,
                         name: component.name,
                         owns,
                         accepts,

@@ -387,6 +387,7 @@ fn every_document_this_generator_can_produce_is_a_valid_openapi_document() {
         ("two-accepted", inline(TWO_ACCEPTED)),
         ("every-type", inline(EVERY_TYPE)),
         ("no-input", inline(NO_INPUT)),
+        ("served", inline(SERVED)),
     ] {
         for (path, document) in documents(&ir) {
             assert_valid(&format!("{label} {path}"), &document);
@@ -410,6 +411,7 @@ fn every_schema_a_document_embeds_is_valid_in_the_dialect_openapi_31_declares() 
         ("two-accepted", inline(TWO_ACCEPTED)),
         ("every-type", inline(EVERY_TYPE)),
         ("no-input", inline(NO_INPUT)),
+        ("served", inline(SERVED)),
     ] {
         for (path, document) in documents(&ir) {
             let found = schemas(&document);
@@ -1332,3 +1334,191 @@ components:
       events: [t.core.Pinged]
 ",
 )];
+
+// ---------------------------------------------------------------------------------------------
+// the surface a specification says is reached from outside
+
+/// A component that declares its callers are not deployed with it, and a view for it to serve.
+///
+/// The corner the billing example cannot reach: every component there is reached in process, so
+/// the view half of the surface has no path anywhere in the committed projections and a generator
+/// that emitted one for everybody would still pass every billing assertion.
+const SERVED: &[(&str, &str)] = &[(
+    "desk.yaml",
+    r"
+format: ess/1
+system: t
+version: v1
+domains: [t.desk]
+domain: t.desk
+naming:
+  wire: desk
+types:
+  - name: t.desk.TicketId
+    kind: newtype
+    of: Uuid
+entities:
+  - name: t.desk.Ticket
+    identity:
+      name: ticket_id
+      type: t.desk.TicketId
+    fields:
+      - name: subject
+        type: String
+    lifecycle:
+      initial: Open
+      states: [Open, Closed]
+      terminal: [Closed]
+      transitions:
+        - name: close
+          from: [Open]
+          to: Closed
+commands:
+  - name: t.desk.CloseTicket
+    naming:
+      wire: close-ticket
+    input:
+      - name: ticket_id
+        type: t.desk.TicketId
+    outcomes:
+      - name: closed
+        moves: t.desk.Ticket.close
+        instance: ticket_id
+        emits: [t.desk.TicketClosed]
+        payload:
+          t.desk.TicketClosed:
+            ticket_id: input.ticket_id
+      - name: wrong-state
+        wrong_state: true
+        error: t.desk.TicketStateConflict
+events:
+  - name: t.desk.TicketClosed
+    fields:
+      - name: ticket_id
+        type: t.desk.TicketId
+errors:
+  - name: t.desk.TicketStateConflict
+    summary: The ticket is not open, so nothing closed.
+    fields:
+      - name: state
+        type: t.desk.Ticket.State
+views:
+  - name: t.desk.OpenTickets
+    source: t.desk.Ticket
+    consistency: read_your_writes
+    filter: state == Open
+    fields:
+      - name: ticket_id
+        type: t.desk.TicketId
+    naming:
+      wire: open
+components:
+  - component: desk-service
+    owns:
+      domains: [t.desk]
+    accepts:
+      commands: [t.desk.CloseTicket]
+    publishes:
+      events: [t.desk.TicketClosed]
+    reached_by: network
+",
+)];
+
+/// The same specification with the one declaration removed.
+fn kept_in_process() -> EssIr {
+    let text = SERVED[0].1.replace("    reached_by: network\n", "");
+    assert_ne!(text, SERVED[0].1, "the fixture must lose the declaration");
+    inline(&[(SERVED[0].0, &text)])
+}
+
+#[test]
+fn a_view_is_served_only_where_the_specification_says_something_outside_reads_it() {
+    let served = document(&inline(SERVED), "desk-service");
+    let internal = document(&kept_in_process(), "desk-service");
+
+    let path = "/desk/views/open";
+    assert!(
+        served["paths"][path]["get"]["operationId"] == Value::String("t.desk.OpenTickets".into()),
+        "a network surface publishes the view it projects: {}",
+        served["paths"]
+    );
+    assert!(
+        internal["paths"].get(path).is_none(),
+        "an in-process component states nothing about how a view is read, so exposing one would \
+         invent a query surface: {}",
+        internal["paths"]
+    );
+
+    // The command half is the same document either way: what the declaration changes is the view
+    // half and nothing else. Asserted rather than assumed, because a change that quietly moved a
+    // command path under this flag would be a second surface nobody asked for.
+    assert_eq!(
+        served["paths"]["/desk/commands/close-ticket"],
+        internal["paths"]["/desk/commands/close-ticket"],
+        "the command surface does not depend on where its callers are"
+    );
+    assert_eq!(
+        served["info"]["x-ess-reached-by"],
+        Value::String("network".into())
+    );
+    assert!(
+        internal["info"].get("x-ess-reached-by").is_none(),
+        "silence in the model is silence in the document"
+    );
+}
+
+#[test]
+fn a_served_view_declares_its_rows_and_the_consistency_a_caller_gets() {
+    let served = document(&inline(SERVED), "desk-service");
+    let operation = &served["paths"]["/desk/views/open"]["get"];
+    assert_eq!(
+        operation["x-ess-consistency"],
+        Value::String("read_your_writes".into()),
+        "a caller that has just closed a ticket has to know whether it can see it"
+    );
+    assert_eq!(
+        operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        Value::String("#/components/schemas/t.desk.OpenTickets.Response".into())
+    );
+    let response = &served["components"]["schemas"]["t.desk.OpenTickets.Response"];
+    assert_eq!(
+        response["properties"]["rows"]["items"]["$ref"],
+        Value::String("#/components/schemas/t.desk.OpenTickets.Row".into())
+    );
+    let row = &served["components"]["schemas"]["t.desk.OpenTickets.Row"];
+    assert_eq!(
+        row["properties"]["ticket_id"]["$ref"],
+        Value::String("#/components/schemas/t.desk.TicketId".into()),
+        "the row's leaf types travel with it, or the document has a `$ref` pointing at nothing"
+    );
+    assert!(
+        served["components"]["schemas"]["t.desk.TicketId"].is_object(),
+        "and are defined: {}",
+        served["components"]["schemas"]
+    );
+    assert!(
+        operation["responses"]["200"]["description"]
+            .as_str()
+            .expect("a description")
+            .contains("state == Open"),
+        "the filter is the projection's, so the document states it rather than offering a parameter"
+    );
+}
+
+#[test]
+fn the_document_a_server_hands_out_is_the_committed_one_in_the_other_dialect() {
+    // The agreement that makes `GET /openapi.json` worth serving: a synthesised server embeds
+    // `openapi::json`, and the repository commits `openapi::OpenApi`'s YAML. Two renderings, one
+    // document — checked by parsing both, because a byte comparison across dialects says nothing.
+    let ir = billing();
+    for component in ir.components.values() {
+        let committed = document(&ir, &component.name.to_string());
+        let served: Value = serde_json::from_str(&ess_gen::openapi::json(&ir, component))
+            .expect("the served document is JSON");
+        assert_eq!(
+            served, committed,
+            "the served contract and the committed one are the same document for `{}`",
+            component.name
+        );
+    }
+}

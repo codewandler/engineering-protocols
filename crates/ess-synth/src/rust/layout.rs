@@ -28,6 +28,8 @@ pub struct Layout {
     package: String,
     /// The package name of the system crate — `billing-system` — holding bindings and transport.
     system_package: String,
+    /// The package name of the server crate — `billing-server` — holding the HTTP surface.
+    server_package: String,
     /// Module identifier per bounded context, keyed by the domain's qualified name.
     modules: BTreeMap<QualifiedName, String>,
     /// The bounded context that owns each declaration.
@@ -41,7 +43,9 @@ impl Layout {
     pub fn of(ir: &EssIr) -> Self {
         let package = format!("{}-types", ir.system.segments().join("-"));
         let system_package = format!("{}-system", ir.system.segments().join("-"));
-        let component_packages = component_packages(ir, &package, &system_package);
+        let server_package = format!("{}-server", ir.system.segments().join("-"));
+        let component_packages =
+            component_packages(ir, &[&package, &system_package, &server_package]);
 
         let modules = module_idents(ir);
         let mut owners = BTreeMap::new();
@@ -68,6 +72,7 @@ impl Layout {
         Self {
             package,
             system_package,
+            server_package,
             modules,
             owners,
             component_packages,
@@ -83,6 +88,16 @@ impl Layout {
     /// components.
     pub fn system_package(&self) -> &str {
         &self.system_package
+    }
+
+    /// The package name of the server crate: the routes, the codecs and the listener.
+    ///
+    /// Reserved whether or not it is emitted, and reserved *before* the component packages are
+    /// allocated: a component called `gatepass-server` must not take the name the server crate
+    /// would have, and finding that out only when a specification does it would be finding it out
+    /// from a build error inside a generated tree.
+    pub fn server_package(&self) -> &str {
+        &self.server_package
     }
 
     /// The package name of a component's crate.
@@ -245,13 +260,9 @@ fn module_idents(ir: &EssIr) -> BTreeMap<QualifiedName, String> {
 /// names this layout reserves (`{system}-types`, `{system}-system`); a colliding candidate gets
 /// `-component` appended, repeatedly if a component was itself named the repaired spelling,
 /// because a deterministic rename that can still collide is a collision with extra steps.
-fn component_packages(
-    ir: &EssIr,
-    types_package: &str,
-    system_package: &str,
-) -> BTreeMap<ComponentName, String> {
+fn component_packages(ir: &EssIr, reserved: &[&str]) -> BTreeMap<ComponentName, String> {
     let mut taken: std::collections::BTreeSet<String> =
-        [types_package.to_owned(), system_package.to_owned()].into();
+        reserved.iter().map(|name| (*name).to_owned()).collect();
     let mut packages = BTreeMap::new();
     for component in ir.components.keys() {
         let mut candidate = component.to_string();

@@ -44,7 +44,7 @@ See the status table in [`README.md`](README.md); keep it accurate when you land
 is the per-wave record of what actually shipped — read it before believing any prose about progress.
 
 **Every crate in the workspace is implemented and gated. There are no skeletons left.** The most
-recent tag is `0.6.1-ess-wave-6.5`; `task check` (nine steps) currently passes 90 suites and 1672
+recent tag is `0.6.1-ess-wave-6.5`; `task check` (nine steps) currently passes 94 suites and 1693
 tests, with 0 clippy warnings and 0 rustdoc warnings. The gate now needs three toolchains beside
 Rust's own: the **Go toolchain**, the **`wasm32-unknown-unknown` target** and **Node**. Two of the
 nine steps build the second and third emitters' committed trees, and none of those checks skips
@@ -68,15 +68,23 @@ passing one.
   workspace — whose linkage with the hand-written realization in `examples/billing-realization`
   passes the committed billing suite unchanged, and fails the deliberately corrupted linkage at
   the one scenario that exists to catch it — wave 7's Go module, W7.3, which is the test of
-  the neutrality claim, and wave 7's browser realization, W7.5, which is the harder test of it
+  the neutrality claim, and wave 7's browser realization, W7.3b, which is the harder test of it
   because it is not a language at all: a `WebAssembly` bridge over the Rust target's system, JSON
   over linear memory with three exports and no build tool, beside a page whose command forms,
   event log, view tables and lifecycles are built at load time from an emitted `catalog.json` —
   nothing about any system is typed into its HTML. The plan's two renderings are byte-identical in
   all three trees, and what a target holds more weakly or cannot represent at all is stated in a
-  `TARGET.md` beside the plan, never folded into it). `generated/` holds the committed projections
-  and all three synthesised trees, `suites/generated/` the committed conformance suites; all
-  drift-checked in the gate.
+  `TARGET.md` beside the plan, never folded into it). W7.5 is the demonstration those three
+  emitters existed for: **one specification, two running applications, one surface** —
+  `examples/gatepass/` synthesised to Rust and to Go, both serving the routes the committed
+  `OpenAPI` document declares plus `/openapi.json` and `/docs`, both writing the same startup
+  record outside a declared `runtime` member, and the gate starting both on ephemeral ports to
+  compare records, statuses, bodies and published bytes. Its transport is **derived**, as wave 6
+  requires: a component may say `reached_by: network`, which states where its callers are and
+  names no protocol, and HTTP follows because the one contract this repository projects for a
+  command surface is an `OpenAPI` document. `generated/` holds the committed projections and all
+  three synthesised trees, `suites/generated/` the committed conformance suites; all drift-checked
+  in the gate.
 * **Infra — observed infrastructure as a second instance of the ESS pattern.** Three crates:
   `infra-domain` (the k8s observation subset, raw→validated, eleven `INFRA-*` refusal codes,
   secrets only ever as digests — IW1), `infra-compiler` (the content-addressed `infra-ir/1`
@@ -229,7 +237,7 @@ Nine steps, all nine of which CI also runs, in this order:
    implementation is checked against, so a stale one certifies the wrong thing.
 8. `synth-check` — `cargo xtask synth --check`, which fails if any committed synthesised tree —
    `generated/rust/`, `generated/go/` and `generated/web/`, three emitters behind one
-   language-neutral plan — differs from what the specifications determine; if a matching tree no
+   language-neutral plan, for two specifications — differs from what the specifications determine; if a matching tree no
    longer builds (`cargo check` for the Rust workspace; `gofmt -l` empty, `go build ./...` and
    `go vet ./...` for the Go module; `cargo build --release --target wasm32-unknown-unknown` for
    the browser bridge and for the host that links a realization into it); if the emitted page calls
@@ -240,8 +248,12 @@ Nine steps, all nine of which CI also runs, in this order:
    and the deliberately corrupted one must fail exactly the scenario that exists to catch it; or if
    the browser boundary no longer holds — the realized module is loaded outside a browser through
    the page's own `bridge.js` and driven through one round trip, and seventeen claims about it must
-   stand. A tree that matches its specification and still fails here is a defect in `ess-synth` or
-   in the realization, not in any specification.
+   stand; or if the **dual-target demonstration** stops holding — the two applications synthesised
+   from `examples/gatepass/` are built from the committed trees plus their hand-written
+   realizations, started on ephemeral ports, and compared on their startup records outside
+   `runtime`, on the status and the body of seven exchanges, and on the two documents they publish
+   about themselves byte for byte. A tree that matches its specification and still fails here is a
+   defect in `ess-synth` or in the realization, not in any specification.
 
    **It needs the Go toolchain, the `wasm32-unknown-unknown` target and Node**, and says which is
    missing rather than skipping — a check that quietly passes without its toolchain reads exactly

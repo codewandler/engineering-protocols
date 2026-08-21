@@ -1,0 +1,687 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "pass-service",
+    "summary": "Holds every expected, present and departed visit for one site.",
+    "description": "The HTTP surface of `pass-service`, one of the components of `gatepass` v1.\n\nEvery path here is one semantic command, so the method is always POST and the path is the command's wire name under its domain's: a command is not a resource, and this document does not invent one. A status code is the outcome the specification declares — 202 for a branch that was taken, 422 for a refusal the input decides, 502 for a refusal decided outside the request — and the `outcome` property of every response body names the branch. Events emitted by a branch are published to consumers through the event transport; they are not returned here.\n\nThis component declares `reached_by: network`, so its callers are not deployed with it and this contract is the surface they reach it through. That declaration is also why the views its domains declare have paths here: a GET under `views` per projection, answering every row it holds. There is no page size, no cursor, no ordering and no filter parameter, because the specification states none — a view's filter is part of the projection, not of the request.",
+    "version": "v1",
+    "x-ess-provenance": {
+      "system": "gatepass",
+      "specification_version": "v1",
+      "source_digest": "f2e0f8ff51c077fa1c713d8151544379bafac36a5a927e71c685042d53ab6e61",
+      "contract_digest": "20853cb8a89aae494e4e0482cf050830b187d6ec3fe16e1df0ad24fc27112701",
+      "compiler_version": "0.1.0",
+      "generator_version": "0.1.0"
+    },
+    "x-ess-reached-by": "network"
+  },
+  "tags": [
+    {
+      "name": "visits",
+      "description": "Expecting a visitor, letting them in, and letting them out again."
+    }
+  ],
+  "paths": {
+    "/visits/commands/admit-visitor": {
+      "post": {
+        "operationId": "gatepass.visit.AdmitVisitor",
+        "summary": "Admit the visitor",
+        "tags": [
+          "visits"
+        ],
+        "x-ess-may-invoke": [
+          "gatepass.visit.Receptionist"
+        ],
+        "requestBody": {
+          "description": "The input `gatepass.visit.AdmitVisitor` declares.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/gatepass.visit.AdmitVisitor.Input"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Outcome `admitted`: the branch the specification declares for this input. Events this branch emits are published to consumers, not returned here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/gatepass.visit.AdmitVisitor.admitted.Response"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Outcome `wrong-state`: the input was acceptable and the subject is in a state this command does not act from. Resending the same request changes nothing until something else moves it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/gatepass.visit.AdmitVisitor.wrong-state.Response"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/visits/commands/register-visit": {
+      "post": {
+        "operationId": "gatepass.visit.RegisterVisit",
+        "summary": "Register a visit",
+        "tags": [
+          "visits"
+        ],
+        "x-ess-may-invoke": [
+          "gatepass.visit.Receptionist"
+        ],
+        "requestBody": {
+          "description": "The input `gatepass.visit.RegisterVisit` declares.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/gatepass.visit.RegisterVisit.Input"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Outcome `registered`: the branch the specification declares for this input. Events this branch emits are published to consumers, not returned here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/gatepass.visit.RegisterVisit.registered.Response"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Outcome `refused`: the request was understood and refused on domain grounds. The body names the declared error and carries whatever that error declares.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/gatepass.visit.RegisterVisit.refused.Response"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/visits/commands/sign-out-visitor": {
+      "post": {
+        "operationId": "gatepass.visit.SignOutVisitor",
+        "summary": "Sign the visitor out",
+        "tags": [
+          "visits"
+        ],
+        "x-ess-may-invoke": [
+          "gatepass.visit.Receptionist"
+        ],
+        "requestBody": {
+          "description": "The input `gatepass.visit.SignOutVisitor` declares.",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/gatepass.visit.SignOutVisitor.Input"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Outcome `signed-out`: the branch the specification declares for this input. Events this branch emits are published to consumers, not returned here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/gatepass.visit.SignOutVisitor.signed-out.Response"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Outcome `wrong-state`: the input was acceptable and the subject is in a state this command does not act from. Resending the same request changes nothing until something else moves it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/gatepass.visit.SignOutVisitor.wrong-state.Response"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/visits/views/by-id": {
+      "get": {
+        "operationId": "gatepass.visit.VisitById",
+        "summary": "Visit by id",
+        "tags": [
+          "visits"
+        ],
+        "x-ess-consistency": "eventual",
+        "responses": {
+          "200": {
+            "description": "Every row of `gatepass.visit.VisitById`, a projection of `gatepass.visit.Visit`. Contains every instance. Eventually consistent: a row may not yet reflect a command that has already returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/gatepass.visit.VisitById.Response"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/visits/views/expected": {
+      "get": {
+        "operationId": "gatepass.visit.ExpectedVisits",
+        "summary": "Expected visits",
+        "tags": [
+          "visits"
+        ],
+        "x-ess-consistency": "read_your_writes",
+        "responses": {
+          "200": {
+            "description": "Every row of `gatepass.visit.ExpectedVisits`, a projection of `gatepass.visit.Visit`. Contains the instances where `state == Expected` holds. Read-your-writes: a caller that has just issued a command sees its effect here.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/gatepass.visit.ExpectedVisits.Response"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "gatepass.visit.AdmitVisitor.Input": {
+        "title": "Admit the visitor input",
+        "x-ess-name": "gatepass.visit.AdmitVisitor",
+        "x-ess-kind": "command-input",
+        "type": "object",
+        "properties": {
+          "visit_id": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitId"
+          },
+          "badge": {
+            "$ref": "#/components/schemas/gatepass.visit.Badge"
+          }
+        },
+        "required": [
+          "visit_id",
+          "badge"
+        ],
+        "additionalProperties": false
+      },
+      "gatepass.visit.AdmitVisitor.admitted.Response": {
+        "additionalProperties": false,
+        "description": "The visitor is on site, holding the badge that was printed. Taken when no other outcome's condition matched. A `gatepass.visit.Visit` has moved to `OnSite`, along `arrive`. The instance is the one `visit_id` names. Emits `VisitorAdmitted`, published to consumers rather than returned here.",
+        "properties": {
+          "outcome": {
+            "const": "admitted",
+            "description": "Which declared outcome the command took."
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "gatepass.visit.AdmitVisitor.wrong-state.Response": {
+        "additionalProperties": false,
+        "description": "The visit is not Expected, so nobody was admitted. Taken when the subject is in a state none of this command's declared moves start from. Which states those are is the lifecycle's answer, not this command's.",
+        "properties": {
+          "error": {
+            "const": "gatepass.visit.VisitStateConflict",
+            "description": "The visit is not in a state this command acts from, so nothing moved.",
+            "type": "string"
+          },
+          "outcome": {
+            "const": "wrong-state",
+            "description": "Which declared outcome the command took."
+          },
+          "payload": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitStateConflict.Error"
+          }
+        },
+        "required": [
+          "outcome",
+          "error",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "gatepass.visit.Badge": {
+        "title": "Badge",
+        "x-ess-name": "gatepass.visit.Badge",
+        "x-ess-kind": "struct",
+        "type": "object",
+        "properties": {
+          "serial": {
+            "type": "string"
+          },
+          "printed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "signature": {
+            "type": "string",
+            "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
+            "contentEncoding": "base64"
+          }
+        },
+        "required": [
+          "serial",
+          "signature"
+        ],
+        "additionalProperties": false
+      },
+      "gatepass.visit.Building": {
+        "title": "Building",
+        "x-ess-name": "gatepass.visit.Building",
+        "x-ess-kind": "enum",
+        "type": "string",
+        "enum": [
+          "North",
+          "South",
+          "Annex"
+        ]
+      },
+      "gatepass.visit.Deposit": {
+        "title": "Deposit",
+        "x-ess-name": "gatepass.visit.Deposit",
+        "x-ess-kind": "struct",
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "format": "decimal",
+            "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+          },
+          "currency": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount",
+          "currency"
+        ],
+        "additionalProperties": false,
+        "x-ess-invariants": [
+          "amount >= 0"
+        ]
+      },
+      "gatepass.visit.EmployeeId": {
+        "title": "EmployeeId",
+        "x-ess-name": "gatepass.visit.EmployeeId",
+        "x-ess-kind": "newtype",
+        "type": "string"
+      },
+      "gatepass.visit.ExpectedVisits.Response": {
+        "additionalProperties": false,
+        "description": "The rows of `gatepass.visit.ExpectedVisits`.",
+        "properties": {
+          "rows": {
+            "description": "Every row the projection holds, in the order it holds them.",
+            "items": {
+              "$ref": "#/components/schemas/gatepass.visit.ExpectedVisits.Row"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "type": "object"
+      },
+      "gatepass.visit.ExpectedVisits.Row": {
+        "title": "Expected visits row",
+        "x-ess-name": "gatepass.visit.ExpectedVisits",
+        "x-ess-kind": "view-row",
+        "type": "object",
+        "properties": {
+          "visit_id": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitId"
+          },
+          "visitor": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitorName"
+          },
+          "building": {
+            "$ref": "#/components/schemas/gatepass.visit.Building"
+          },
+          "deposit": {
+            "$ref": "#/components/schemas/gatepass.visit.Deposit"
+          }
+        },
+        "required": [
+          "visit_id",
+          "visitor",
+          "building",
+          "deposit"
+        ],
+        "additionalProperties": false
+      },
+      "gatepass.visit.Host": {
+        "title": "Host",
+        "x-ess-name": "gatepass.visit.Host",
+        "x-ess-kind": "union",
+        "oneOf": [
+          {
+            "title": "contractor",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "contractor"
+              },
+              "value": {
+                "$ref": "#/components/schemas/gatepass.visit.VendorRef"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "title": "employee",
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "employee"
+              },
+              "value": {
+                "$ref": "#/components/schemas/gatepass.visit.EmployeeId"
+              }
+            },
+            "required": [
+              "kind",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        ],
+        "x-ess-union-tag": "kind"
+      },
+      "gatepass.visit.InvalidVisitLength.Error": {
+        "title": "InvalidVisitLength payload",
+        "description": "The expected length of the visit is not a positive number of minutes.",
+        "x-ess-name": "gatepass.visit.InvalidVisitLength",
+        "x-ess-kind": "error-payload",
+        "type": "object",
+        "properties": {
+          "submitted": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "submitted"
+        ],
+        "additionalProperties": false
+      },
+      "gatepass.visit.RegisterVisit.Input": {
+        "title": "Register a visit input",
+        "x-ess-name": "gatepass.visit.RegisterVisit",
+        "x-ess-kind": "command-input",
+        "type": "object",
+        "properties": {
+          "visitor": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitorName"
+          },
+          "building": {
+            "$ref": "#/components/schemas/gatepass.visit.Building"
+          },
+          "host": {
+            "$ref": "#/components/schemas/gatepass.visit.Host"
+          },
+          "expected_minutes": {
+            "type": "integer"
+          },
+          "expected_stay": {
+            "type": "string",
+            "format": "duration"
+          },
+          "deposit": {
+            "$ref": "#/components/schemas/gatepass.visit.Deposit"
+          },
+          "escorts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/gatepass.visit.VisitorName"
+            }
+          },
+          "notes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "x-ess-map-key": "String"
+          },
+          "on_watchlist": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "visitor",
+          "building",
+          "host",
+          "expected_minutes",
+          "expected_stay",
+          "deposit",
+          "escorts",
+          "notes",
+          "on_watchlist"
+        ],
+        "additionalProperties": false
+      },
+      "gatepass.visit.RegisterVisit.refused.Response": {
+        "additionalProperties": false,
+        "description": "The expected length was not positive, and nothing was recorded. Taken when no other outcome's condition matched.",
+        "properties": {
+          "error": {
+            "const": "gatepass.visit.InvalidVisitLength",
+            "description": "The expected length of the visit is not a positive number of minutes.",
+            "type": "string"
+          },
+          "outcome": {
+            "const": "refused",
+            "description": "Which declared outcome the command took."
+          },
+          "payload": {
+            "$ref": "#/components/schemas/gatepass.visit.InvalidVisitLength.Error"
+          }
+        },
+        "required": [
+          "outcome",
+          "error",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "gatepass.visit.RegisterVisit.registered.Response": {
+        "additionalProperties": false,
+        "description": "The visit is recorded, and the visitor is Expected. Taken when `expected_minutes > 0` holds of the input. A `gatepass.visit.Visit` now exists, in `Expected`. Its identity is published as `visit_id` on `gatepass.visit.VisitRegistered`. Emits `VisitRegistered`, published to consumers rather than returned here.",
+        "properties": {
+          "outcome": {
+            "const": "registered",
+            "description": "Which declared outcome the command took."
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "gatepass.visit.SignOutVisitor.Input": {
+        "title": "Sign the visitor out input",
+        "x-ess-name": "gatepass.visit.SignOutVisitor",
+        "x-ess-kind": "command-input",
+        "type": "object",
+        "properties": {
+          "visit_id": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitId"
+          }
+        },
+        "required": [
+          "visit_id"
+        ],
+        "additionalProperties": false
+      },
+      "gatepass.visit.SignOutVisitor.signed-out.Response": {
+        "additionalProperties": false,
+        "description": "The visitor has left the building. Taken when no other outcome's condition matched. A `gatepass.visit.Visit` has moved to `Departed`, along `depart`. The instance is the one `visit_id` names. Emits `VisitorDeparted`, published to consumers rather than returned here.",
+        "properties": {
+          "outcome": {
+            "const": "signed-out",
+            "description": "Which declared outcome the command took."
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "gatepass.visit.SignOutVisitor.wrong-state.Response": {
+        "additionalProperties": false,
+        "description": "The visit is not OnSite, so nobody was signed out. Taken when the subject is in a state none of this command's declared moves start from. Which states those are is the lifecycle's answer, not this command's.",
+        "properties": {
+          "error": {
+            "const": "gatepass.visit.VisitStateConflict",
+            "description": "The visit is not in a state this command acts from, so nothing moved.",
+            "type": "string"
+          },
+          "outcome": {
+            "const": "wrong-state",
+            "description": "Which declared outcome the command took."
+          },
+          "payload": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitStateConflict.Error"
+          }
+        },
+        "required": [
+          "outcome",
+          "error",
+          "payload"
+        ],
+        "type": "object"
+      },
+      "gatepass.visit.VendorRef": {
+        "title": "VendorRef",
+        "x-ess-name": "gatepass.visit.VendorRef",
+        "x-ess-kind": "newtype",
+        "type": "string"
+      },
+      "gatepass.visit.Visit.State": {
+        "title": "State",
+        "x-ess-name": "gatepass.visit.Visit.State",
+        "x-ess-kind": "enum",
+        "type": "string",
+        "enum": [
+          "Departed",
+          "Expected",
+          "OnSite"
+        ]
+      },
+      "gatepass.visit.VisitById.Response": {
+        "additionalProperties": false,
+        "description": "The rows of `gatepass.visit.VisitById`.",
+        "properties": {
+          "rows": {
+            "description": "Every row the projection holds, in the order it holds them.",
+            "items": {
+              "$ref": "#/components/schemas/gatepass.visit.VisitById.Row"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "type": "object"
+      },
+      "gatepass.visit.VisitById.Row": {
+        "title": "Visit by id row",
+        "x-ess-name": "gatepass.visit.VisitById",
+        "x-ess-kind": "view-row",
+        "type": "object",
+        "properties": {
+          "visit_id": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitId"
+          },
+          "visitor": {
+            "$ref": "#/components/schemas/gatepass.visit.VisitorName"
+          },
+          "host": {
+            "$ref": "#/components/schemas/gatepass.visit.Host"
+          },
+          "escorts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/gatepass.visit.VisitorName"
+            }
+          },
+          "notes": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "x-ess-map-key": "String"
+          },
+          "badge": {
+            "$ref": "#/components/schemas/gatepass.visit.Badge"
+          }
+        },
+        "required": [
+          "visit_id",
+          "visitor",
+          "host",
+          "escorts",
+          "notes"
+        ],
+        "additionalProperties": false
+      },
+      "gatepass.visit.VisitId": {
+        "title": "VisitId",
+        "x-ess-name": "gatepass.visit.VisitId",
+        "x-ess-kind": "newtype",
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      },
+      "gatepass.visit.VisitStateConflict.Error": {
+        "title": "VisitStateConflict payload",
+        "description": "The visit is not in a state this command acts from, so nothing moved.",
+        "x-ess-name": "gatepass.visit.VisitStateConflict",
+        "x-ess-kind": "error-payload",
+        "type": "object",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/gatepass.visit.Visit.State"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "gatepass.visit.VisitorName": {
+        "title": "VisitorName",
+        "x-ess-name": "gatepass.visit.VisitorName",
+        "x-ess-kind": "newtype",
+        "type": "string"
+      }
+    }
+  }
+}

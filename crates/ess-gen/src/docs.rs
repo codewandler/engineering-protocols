@@ -288,6 +288,31 @@ fn domain_slice(ir: &EssIr, domain: &ResolvedDomain, mint: &ProvenanceMint) -> S
     mint.of_seeds(seeds)
 }
 
+/// The prose one served component publishes about itself.
+///
+/// The committed domain page for each bounded context the component owns, in name order, and
+/// nothing rewritten: for a component owning one domain these are byte for byte the bytes of
+/// `generated/docs/domains/{domain}.md`, which is what `tests/docs.rs` holds it to. A served
+/// document that was rendered a second way would be a second answer to "what does this system do",
+/// and the two would drift on the first edit.
+///
+/// The relative links inside a page point at siblings this surface does not serve — the index, the
+/// interactions page. They are left exactly as the projection wrote them rather than rewritten or
+/// stripped, because rewriting them makes the served bytes differ from the committed ones, and that
+/// difference is the one thing this document exists to make checkable.
+pub fn served(ir: &EssIr, component: &ResolvedComponent) -> String {
+    let mint = ProvenanceMint::new(ir);
+    let mut out = String::new();
+    for handle in &component.owns {
+        let domain = ir.domain(handle);
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&domain_page(ir, domain, &domain_slice(ir, domain, &mint)).contents);
+    }
+    out
+}
+
 fn domain_page(ir: &EssIr, domain: &ResolvedDomain, provenance: &SlicedProvenance) -> Artifact {
     let mut body = String::new();
     if let Some(summary) = &domain.naming.summary {

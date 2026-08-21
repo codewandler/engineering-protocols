@@ -677,6 +677,23 @@ pub(crate) fn components_generics(ir: &EssIr) -> Vec<String> {
         .collect()
 }
 
+/// `true` when the system crate carries obligations of its own — a transformation nobody
+/// determined, or an escalation to build.
+///
+/// The question that decides whether `System` takes a third type parameter, asked by every
+/// artifact that has to spell the type: the system crate itself, the browser bridge and the server
+/// crate. One answer, because three would drift.
+pub(crate) fn has_obligations(ir: &EssIr, plan: &SynthesisPlan) -> bool {
+    ir.bindings.values().any(|binding| {
+        let source = binding.name.to_string();
+        if !plan.is_generated(CapabilityKind::BindingDelivery, &source) {
+            return false;
+        }
+        !plan.is_generated(CapabilityKind::BindingTransformation, &source)
+            || matches!(binding.on_failure(), ResolvedFailure::Escalate { .. })
+    })
+}
+
 /// The pump: collection, delivery, and the failure policies, one arm per event.
 #[allow(clippy::too_many_arguments)]
 fn pump_impl(
@@ -734,13 +751,19 @@ fn pump_impl(
     }
     out.push_str(
         "        loop {\n            self.collect();\n            if self.cursor == \
-         self.published.len() {\n                return Ok(());\n            }\n            let \
-         event = self.published[self.cursor].clone();\n            self.cursor += 1;\n",
+         self.published.len() {\n                return Ok(());\n            }\n",
     );
     if deliveries.is_empty() {
-        out.push_str("        }\n    }\n");
+        // Nothing in this specification reacts to an occurrence, so the pump advances the cursor
+        // and stops. Binding the occurrence would be binding a value nothing reads, which the
+        // generated tree's own build reports as a warning — and a generated tree that warns
+        // teaches its reader that warnings here are normal.
+        out.push_str("            self.cursor += 1;\n        }\n    }\n");
     } else {
-        out.push_str("            self.deliver(&event)?;\n        }\n    }\n");
+        out.push_str(
+            "            let event = self.published[self.cursor].clone();\n            \
+             self.cursor += 1;\n            self.deliver(&event)?;\n        }\n    }\n",
+        );
         let _ = writeln!(
             out,
             "\n    /// Delivers one already-published occurrence to every binding that reacts to \

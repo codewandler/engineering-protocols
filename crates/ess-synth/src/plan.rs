@@ -63,6 +63,7 @@ use ess_compiler::ir::{
     ResolvedConversion, ResolvedEffect, ResolvedFailure, ResolvedField, ResolvedMappingValue,
     ResolvedTypeRef, ResolvedView, TypeHandle,
 };
+use ess_domain::component::Reach;
 use ess_gen::Provenance;
 
 /// The command that rewrites what this plan describes, named in every rendering of it.
@@ -166,6 +167,12 @@ pub enum CapabilityKind {
     BindingEscalation,
     /// A component's port surface.
     ComponentPort,
+    /// The transport a component's surface is served over.
+    ///
+    /// A capability only where the specification says the surface leaves the process — `reached_by:
+    /// network`. A component whose callers are deployed with it is reached by calling its port, and
+    /// there is nothing to serve.
+    ComponentTransport,
     /// A component's runtime requirements.
     Workload,
 }
@@ -188,6 +195,7 @@ impl CapabilityKind {
             Self::BindingDelivery => "binding delivery",
             Self::BindingEscalation => "binding escalation",
             Self::ComponentPort => "component port",
+            Self::ComponentTransport => "component transport",
             Self::Workload => "workload",
         }
     }
@@ -1068,6 +1076,23 @@ fn plan_components(ir: &EssIr, capabilities: &mut Vec<PlannedCapability>) {
         capabilities.push(PlannedCapability {
             capability: Capability {
                 kind: CapabilityKind::ComponentPort,
+                source: component.name.to_string(),
+            },
+            disposition: SynthesisDisposition::Generated,
+        });
+        // The second transport this scope holds, and the second one derived rather than chosen. A
+        // binding's `at_least_once` determines an in-process log; a component's `reached_by:
+        // network` determines that the surface exists on a wire, and the only wire contract this
+        // repository projects for a command surface is the `OpenAPI` document — so the transport is
+        // HTTP, serving exactly the routes that document declares. A specification that says
+        // nothing about reach contributes no capability here at all, which is why the normative
+        // example's plan is the same document it was before this word existed.
+        if component.reached_by != Reach::Network {
+            continue;
+        }
+        capabilities.push(PlannedCapability {
+            capability: Capability {
+                kind: CapabilityKind::ComponentTransport,
                 source: component.name.to_string(),
             },
             disposition: SynthesisDisposition::Generated,

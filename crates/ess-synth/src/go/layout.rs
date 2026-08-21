@@ -74,6 +74,8 @@ pub(crate) struct Layout {
     conversion: Package,
     /// The bindings and the one transport.
     system: Package,
+    /// The HTTP surface of every component reached over a network.
+    server: Package,
     /// The bounded context that owns each declaration.
     owners: BTreeMap<QualifiedName, QualifiedName>,
     /// Every identifier this emitter declares, allocated once, keyed by [`Key`].
@@ -153,6 +155,7 @@ impl Layout {
         let obligation = package("obligation", "types/obligation");
         let conversion = package("conversion", "types/conversion");
         let system = package("system", "system");
+        let server = package("server", "server");
 
         // One namespace for package names across the whole module: the system package imports
         // every other one, so two packages sharing a name is a file that cannot spell one of them.
@@ -161,6 +164,7 @@ impl Layout {
             obligation.name.clone(),
             conversion.name.clone(),
             system.name.clone(),
+            server.name.clone(),
         ]
         .into();
         let mut domains = BTreeMap::new();
@@ -211,6 +215,7 @@ impl Layout {
             obligation,
             conversion,
             system,
+            server,
             owners,
             names: BTreeMap::new(),
             system_events,
@@ -263,6 +268,15 @@ impl Layout {
     /// The system package.
     pub fn system(&self) -> &Package {
         &self.system
+    }
+
+    /// The server package: the routes, the codecs and the listener.
+    ///
+    /// Reserved whether or not it is emitted, and reserved before the domain and component
+    /// packages are allocated: a bounded context called `server` must not take the name the
+    /// server package would have.
+    pub fn server(&self) -> &Package {
+        &self.server
     }
 
     /// Every event the system's log can carry.

@@ -73,6 +73,23 @@ fine against drift and weak against construction. Decided: widen to the full SHA
 next model-touching batch (below), regenerating committed artifacts once. Not done live because
 every committed suite and projection embeds the digest and the regeneration belongs in one commit.
 
+## Closed by code, 2026-08-21 — wave 7, W7.5
+
+One gap, closed by one word, and it had never been on this list because nothing had needed it: the
+model could say what a component accepts and publishes and could not say **where its callers are**.
+Every synthesised system therefore had exactly one derivable transport — the in-process log a
+binding's `at_least_once` determines — and a second one could only have been chosen by preference,
+which the wave-6 rule forbids.
+
+Each new guard was verified by mutation before being trusted: the one-line violation it exists to
+catch was applied, the failure was watched naming the defect, and the mutation reverted.
+
+| gap | what closes it now |
+|---|---|
+| the model cannot state that a component's surface is reached from outside the process, so no specification can *derive* a network transport | `reached_by:` on a component (`ess-domain`), a closed two-word set — `in_process` (the default, and what silence has always meant) and `network` — validated by the raw→validated pair and refused as `EmptyDeclaration` when a network surface has neither an accepted command nor an owned domain that projects a view. Skipped from the resolved model's serialisation when unstated, so **no existing specification's digest moved**. Mutation: the rule made to return no errors, caught by `a_component_reached_over_a_network_that_serves_nothing_is_refused` |
+| `openapi.rs`'s "what this refuses to guess" carried *pagination, filtering, sorting* — a view is in the IR and nothing said how one is read | the row is closed by a declaration rather than by a generator's opinion: where a component says `network`, each view its domains declare gets `GET /{domain}/views/{view}`, its rows under one key, its declared filter in the response description and its consistency as `x-ess-consistency`. Still no page size, no cursor, no ordering and no filter parameter, because the specification states none. Mutation: view paths published unconditionally, caught by `a_view_is_served_only_where_the_specification_says_something_outside_reads_it` **and** by `generate-check` on `openapi/invoice-service.yaml` |
+| a synthesised server and its published contract could disagree about a path or a status | `ess_gen::http` holds one route mapping and one status mapping, read by the `OpenAPI` projection, the Rust emitter and the Go emitter. Mutation: two rows dropped from the emitted route table, caught by `the_routes_a_server_answers_are_the_routes_the_contract_declares` with both sets printed |
+
 ## Closed by code, 2026-08-21 — wave 6.5 chunk B
 
 The last two rows of the post-wave-6 hardening batch. As with chunk A, each new guard was verified

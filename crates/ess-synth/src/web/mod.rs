@@ -32,8 +32,6 @@ mod catalog;
 mod layout;
 mod page;
 mod refusal;
-mod runtime;
-mod wire;
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -184,11 +182,6 @@ impl<'a> Bridge<'a> {
         self.present(CapabilityKind::CommandContract, &declared.to_string())
     }
 
-    /// A declaration's path from inside the bridge crate.
-    pub fn path(&self, declared: &QualifiedName) -> String {
-        wire::path(self.layout.rust(), &self.types, declared)
-    }
-
     /// `true` when the system crate carries obligations of its own — a transformation nobody
     /// determined, or an escalation to build.
     ///
@@ -227,6 +220,45 @@ impl<'a> Bridge<'a> {
     }
 }
 
+/// The wire emitter's seam, answered by what this target presents.
+///
+/// Every answer is the `presents_*` question already asked above: the plan is the gate and this
+/// target's own refusals are the second, so a capability refused at the target stage gets no
+/// encoder — which is what keeps a refusal from becoming a silently missing function.
+impl crate::rust::wire::Surface for Bridge<'_> {
+    fn ir(&self) -> &EssIr {
+        self.ir
+    }
+
+    fn layout(&self) -> &RustLayout {
+        self.layout.rust()
+    }
+
+    fn types(&self) -> &str {
+        &self.types
+    }
+
+    fn presents_type(&self, declared: &QualifiedName) -> bool {
+        Bridge::presents_type(self, declared)
+    }
+
+    fn presents_event(&self, declared: &QualifiedName) -> bool {
+        Bridge::presents_event(self, declared)
+    }
+
+    fn presents_error(&self, declared: &QualifiedName) -> bool {
+        Bridge::presents_error(self, declared)
+    }
+
+    fn presents_view(&self, declared: &QualifiedName) -> bool {
+        Bridge::presents_view(self, declared)
+    }
+
+    fn presents_command(&self, declared: &QualifiedName) -> bool {
+        Bridge::presents_command(self, declared)
+    }
+}
+
 /// Emits the browser realization a plan determines, and reports what this target could not carry.
 ///
 /// # Panics
@@ -259,7 +291,7 @@ pub fn workspace(ir: &EssIr, plan: &SynthesisPlan) -> Emission {
     }
 
     let catalog = catalog::document(&bridge);
-    let wire = wire::module(&bridge);
+    let wire = crate::rust::wire::module(&bridge);
     let library = bridge::module(&bridge);
 
     let artifacts = vec![
@@ -474,7 +506,7 @@ fn json_module(provenance: &Provenance) -> String {
     format!(
         "{}{}",
         provenance.commented_for("//", &regenerate()),
-        runtime::JSON
+        crate::rust::json::JSON
     )
 }
 

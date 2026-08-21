@@ -3,8 +3,9 @@
 > **In progress. Scheduled 2026-08-20 by operator instruction, re-scoped twice by the same
 > authority on 2026-08-21: W7.3 (the Go emitter) was deferred by the sequencing decision that
 > pulled the infra waves forward and **revived the same night** (roadmap commit `1e3bbac`), so
-> W7.1, W7.2 and W7.3 are delivered and W7.4 (obligations as artifacts) stays deferred and
-> unscheduled on the roadmap.** Design:
+> W7.1, W7.2, W7.3 and its browser continuation are delivered, W7.5 — the dual-target
+> demonstration — is delivered, and W7.4 (obligations as artifacts) stays deferred and unscheduled
+> on the roadmap.** Design:
 > [`ess-semantic-diff-impact-evolution-design-v0.1.md`](../design/ess-semantic-diff-impact-evolution-design-v0.1.md)
 > §33, which was blocked on `contract_digest` existing in no code. W7.1 makes it exist. Where that
 > section's verdict vocabulary contradicts gate G19's polarity — its `still valid` and
@@ -231,8 +232,147 @@ serving the same API. It needs an application specification that does not exist 
 neither emitter produces, and it is a slice of its own rather than a criterion this one silently
 fails. Nothing in W7.3 blocks it: the two trees exist, both build, and both are drift-checked.
 
+## W7.3b — the browser is the third target, and the page holds no model. Delivered.
+
+Filed under W7.3's number rather than its own because it is the same claim continued: a third
+emitter behind the same seam, and the plan gained not one line to admit it. `PLAN.md` and
+`plan.json` are byte-identical in all three trees. `crates/ess-synth/src/web/` emits a
+`WebAssembly` bridge over the Rust target's system — three `#[no_mangle]` exports passing JSON over
+linear memory, no `wasm-bindgen` and no build tool, because a gate step that resolves a crate is a
+gate step that reaches a network — beside one page whose command forms, event log, view tables and
+lifecycles are built at load time from an emitted `catalog.json`. A test asserts the page names no
+construct of any specification: the UI cannot drift from the model because it never contained it.
+Six weakenings are in its `TARGET.md`, the gate builds the module for `wasm32-unknown-unknown`,
+checks the page's export references against the compiled module's own export table, and drives one
+round trip through the page's own `bridge.js` under Node, holding seventeen claims.
+
+Full detail is in `CHANGELOG.md`; what belongs here is the number and the reason it is this one.
+
+## W7.5 — one specification, two applications, one surface. Delivered.
+
+The demonstration W7.3 named and deliberately did not attempt, executed rather than asserted:
+**one application specification, synthesised to Rust and to Go, both binaries starting with the
+same log and serving the same API.**
+
+### What forces HTTP, and why it is not a preference
+
+The wave-6 rule is that a system has exactly one transport and the transport is *derived from what
+the specification states*. Billing's `delivery: at_least_once` on a binding derives an in-process
+log. The demonstration needed a specification whose own words derive something else, and the model
+could not say anything at all about how a component's surface is reached — so the model gained one
+word, in the wave-4 tradition: raw → validated, a closed set, a code, a regenerated schema, and one
+construct rather than a transport DSL.
+
+```yaml
+components:
+  - component: pass-service
+    reached_by: network        # or `in_process`, which is what silence means
+```
+
+`network` names no protocol. What follows is a *derivation*: a surface whose callers are not
+deployed with it has to exist on a wire, and this repository projects exactly one contract for a
+component's command surface — the `OpenAPI` document under `generated/openapi/` — which is an HTTP
+contract. A synthesised server speaking anything else would contradict the document committed
+beside it. Neither variant of [`Reach`](../../crates/ess-domain/src/component.rs) says `http`, and
+adding one would be design §7's transport DSL, which this model has not taken.
+
+| what the word closed | how |
+|---|---|
+| the model could not state where a component's callers are | `reached_by:` on a component, defaulting to `in_process`, skipped from the IR's serialisation when unstated — so **every committed artifact of every existing specification keeps its digest**, and billing's model digest is the same string it was before this wave |
+| the `OpenAPI` projection refused to expose a view, because "nothing in the model says how one is read" | it still refuses — *unless* the component says something outside the process reads it. A view then gets `GET /{domain}/views/{view}`, its rows under one key, its declared filter in the description and its consistency as `x-ess-consistency`. No page size, no cursor, no ordering, no filter parameter: the specification states none |
+| a server and a contract could disagree about a path | they cannot: `ess_gen::http::routes` is the one mapping, and `openapi.rs`, the Rust emitter and the Go emitter all read it. So is `ess_gen::http::status`, which is where 202, 409, 422 and 502 are decided once |
+| a component could claim a surface with nothing on it | `reached_by: network` with no accepted command and no owned domain projecting a view is refused as `EmptyDeclaration`, naming what is missing |
+
+### The application
+
+[`examples/gatepass/`](../../examples/gatepass) — visitor passes for a building. One domain, one
+component, **no binding**, so the one transport it has is the one its component's own words force.
+
+| construct | what it holds |
+|---|---|
+| types | a newtype over `Uuid` and one over `String`, an enum, a tagged union, and two structs — one carrying `Optional<Timestamp>` and `Bytes`, one carrying `Decimal` |
+| entity | `Visit`, ten fields including a `List`, a `Map` and an `Optional`, two invariants, a three-state lifecycle with two transitions |
+| commands | three, each with a refusal: one guarded (`expected_minutes > 0`) and two `wrong_state:` branches |
+| events | three, each with its payload declared from the command's input |
+| views | two — one `read_your_writes` with a declared filter, one `eventual` carrying every kind the wire has |
+| actors | a receptionist who may invoke all three, and a security auditor who may invoke nothing |
+
+Every primitive the model has reaches the wire through it, which is what makes the comparison
+below worth making: `Bytes` as base64, `Decimal`, `Timestamp`, `Duration` and `Uuid` as strings, an
+`Integer` as a number, an absent optional member omitted rather than sent as `null`.
+
+### The surface both applications serve
+
+Seven routes, from one mapping: three commands as `POST`, two views as `GET`, plus
+`GET /openapi.json` and `GET /docs`. The two documents are **embedded at emission** — the committed
+`OpenAPI` document and the committed Markdown domain page, byte for byte — because a server that
+regenerated its own contract could publish one the repository never reviewed. `/docs` is served as
+`text/markdown; charset=utf-8` rather than rendered: rendering would be a second rendering of the
+documentation, and the two would differ the first time either moved.
+
+A path the contract does not declare is a `404`; a declared path under another method is a `405`; a
+body the schema refuses is a `400`; an obligation nothing has satisfied is a `501` naming it.
+None of those is a status the contract declares, and none should be — each is a fact about a
+transport rather than about a command, which is the row `openapi.rs` has always carried.
+
+Neither tree takes a dependency. Rust serves over `std::net::TcpListener` with about two hundred
+fixed lines of HTTP/1.1 and the JSON reader the browser target already needed — now shared, one
+emitter, two targets. Go serves over `net/http` and `encoding/json`, with generated codecs beside
+the types, because a generated Go type carries an unexported field that `encoding/json` cannot see
+and exporting it would undo the distinctness the newtype encoding exists for.
+
+### The startup record, and the one member that may differ
+
+Three lines of JSON on standard output before either application answers anything. Every member is
+derived from the specification — **except `runtime`**, which is the process's own: the language it
+was synthesised into, the address it bound, the port it took.
+
+| line | carries |
+|---|---|
+| `system.starting` | the system, its version, the model digest, the contract digest, every component, and the plan's disposition counts |
+| `surface.serving` | the served component, its declared reach, the transport, the route count, and every route as method, path, what it serves and the construct it serves |
+| `system.ready` | the system, and how many surfaces this process serves |
+
+The split is the whole comparison, and it is deliberately not a list of members to compare: the
+gate **removes** `runtime` and refuses a line that has none, so a member the record gains tomorrow
+is compared without anyone editing the comparison, and a member moved into `runtime` to make a
+comparison pass would be a member that visibly stopped being compared.
+
+### The proof, in the gate
+
+`cargo xtask synth` builds both applications from the committed trees plus their hand-written
+realizations — [`examples/gatepass-realization/`](../../examples/gatepass-realization) for Rust,
+[`examples/gatepass-go-realization/`](../../examples/gatepass-go-realization) for Go, each with a
+linker that resolves exactly one implementation per obligation and never chooses between two (gap
+register D-2) — starts each on an **ephemeral** port, and:
+
+* reads three startup lines from each, strips `runtime`, and compares;
+* drives seven exchanges through both — a registration, a domain refusal, both projections, a body
+  the schema refuses, an undeclared path and a declared path under the wrong method — comparing the
+  status and the body **as a value**, because a JSON object is unordered and the two languages
+  build one through two writers;
+* fetches `/openapi.json` and `/docs` from both and compares them to the committed bytes and to
+  each other;
+* kills and reaps both, from a guard whose `Drop` runs on every path out.
+
+The two realizations are deliberately not translations of each other. Both were written from the
+specification, in the language of the tree each links into, which is what makes "they answer the
+same way" a claim about the specification rather than about a copy.
+
+### What is deliberately not here
+
+The browser target is **not** emitted for this specification, and refuses its transport at the
+target stage rather than silently: a page holds the system in one tab and binds no socket, so a
+network surface is one a page would *call* rather than contain — a fourth target rather than this
+one. There is no authentication (the model states none; `x-ess-may-invoke` still says who may
+invoke what), no concurrency beyond one connection at a time, no TLS and no `servers` block,
+because the model has no URL. And a command naming a subject that was never created still has no
+declared outcome — `wrong_state:` demands a state the subject does not have — so both realizations
+answer the typed refusal and the surface reports `501`. That is a gap in the *model*, recorded
+against the billing realization before this wave and unchanged by it.
+
 ## W7.4 — deferred by operator decision
 
 Obligations-as-artifacts stays described on [`ess-roadmap.md`](ess-roadmap.md) and is not
-scheduled. Nothing in W7.1, W7.2 or W7.3 depends on it; its precondition — a contract digest that
-exists in code — is now met, so scheduling it later is a decision, not a build.
+scheduled. Nothing in W7.1, W7.2, W7.3 or W7.5 depends on it; its precondition — a contract digest
+that exists in code — is now met, so scheduling it later is a decision, not a build.
