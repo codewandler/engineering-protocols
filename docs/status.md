@@ -37,6 +37,7 @@ Two rules keep this page honest, both learned the expensive way:
 | `0.8.0-harness-wave-1-trace-wave-1` | 0.8.0-harness-wave-1-trace-wave-1 |
 | `0.9.0-harness-waves-2-3` | 0.9.0-harness-waves-2-3 |
 | `0.10.0-horizons-dogfood-lab` | 0.10.0-horizons-dogfood-lab |
+| `0.11.0-ground-truth-and-docs` | 0.11.0-ground-truth-and-docs |
 <!-- generated:delivered-waves:end -->
 
 ## The two halves, and the proposed designs
