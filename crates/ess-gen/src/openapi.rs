@@ -196,7 +196,9 @@ use ess_domain::binding::Delivery;
 use serde_json::{json, Map, Value};
 
 use crate::artifact::{Artifact, Generator};
-use crate::provenance::Provenance;
+use ess_compiler::refs::{ActorRef, BindingRef, ComponentRef, EssSemanticRef};
+
+use crate::provenance::{Provenance, ProvenanceMint, SlicedProvenance};
 use crate::schema::types::{self, Message, Node};
 
 /// The specification version emitted. 3.1 rather than 3.0 because 3.1's schema dialect is JSON
@@ -262,20 +264,54 @@ impl Generator for OpenApi {
         "openapi"
     }
 
-    fn generate(&self, ir: &EssIr, provenance: &Provenance) -> Vec<Artifact> {
+    fn generate(&self, ir: &EssIr, mint: &ProvenanceMint) -> Vec<Artifact> {
         // `ir.components` is a `BTreeMap`, so this order is the same on every machine. The file name
         // comes from the component's own name rather than its wire name: a wire name is free text
         // and a file name is not, and this path is not something a consumer reads off the wire.
         ir.components
             .values()
             .map(|component| {
-                Artifact::new(
+                let sliced = component_slice(ir, component, mint);
+                Artifact::sliced(
                     format!("{}.yaml", component.name),
-                    render(&document(ir, component, provenance), provenance),
+                    render(
+                        &document(ir, component, &sliced.provenance),
+                        &sliced.provenance,
+                    ),
+                    sliced.slice,
                 )
             })
             .collect()
     }
+}
+
+/// The slice one component's document derives from: the component, every actor and every binding.
+///
+/// The component's own closure brings in what it accepts, owns and publishes — commands with their
+/// outcomes, the domains, the input and error payload types. The two flat additions are the
+/// constructs this document reads by *inversion*, which no forward walk from the component can
+/// reach: grants live on the actors (`ir.grants()` is walked for every operation's security
+/// answer), and the `Idempotency-Key` header exists exactly where some binding invokes a command
+/// `at_least_once`. Every actor and every binding rather than the currently-relevant ones,
+/// because "which ones are relevant" is itself an answer that changes — an actor granted its
+/// first accepted command tomorrow must move this digest today.
+fn component_slice(
+    ir: &EssIr,
+    component: &ResolvedComponent,
+    mint: &ProvenanceMint,
+) -> SlicedProvenance {
+    let mut seeds: Vec<EssSemanticRef> = vec![ComponentRef::new(component.name.clone()).into()];
+    seeds.extend(
+        ir.actors
+            .keys()
+            .map(|name| ActorRef::new(name.clone()).into()),
+    );
+    seeds.extend(
+        ir.bindings
+            .keys()
+            .map(|name| BindingRef::new(name.clone()).into()),
+    );
+    mint.of_seeds(seeds)
 }
 
 /// The document as YAML, behind the provenance header.

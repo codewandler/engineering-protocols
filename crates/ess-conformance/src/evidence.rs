@@ -276,6 +276,10 @@ mod tests {
                     "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
                 )
                 .expect("a digest"),
+                contract_digest: SpecDigest::new(
+                    "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
+                )
+                .expect("a digest"),
                 compiler_version: "0.1.0".to_owned(),
                 generator_version: "0.1.0".to_owned(),
                 synthesizer_version: "0.1.0".to_owned(),

@@ -5,6 +5,7 @@
     "system": "billing",
     "specification_version": "v3",
     "source_digest": "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
+    "contract_digest": "36377c1bf31322cc52316090a0f37a9081701352625f837a51bb8302f2c5fcf5",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "regenerate": "protocol ess generate"

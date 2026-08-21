@@ -40,6 +40,21 @@
 //!
 //! `tests/impact.rs` breaks each of 3, 4, 5 and 6 and watches it fail.
 //!
+//! # Wave 7: the same answer about generated artifacts
+//!
+//! Since W7.1 every generated artifact carries the digest of the model slice it derives from
+//! ([`ess_gen::provenance::ModelSlice`]), and this module answers the artifact-granularity
+//! question beside the scenario one: **which artifacts are owed regeneration**. The polarity is
+//! identical and enforced the same way — [`ArtifactAnswer`] has `Whole` and `Narrowed` and no
+//! third variant, an artifact absent from the answer was *not reached*, and everything the
+//! analysis cannot follow is owed, stated as such: a change with no construct to seed from owes
+//! every artifact (mechanism 3), a slice resting on an ungraphed construct owes every artifact
+//! (mechanism 4), a move in an uncompared family owes every artifact (mechanism 6), and a
+//! committed artifact whose provenance cannot be read or whose contract digest its slice does not
+//! compute is owed outright ([`ArtifactObligation`]). `tests/artifacts.rs` proves the narrowing on
+//! the fixture pair — a strict subset, with the path explaining each member — and breaks every
+//! fail-closed arm from outside.
+//!
 //! # Why there is no `RawEssImpact`
 //!
 //! Invariant 2 applies to documents that are **read back**. A delta is one — it is committed, quoted
@@ -59,6 +74,8 @@ use ess_conformance::scenario::{
 };
 use ess_domain::name::QualifiedName;
 
+use ess_gen::provenance::ModelSlice;
+
 use crate::change::{ActorChange, ChangeId, SemanticChange};
 use crate::delta::EssDelta;
 use crate::diff::{diff, DiffRefusal};
@@ -71,7 +88,12 @@ use crate::graph::{DependencyEdge, ImpactClass, Reach, SemanticDependencyGraph};
 /// document back and has to refuse a shape it does not understand. Nothing reads an impact report
 /// back — see the module documentation — so a parser here would be a refusal that cannot fire, and
 /// the word is carried anyway because a consumer keying on it costs nothing.
-pub const IMPACT_FORMAT: &str = "ess-impact/1";
+///
+/// `/2` since wave 7: the document gained an `artifacts` section, and `suite` plus
+/// `invalidation` became optional — a report can now be about the generated tree alone. The label
+/// still has no parser, for the reason above, and it is bumped anyway because a label that stays
+/// at `/1` across a shape change is a label that lies to the one consumer who does key on it.
+pub const IMPACT_FORMAT: &str = "ess-impact/2";
 
 /// Why a delta and a suite cannot be compared at all.
 ///
@@ -111,6 +133,19 @@ pub enum ImpactRefusal {
         /// this refusal catches most often, and a reader should not have to work that out.
         after: SpecDigest,
     },
+    /// The suite's contract digest is not what the `--from` model's slice rule computes.
+    ///
+    /// The suite's `spec_digest` matched, so the model is the right one — which leaves exactly one
+    /// way to reach this state: the digest was written by something other than the synthesiser, a
+    /// hand edit or a corruption. A document whose claim of derivation is false is refused rather
+    /// than narrowed, for the reason a suite from another revision is: the short list it would
+    /// produce looks exactly like a correct short list.
+    SuiteContractMismatch {
+        /// What the suite claims its slice digest is.
+        suite: SpecDigest,
+        /// What the `--from` model's whole-model slice computes.
+        expected: String,
+    },
 }
 
 impl fmt::Display for ImpactRefusal {
@@ -121,6 +156,13 @@ impl fmt::Display for ImpactRefusal {
                 f,
                 "the suite checks `{suite}` and these are two revisions of `{revisions}`: a suite \
                  says what one system's implementation owes, and it cannot say it about another"
+            ),
+            Self::SuiteContractMismatch { suite, expected } => write!(
+                f,
+                "this suite claims contract digest {suite}, and the `--from` model's slice rule \
+                 computes {expected}: the claim of derivation is false — a hand edit or a \
+                 corruption — and narrowing on a false claim would produce a short list that looks \
+                 exactly like a correct one"
             ),
             Self::SuiteFromAnotherRevision {
                 suite,
@@ -258,14 +300,17 @@ impl ScenarioImpact {
     }
 }
 
-/// Why a whole suite is owed again.
+/// Why a whole answer is owed — every scenario of the suite, or every generated artifact.
 ///
-/// Both variants are the fail-closed escape hatch: a change the closure cannot follow, and a suite
-/// resting on something the graph cannot see. Neither is an error — the analysis worked and the
-/// honest answer is *all of it*, which is exactly what G19 would have said.
+/// Each variant is the fail-closed escape hatch: a change the closure cannot follow, a dependency
+/// set resting on something the graph cannot see, a family the delta does not compare. None is an
+/// error — the analysis worked and the honest answer is *all of it*, which is exactly what G19
+/// would have said. One vocabulary for both questions on purpose: what makes a suite un-narrowable
+/// makes the artifact tree un-narrowable by the same argument, and two enums would let the two
+/// answers drift.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "reason", rename_all = "kebab-case")]
-pub enum WholeSuite {
+pub enum WholeAnswer {
     /// A change is about the specification itself, and no construct in a suite names one.
     ///
     /// [`SemanticChange::subject`] is `None` for a
@@ -277,11 +322,12 @@ pub enum WholeSuite {
         /// The change that did it.
         change: ChangeId,
     },
-    /// The suite rests on a construct neither revision's graph has a node for.
+    /// A dependency set rests on a construct neither revision's graph has a node for.
     ///
-    /// A scenario naming something the walk does not build a node for can never be reached by any
-    /// closure, so narrowing would quietly leave it out of every answer. That is the one shape in
-    /// which a narrowing is wrong and looks right, so it is not narrowed at all.
+    /// A scenario — or an artifact's slice — naming something the walk does not build a node for
+    /// can never be reached by any closure, so narrowing would quietly leave it out of every
+    /// answer. That is the one shape in which a narrowing is wrong and looks right, so it is not
+    /// narrowed at all.
     UngraphedDependency {
         /// What the suite named.
         construct: EssSemanticRef,
@@ -299,18 +345,18 @@ pub enum WholeSuite {
     UncomparedFamilyChanged,
 }
 
-impl fmt::Display for WholeSuite {
+impl fmt::Display for WholeAnswer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::SystemChanged { change } => write!(
                 f,
-                "`{change}` is about the specification itself, which no scenario names as a \
-                 dependency — so nothing can be narrowed away from it"
+                "`{change}` is about the specification itself, which no dependency set names as a \
+                 construct — so nothing can be narrowed away from it"
             ),
             Self::UngraphedDependency { construct } => write!(
                 f,
-                "a scenario depends on {construct}, which neither revision's dependency graph has a \
-                 node for: no closure could ever reach it, and leaving it out of every answer is \
+                "a dependency set names {construct}, which neither revision's dependency graph has \
+                 a node for: no closure could ever reach it, and leaving it out of every answer is \
                  the one way a narrowing is wrong and looks right"
             ),
             Self::UncomparedFamilyChanged => f.write_str(
@@ -333,7 +379,7 @@ pub enum Invalidation {
     /// Every scenario the suite holds.
     Whole {
         /// Why narrowing was not available.
-        because: WholeSuite,
+        because: WholeAnswer,
     },
     /// These scenarios, each with the reasons that reached it.
     Narrowed {
@@ -413,6 +459,171 @@ impl Invalidation {
     }
 }
 
+/// Names one generated artifact in an impact answer.
+///
+/// Three kinds because the repository commits three kinds of derived output, at the granularity
+/// each is regenerated at: a projection is one file, a suite is one document, and a synthesised
+/// workspace is one tree `protocol ess synthesize` rewrites whole — so listing its files one by
+/// one would name a hundred artifacts where there is one decision.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[serde(tag = "artifact", rename_all = "kebab-case")]
+pub enum ArtifactId {
+    /// A projection under the generated tree, by its path relative to that tree's root.
+    Projection {
+        /// Where it is, `/`-separated.
+        path: String,
+    },
+    /// The conformance suite the specification obliges.
+    Suite,
+    /// A synthesised workspace.
+    Workspace {
+        /// Its root, relative to the generated tree — `rust/billing` — or `rust` when no
+        /// committed tree was read and the workspaces are being answered for as one obligation.
+        path: String,
+    },
+}
+
+impl fmt::Display for ArtifactId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Projection { path } => write!(f, "projection {path}"),
+            Self::Suite => f.write_str("conformance suite"),
+            Self::Workspace { path } => write!(f, "workspace {path}"),
+        }
+    }
+}
+
+/// Why one artifact is owed regeneration.
+///
+/// Every variant is an obligation and none is a verdict of health: there is no `Current`, no
+/// `Verified` and no way to say an artifact stands, for the same reason [`Invalidation`] has no
+/// `StillValid` — an artifact absent from the answer was not reached by this analysis, which is
+/// not a claim about it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "owed", rename_all = "kebab-case")]
+pub enum ArtifactObligation {
+    /// The delta reached the artifact's slice; the paths explain it, one per change.
+    SliceMoved {
+        /// Why, in canonical order: by change, then by the slice member it reached.
+        #[serde(serialize_with = "serialize_paths")]
+        reasons: Vec<ImpactPath>,
+    },
+    /// The committed artifact carries no provenance this analysis can read.
+    ///
+    /// Including every artifact written before wave 7, which carries a model digest and no
+    /// contract digest: one digest is not provenance, and an unreadable claim is treated exactly
+    /// like a false one.
+    ProvenanceUnreadable,
+    /// The committed artifact's contract digest is not what its slice computes against `--from`.
+    ///
+    /// A false claim about derivation — a hand edit, a stale regeneration, a corruption. What the
+    /// artifact would owe if its claim were true is unknowable, so it owes regeneration outright.
+    ContractMismatch {
+        /// What the committed artifact claims.
+        committed: String,
+        /// What its slice computes against the `--from` model.
+        expected: String,
+    },
+    /// A committed file this analysis cannot account for: the `--from` model derives nothing at
+    /// its path.
+    Unfollowed,
+    /// The `--from` model derives it and the committed tree does not hold it.
+    Missing,
+}
+
+/// Which generated artifacts a delta puts back to owed.
+///
+/// The same two-variant shape as [`Invalidation`], for the same reason: there is no third variant,
+/// no complement operation and no way to read a survival claim out of it. `Whole` answers reuse
+/// [`WholeAnswer`] — what makes a suite un-narrowable makes the artifact tree un-narrowable by the
+/// same argument.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "answer", rename_all = "kebab-case")]
+pub enum ArtifactAnswer {
+    /// Every artifact the model derives.
+    Whole {
+        /// Why narrowing was not available.
+        because: WholeAnswer,
+    },
+    /// These artifacts, each with the obligation that reached it.
+    Narrowed {
+        /// By artifact, in canonical order.
+        #[serde(serialize_with = "serialize_owed")]
+        owed: BTreeMap<ArtifactId, ArtifactObligation>,
+    },
+}
+
+impl ArtifactAnswer {
+    /// How many artifacts are owed, out of `total` the model derives.
+    fn owed_count(&self, total: usize) -> usize {
+        match self {
+            Self::Whole { .. } => total,
+            Self::Narrowed { owed } => owed.len(),
+        }
+    }
+
+    /// The obligation one artifact carries, where the answer is a narrowing.
+    ///
+    /// `None` for [`Whole`](Self::Whole): the whole tree is owed because narrowing was not
+    /// available, so there is no per-artifact reason to give.
+    pub fn obligation(&self, artifact: &ArtifactId) -> Option<&ArtifactObligation> {
+        match self {
+            Self::Whole { .. } => None,
+            Self::Narrowed { owed } => owed.get(artifact),
+        }
+    }
+
+    /// `true` when every artifact is owed.
+    pub fn is_whole(&self) -> bool {
+        matches!(self, Self::Whole { .. })
+    }
+
+    /// The owed artifacts, where the answer is a narrowing.
+    pub fn owed(&self) -> Option<&BTreeMap<ArtifactId, ArtifactObligation>> {
+        match self {
+            Self::Whole { .. } => None,
+            Self::Narrowed { owed } => Some(owed),
+        }
+    }
+}
+
+/// One owed artifact as the document writes it: the id's fields and the obligation's, one object.
+#[derive(serde::Serialize)]
+struct WrittenArtifact<'a> {
+    /// Which artifact.
+    #[serde(flatten)]
+    id: &'a ArtifactId,
+    /// What it owes.
+    #[serde(flatten)]
+    obligation: &'a ArtifactObligation,
+}
+
+/// Writes the owed map as a sequence, because an [`ArtifactId`] is a value and not a string, and a
+/// JSON map key must be a string.
+fn serialize_owed<S: serde::Serializer>(
+    owed: &BTreeMap<ArtifactId, ArtifactObligation>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    use serde::ser::SerializeSeq as _;
+
+    let mut sequence = serializer.serialize_seq(Some(owed.len()))?;
+    for (id, obligation) in owed {
+        sequence.serialize_element(&WrittenArtifact { id, obligation })?;
+    }
+    sequence.end()
+}
+
+/// The committed generated tree, as whoever holds a filesystem read it.
+///
+/// A value rather than a path, so this crate stays a pure function of its inputs: the CLI walks
+/// the directory and hands the bytes in, and a test hands in a map — the same discipline that
+/// keeps the comparison itself inside [`impact()`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GeneratedTree {
+    /// Every committed file, by path relative to the tree root, `/`-separated.
+    pub files: BTreeMap<String, String>,
+}
+
 /// Counts a delta and a closure produce, without pretending to know effort.
 ///
 /// Design §26, restricted to what this slice can count. The four §26 names that are absent —
@@ -438,10 +649,17 @@ pub struct Churn {
     pub components_impacted: usize,
     /// How many changes add or remove an actor's authority to invoke a command.
     pub actor_grants_changed: usize,
-    /// How many scenarios the suite holds.
-    pub conformance_scenarios_total: usize,
-    /// How many of them are owed again.
-    pub conformance_scenarios_invalidated: usize,
+    /// How many scenarios the suite holds. Absent when no suite was given: a zero here would read
+    /// as "nothing owed", which is a claim, where absence is only a question not asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conformance_scenarios_total: Option<usize>,
+    /// How many of them are owed again. Absent exactly when the total is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conformance_scenarios_invalidated: Option<usize>,
+    /// How many generated artifacts the `--from` model derives.
+    pub generated_artifacts_total: usize,
+    /// How many of them are owed regeneration.
+    pub generated_artifacts_owed: usize,
 }
 
 /// What a delta invalidates, with the paths that explain it.
@@ -455,13 +673,17 @@ pub struct EssImpact {
     pub format: &'static str,
     /// What moved.
     pub delta: EssDelta,
-    /// Which suite was narrowed, and what produced it.
-    pub suite: SuiteProvenance,
+    /// Which suite was narrowed, and what produced it. Absent when no suite was given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suite: Option<SuiteProvenance>,
     /// Every construct any change reached, with the path that explains it.
     #[serde(serialize_with = "serialize_paths")]
     impacts: Vec<ImpactPath>,
-    /// What the suite owes again.
-    pub invalidation: Invalidation,
+    /// What the suite owes again. Absent exactly when `suite` is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invalidation: Option<Invalidation>,
+    /// Which generated artifacts are owed regeneration.
+    pub artifacts: ArtifactAnswer,
     /// Deterministic counts.
     pub churn: Churn,
 }
@@ -495,55 +717,96 @@ impl EssImpact {
     }
 }
 
-/// What moving from `before` to `after` invalidates in `suite`.
+/// What moving from `before` to `after` invalidates: the suite's scenarios when a suite is given,
+/// and the generated artifacts always.
 ///
 /// The comparison is run here rather than taken as an argument, and that is mechanism 5 of the
 /// fail-closed list in the module documentation: a caller cannot hand in a delta computed from one
-/// pair and a graph built from another, because there is nowhere to hand a delta in.
+/// pair and a graph built from another, because there is nowhere to hand a delta in. The artifact
+/// inventory is derived here too, from the same `before` model, for the same reason.
+///
+/// `tree` is the committed generated tree, when the caller has one: each artifact's stamped
+/// provenance is then checked against what its slice computes, and an artifact whose claim cannot
+/// be read or does not hold is owed outright — stated as such, never silently narrowed past.
 ///
 /// # Errors
 ///
 /// [`ImpactRefusal`] when the two specifications are not two revisions of one system, or when the
-/// suite was not produced from the `before` revision.
+/// given suite was not produced from the `before` revision or carries a contract digest its model
+/// does not compute.
 pub fn impact(
     before: &EssIr,
     after: &EssIr,
-    suite: &ConformanceSuite,
+    suite: Option<&ConformanceSuite>,
+    tree: Option<&GeneratedTree>,
 ) -> Result<EssImpact, ImpactRefusal> {
     let delta = diff(before, after).map_err(|refusal| ImpactRefusal::Pair { refusal })?;
 
-    if suite.provenance.system != delta.before.system.to_string() {
-        return Err(ImpactRefusal::SuiteFromAnotherSystem {
-            suite: suite.provenance.system.clone(),
-            revisions: delta.before.system.clone(),
-        });
-    }
-    if suite.provenance.spec_digest != delta.before.spec_digest {
-        return Err(ImpactRefusal::SuiteFromAnotherRevision {
-            suite: suite.provenance.spec_digest.clone(),
-            before: delta.before.spec_digest.clone(),
-            after: delta.after.spec_digest.clone(),
-        });
+    if let Some(suite) = suite {
+        if suite.provenance.system != delta.before.system.to_string() {
+            return Err(ImpactRefusal::SuiteFromAnotherSystem {
+                suite: suite.provenance.system.clone(),
+                revisions: delta.before.system.clone(),
+            });
+        }
+        if suite.provenance.spec_digest != delta.before.spec_digest {
+            return Err(ImpactRefusal::SuiteFromAnotherRevision {
+                suite: suite.provenance.spec_digest.clone(),
+                before: delta.before.spec_digest.clone(),
+                after: delta.after.spec_digest.clone(),
+            });
+        }
+        let expected = ess_gen::Provenance::of(before).contract_digest;
+        if suite.provenance.contract_digest.as_str() != expected {
+            return Err(ImpactRefusal::SuiteContractMismatch {
+                suite: suite.provenance.contract_digest.clone(),
+                expected,
+            });
+        }
     }
 
     let graph = SemanticDependencyGraph::of(before).merged(&SemanticDependencyGraph::of(after));
-    let (impacts, mut invalidation) = analyse(&delta, &graph, suite);
     // Mechanism 6. The families the delta does not compare are checked for canonical equality, and
     // any difference owes everything: an empty delta over two different models would otherwise be
-    // a narrowing to nothing, which is a survival claim nothing here is entitled to make.
-    if uncompared_families(before) != uncompared_families(after) {
-        invalidation = invalidation.joined(Invalidation::Whole {
-            because: WholeSuite::UncomparedFamilyChanged,
-        });
+    // a narrowing to nothing, which is a survival claim nothing here is entitled to make. One
+    // comparison feeds both answers — the suite's and the artifacts' — because it is one fact.
+    let uncompared_moved = uncompared_families(before) != uncompared_families(after);
+
+    let mut impacts = Vec::new();
+    let invalidation = suite.map(|suite| {
+        let (walked, mut invalidation) = analyse(&delta, &graph, suite);
+        impacts = walked;
+        if uncompared_moved {
+            invalidation = invalidation.joined(Invalidation::Whole {
+                because: WholeAnswer::UncomparedFamilyChanged,
+            });
+        }
+        invalidation
+    });
+    if suite.is_none() {
+        // The construct walk does not need a suite; only the scenario intersection does.
+        impacts = construct_impacts(&delta, &graph);
     }
-    let churn = churn(&delta, &impacts, &invalidation, suite);
+
+    let inventory = artifact_inventory(before, tree);
+    let artifacts = analyse_artifacts(&delta, &graph, before, &inventory, tree, uncompared_moved);
+
+    let churn = churn(
+        &delta,
+        &impacts,
+        invalidation.as_ref(),
+        suite,
+        &artifacts,
+        inventory.len(),
+    );
 
     Ok(EssImpact {
         format: IMPACT_FORMAT,
         delta,
-        suite: suite.provenance.clone(),
+        suite: suite.map(|suite| suite.provenance.clone()),
         impacts,
         invalidation,
+        artifacts,
         churn,
     })
 }
@@ -579,7 +842,6 @@ pub(crate) fn analyse(
     graph: &SemanticDependencyGraph,
     suite: &ConformanceSuite,
 ) -> (Vec<ImpactPath>, Invalidation) {
-    let mut impacts: Vec<ImpactPath> = Vec::new();
     let mut invalidation = Invalidation::nothing();
 
     // Mechanism 4, before any change is looked at: a suite resting on a construct the graph has no
@@ -587,7 +849,7 @@ pub(crate) fn analyse(
     for construct in suite.dependencies() {
         if !graph.nodes().contains(construct) {
             invalidation = invalidation.joined(Invalidation::Whole {
-                because: WholeSuite::UngraphedDependency {
+                because: WholeAnswer::UngraphedDependency {
                     construct: construct.clone(),
                 },
             });
@@ -600,23 +862,12 @@ pub(crate) fn analyse(
         // to seed a closure at — and the alternative to owing everything is owing nothing.
         let Some(subject) = change.subject() else {
             invalidation = invalidation.joined(Invalidation::Whole {
-                because: WholeSuite::SystemChanged { change: id },
+                because: WholeAnswer::SystemChanged { change: id },
             });
             continue;
         };
 
         let reach = graph.closure(&subject);
-        for target in reach.constructs() {
-            impacts.push(ImpactPath {
-                change: id.clone(),
-                target: target.clone(),
-                edges: reach
-                    .path(target)
-                    .expect("a reached construct has the path it was reached by")
-                    .to_vec(),
-            });
-        }
-
         let mut scenarios: BTreeMap<ScenarioId, ScenarioImpact> = BTreeMap::new();
         for (scenario_id, scenario) in &suite.scenarios {
             if let Some(reason) = nearest_reason(&reach, scenario, &id) {
@@ -631,9 +882,249 @@ pub(crate) fn analyse(
         invalidation = invalidation.joined(Invalidation::Narrowed { scenarios });
     }
 
+    (construct_impacts(delta, graph), invalidation)
+}
+
+/// Every construct any change reached, with the path that explains it — the walk that needs no
+/// suite, split out so a report without one still carries its impacts.
+fn construct_impacts(delta: &EssDelta, graph: &SemanticDependencyGraph) -> Vec<ImpactPath> {
+    let mut impacts: Vec<ImpactPath> = Vec::new();
+    for change in delta.changes() {
+        let id = change.id();
+        let Some(subject) = change.subject() else {
+            continue;
+        };
+        let reach = graph.closure(&subject);
+        for target in reach.constructs() {
+            impacts.push(ImpactPath {
+                change: id.clone(),
+                target: target.clone(),
+                edges: reach
+                    .path(target)
+                    .expect("a reached construct has the path it was reached by")
+                    .to_vec(),
+            });
+        }
+    }
     impacts.sort();
     impacts.dedup();
-    (impacts, invalidation)
+    impacts
+}
+
+/// Every generated artifact the `before` model derives, each with the slice it derives from.
+///
+/// The projections are generated in memory — the same call `protocol ess generate` makes, so the
+/// inventory cannot disagree with the committed tree about what exists. The suite and the
+/// synthesised workspaces enter as whole-model artifacts without being synthesised: their slices
+/// are the whole model by construction (a suite holds a scenario for every construct that obliges
+/// one; a workspace is one tree, regenerated whole), so nothing about their content is needed to
+/// answer for them.
+///
+/// Workspace entries follow the tree when one was read — one per committed `rust/<root>/` — and
+/// collapse to a single `rust` obligation when none was: without a tree there is nothing to name
+/// the roots by, and one honest obligation beats a guessed list.
+fn artifact_inventory(
+    before: &EssIr,
+    tree: Option<&GeneratedTree>,
+) -> BTreeMap<ArtifactId, ModelSlice> {
+    let mut inventory: BTreeMap<ArtifactId, ModelSlice> = BTreeMap::new();
+    let projections = ess_gen::generate_all(before)
+        .unwrap_or_else(|defect| panic!("the projections of a resolved model generate: {defect}"));
+    for (path, artifact) in projections {
+        inventory.insert(ArtifactId::Projection { path }, artifact.slice);
+    }
+    inventory.insert(ArtifactId::Suite, ModelSlice::WholeModel);
+
+    match tree {
+        Some(tree) => {
+            let mut roots: BTreeSet<String> = BTreeSet::new();
+            for path in tree.files.keys() {
+                if let Some(rest) = path.strip_prefix("rust/") {
+                    if let Some((root, _)) = rest.split_once('/') {
+                        roots.insert(format!("rust/{root}"));
+                    }
+                }
+            }
+            for root in roots {
+                inventory.insert(ArtifactId::Workspace { path: root }, ModelSlice::WholeModel);
+            }
+        }
+        None => {
+            inventory.insert(
+                ArtifactId::Workspace {
+                    path: "rust".to_owned(),
+                },
+                ModelSlice::WholeModel,
+            );
+        }
+    }
+    inventory
+}
+
+/// The artifact half of the analysis: which artifacts the delta owes, or why all of them are.
+///
+/// The same mechanisms as [`analyse`], in the same order, because they are the same argument at a
+/// different granularity: a change the closure cannot follow owes everything (mechanism 3), a
+/// slice resting on an ungraphed construct owes everything (mechanism 4), a family the delta does
+/// not compare owes everything (mechanism 6) — and only then is anything narrowed. A committed
+/// artifact whose provenance cannot be read, or whose contract digest is not what its slice
+/// computes, is owed before its slice is even consulted: a claim that cannot be checked and a
+/// claim that is false get the same answer.
+/// The committed tree's claims, checked artifact by artifact — every failure an obligation.
+///
+/// A projection the tree lacks is owed its creation; a workspace speaks through its `plan.json`
+/// (the granularity the tree is regenerated at) and one that cannot is owed as unreadable; a
+/// stamped digest that is not what the artifact's slice computes against `before` is owed as a
+/// false claim; and a committed file the model derives nothing at is owed as unfollowable —
+/// absence from the inventory is not knowledge about a file, and the one fail-closed thing to say
+/// about it is that standing still is not something it has established. The suite is deliberately
+/// not here: its claims are checked — and refused, not owed — through the `--suite` door.
+fn verify_committed(
+    before: &EssIr,
+    inventory: &BTreeMap<ArtifactId, ModelSlice>,
+    tree: &GeneratedTree,
+    owed: &mut BTreeMap<ArtifactId, ArtifactObligation>,
+) {
+    let mint = ess_gen::provenance::ProvenanceMint::new(before);
+    for (id, slice) in inventory {
+        let committed = match id {
+            ArtifactId::Projection { path } => match tree.files.get(path) {
+                None => {
+                    owed.insert(id.clone(), ArtifactObligation::Missing);
+                    continue;
+                }
+                Some(contents) => contents,
+            },
+            ArtifactId::Workspace { path } => match tree.files.get(&format!("{path}/plan.json")) {
+                None => {
+                    owed.insert(id.clone(), ArtifactObligation::ProvenanceUnreadable);
+                    continue;
+                }
+                Some(contents) => contents,
+            },
+            ArtifactId::Suite => continue,
+        };
+        match ess_gen::Provenance::read_digests(committed) {
+            None => {
+                owed.insert(id.clone(), ArtifactObligation::ProvenanceUnreadable);
+            }
+            Some(read) => {
+                let expected = mint.digest_of(slice);
+                if read.contract_digest != expected {
+                    owed.insert(
+                        id.clone(),
+                        ArtifactObligation::ContractMismatch {
+                            committed: read.contract_digest,
+                            expected,
+                        },
+                    );
+                }
+            }
+        }
+    }
+    for path in tree.files.keys() {
+        let inside_workspace = inventory.keys().any(|id| {
+            matches!(id, ArtifactId::Workspace { path: root }
+                if path == root || path.starts_with(&format!("{root}/")))
+        });
+        if inside_workspace {
+            continue;
+        }
+        let id = ArtifactId::Projection { path: path.clone() };
+        if !inventory.contains_key(&id) {
+            owed.insert(id, ArtifactObligation::Unfollowed);
+        }
+    }
+}
+
+fn analyse_artifacts(
+    delta: &EssDelta,
+    graph: &SemanticDependencyGraph,
+    before: &EssIr,
+    inventory: &BTreeMap<ArtifactId, ModelSlice>,
+    tree: Option<&GeneratedTree>,
+    uncompared_moved: bool,
+) -> ArtifactAnswer {
+    if uncompared_moved {
+        return ArtifactAnswer::Whole {
+            because: WholeAnswer::UncomparedFamilyChanged,
+        };
+    }
+    for change in delta.changes() {
+        if change.subject().is_none() {
+            return ArtifactAnswer::Whole {
+                because: WholeAnswer::SystemChanged {
+                    change: change.id(),
+                },
+            };
+        }
+    }
+    for slice in inventory.values() {
+        if let ModelSlice::Constructs { seeds } = slice {
+            for seed in seeds {
+                if !graph.nodes().contains(seed) {
+                    return ArtifactAnswer::Whole {
+                        because: WholeAnswer::UngraphedDependency {
+                            construct: seed.clone(),
+                        },
+                    };
+                }
+            }
+        }
+    }
+
+    // Every change names a subject from here on — the System arm above returned.
+    let subjects: Vec<(ChangeId, EssSemanticRef)> = delta
+        .changes()
+        .iter()
+        .filter_map(|change| change.subject().map(|subject| (change.id(), subject)))
+        .collect();
+
+    let mut owed: BTreeMap<ArtifactId, ArtifactObligation> = BTreeMap::new();
+    if let Some(tree) = tree {
+        verify_committed(before, inventory, tree, &mut owed);
+    }
+
+    for (id, slice) in inventory {
+        if owed.contains_key(id) {
+            // Already owed for a stronger reason than a narrowing could give.
+            continue;
+        }
+        let mut reasons: Vec<ImpactPath> = Vec::new();
+        match slice {
+            ModelSlice::WholeModel => {
+                // Every construct is in a whole-model slice, the changed one included, at no
+                // distance: the empty path is the honest explanation, exactly as it is for a
+                // directly changed construct in a scenario's answer.
+                for (change, subject) in &subjects {
+                    reasons.push(ImpactPath {
+                        change: change.clone(),
+                        target: subject.clone(),
+                        edges: Vec::new(),
+                    });
+                }
+            }
+            ModelSlice::Constructs { seeds } => {
+                let members = graph.slice(seeds);
+                for (change, subject) in &subjects {
+                    if let Some(edges) = members.get(subject) {
+                        reasons.push(ImpactPath {
+                            change: change.clone(),
+                            target: subject.clone(),
+                            edges: edges.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        if !reasons.is_empty() {
+            reasons.sort();
+            reasons.dedup();
+            owed.insert(id.clone(), ArtifactObligation::SliceMoved { reasons });
+        }
+    }
+
+    ArtifactAnswer::Narrowed { owed }
 }
 
 /// The closest construct in a scenario's dependency set that this closure reached.
@@ -665,12 +1156,14 @@ fn nearest_reason(
         })
 }
 
-/// The counts, from the delta and the closure that has already been computed.
+/// The counts, from the delta and the closures that have already been computed.
 fn churn(
     delta: &EssDelta,
     impacts: &[ImpactPath],
-    invalidation: &Invalidation,
-    suite: &ConformanceSuite,
+    invalidation: Option<&Invalidation>,
+    suite: Option<&ConformanceSuite>,
+    artifacts: &ArtifactAnswer,
+    artifacts_total: usize,
 ) -> Churn {
     // One class per construct: the strongest one any change gives it. A type that one change is
     // about and another merely reaches is counted once, as changed.
@@ -707,8 +1200,12 @@ fn churn(
                 )
             })
             .count(),
-        conformance_scenarios_total: suite.len(),
-        conformance_scenarios_invalidated: invalidation.owed(suite).len(),
+        conformance_scenarios_total: suite.map(ConformanceSuite::len),
+        conformance_scenarios_invalidated: suite
+            .zip(invalidation)
+            .map(|(suite, invalidation)| invalidation.owed(suite).len()),
+        generated_artifacts_total: artifacts_total,
+        generated_artifacts_owed: artifacts.owed_count(artifacts_total),
     }
 }
 
@@ -744,6 +1241,10 @@ mod tests {
             specification_version: "v1".to_owned(),
             spec_digest: SpecDigest::new(
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            )
+            .expect("a digest"),
+            contract_digest: SpecDigest::new(
+                "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
             )
             .expect("a digest"),
             compiler_version: "0.1.0".to_owned(),
@@ -832,7 +1333,7 @@ mod tests {
         // The lattice property mechanism 2 rests on, asserted rather than assumed: `Whole` is the
         // top, so processing one more change can only widen what is owed.
         let whole = Invalidation::Whole {
-            because: WholeSuite::SystemChanged {
+            because: WholeAnswer::SystemChanged {
                 change: SemanticChange::System {
                     subject: name("catalog"),
                     changed: SystemChange::SummaryChanged {

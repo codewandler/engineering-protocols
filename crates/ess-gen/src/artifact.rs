@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use ess_compiler::EssIr;
 
-use crate::provenance::Provenance;
+use crate::provenance::{ModelSlice, Provenance, ProvenanceMint};
 
 /// One generated file.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -13,14 +13,34 @@ pub struct Artifact {
     pub path: String,
     /// Its contents.
     pub contents: String,
+    /// The model slice it derives from.
+    ///
+    /// [`ModelSlice::WholeModel`] unless the generator narrowed it, and that default is the
+    /// polarity of the whole wave: an artifact whose slice nobody thought about is owed
+    /// regeneration whenever anything moves, never quietly current.
+    pub slice: ModelSlice,
 }
 
 impl Artifact {
-    /// Builds one.
+    /// Builds one that derives from the whole model.
     pub fn new(path: impl Into<String>, contents: impl Into<String>) -> Self {
         Self {
             path: path.into(),
             contents: contents.into(),
+            slice: ModelSlice::WholeModel,
+        }
+    }
+
+    /// Builds one that derives from a narrower slice.
+    ///
+    /// The slice comes attached to the provenance that was stamped into `contents` —
+    /// [`ProvenanceMint::of_seeds`] hands both out as one value — so the recorded slice and the
+    /// stamped digest cannot be paired up wrong by a generator, and [`run`] still checks.
+    pub fn sliced(path: impl Into<String>, contents: impl Into<String>, slice: ModelSlice) -> Self {
+        Self {
+            path: path.into(),
+            contents: contents.into(),
+            slice,
         }
     }
 }
@@ -46,20 +66,50 @@ pub trait Generator {
     /// crate, not a fault in the specification — and the specification has already been refused if it
     /// was wrong, because this takes an [`EssIr`] and there is no way to hold one that did not
     /// resolve. So there is nothing left for a `Result` to report.
-    fn generate(&self, ir: &EssIr, provenance: &Provenance) -> Vec<Artifact>;
+    ///
+    /// The mint, not a `Provenance`: since wave 7 each artifact carries the digest of the model
+    /// slice it derives from, and a single pre-computed provenance could only say "the whole
+    /// model" about every file. A generator that has nothing narrower to say still stamps
+    /// [`ProvenanceMint::whole`].
+    fn generate(&self, ir: &EssIr, mint: &ProvenanceMint) -> Vec<Artifact>;
 }
 
 /// Runs one generator and returns its artifacts keyed by path.
 ///
 /// Keyed, and therefore deduplicated: two artifacts claiming one path means the second silently
 /// overwrites the first, and the output tree looks complete while missing a file.
+/// # Panics
+///
+/// When an artifact's stamped contract digest disagrees with the digest its recorded slice
+/// computes, or when an artifact carries no readable provenance at all. Both are defects in a
+/// generator, not in any specification — the same class as two artifacts claiming one path, but
+/// worse, because a wrong stamp *ships*: a committed artifact claiming derivation from a slice it
+/// was not stamped for is exactly the false claim wave 7's drift check exists to refuse, and this
+/// is the one place every artifact of every generator passes through before it can be written.
 pub fn run(
     generator: &dyn Generator,
     ir: &EssIr,
 ) -> Result<BTreeMap<String, Artifact>, DuplicatePath> {
-    let provenance = Provenance::of(ir);
+    let mint = ProvenanceMint::new(ir);
     let mut out: BTreeMap<String, Artifact> = BTreeMap::new();
-    for artifact in generator.generate(ir, &provenance) {
+    for artifact in generator.generate(ir, &mint) {
+        let stamped = Provenance::read_digests(&artifact.contents).unwrap_or_else(|| {
+            panic!(
+                "the `{}` generator wrote `{}` without readable provenance; an artifact that \
+                 cannot say what it derives from is an artifact nobody can audit",
+                generator.name(),
+                artifact.path
+            )
+        });
+        let computed = mint.digest_of(&artifact.slice);
+        assert_eq!(
+            stamped.contract_digest,
+            computed,
+            "the `{}` generator stamped `{}` with a contract digest its recorded slice does not \
+             compute; the stamp and the slice must come from one `ProvenanceMint` call",
+            generator.name(),
+            artifact.path
+        );
         let path = format!("{}/{}", generator.directory(), artifact.path);
         if out.contains_key(&path) {
             return Err(DuplicatePath {
@@ -67,7 +117,10 @@ pub fn run(
                 path,
             });
         }
-        out.insert(path.clone(), Artifact::new(path, artifact.contents));
+        out.insert(
+            path.clone(),
+            Artifact::sliced(path, artifact.contents, artifact.slice),
+        );
     }
     Ok(out)
 }

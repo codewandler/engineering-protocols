@@ -4,6 +4,7 @@
     "system": "oracle",
     "specification_version": "v1",
     "spec_digest": "4288d50a003fa7d5b39743327880aa7e2f97ff6d9408f8a5ddb908c8b6af79ee",
+    "contract_digest": "9c8f1b65057d7378da54f3072e27e6bb046abd22265bbdf1c1caadb94ecaa1bd",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "synthesizer_version": "0.1.0"

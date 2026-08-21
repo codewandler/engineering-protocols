@@ -25,4 +25,4 @@ beside the honest one must fail exactly the scenario that exists to catch it.
 
 | workspace | generated from | generated | obligations | refused | plan |
 | --- | --- | --- | --- | --- | --- |
-| [`billing/`](billing) | billing v3 (model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861) | 33 | 8 | 4 | [`billing/PLAN.md`](billing/PLAN.md) |
+| [`billing/`](billing) | billing v3 (model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861, contract digest d2b48060b7ee32e8f23b1e28972fea39921a25fdcacd635fdf7bbb538e94f367) | 33 | 8 | 4 | [`billing/PLAN.md`](billing/PLAN.md) |

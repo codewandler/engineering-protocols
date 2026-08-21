@@ -1,5 +1,6 @@
 # generated from billing v3
 # model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
+# contract digest 349f5a6ba27e3e94aba00b700b07454ac9f44021daa1385d6df99e9d4dc83bdd
 # compiler 0.1.0 · generator 0.1.0
 # do not edit: regenerate with `protocol ess generate`
 openapi: 3.1.0
@@ -15,6 +16,7 @@ info:
     system: billing
     specification_version: v3
     source_digest: 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
+    contract_digest: 349f5a6ba27e3e94aba00b700b07454ac9f44021daa1385d6df99e9d4dc83bdd
     compiler_version: 0.1.0
     generator_version: 0.1.0
 tags:

@@ -20,7 +20,7 @@ use std::fmt::Write as _;
 
 use crate::change::SemanticRelation;
 use crate::delta::EssDelta;
-use crate::impact::{EssImpact, Invalidation};
+use crate::impact::{ArtifactAnswer, ArtifactObligation, EssImpact, Invalidation};
 
 /// The delta as lines a person reads, ending in a newline.
 ///
@@ -83,15 +83,17 @@ pub fn impact(report: &EssImpact) -> String {
     let mut out = text(&report.delta);
     out.push('\n');
 
-    let _ = writeln!(
-        out,
-        "suite {} {} ({}): {} of {} scenario(s) owed again",
-        report.suite.system,
-        report.suite.specification_version,
-        report.suite.spec_digest,
+    if let (Some(suite), Some(invalidated), Some(total)) = (
+        &report.suite,
         report.churn.conformance_scenarios_invalidated,
-        report.churn.conformance_scenarios_total
-    );
+        report.churn.conformance_scenarios_total,
+    ) {
+        let _ = writeln!(
+            out,
+            "suite {} {} ({}): {invalidated} of {total} scenario(s) owed again",
+            suite.system, suite.specification_version, suite.spec_digest,
+        );
+    }
     let _ = writeln!(
         out,
         "{} construct(s) reached: {} changed, {} depend on one directly, {} through another",
@@ -102,14 +104,20 @@ pub fn impact(report: &EssImpact) -> String {
         report.churn.semantic_elements_directly_dependent,
         report.churn.semantic_elements_transitively_impacted
     );
+    let _ = writeln!(
+        out,
+        "{} of {} generated artifact(s) owed regeneration",
+        report.churn.generated_artifacts_owed, report.churn.generated_artifacts_total
+    );
     out.push('\n');
 
     match &report.invalidation {
-        Invalidation::Whole { because } => {
+        None => {}
+        Some(Invalidation::Whole { because }) => {
             let _ = writeln!(out, "  every scenario in the suite is owed again, because");
             let _ = writeln!(out, "  {because}");
         }
-        Invalidation::Narrowed { scenarios } => {
+        Some(Invalidation::Narrowed { scenarios }) => {
             if scenarios.is_empty() {
                 // Not "nothing is affected". The distinction is the whole polarity of the wave, and
                 // a line that blurred it here would undo in prose what the types make impossible.
@@ -135,6 +143,85 @@ pub fn impact(report: &EssImpact) -> String {
             }
         }
     }
+    if report.invalidation.is_some() {
+        out.push('\n');
+    }
 
+    artifact_section(report, &mut out);
     out
+}
+
+/// The artifacts block: which generated artifacts are owed regeneration, and why each one is.
+///
+/// The same shape as the scenario block above it — a whole answer says so in one line with its
+/// reason, a narrowing lists each artifact with what reached it — because it is the same question
+/// at a different granularity, and a reader should not have to learn two layouts for one answer.
+fn artifact_section(report: &EssImpact, out: &mut String) {
+    let _ = writeln!(out, "artifacts owed regeneration:");
+    match &report.artifacts {
+        ArtifactAnswer::Whole { because } => {
+            let _ = writeln!(out, "  every generated artifact is owed, because");
+            let _ = writeln!(out, "  {because}");
+        }
+        ArtifactAnswer::Narrowed { owed } => {
+            if owed.is_empty() {
+                // The same polarity note as the scenario block: absence is "not reached", never
+                // "still current".
+                let _ = writeln!(
+                    out,
+                    "  no artifact's slice rests on anything this delta reached. That is not a \
+                     claim that any artifact is current — one this analysis could not follow \
+                     would be listed above, not omitted."
+                );
+            }
+            for (id, obligation) in owed {
+                let _ = writeln!(out, "  {id}");
+                match obligation {
+                    ArtifactObligation::SliceMoved { reasons } => {
+                        for reason in reasons {
+                            let _ = writeln!(
+                                out,
+                                "    {} {} — {}",
+                                reason.class(),
+                                reason.target,
+                                reason.change
+                            );
+                            out.push_str(&reason.explain());
+                        }
+                    }
+                    ArtifactObligation::ProvenanceUnreadable => {
+                        let _ = writeln!(
+                            out,
+                            "    its committed provenance cannot be read, so its claims cannot \
+                             be checked"
+                        );
+                    }
+                    ArtifactObligation::ContractMismatch {
+                        committed,
+                        expected,
+                    } => {
+                        let _ = writeln!(
+                            out,
+                            "    its committed contract digest is {committed}, and its slice \
+                             computes {expected}: a false claim about derivation"
+                        );
+                    }
+                    ArtifactObligation::Unfollowed => {
+                        let _ = writeln!(
+                            out,
+                            "    the `--from` model derives nothing at this path, so this \
+                             analysis cannot follow it"
+                        );
+                    }
+                    ArtifactObligation::Missing => {
+                        let _ = writeln!(
+                            out,
+                            "    the `--from` model derives it and the committed tree does not \
+                             hold it"
+                        );
+                    }
+                }
+            }
+        }
+    }
 }

@@ -131,7 +131,7 @@ impl GraphFormat {
 enum DiffFormat {
     /// Human-readable lines: what moved, and which of it widens or narrows the system.
     Text,
-    /// The canonical document: `ess-diff/1` from `diff`, `ess-impact/1` from `impact`.
+    /// The canonical document: `ess-diff/1` from `diff`, `ess-impact/2` from `impact`.
     Json,
 }
 
@@ -507,8 +507,9 @@ fn run_ess(command: EssCommand) -> Result<ExitCode> {
             from,
             to,
             suite,
+            generated,
             format,
-        } => ess_impact(&from, &to, &suite, format),
+        } => ess_impact(&from, &to, suite.as_deref(), generated.as_deref(), format),
         EssCommand::Conform { command } => match command {
             EssConformCommand::Synthesize { path, out, format } => {
                 ess_conform_synthesize(&path, out.as_deref(), format)
@@ -798,7 +799,7 @@ enum EssCommand {
     ///
     /// It takes a **third input**. `diff` is a function of two specifications and writes one
     /// document, `ess-diff/1`; this reads a suite as well and writes a different document,
-    /// `ess-impact/1`. A `--suite` flag on `diff` would make `--format json` mean one of two
+    /// `ess-impact/2`. A `--suite` flag on `diff` would make `--format json` mean one of two
     /// documents depending on another flag, which is the shape `ess conform`'s two verbs were
     /// already split apart to avoid.
     ///
@@ -822,6 +823,14 @@ enum EssCommand {
     /// reached by this analysis, which is **not** a claim that its evidence still stands. A change
     /// the graph cannot follow — one to the specification itself — owes the whole suite.
     ///
+    /// # And since wave 7, the generated artifacts
+    ///
+    /// Every generated artifact carries the digest of the model slice it derives from, and the
+    /// report's artifact section answers which of them this change owes regeneration — narrowed by
+    /// the same graph, with the path explaining each, under the same polarity: an artifact absent
+    /// from the answer was not reached, and one whose committed provenance cannot be read or does
+    /// not hold is owed outright.
+    ///
     /// Exits 1 when either side does not compile, when the two name different systems, or when the
     /// suite was not produced from the `--from` revision.
     Impact {
@@ -831,10 +840,16 @@ enum EssCommand {
         /// The specification being moved to: a directory, or one file.
         #[arg(long)]
         to: PathBuf,
-        /// The committed suite, as `protocol ess conform synthesize --out` writes it.
+        /// The committed suite, as `protocol ess conform synthesize --out` writes it. Without it
+        /// the report answers for the generated artifacts alone.
         #[arg(long)]
-        suite: PathBuf,
-        /// How to render the report. `json` is the `ess-impact/1` document itself.
+        suite: Option<PathBuf>,
+        /// The committed generated tree, as `cargo xtask generate` maintains it. When given, each
+        /// artifact's stamped provenance is checked against what its slice computes, and an
+        /// artifact whose claim cannot be read or does not hold is owed outright.
+        #[arg(long)]
+        generated: Option<PathBuf>,
+        /// How to render the report. `json` is the `ess-impact/2` document itself.
         #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
         format: DiffFormat,
     },
@@ -2747,7 +2762,13 @@ fn ess_diff(from: &Path, to: &Path, format: DiffFormat) -> Result<ExitCode> {
 ///
 /// A refusal is rendered rather than returned as an `Err`, exactly as `ess diff` renders one: "this
 /// suite belongs to another revision" is an answer about the input, not a failure of this program.
-fn ess_impact(from: &Path, to: &Path, suite_file: &Path, format: DiffFormat) -> Result<ExitCode> {
+fn ess_impact(
+    from: &Path,
+    to: &Path,
+    suite_file: Option<&Path>,
+    generated: Option<&Path>,
+    format: DiffFormat,
+) -> Result<ExitCode> {
     let before = match ess_compiled(from, format.diagnostics())? {
         EssCompiled::Compiled { ir, .. } => ir,
         EssCompiled::Reported => return Ok(exit_code(false)),
@@ -2757,12 +2778,19 @@ fn ess_impact(from: &Path, to: &Path, suite_file: &Path, format: DiffFormat) -> 
         EssCompiled::Reported => return Ok(exit_code(false)),
     };
 
-    let text = fs::read_to_string(suite_file)
-        .with_context(|| format!("reading the suite {}", suite_file.display()))?;
-    let suite = ess_conformance::ConformanceSuite::from_json(&text)
-        .with_context(|| format!("reading the suite {}", suite_file.display()))?;
+    let suite = suite_file
+        .map(|suite_file| -> Result<_> {
+            let text = fs::read_to_string(suite_file)
+                .with_context(|| format!("reading the suite {}", suite_file.display()))?;
+            ess_conformance::ConformanceSuite::from_json(&text)
+                .with_context(|| format!("reading the suite {}", suite_file.display()))
+        })
+        .transpose()?;
+    let tree = generated
+        .map(|root| -> Result<_> { generated_tree(root) })
+        .transpose()?;
 
-    let report = match ess_diff::impact(&before, &after, &suite) {
+    let report = match ess_diff::impact(&before, &after, suite.as_ref(), tree.as_ref()) {
         Ok(report) => report,
         Err(refusal) => {
             match format {
@@ -2779,6 +2807,47 @@ fn ess_impact(from: &Path, to: &Path, suite_file: &Path, format: DiffFormat) -> 
     }
 
     Ok(ExitCode::SUCCESS)
+}
+
+/// The committed generated tree, read whole for the impact analysis.
+///
+/// Two subtrees are skipped while walking: `target/` directories and `Cargo.lock` files, which
+/// `cargo` writes beside a synthesised workspace while `cargo xtask synth` proves it compiles —
+/// they are ignored by git and are nobody's artifact. Everything else is read; a file that is not
+/// UTF-8 enters with empty contents rather than being skipped, so it arrives at the analysis as an
+/// artifact whose provenance cannot be read — owed, stated as such — instead of vanishing.
+fn generated_tree(root: &Path) -> Result<ess_diff::GeneratedTree> {
+    let mut tree = ess_diff::GeneratedTree::default();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(directory) = pending.pop() {
+        let entries = fs::read_dir(&directory)
+            .with_context(|| format!("reading the generated tree at {}", directory.display()))?;
+        for entry in entries {
+            let path = entry
+                .with_context(|| format!("reading {}", directory.display()))?
+                .path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|name| name == "target") {
+                    continue;
+                }
+                pending.push(path);
+                continue;
+            }
+            if path.file_name().is_some_and(|name| name == "Cargo.lock") {
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root)
+                .expect("the walk stays inside the root")
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            let contents = fs::read_to_string(&path).unwrap_or_default();
+            tree.files.insert(relative, contents);
+        }
+    }
+    Ok(tree)
 }
 
 /// `protocol validate`

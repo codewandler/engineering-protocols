@@ -213,9 +213,9 @@ fn probe() -> EssIr {
 
 /// Every document the projection produces, by artifact path.
 fn documents(ir: &EssIr) -> BTreeMap<String, String> {
-    let provenance = Provenance::of(ir);
+    let mint = ess_gen::provenance::ProvenanceMint::new(ir);
     AsyncApi
-        .generate(ir, &provenance)
+        .generate(ir, &mint)
         .into_iter()
         .map(|artifact| (artifact.path, artifact.contents))
         .collect()
@@ -860,11 +860,20 @@ fn every_document_carries_the_provenance_of_the_model_it_came_from() {
     let provenance = Provenance::of(&ir);
     for (path, text) in documents(&ir) {
         for line in provenance.lines() {
+            // The contract digest is per artifact — each document's own slice — so the whole-model
+            // line is the one line the shared provenance cannot predict here.
+            if line.starts_with("contract digest ") {
+                continue;
+            }
             assert!(
                 text.contains(&line),
                 "{path} is missing the provenance line `{line}`"
             );
         }
+        assert!(
+            text.contains("# contract digest "),
+            "{path} does not say which model slice it derives from"
+        );
         let document: Value = serde_yaml::from_str(&text).expect("parses");
         let recorded = at(&document, &["info", "x-ess-provenance"]);
         assert_eq!(

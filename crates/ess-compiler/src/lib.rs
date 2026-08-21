@@ -28,6 +28,15 @@
 //! to parse them back out of a sentence. [`diagnostic::Diagnostic`] is the structured form, and its
 //! rendering is a projection of it rather than the other way round.
 //!
+//! # Names and the dependency graph live here too
+//!
+//! [`refs`] is the stable semantic-name vocabulary — [`EssSemanticRef`] and its per-construct
+//! forms — and [`graph`] is the dependency walk over one compiled model. Both began life upstream
+//! (the names in `ess-conformance`, the graph in `ess-diff`) and moved down in wave 7, because a
+//! generated artifact's slice digest and `ess impact`'s narrowing must be answers from **one**
+//! graph over **one** vocabulary; the original homes re-export them, so no document's spelling
+//! moved.
+//!
 //! # Determinism
 //!
 //! No clock, no RNG, `BTreeMap`/`BTreeSet` only, and canonical serialisation with a trailing
@@ -35,10 +44,14 @@
 //! the same source twice and compares bytes is what makes it true.
 
 pub mod diagnostic;
+pub mod graph;
 pub mod ir;
+pub mod refs;
 pub mod resolve;
 pub mod source;
 
 pub use diagnostic::{Diagnostic, Diagnostics, Severity};
+pub use graph::{DependencyEdge, DependencyRelation, ImpactClass, Reach, SemanticDependencyGraph};
 pub use ir::EssIr;
+pub use refs::EssSemanticRef;
 pub use resolve::compile;

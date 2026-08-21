@@ -37,14 +37,15 @@ fn catalog_impact() -> EssImpact {
     impact(
         &compiled("examples/revision-pair/before"),
         &compiled("examples/revision-pair/after"),
-        &catalog_suite(),
+        Some(&catalog_suite()),
+        None,
     )
     .expect("the pair is two revisions of one system and the suite is the earlier one's")
 }
 
 /// Every scenario one change puts back to owed.
 fn owed_by(report: &EssImpact, change: &str) -> BTreeSet<String> {
-    let Invalidation::Narrowed { scenarios } = &report.invalidation else {
+    let Some(Invalidation::Narrowed { scenarios }) = &report.invalidation else {
         panic!(
             "this fixture narrows; it reported {:?}",
             report.invalidation
@@ -69,7 +70,7 @@ fn the_suite_the_fixture_obliges_is_nine_scenarios_and_the_delta_is_four_changes
     // this file pass by reporting nothing.
     let report = catalog_impact();
 
-    assert_eq!(report.churn.conformance_scenarios_total, 9);
+    assert_eq!(report.churn.conformance_scenarios_total, Some(9));
     assert_eq!(report.churn.semantic_changes_total, 4);
     assert_eq!(report.churn.actor_grants_changed, 2);
 }
@@ -127,7 +128,7 @@ fn a_variant_removed_from_an_enum_reaches_the_entity_that_holds_it_three_declara
          headline priced in a currency: {owed:?}"
     );
 
-    let Invalidation::Narrowed { scenarios } = &report.invalidation else {
+    let Some(Invalidation::Narrowed { scenarios }) = &report.invalidation else {
         panic!("this fixture narrows");
     };
     let publish = scenarios
@@ -166,6 +167,8 @@ fn every_scenario_resting_directly_on_a_changed_construct_is_owed_again() {
     let suite = catalog_suite();
     let owed: BTreeSet<String> = report
         .invalidation
+        .as_ref()
+        .expect("a suite was given")
         .owed(&suite)
         .into_iter()
         .map(ToString::to_string)
@@ -217,6 +220,38 @@ fn analysing_the_same_pair_twice_produces_byte_identical_json() {
 }
 
 #[test]
+fn a_suite_whose_contract_digest_its_model_does_not_compute_is_refused() {
+    // The state the rule is load-bearing in: the suite is genuinely the `before` revision's — its
+    // `spec_digest` matches, so the older refusal provably cannot fire — and only its contract
+    // digest has been rewritten, which is a hand edit or a corruption. Narrowing on a false claim
+    // of derivation would produce a short list that looks exactly like a correct one.
+    let before = compiled("examples/revision-pair/before");
+    let after = compiled("examples/revision-pair/after");
+    let mut forged = catalog_suite();
+    assert_eq!(
+        forged.provenance.spec_digest,
+        synthesize(&before).suite.provenance.spec_digest,
+        "the suite is the earlier revision's, so only the contract check can refuse it"
+    );
+    forged.provenance.contract_digest = aep_domain::evidence::SpecDigest::new(
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    )
+    .expect("a well-formed digest");
+
+    let refusal =
+        impact(&before, &after, Some(&forged), None).expect_err("a false claim is refused");
+
+    assert!(
+        matches!(refusal, ImpactRefusal::SuiteContractMismatch { .. }),
+        "{refusal:?}"
+    );
+    assert!(
+        refusal.to_string().contains("false"),
+        "the refusal says the claim is false, not merely different: {refusal}"
+    );
+}
+
+#[test]
 fn a_suite_produced_from_the_later_revision_is_refused_rather_than_narrowed() {
     // The state the rule is load-bearing in: this suite is a real suite for a real revision of the
     // same system, so a narrowing against it would run, terminate and produce a short, plausible,
@@ -227,7 +262,8 @@ fn a_suite_produced_from_the_later_revision_is_refused_rather_than_narrowed() {
     let later = synthesize(&after).suite;
     assert_eq!(later.len(), 9, "the later suite is a real suite");
 
-    let refusal = impact(&before, &after, &later).expect_err("the wrong suite is refused");
+    let refusal =
+        impact(&before, &after, Some(&later), None).expect_err("the wrong suite is refused");
 
     assert!(
         matches!(refusal, ImpactRefusal::SuiteFromAnotherRevision { .. }),
@@ -246,8 +282,8 @@ fn a_suite_for_another_system_is_refused() {
     let elsewhere = synthesize(&compiled("examples/billing")).suite;
     assert!(!elsewhere.is_empty(), "billing obliges scenarios");
 
-    let refusal =
-        impact(&before, &after, &elsewhere).expect_err("another system's suite is refused");
+    let refusal = impact(&before, &after, Some(&elsewhere), None)
+        .expect_err("another system's suite is refused");
 
     assert!(
         matches!(refusal, ImpactRefusal::SuiteFromAnotherSystem { .. }),
@@ -266,7 +302,8 @@ fn two_specifications_of_different_systems_are_refused_here_too() {
     let refusal = impact(
         &compiled("examples/billing"),
         &compiled("examples/revision-pair/before"),
-        &catalog_suite(),
+        Some(&catalog_suite()),
+        None,
     )
     .expect_err("two systems are refused");
 
@@ -303,16 +340,21 @@ fn a_suite_resting_on_a_construct_no_graph_has_a_node_for_owes_the_whole_suite()
         .expect("the id is new");
     assert_eq!(suite.len(), total + 1, "the fixture reached the state");
 
-    let report = impact(&before, &after, &suite).expect("the suite is still the earlier one's");
+    let report =
+        impact(&before, &after, Some(&suite), None).expect("the suite is still the earlier one's");
 
     assert!(
-        report.invalidation.is_whole(),
+        report
+            .invalidation
+            .as_ref()
+            .expect("a suite was given")
+            .is_whole(),
         "a suite the graph cannot see all of is owed whole: {:?}",
         report.invalidation
     );
     assert_eq!(
         report.churn.conformance_scenarios_invalidated,
-        suite.len(),
+        Some(suite.len()),
         "every scenario, not the ones a partial walk happened to reach"
     );
 }
@@ -341,7 +383,8 @@ fn a_change_in_a_family_the_delta_does_not_compare_owes_the_whole_suite() {
     settled.payload.clear();
 
     let suite = synthesize(&before).suite;
-    let report = impact(&before, &after, &suite).expect("one system, and the earlier one's suite");
+    let report = impact(&before, &after, Some(&suite), None)
+        .expect("one system, and the earlier one's suite");
 
     assert!(
         report.delta.is_empty(),
@@ -349,16 +392,16 @@ fn a_change_in_a_family_the_delta_does_not_compare_owes_the_whole_suite() {
          answer: {:?}",
         report.delta
     );
-    let Invalidation::Whole { because } = &report.invalidation else {
+    let Some(Invalidation::Whole { because }) = &report.invalidation else {
         panic!(
             "a model that moved where no comparison reads owes everything: {:?}",
             report.invalidation
         );
     };
-    assert_eq!(*because, ess_diff::WholeSuite::UncomparedFamilyChanged);
+    assert_eq!(*because, ess_diff::WholeAnswer::UncomparedFamilyChanged);
     assert_eq!(
         report.churn.conformance_scenarios_invalidated,
-        suite.len(),
+        Some(suite.len()),
         "every scenario, because none of them can honestly be said to stand"
     );
 }
@@ -369,11 +412,18 @@ fn a_narrowed_answer_never_reports_more_scenarios_than_the_suite_holds() {
     // name a scenario the suite does not hold, and it cannot exceed it.
     let report = catalog_impact();
     let suite = catalog_suite();
-    let owed = report.invalidation.owed(&suite);
+    let owed = report
+        .invalidation
+        .as_ref()
+        .expect("a suite was given")
+        .owed(&suite);
 
     assert!(owed.len() <= suite.len());
     for id in &owed {
         assert!(suite.scenario(id).is_some(), "`{id}` is not in the suite");
     }
-    assert_eq!(owed.len(), report.churn.conformance_scenarios_invalidated);
+    assert_eq!(
+        Some(owed.len()),
+        report.churn.conformance_scenarios_invalidated
+    );
 }

@@ -30,8 +30,11 @@ ess-conformance.workspace = true
 ess-domain.workspace = true
 
 # For the model digest in `EssRevisionRef`, derived from `ess_gen::Provenance` rather than computed a
-# second way. `SuiteProvenance::of` takes the same dependency for the same reason: one model has one
-# digest, or a report attests to a specification nobody can find again.
+# second way — one model has one digest, or a report attests to a specification nobody can find
+# again. Since wave 7 the impact answer also derives the artifact inventory through
+# `ess_gen::generate_all` (the same call `protocol ess generate` makes, so the inventory cannot
+# disagree with the committed tree about what exists) and reads committed artifacts' digests back
+# through `ess_gen::Provenance::read_digests` — the one reader beside the one writer.
 ess-gen.workspace = true
 
 # The two the delta format needs, both already in `[workspace.dependencies]`. A committed delta is

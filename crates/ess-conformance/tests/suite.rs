@@ -398,6 +398,7 @@ fn a_suite_parses_from_text_alone_without_an_ir() {
     "system": "billing",
     "specification_version": "v3",
     "spec_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "contract_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "synthesizer_version": "0.1.0"
@@ -457,6 +458,7 @@ fn the_steps_a_binding_and_an_invariant_need_survive_being_read_back_from_text()
     "system": "billing",
     "specification_version": "v3",
     "spec_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "contract_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "synthesizer_version": "0.1.0"
@@ -559,6 +561,7 @@ fn a_suite_naming_something_that_is_not_an_ess_name_is_refused_while_it_is_read(
     "system": "billing",
     "specification_version": "v3",
     "spec_digest": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "contract_digest": "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "synthesizer_version": "0.1.0"
@@ -664,6 +667,7 @@ fn the_suite_records_the_same_model_digest_the_projections_do() {
     let suite = SuiteProvenance::of(&ir);
 
     assert_eq!(suite.spec_digest.as_str(), projection.source_digest);
+    assert_eq!(suite.contract_digest.as_str(), projection.contract_digest);
     assert_eq!(suite.system, projection.system);
     assert_eq!(
         suite.specification_version,

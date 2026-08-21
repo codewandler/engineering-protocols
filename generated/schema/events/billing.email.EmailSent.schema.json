@@ -21,6 +21,7 @@
     "system": "billing",
     "specification_version": "v3",
     "source_digest": "13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861",
+    "contract_digest": "f618617479be29c43181d2ac41342ea844280d07f14444f6a4cba214a319f52e",
     "compiler_version": "0.1.0",
     "generator_version": "0.1.0",
     "regenerate": "protocol ess generate"

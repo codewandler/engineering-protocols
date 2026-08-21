@@ -403,6 +403,7 @@ fn sync(
     fix: &str,
 ) -> Result<()> {
     let mut differing = Vec::new();
+    let mut stale_contracts = Vec::new();
     let mut written = 0_usize;
     let mut removed = 0_usize;
 
@@ -416,6 +417,19 @@ fn sync(
             continue;
         }
         if check {
+            // A drifted file whose *contract digest* drifted is called out by name: the byte
+            // comparison already fails it, but "this file differs" and "this file claims to derive
+            // from a slice its slice no longer computes" are different findings, and the second is
+            // a false claim about derivation that deserves its own sentence.
+            if let (Some(committed), Some(fresh)) = (
+                committed.as_deref().and_then(contract_digest_in),
+                contract_digest_in(contents),
+            ) {
+                if committed != fresh {
+                    stale_contracts
+                        .push(format!("{path} (committed {committed}, computed {fresh})"));
+                }
+            }
             differing.push(path.clone());
             continue;
         }
@@ -457,6 +471,15 @@ fn sync(
                 differing.join(", ")
             );
         }
+        if !stale_contracts.is_empty() {
+            let _ = writeln!(
+                detail,
+                "{} of them carry a stale contract digest — a false claim about the model slice \
+                 they derive from: {}",
+                stale_contracts.len(),
+                stale_contracts.join(", ")
+            );
+        }
         if !orphaned.is_empty() {
             let _ = writeln!(
                 detail,
@@ -475,6 +498,31 @@ fn sync(
     }
     println!("{noun} written: {written} changed, {removed} no longer generated");
     Ok(())
+}
+
+/// The contract digest stamped in one artifact's text, or `None`.
+///
+/// The same two spellings `ess_gen::Provenance::read_digests` emits and reads — the comment-line
+/// form and the serialized-field form — scanned here rather than through that crate, because this
+/// task deliberately reaches every artifact through the command line and not by linking the
+/// generators (see [`projections`]). The scan is deliberately dumb: 64 lower-case hex characters
+/// after a marker, or nothing. `None` never fails a check by itself — the byte comparison decides
+/// that — it only withholds the sharper message.
+fn contract_digest_in(text: &str) -> Option<&str> {
+    for marker in ["contract digest ", "\"contract_digest\": \""] {
+        let Some(at) = text.find(marker) else {
+            continue;
+        };
+        let rest = &text[at + marker.len()..];
+        let hex: usize = rest
+            .bytes()
+            .take_while(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            .count();
+        if hex == 64 {
+            return Some(&rest[..64]);
+        }
+    }
+    None
 }
 
 /// `true` when `path` — relative, `/`-separated — is one of the excluded entries or inside one.
@@ -514,10 +562,11 @@ fn projections(spec: &Path) -> Result<Generated> {
     let provenance = &report["provenance"];
     Ok(Generated {
         provenance: format!(
-            "{} {} (model digest {})",
+            "{} {} (model digest {}, contract digest {})",
             text(provenance, "system")?,
             text(provenance, "specification_version")?,
-            text(provenance, "source_digest")?
+            text(provenance, "source_digest")?,
+            text(provenance, "contract_digest")?
         ),
         projections,
         artifacts,
@@ -844,10 +893,11 @@ fn synth_of(spec: &Path) -> Result<Synthesized> {
                 )
             })?,
         provenance: format!(
-            "{} {} (model digest {})",
+            "{} {} (model digest {}, contract digest {})",
             text(provenance, "system")?,
             text(provenance, "specification_version")?,
-            text(provenance, "source_digest")?
+            text(provenance, "source_digest")?,
+            text(provenance, "contract_digest")?
         ),
         generated: number(&report, "generated")?,
         obligations: number(&report, "obligations")?,
@@ -978,10 +1028,11 @@ fn suite_of(spec: &Path) -> Result<Suite> {
                 )
             })?,
         provenance: format!(
-            "{} {} (model digest {})",
+            "{} {} (model digest {}, contract digest {})",
             text(provenance, "system")?,
             text(provenance, "specification_version")?,
-            text(provenance, "spec_digest")?
+            text(provenance, "spec_digest")?,
+            text(provenance, "contract_digest")?
         ),
         scenarios: number(&report, "scenarios")?,
         refusals,
@@ -1252,8 +1303,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        generate, schema, suite, synth, workspace_root, INDEX, NORMATIVE_EXAMPLE, PROJECTIONS,
-        PROJECTION_EXCLUSIONS, SUITES, SUITE_SPECIFICATIONS, SYNTH, SYNTH_SPECIFICATIONS,
+        contract_digest_in, generate, schema, suite, synth, workspace_root, INDEX,
+        NORMATIVE_EXAMPLE, PROJECTIONS, PROJECTION_EXCLUSIONS, SUITES, SUITE_SPECIFICATIONS, SYNTH,
+        SYNTH_SPECIFICATIONS,
     };
 
     /// A scratch tree with a freshly generated `schemas/generated/` in it.
@@ -1315,6 +1367,66 @@ mod tests {
     fn the_check_passes_on_a_freshly_written_tree() {
         let out = projected("xtask-projections-fresh");
         generate(&specification(), &out, true).expect("a freshly written tree is up to date");
+
+        std::fs::remove_dir_all(&out).ok();
+    }
+
+    #[test]
+    fn the_contract_digest_scanner_reads_both_stamped_forms_and_refuses_damage() {
+        let hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        assert_eq!(
+            contract_digest_in(&format!("# contract digest {hex}\n")),
+            Some(hex)
+        );
+        assert_eq!(
+            contract_digest_in(&format!("    \"contract_digest\": \"{hex}\",\n")),
+            Some(hex)
+        );
+        // Damage reads as nothing, so the sharper message is withheld and the byte comparison
+        // still decides — never the other way round.
+        assert_eq!(
+            contract_digest_in(&format!("# contract digest {}", &hex[..16])),
+            None
+        );
+        assert_eq!(contract_digest_in("# model digest only"), None);
+    }
+
+    #[test]
+    fn a_stale_contract_digest_is_called_out_as_a_false_claim_about_derivation() {
+        // W7.1's drift-check extension, verified by doing exactly what it exists to catch: edit a
+        // committed artifact's contract digest and nothing else. The byte comparison would already
+        // fail the file; the check must additionally say *why this failure is worse* — a claim of
+        // derivation the slice no longer computes.
+        let out = projected("xtask-projections-stale-contract");
+        let target = out.join("docs/README.md");
+        let honest = std::fs::read_to_string(&target).expect("the projection exists");
+        let stamped = contract_digest_in(&honest)
+            .expect("a generated artifact carries its contract digest")
+            .to_owned();
+        std::fs::write(
+            &target,
+            honest.replace(
+                &stamped,
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+        )
+        .expect("the fixture is writable");
+
+        let refusal = generate(&specification(), &out, true)
+            .expect_err("a stale contract digest fails the check");
+        let reason = format!("{refusal:#}");
+        assert!(
+            reason.contains("stale contract digest"),
+            "the refusal names the defect class: {reason}"
+        );
+        assert!(
+            reason.contains("false claim"),
+            "the refusal says why it is worse than drift: {reason}"
+        );
+        assert!(
+            reason.contains("docs/README.md"),
+            "the refusal names the file: {reason}"
+        );
 
         std::fs::remove_dir_all(&out).ok();
     }

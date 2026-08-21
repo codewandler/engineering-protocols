@@ -16,8 +16,8 @@ protocol ess conform run --suite suites/generated/billing/suite.json --target bi
 
 | suite | checks | scenarios | no scenario | generated from |
 | --- | --- | --- | --- | --- |
-| [`billing/suite.json`](billing/suite.json) | billing v3 (model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861) | 29 | 0 | [`examples/billing`](../../examples/billing) |
-| [`oracle-fixture/suite.json`](oracle-fixture/suite.json) | oracle v1 (model digest 4288d50a003fa7d5b39743327880aa7e2f97ff6d9408f8a5ddb908c8b6af79ee) | 31 | 6 | [`examples/oracle-fixture`](../../examples/oracle-fixture) |
+| [`billing/suite.json`](billing/suite.json) | billing v3 (model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861, contract digest d2b48060b7ee32e8f23b1e28972fea39921a25fdcacd635fdf7bbb538e94f367) | 29 | 0 | [`examples/billing`](../../examples/billing) |
+| [`oracle-fixture/suite.json`](oracle-fixture/suite.json) | oracle v1 (model digest 4288d50a003fa7d5b39743327880aa7e2f97ff6d9408f8a5ddb908c8b6af79ee, contract digest 9c8f1b65057d7378da54f3072e27e6bb046abd22265bbdf1c1caadb94ecaa1bd) | 31 | 6 | [`examples/oracle-fixture`](../../examples/oracle-fixture) |
 
 ## What no scenario covers
 

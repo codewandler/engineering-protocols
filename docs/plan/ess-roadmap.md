@@ -322,6 +322,9 @@ already promises; and `proptest` phase 1 lands with the model changes it was que
 
 ### W7.1 The diff learns about generated artifacts
 
+> **Delivered.** See [`ess-wave-7-closing-the-loop.md`](ess-wave-7-closing-the-loop.md); W7.3 and
+> W7.4 are deferred there by operator decision.
+
 `contract_digest` becomes code: generated artifacts — projections, suites, synthesised workspaces —
 carry the digest of the model slice they derive from, and `ess impact` narrows "the specification
 moved, the whole workspace is owed" to the artifacts whose slice moved. Same polarity as everything:

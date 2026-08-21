@@ -11,6 +11,42 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **The infrastructure observation reads five more kinds, and analysis grows invariants,
+  directions and an HTML component view (IW2.5).** Replicasets, jobs, cronjobs, pod disruption
+  budgets and autoscalers join the model — each *optional* in a bundle, so a scan taken before
+  the scanner grew them still validates and their absence stays `None`, never "none exist". Pod
+  ownership is exact where the chain was observed (pod→replicaset→deployment, pod→job→cronjob,
+  each edge's site the `ownerReferences` that states it); the `pod-template-hash` derivation
+  remains as the old-bundle fallback and names itself on the edge. Six new diagnosis rules
+  (`INFRA-DIAG-015`…`020`; none can fire on a bundle that did not scan its kind), per-workload
+  properties widened to observed/ready replicas, registry-split images and budget/autoscaler
+  coverage, `INFRA-PROP-001`…`003` invariant candidates (uniformity with exceptions carried as
+  evidence, never as violations), a severity-ranked directions summary grouped by shared root
+  cause, and `infra_analyze::render_html` — one self-contained page, Mermaid from a
+  version-pinned CDN tag, optional namespace filter. Library-level; CLI flags follow. The IR
+  model grew, so every `infra-ir/1` digest moves.
+- **Every generated artifact carries a `contract_digest` — the digest of the model slice it
+  derives from — beside its whole-model `source_digest` (ESS wave 7, W7.1).** The 36 projections
+  under `generated/`, each committed conformance suite and each synthesised workspace are stamped
+  through the one existing provenance mechanism: comment headers gain a `contract digest` line and
+  the serialized forms (`x-ess-provenance`, suite provenance, `plan.json`) gain the field. The
+  slice is the artifact's seed constructs closed over everything they rest on, by the same
+  dependency graph `ess impact` walks; membership resolves every doubt by including more — a
+  too-big slice costs a regeneration, a too-small one a false "still current". A suite document
+  now requires the field on read: a pre-wave-7 suite no longer parses, and regenerating it is the
+  fix.
+- **`protocol ess impact` answers for the generated artifacts, not only the suite.** `--suite`
+  is now optional and `--generated <dir>` reads the committed projection tree. The report —
+  `ess-impact/2`; the document gained an `artifacts` section, `suite`/`invalidation` appear only
+  when a suite was given, and the churn counts `generated_artifacts_total`/`_owed` — narrows "the
+  specification moved, everything is owed" to the artifacts whose slice the delta reached, one
+  path hop per line, under wave 5's exact polarity: an artifact absent from the answer was not
+  reached, never "still current". Everything the analysis cannot follow is owed, stated as such —
+  unreadable provenance (every pre-wave-7 artifact included), a contract digest the slice does not
+  compute, a committed file the model derives nothing at, a derived artifact the tree lacks. A
+  *suite* whose contract digest its own model does not compute is refused outright, because the
+  short list it would produce looks exactly like a correct one.
+
 - **`protocol infra graph` — the observed cluster as a typed dependency graph.** Edges exist
   where a reference resolved — service→workload by selector match, ingress→service,
   workload→configmap/secret/claim/service-account per env, `envFrom` and volume site,
@@ -64,6 +100,13 @@ belongs in the commit message or in `docs/design/`.
 - **`examples/k3d-dev-cluster/`** — a trimmed, reviewed observation derived from a real k3d
   scan, and the committed IR it compiles to, drift-checked in the gate (`task infra-check`,
   `cargo xtask infra --check`) and in its own CI job.
+
+### Changed
+
+- **A stale contract digest fails the gate as its own finding.** `generate-check`, `suite-check`
+  and `synth-check` now read the contract digest out of both the committed and the freshly
+  generated artifact, and a mismatch is reported as *a false claim about the model slice it
+  derives from* — beside, not instead of, the byte-drift message. Same three steps, no new step.
 
 ## [0.6.1-ess-wave-6.5] — 2026-08-21
 

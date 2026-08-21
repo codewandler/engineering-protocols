@@ -52,7 +52,12 @@ use ess_domain::view::{AssertionStyle, Consistency};
 
 use crate::artifact::{Artifact, Generator};
 use crate::graph::{label, SystemGraph};
-use crate::provenance::Provenance;
+use ess_compiler::refs::{
+    ActorRef, BindingRef, CommandRef, ComponentRef, DeclaredTypeRef, DomainRef, EntityRef,
+    ErrorRef, EssSemanticRef, EventRef, ViewRef,
+};
+
+use crate::provenance::{Provenance, ProvenanceMint, SlicedProvenance};
 
 /// Markdown and Mermaid: the cheapest check that every construct can be described.
 pub struct Docs;
@@ -77,14 +82,18 @@ impl Generator for Docs {
     /// are the unit someone reads to learn how two contexts meet, and the crossings and the topology
     /// are each a single system-wide question — "what is this system willing to treat as what" and
     /// "what does it need in order to run" — that would be invisible if scattered per domain.
-    fn generate(&self, ir: &EssIr, provenance: &Provenance) -> Vec<Artifact> {
-        let mut out = vec![readme(ir, provenance)];
+    fn generate(&self, ir: &EssIr, mint: &ProvenanceMint) -> Vec<Artifact> {
+        // The four system-wide pages derive from the whole model, honestly: the index draws the
+        // whole graph, the interactions page reads every binding, the crossings and topology pages
+        // are each one system-wide question. A domain page derives from its own context — plus the
+        // bindings and components, which reach across contexts by design — and says so.
+        let mut out = vec![readme(ir, &mint.whole())];
         for domain in ir.domains.values() {
-            out.push(domain_page(ir, domain, provenance));
+            out.push(domain_page(ir, domain, &domain_slice(ir, domain, mint)));
         }
-        out.push(interactions_page(ir, provenance));
-        out.push(crossings_page(ir, provenance));
-        out.push(topology_page(ir, provenance));
+        out.push(interactions_page(ir, &mint.whole()));
+        out.push(crossings_page(ir, &mint.whole()));
+        out.push(topology_page(ir, &mint.whole()));
         out
     }
 }
@@ -129,7 +138,7 @@ const GAPS: &[Gap] = &[];
 // ---- pages ------------------------------------------------------------------------------------
 
 /// The index: what the system is, how it fits together, and where everything else is.
-fn readme(ir: &EssIr, provenance: &Provenance) -> Artifact {
+fn readme(ir: &EssIr, provenance: &SlicedProvenance) -> Artifact {
     let mut body = String::new();
     if let Some(summary) = &ir.summary {
         let _ = writeln!(body, "{summary}\n");
@@ -212,7 +221,74 @@ fn readme(ir: &EssIr, provenance: &Provenance) -> Artifact {
 /// entities, because an entity is made of them; entities before views, because a view projects one;
 /// commands, events and errors next; and actors last, because a grant is a link *up* the page to the
 /// command it names. A reader who meets `Money` first does not have to jump.
-fn domain_page(ir: &EssIr, domain: &ResolvedDomain, provenance: &Provenance) -> Artifact {
+/// The slice a domain page derives from: the context and everything declared in it, plus every
+/// binding and every component.
+///
+/// The members, not only the domain: membership edges point *at* the context (`type X is declared
+/// in domain D`), so a slice seeded at the domain alone would close over nothing the page renders.
+/// The bindings and components are included whole because they are the constructs that reach
+/// across contexts by design — a binding into this domain's commands appears on this page, and
+/// which bindings those are is itself a fact that changes. The cost of the width is a regeneration
+/// when an unrelated binding moves; the alternative is a page claiming to stand still while its
+/// own crossings section is stale, and those are not comparable errors.
+fn domain_slice(ir: &EssIr, domain: &ResolvedDomain, mint: &ProvenanceMint) -> SlicedProvenance {
+    let mut seeds: Vec<EssSemanticRef> = vec![DomainRef::new(domain.name.clone()).into()];
+    seeds.extend(
+        domain
+            .types
+            .iter()
+            .map(|handle| DeclaredTypeRef::from(handle).into()),
+    );
+    seeds.extend(
+        domain
+            .entities
+            .iter()
+            .map(|handle| EntityRef::from(handle).into()),
+    );
+    seeds.extend(
+        domain
+            .commands
+            .iter()
+            .map(|handle| CommandRef::from(handle).into()),
+    );
+    seeds.extend(
+        domain
+            .events
+            .iter()
+            .map(|handle| EventRef::from(handle).into()),
+    );
+    seeds.extend(
+        domain
+            .errors
+            .iter()
+            .map(|handle| ErrorRef::from(handle).into()),
+    );
+    seeds.extend(
+        domain
+            .views
+            .iter()
+            .map(|handle| ViewRef::from(handle).into()),
+    );
+    seeds.extend(
+        domain
+            .actors
+            .iter()
+            .map(|handle| ActorRef::from(handle).into()),
+    );
+    seeds.extend(
+        ir.bindings
+            .keys()
+            .map(|name| BindingRef::new(name.clone()).into()),
+    );
+    seeds.extend(
+        ir.components
+            .keys()
+            .map(|name| ComponentRef::new(name.clone()).into()),
+    );
+    mint.of_seeds(seeds)
+}
+
+fn domain_page(ir: &EssIr, domain: &ResolvedDomain, provenance: &SlicedProvenance) -> Artifact {
     let mut body = String::new();
     if let Some(summary) = &domain.naming.summary {
         let _ = writeln!(body, "{summary}\n");
@@ -247,7 +323,7 @@ fn domain_page(ir: &EssIr, domain: &ResolvedDomain, provenance: &Provenance) -> 
 }
 
 /// Every binding: what it reacts to, what it invokes, and what it promises while doing so.
-fn interactions_page(ir: &EssIr, provenance: &Provenance) -> Artifact {
+fn interactions_page(ir: &EssIr, provenance: &SlicedProvenance) -> Artifact {
     let mut body = String::from(
         "A binding is the only way an event in one context causes a command in another. Each one \
          states how many times the command may run and what happens when it does not, because a \
@@ -291,7 +367,7 @@ fn interactions_page(ir: &EssIr, provenance: &Provenance) -> Artifact {
 /// same reason is repeated at each point of use — on the binding that relies on it, and on the pages
 /// of both contexts whose types it joins — so that a reader who never thought to ask "what may be
 /// treated as what here" still meets the answer beside the type it concerns.
-fn crossings_page(ir: &EssIr, provenance: &Provenance) -> Artifact {
+fn crossings_page(ir: &EssIr, provenance: &SlicedProvenance) -> Artifact {
     let mut body = String::from(
         "A conversion is this system's permission for a value of one type to be used as another. \
          Every one of them carries a reason, and the reason is required rather than optional \
@@ -338,7 +414,7 @@ fn crossings_page(ir: &EssIr, provenance: &Provenance) -> Artifact {
 }
 
 /// What each component needs in order to run, and what a replica floor is claiming.
-fn topology_page(ir: &EssIr, provenance: &Provenance) -> Artifact {
+fn topology_page(ir: &EssIr, provenance: &SlicedProvenance) -> Artifact {
     let mut body = String::from(
         "Runtime requirements, stated semantically. None of this is a deployment and nothing \
          generates a manifest from it: a replica floor of two is a claim that the system is not \
@@ -1777,7 +1853,8 @@ fn system_graph(ir: &EssIr) -> String {
 // ---- plumbing ---------------------------------------------------------------------------------
 
 /// A page, with the provenance a reader can see and the provenance a tool can read.
-fn page(path: String, title: &str, body: &str, provenance: &Provenance) -> Artifact {
+fn page(path: String, title: &str, body: &str, sliced: &SlicedProvenance) -> Artifact {
+    let provenance = &sliced.provenance;
     let mut contents = provenance_comment(provenance);
     let _ = writeln!(contents, "\n# {title}\n");
     contents.push_str(body);
@@ -1785,7 +1862,7 @@ fn page(path: String, title: &str, body: &str, provenance: &Provenance) -> Artif
         contents.push('\n');
     }
     contents.push_str(&provenance_footer(provenance));
-    Artifact::new(path, contents)
+    Artifact::sliced(path, contents, sliced.slice.clone())
 }
 
 /// The provenance block every artifact opens with, as one HTML comment.

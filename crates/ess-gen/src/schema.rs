@@ -49,10 +49,11 @@
 pub(crate) mod types;
 
 use ess_compiler::ir::ResolvedType;
+use ess_compiler::refs::{CommandRef, DeclaredTypeRef, ErrorRef, EssSemanticRef, EventRef};
 use ess_compiler::EssIr;
 
 use crate::artifact::{Artifact, Generator};
-use crate::provenance::Provenance;
+use crate::provenance::ProvenanceMint;
 use crate::schema::types::{Attribution, Message, Node};
 
 /// The dialect every emitted document declares.
@@ -74,28 +75,43 @@ impl Generator for JsonSchema {
         "schema"
     }
 
-    fn generate(&self, ir: &EssIr, provenance: &Provenance) -> Vec<Artifact> {
+    fn generate(&self, ir: &EssIr, mint: &ProvenanceMint) -> Vec<Artifact> {
         let mut out = Vec::new();
 
         // Every named type, not only the ones a message reaches: the union and the enums in the
         // billing example are declared and referenced by an entity, and a projection that dropped
         // them would look complete while the construct this crate most needs to prove — a tagged
         // union that round-trips — appeared in no file at all.
+        //
+        // Each document's slice is seeded at the one construct it is about. The closure brings in
+        // everything the construct rests on — the types a payload reaches, however deep — so the
+        // digest moves exactly when something this document could render moves.
         for declared in ir.types.values() {
-            out.push(type_document(ir, declared, provenance));
+            out.push(type_document(ir, declared, mint));
         }
         for command in ir.commands.values() {
             out.push(message_document(
                 ir,
                 &Message::of_command(command),
-                provenance,
+                CommandRef::new(command.name.clone()).into(),
+                mint,
             ));
         }
         for event in ir.events.values() {
-            out.push(message_document(ir, &Message::of_event(event), provenance));
+            out.push(message_document(
+                ir,
+                &Message::of_event(event),
+                EventRef::new(event.name.clone()).into(),
+                mint,
+            ));
         }
         for error in ir.errors.values() {
-            out.push(message_document(ir, &Message::of_error(error), provenance));
+            out.push(message_document(
+                ir,
+                &Message::of_error(error),
+                ErrorRef::new(error.name.clone()).into(),
+                mint,
+            ));
         }
 
         out
@@ -108,38 +124,47 @@ impl Generator for JsonSchema {
 /// the shape is the same whether or not the type reaches itself. A struct with a field of its own
 /// type is representable in the model, and inlining would have needed a special case for exactly the
 /// construct most likely to be got wrong.
-fn type_document(ir: &EssIr, declared: &ResolvedType, provenance: &Provenance) -> Artifact {
+fn type_document(ir: &EssIr, declared: &ResolvedType, mint: &ProvenanceMint) -> Artifact {
     // The type itself is inserted by hand rather than used as the root of the walk: a handle has no
     // public constructor, so a projection holding a `ResolvedType` cannot ask for its own handle —
     // and everything the type reaches is reachable from its body.
     let mut defs = types::definitions(ir, types::body_leaves(&declared.body));
     defs.insert(declared.name.to_string(), types::body(declared));
 
+    let sliced = mint.of_seeds([DeclaredTypeRef::new(declared.name.clone()).into()]);
     let root = Node {
         dialect: Some(DIALECT),
         reference: Some(types::pointer(&declared.name)),
-        provenance: Some(Attribution::new(provenance)),
+        provenance: Some(Attribution::new(&sliced.provenance)),
         defs,
         ..Node::default()
     };
 
-    Artifact::new(
+    Artifact::sliced(
         format!("types/{}.schema.json", declared.name),
         root.to_canonical_json(),
+        sliced.slice,
     )
 }
 
 /// The document for one message.
-fn message_document(ir: &EssIr, carried: &Message<'_>, provenance: &Provenance) -> Artifact {
+fn message_document(
+    ir: &EssIr,
+    carried: &Message<'_>,
+    seed: EssSemanticRef,
+    mint: &ProvenanceMint,
+) -> Artifact {
+    let sliced = mint.of_seeds([seed]);
     let root = Node {
         dialect: Some(DIALECT),
-        provenance: Some(Attribution::new(provenance)),
+        provenance: Some(Attribution::new(&sliced.provenance)),
         defs: types::definitions(ir, types::field_leaves(carried.fields)),
         ..types::message(carried)
     };
 
-    Artifact::new(
+    Artifact::sliced(
         format!("{}/{}.schema.json", carried.directory(), carried.name),
         root.to_canonical_json(),
+        sliced.slice,
     )
 }

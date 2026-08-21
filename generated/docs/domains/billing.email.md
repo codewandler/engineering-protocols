@@ -1,6 +1,7 @@
 <!--
 generated from billing v3
 model digest 13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861
+contract digest d74b7bea113d8f4848aded48f4490bac81ba3e6c8ced38c148f568be20984ebe
 compiler 0.1.0 · generator 0.1.0
 do not edit: regenerate with `protocol ess generate`
 -->

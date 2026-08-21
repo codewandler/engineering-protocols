@@ -121,7 +121,7 @@ pub use delta::{DeltaFormat, EssDelta, EssRevisionRef, SUPPORTED_DELTA_FORMATS};
 pub use diff::{diff, DiffRefusal};
 pub use graph::{DependencyEdge, DependencyRelation, ImpactClass, Reach, SemanticDependencyGraph};
 pub use impact::{
-    impact, Churn, EssImpact, ImpactPath, ImpactRefusal, Invalidation, ScenarioImpact, WholeSuite,
-    IMPACT_FORMAT,
+    impact, ArtifactAnswer, ArtifactId, ArtifactObligation, Churn, EssImpact, GeneratedTree,
+    ImpactPath, ImpactRefusal, Invalidation, ScenarioImpact, WholeAnswer, IMPACT_FORMAT,
 };
 pub use raw::RawEssDelta;

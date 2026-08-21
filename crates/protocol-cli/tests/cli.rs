@@ -2712,7 +2712,7 @@ fn ess_impact_writes_a_document_carrying_the_delta_the_suite_and_the_counts() {
     let document: serde_json::Value =
         serde_json::from_str(&stdout(&output)).expect("the report is JSON");
 
-    assert_eq!(document["format"], "ess-impact/1");
+    assert_eq!(document["format"], "ess-impact/2");
     assert_eq!(document["delta"]["format"], "ess-diff/1");
     assert_eq!(document["suite"]["system"], "catalog");
     assert_eq!(document["churn"]["conformance_scenarios_total"], 9);
@@ -2894,6 +2894,102 @@ fn ess_impact_narrows_the_committed_billing_suite_when_only_one_grant_moved() {
     assert!(
         !owed.contains_key("billing.email.SendEmail/outcome/sent"),
         "and sending an email does not act as one: {owed:?}"
+    );
+
+    std::fs::remove_dir_all(&directory).ok();
+}
+
+#[test]
+fn ess_impact_answers_for_the_artifacts_without_a_suite() {
+    // Since W7.1 the report has an artifact half, and it stands on the two models alone: no suite,
+    // no committed tree, and still an answer a person can act on — which artifacts to regenerate,
+    // with the path that explains each.
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let document: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the report is JSON");
+
+    assert_eq!(document["format"], "ess-impact/2");
+    assert!(
+        document.get("suite").is_none() && document.get("invalidation").is_none(),
+        "no suite was given, so no scenario answer is manufactured: {document}"
+    );
+    assert_eq!(document["artifacts"]["answer"], "narrowed");
+    let owed = document["artifacts"]["owed"]
+        .as_array()
+        .expect("owed artifacts");
+    let total = document["churn"]["generated_artifacts_total"]
+        .as_u64()
+        .expect("a total");
+    assert!(
+        !owed.is_empty() && (owed.len() as u64) < total,
+        "{} of {total} owed — the four changes must narrow to a strict subset",
+        owed.len()
+    );
+}
+
+#[test]
+fn ess_impact_reads_the_generated_tree_and_owes_a_false_contract_digest() {
+    // The fail-closed door, end to end: a tree written by `ess generate --out`, one artifact's
+    // contract digest damaged by hand, and the report owes exactly that artifact as a false claim
+    // — where without the damage its slice was untouched by the delta and it was absent.
+    let directory = scratch("ess-impact-generated-tree");
+    let generated = protocol(&[
+        "ess",
+        "generate",
+        "--path",
+        REVISION_BEFORE,
+        "--out",
+        printable(&directory),
+    ]);
+    assert_eq!(code(&generated), 0, "{}", stderr(&generated));
+
+    let target = directory.join("schema/types/catalog.pricing.PriceListId.schema.json");
+    let honest = std::fs::read_to_string(&target).expect("the projection exists");
+    let damaged = {
+        let at = honest.find("\"contract_digest\": \"").expect("the stamp") + 20;
+        let mut bytes = honest.into_bytes();
+        // One hex digit flipped: the digest stays well formed and stops being true.
+        bytes[at] = if bytes[at] == b'0' { b'1' } else { b'0' };
+        String::from_utf8(bytes).expect("still text")
+    };
+    write(&target, &damaged);
+
+    let output = protocol(&[
+        "ess",
+        "impact",
+        "--from",
+        REVISION_BEFORE,
+        "--to",
+        REVISION_AFTER,
+        "--generated",
+        printable(&directory),
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let document: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the report is JSON");
+
+    let owed = document["artifacts"]["owed"]
+        .as_array()
+        .expect("owed artifacts");
+    let entry = owed
+        .iter()
+        .find(|entry| entry["path"] == "schema/types/catalog.pricing.PriceListId.schema.json")
+        .unwrap_or_else(|| panic!("the damaged artifact is owed, stated as such: {owed:?}"));
+    assert_eq!(
+        entry["owed"], "contract-mismatch",
+        "a false claim about derivation is its own finding: {entry}"
     );
 
     std::fs::remove_dir_all(&directory).ok();
@@ -3128,7 +3224,7 @@ fn infra_diagnose_reports_the_findings_and_exits_zero_because_a_diagnosis_is_not
         "the crash loop is reported with its code and severity: {text}"
     );
     assert!(
-        text.contains("3 error(s), 22 warning(s), 10 info(s)"),
+        text.contains("4 error(s), 22 warning(s), 11 info(s)"),
         "the summary counts every severity: {text}"
     );
 }
@@ -3150,11 +3246,11 @@ fn infra_diagnose_min_severity_filters_the_lines_and_keeps_the_totals() {
         "nothing below the floor is listed: {text}"
     );
     assert!(
-        text.contains("3 of 35 finding(s) at or above error"),
+        text.contains("4 of 37 finding(s) at or above error"),
         "the filter says what it hid: {text}"
     );
     assert!(
-        text.contains("3 error(s), 22 warning(s), 10 info(s)"),
+        text.contains("4 error(s), 22 warning(s), 11 info(s)"),
         "the totals stay totals under any floor: {text}"
     );
 }
@@ -3172,11 +3268,11 @@ fn infra_diagnose_json_carries_codes_severities_and_evidence() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let report: serde_json::Value =
         serde_json::from_str(&stdout(&output)).expect("the report is JSON");
-    assert_eq!(report["errors"], 3);
+    assert_eq!(report["errors"], 4);
     assert_eq!(report["warnings"], 22);
-    assert_eq!(report["infos"], 10);
+    assert_eq!(report["infos"], 11);
     let findings = report["findings"].as_array().expect("findings");
-    assert_eq!(findings.len(), 35);
+    assert_eq!(findings.len(), 37);
     let crash = findings
         .iter()
         .find(|finding| finding["code"] == "INFRA-DIAG-008")

@@ -23,7 +23,7 @@ its HTTP layer.
 | Run that suite against an implementation | `protocol ess conform run --path <path> --target <name>` |
 | Turn that run into AEP evidence | `protocol ess conform evidence --path <path> --target <name>` |
 | Say what moved between two revisions of one specification | `protocol ess diff --from <path> --to <path> --format text\|json` |
-| Say what that move puts back to owed in a committed suite | `protocol ess impact --from <path> --to <path> --suite <suite.json>` |
+| Say what that move puts back to owed — scenarios and generated artifacts | `protocol ess impact --from <path> --to <path> [--suite <suite.json>] [--generated <dir>]` |
 | Complete a task only once that evidence exists | [`examples/billing-conformance/`](../../examples/billing-conformance/) |
 | Read the suites this repository commits | [`suites/generated/`](../../suites/generated/) |
 | Validate in an editor as you type | [`schemas/generated/ess.schema.json`](../../schemas/generated/ess.schema.json) |
@@ -225,8 +225,14 @@ billing v3 → v3
 
 suite billing v3 (13577b3ce695932e980d418d5863bcde07f4c362516d53147870d31eaf2ed861): 7 of 29 scenario(s) owed again
 2 construct(s) reached: 2 changed, 0 depend on one directly, 0 through another
+9 of 37 generated artifact(s) owed regeneration
 
   billing.invoice.CreateInvoice/outcome/accepted
+    directly-changed actor billing.invoice.Customer — actor/…/grant-removed/…CreateInvoice
+  …
+
+artifacts owed regeneration:
+  projection docs/README.md
     directly-changed actor billing.invoice.Customer — actor/…/grant-removed/…CreateInvoice
   …
 ```
@@ -250,6 +256,14 @@ answer, proportionate.
 The scenario never mentions `Currency`. It is reached three declarations away, and the three lines
 are what make that checkable rather than assertable. An impact nobody can explain is an impact
 nobody will act on.
+
+**The generated artifacts get the same answer.** Every artifact under `generated/`, every committed
+suite and every synthesised workspace carries a `contract digest` beside its model digest — the
+digest of the model slice it derives from — and the report's artifact section narrows "the
+specification moved, regenerate everything" to the artifacts whose slice the delta reached, each
+with the same hop-by-hop path. `--suite` is optional now, `--generated generated/` additionally
+checks each committed artifact's stamped digest against what its slice computes, and an artifact
+whose claim cannot be read or does not hold is owed outright, stated as such.
 
 **It narrows; it never says a result still holds.** A scenario absent from the output was not
 reached by this analysis — which is *not* a claim that its evidence still stands. Impact analysis

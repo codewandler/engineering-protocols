@@ -145,7 +145,9 @@ use ess_domain::name::QualifiedName;
 
 use crate::artifact::{Artifact, Generator};
 use crate::openapi::under_components;
-use crate::provenance::Provenance;
+use ess_compiler::refs::{BindingRef, CommandRef, ComponentRef, EssSemanticRef};
+
+use crate::provenance::{Provenance, ProvenanceMint, SlicedProvenance};
 use crate::schema::types::{self, Node};
 
 /// The `AsyncAPI` version every document declares.
@@ -182,16 +184,18 @@ impl Generator for AsyncApi {
         "asyncapi"
     }
 
-    fn generate(&self, ir: &EssIr, provenance: &Provenance) -> Vec<Artifact> {
+    fn generate(&self, ir: &EssIr, mint: &ProvenanceMint) -> Vec<Artifact> {
         ir.components
             .values()
             .map(|component| {
-                let document = document(ir, component, provenance);
+                let sliced = component_slice(ir, component, mint);
+                let document = document(ir, component, &sliced.provenance);
                 let body = serde_yaml::to_string(&document)
                     .unwrap_or_else(|error| panic!("an AsyncAPI document serialises: {error}"));
-                Artifact::new(
+                Artifact::sliced(
                     format!("{}.yaml", component.name),
-                    format!("{}{body}", provenance.commented("#")),
+                    format!("{}{body}", sliced.provenance.commented("#")),
+                    sliced.slice,
                 )
             })
             .collect()
@@ -412,6 +416,40 @@ struct Plan<'a> {
 
 /// Every event that causes a command, keyed by the event's identity.
 ///
+/// The slice one component's document derives from: the component, every binding, every command
+/// and every component.
+///
+/// Wider than `OpenAPI`'s on purpose, because this document reads across the whole interaction
+/// layer by inversion: the channels come from `ir.reactions()` (every binding), a send operation
+/// names the components that consume the event (every component), and the state-change notes scan
+/// every command's outcomes for the ones that emit the message — none of which a forward walk
+/// from this component alone can reach. The commands' closure brings the entities and the
+/// transitions the notes name. What is deliberately *not* here: views and actors, which nothing
+/// in this document reads — those are the narrowing this slice still buys.
+fn component_slice(
+    ir: &EssIr,
+    component: &ResolvedComponent,
+    mint: &ProvenanceMint,
+) -> SlicedProvenance {
+    let mut seeds: Vec<EssSemanticRef> = vec![ComponentRef::new(component.name.clone()).into()];
+    seeds.extend(
+        ir.bindings
+            .keys()
+            .map(|name| BindingRef::new(name.clone()).into()),
+    );
+    seeds.extend(
+        ir.commands
+            .keys()
+            .map(|name| CommandRef::new(name.clone()).into()),
+    );
+    seeds.extend(
+        ir.components
+            .keys()
+            .map(|name| ComponentRef::new(name.clone()).into()),
+    );
+    mint.of_seeds(seeds)
+}
+
 /// [`EssIr::reactions`] keyed by handle, re-keyed by name: a handle has no public constructor, so a
 /// map keyed by one can only be searched linearly from a projection, and this is asked per event.
 type Reactions<'a> = BTreeMap<&'a QualifiedName, Vec<&'a ResolvedBinding>>;
