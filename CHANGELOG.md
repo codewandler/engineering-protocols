@@ -11,6 +11,16 @@ belongs in the commit message or in `docs/design/`.
 
 ### Changed
 
+- **The guard-efficacy review's last two loose ends, closed.** Every substantive finding of
+  `docs/reviews/2026-08-20-guard-efficacy-review.md` was fixed by later waves — the refusal that
+  authorised, the unenforced `Deserialize` ban, the one-directional approval floor, the untested
+  Kleene negation, the audit disjunct, the Decimal rejection test, proptest phase 1 — and two small
+  ones were not: the two guards the review caught reporting a bare `left == right` now say what
+  broke and why it matters (`kleene_conjunction_keeps_false_ahead_of_unknown`, the Decimal
+  structural assertions), and the `identity` conformance suite's module doc records the mutation-11
+  efficacy evidence the review's D5 accepted in place of an in-CI fault, so the one suite whose
+  efficacy CI cannot verify carries its measured proof where a reader of the suite looks.
+
 - **The horizons corpus is ground truth now, and the scanner reads two more positions.** The
   adopter fixed their reference implementation against the vendored corpus and re-issued
   `expected.json` as ground truth: 43 raw annotations, 43 parsed, `missed_by_reference: 0`, with

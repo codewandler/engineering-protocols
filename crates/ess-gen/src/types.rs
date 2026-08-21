@@ -839,8 +839,16 @@ mod tests {
     #[test]
     fn a_decimal_is_written_as_an_exact_string_because_a_json_number_is_read_as_a_float() {
         let node = primitive(Primitive::Decimal);
-        assert_eq!(node.kind, Some("string"));
-        assert_eq!(node.pattern, Some(DECIMAL_PATTERN));
+        assert_eq!(
+            node.kind,
+            Some("string"),
+            "a decimal published as a JSON number is read back as a float"
+        );
+        assert_eq!(
+            node.pattern,
+            Some(DECIMAL_PATTERN),
+            "without the pattern, `\"abc\"` is a valid amount in every projection at once"
+        );
     }
 
     #[test]

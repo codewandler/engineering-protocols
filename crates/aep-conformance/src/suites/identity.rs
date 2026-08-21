@@ -13,6 +13,12 @@
 //! suite runs against a working backend and earns its keep on the mistakes implementers actually
 //! make — an id built out of the locator, an address that resolves to nothing, an identity that
 //! moves when the entity changes.
+//!
+//! That it earns its keep is measured, not asserted: the guard-efficacy review
+//! (`docs/reviews/2026-08-20-guard-efficacy-review.md`, mutation 11) minted the id from the
+//! locator inside the reference backend, and this suite caught it, printing the derived id beside
+//! the key it was derived from. The efficacy evidence lives there because no in-CI fault can
+//! produce it — the reasoning above is why, and the review's D5 records the acceptance.
 
 use aep_contract::testing::block_on;
 use aep_domain::command::{Command, CreateEntity, UpdateEntity};

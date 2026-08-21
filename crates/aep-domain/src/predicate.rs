@@ -1213,10 +1213,18 @@ mod tests {
     fn kleene_conjunction_keeps_false_ahead_of_unknown() {
         let facts = store(&[("a.failed", FactValue::count(1))]);
         let predicate = Predicate::all(vec![parse("a.failed == 0"), parse("b.failed == 0")]);
-        assert_eq!(predicate.evaluate(&facts), Truth::False);
+        assert_eq!(
+            predicate.evaluate(&facts),
+            Truth::False,
+            "one observed failure decides the conjunction, whatever the unobserved half holds"
+        );
 
         let partial = store(&[("a.failed", FactValue::count(0))]);
-        assert_eq!(predicate.evaluate(&partial), Truth::Unknown);
+        assert_eq!(
+            predicate.evaluate(&partial),
+            Truth::Unknown,
+            "the unobserved half must stay Unknown, not collapse to False — invariant 5"
+        );
     }
 
     #[test]
