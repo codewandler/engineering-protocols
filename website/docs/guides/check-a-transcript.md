@@ -111,6 +111,20 @@ to call work done until independent conformance evidence exists; it can now also
 the *run that produced the work* checked out — the skill was consulted before the store was
 touched, nothing shelled out to `rm -rf`, the environment was the one the eval promised.
 
+## The whole loop, in one picture
+
+![Animated diagram: transcript events stream in on the left; the checker ticks expectations off
+against them, each verdict citing event indices; the passing check mints a trace_conformance
+evidence record with its digest pair; and in the reference driver — decided, not yet built — a
+workflow transition stays Blocked until exactly that record is submitted, then
+moves.](/img/trace-evidence-gate.svg)
+
+The last panel is deliberately drawn dashed: the gate it shows is the [reference
+driver](../status/roadmap.md), decided and designed but not built. The mechanism it will use
+exists today — the evidence record above is already accepted by `protocol evaluate --evidence`,
+and a state's evidence requirement is already how the engine answers `Blocked { reasons }`. What
+the driver adds is only the loop that asks.
+
 ## Sources
 
 The checker and IR live in `crates/trace-domain` and `crates/trace-spec`; the specification

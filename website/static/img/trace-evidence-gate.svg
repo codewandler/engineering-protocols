@@ -1,0 +1,147 @@
+<svg viewBox="0 0 960 540" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="Animation: a harness transcript streams events; the trace checker ticks expectations off against it; a passing check mints a trace_conformance evidence record; and soon a workflow gate stays blocked until exactly that record exists.">
+  <style>
+    .bg { fill: #0f1418; }
+    .panel { fill: #161d24; stroke: #2b3540; stroke-width: 1; rx: 8; }
+    .title { fill: #8b98a5; font-size: 12px; letter-spacing: .08em; }
+    .t { fill: #d7dde3; font-size: 12px; }
+    .dim { fill: #8b98a5; font-size: 11px; }
+    .ok { fill: #3fb950; font-size: 12px; }
+    .amber { fill: #d29922; }
+    .soon { fill: #d29922; font-size: 11px; font-style: italic; }
+
+    .stage { animation: stage 16s linear infinite; }
+    @keyframes stage { 0% {opacity:0} 2% {opacity:1} 97% {opacity:1} 100% {opacity:0} }
+
+    .ev1 { animation: ev1 16s linear infinite; opacity:0 }
+    .ev2 { animation: ev2 16s linear infinite; opacity:0 }
+    .ev3 { animation: ev3 16s linear infinite; opacity:0 }
+    .ev4 { animation: ev4 16s linear infinite; opacity:0 }
+    .ev5 { animation: ev5 16s linear infinite; opacity:0 }
+    .ev6 { animation: ev6 16s linear infinite; opacity:0 }
+    @keyframes ev1 { 0%,5% {opacity:0} 7%,100% {opacity:1} }
+    @keyframes ev2 { 0%,9% {opacity:0} 11%,100% {opacity:1} }
+    @keyframes ev3 { 0%,13% {opacity:0} 15%,100% {opacity:1} }
+    @keyframes ev4 { 0%,17% {opacity:0} 19%,100% {opacity:1} }
+    @keyframes ev5 { 0%,21% {opacity:0} 23%,100% {opacity:1} }
+    @keyframes ev6 { 0%,25% {opacity:0} 27%,100% {opacity:1} }
+
+    .ck1 { animation: ck1 16s linear infinite; opacity:0 }
+    .ck2 { animation: ck2 16s linear infinite; opacity:0 }
+    .ck3 { animation: ck3 16s linear infinite; opacity:0 }
+    .ck4 { animation: ck4 16s linear infinite; opacity:0 }
+    .verdict { animation: verdict 16s linear infinite; opacity:0 }
+    @keyframes ck1 { 0%,12% {opacity:0} 14%,100% {opacity:1} }
+    @keyframes ck2 { 0%,18% {opacity:0} 20%,100% {opacity:1} }
+    @keyframes ck3 { 0%,22% {opacity:0} 24%,100% {opacity:1} }
+    @keyframes ck4 { 0%,28% {opacity:0} 30%,100% {opacity:1} }
+    @keyframes verdict { 0%,33% {opacity:0} 35%,100% {opacity:1} }
+
+    .evcard { animation: evcard 16s linear infinite; opacity:0 }
+    @keyframes evcard {
+      0%,38% { opacity:0; transform: translateX(-24px) }
+      42%,100% { opacity:1; transform: translateX(0) }
+    }
+    .drop { animation: drop 16s linear infinite; opacity:0 }
+    @keyframes drop {
+      0%,50% { opacity:0; transform: translateY(-46px) }
+      53% { opacity:1; transform: translateY(-46px) }
+      60%,100% { opacity:1; transform: translateY(0) }
+    }
+    .gateshut { animation: gateshut 16s linear infinite; }
+    .gateopen { animation: gateopen 16s linear infinite; opacity:0 }
+    @keyframes gateshut { 0%,62% {opacity:1} 64%,100% {opacity:0} }
+    @keyframes gateopen { 0%,62% {opacity:0} 64%,100% {opacity:1} }
+    .blocked { animation: gateshut 16s linear infinite; }
+    .permitted { animation: gateopen 16s linear infinite; opacity:0 }
+    .token { animation: token 16s linear infinite; opacity:0 }
+    @keyframes token {
+      0%,64% { opacity:0; transform: translateX(0) }
+      66% { opacity:1; transform: translateX(0) }
+      74%,100% { opacity:1; transform: translateX(206px) }
+    }
+  </style>
+
+  <rect class="bg" width="960" height="540"/>
+  <g class="stage">
+
+    <!-- transcript lane -->
+    <rect class="panel" x="20" y="20" width="290" height="330" rx="8"/>
+    <text class="title" x="36" y="44">THE TRANSCRIPT</text>
+    <text class="dim" x="36" y="60">one event per line, as the harness wrote it</text>
+    <g class="ev1"><text class="t" x="36" y="88">0  session_start</text>
+      <text class="dim" x="52" y="102">plugins: [engineering-protocols]</text></g>
+    <g class="ev2"><text class="t" x="36" y="126">5  tool_call  Skill</text>
+      <text class="dim" x="52" y="140">engineering-protocols:planning → success</text></g>
+    <g class="ev3"><text class="t" x="36" y="164">13 tool_call  Bash</text>
+      <text class="dim" x="52" y="178">protocol artifact new epic …</text></g>
+    <g class="ev4"><text class="t" x="36" y="202">14 tool_result  159B</text>
+      <text class="dim" x="52" y="216">created epic:… (draft)</text></g>
+    <g class="ev5"><text class="t" x="36" y="240">25 tool_call  Edit</text>
+      <text class="dim" x="52" y="254">body only, below the ---</text></g>
+    <g class="ev6"><text class="t" x="36" y="278">38 run_outcome</text>
+      <text class="dim" x="52" y="292">is_error: false · 0 denials · $0.29</text></g>
+
+    <!-- checker -->
+    <rect class="panel" x="340" y="20" width="300" height="330" rx="8"/>
+    <text class="title" x="356" y="44">protocol trace check</text>
+    <text class="dim" x="356" y="60">a typed spec, judged against the events</text>
+    <g class="ck1"><text class="ok" x="356" y="92">ok</text>
+      <text class="t" x="392" y="92">skill-completed</text>
+      <text class="dim" x="392" y="106">at events 5, 6</text></g>
+    <g class="ck2"><text class="ok" x="356" y="130">ok</text>
+      <text class="t" x="392" y="130">created-through-the-cli</text>
+      <text class="dim" x="392" y="144">at events 13, 15</text></g>
+    <g class="ck3"><text class="ok" x="356" y="168">ok</text>
+      <text class="t" x="392" y="168">consulted-the-skill-first</text>
+      <text class="dim" x="392" y="182">first Skill at 5, first Bash at 10</text></g>
+    <g class="ck4"><text class="ok" x="356" y="206">ok</text>
+      <text class="t" x="392" y="206">terminal-record-clean</text>
+      <text class="dim" x="392" y="220">at event 38</text></g>
+    <g class="verdict">
+      <line x1="356" y1="238" x2="624" y2="238" stroke="#2b3540"/>
+      <text class="ok" x="356" y="262">41 ok, 0 gap, 0 unk — conformant</text>
+      <text class="dim" x="356" y="278">unknown is not false: unk exits 3, not 0</text>
+    </g>
+
+    <!-- evidence card -->
+    <g class="evcard">
+      <rect class="panel" x="670" y="20" width="270" height="150" rx="8" stroke="#3fb950"/>
+      <text class="title" x="686" y="44">THE EVIDENCE RECORD</text>
+      <text class="t" x="686" y="68">kind: trace_conformance</text>
+      <text class="t" x="686" y="86">status: passed</text>
+      <text class="dim" x="686" y="104">spec_digest: 8eca7c40…</text>
+      <text class="dim" x="686" y="120">transcript_digest: 6522e1eb…</text>
+      <text class="t" x="686" y="142">producer: verifier / trace-checker</text>
+      <text class="dim" x="686" y="158">an agent's own claim never mints this</text>
+    </g>
+
+    <!-- gate scene -->
+    <rect class="panel" x="340" y="380" width="600" height="140" rx="8" stroke-dasharray="5 4"/>
+    <text class="title" x="356" y="404">SOON: THE REFERENCE DRIVER</text>
+    <text class="soon" x="356" y="420">the engine evaluates; the driver only does what the answers permit</text>
+
+    <rect class="panel" x="380" y="440" width="120" height="52" rx="8"/>
+    <text class="t" x="404" y="470">implement</text>
+    <rect class="panel" x="620" y="440" width="120" height="52" rx="8"/>
+    <text class="t" x="650" y="470">complete</text>
+
+    <!-- gate bar between the states -->
+    <g class="gateshut">
+      <rect x="552" y="436" width="10" height="60" fill="#f85149" rx="2"/>
+      <text class="dim" x="512" y="516" fill="#f85149">Blocked: trace_conformance missing</text>
+    </g>
+    <g class="gateopen">
+      <rect x="552" y="436" width="10" height="60" fill="#3fb950" rx="2"/>
+      <text class="ok" x="530" y="516">Moved: the evidence permits it</text>
+    </g>
+    <line x1="500" y1="466" x2="620" y2="466" stroke="#2b3540" stroke-width="2"/>
+    <circle class="token" cx="512" cy="466" r="7" fill="#58a6ff"/>
+
+    <!-- the record travels to the gate -->
+    <g class="drop">
+      <rect x="700" y="440" width="200" height="40" rx="6" fill="#161d24" stroke="#3fb950"/>
+      <text class="t" x="712" y="457">trace_conformance</text>
+      <text class="dim" x="712" y="473">submitted as evidence</text>
+    </g>
+  </g>
+</svg>
