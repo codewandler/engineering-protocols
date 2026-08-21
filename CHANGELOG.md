@@ -9,10 +9,72 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.7.0-ess-wave-7] — 2026-08-21
+
 ### Added
 
+- **One specification, two running applications, one surface (ESS wave 7, W7.5).**
+  [`examples/gatepass/`](examples/gatepass) is a new application specification — visitor passes for
+  a building — and `protocol ess synthesize` now emits, for Rust *and* for Go, a binary that serves
+  it over HTTP. Start either one and it writes the same three lines of JSON about itself, answers
+  the same seven routes, and publishes the same contract and the same documentation, byte for byte.
+  `cargo xtask synth` starts both on ephemeral ports and holds them to it.
+
+  **A component can now say where its callers are, and that is what forces HTTP.** The model gained
+  one word: `reached_by: network` on a component, against `in_process`, which is what silence has
+  always meant. It names no protocol. What follows is a derivation and not a preference — a surface
+  whose callers are not deployed with it has to exist on a wire, and this repository projects
+  exactly one contract for a component's command surface, the `OpenAPI` document, which is an HTTP
+  contract. A synthesised server speaking anything else would contradict the document committed
+  beside it. **A specification that says nothing keeps everything it had**: the word is left out of
+  the resolved model when unstated, so every committed artifact of every existing specification
+  keeps the digest it had, and no server is emitted for a system that never asked for one.
+
+  **A view is exposed only where the specification says something outside reads it.** The `OpenAPI`
+  projection has always refused to give a view a path, because nothing in the model said how one is
+  read; it still refuses, unless the component declares a network surface. Then each view gets
+  `GET /{domain}/views/{view}`, its rows under one key, its declared filter in the description and
+  its consistency as `x-ess-consistency` — and still no page size, no cursor, no ordering and no
+  filter parameter, because the specification states none of them. A component that declares a
+  network surface and has neither a command to accept nor a view to project is refused, naming what
+  is missing.
+
+  **A server and its contract cannot disagree about a path.** `ess_gen::http` holds one route
+  mapping and one status mapping, and the published document, the Rust server and the Go server all
+  read them. `GET /openapi.json` serves the committed contract and `GET /docs` the committed
+  Markdown, both embedded at emission rather than rebuilt at run time — a server that regenerated
+  its own contract could publish one nobody reviewed. A path the contract does not declare is a
+  404, a declared path under another method is a 405, a body the schema refuses is a 400, and an
+  obligation nothing has satisfied is a 501 naming it; none of the four is a status the contract
+  declares, because each is a fact about a transport rather than about a command.
+
+  **Neither tree takes a dependency**, and neither chooses a realization. Rust serves over
+  `std::net::TcpListener`; Go over `net/http` and `encoding/json`, with generated codecs beside the
+  types because a generated Go type carries an unexported field `encoding/json` cannot see. The
+  hand-written halves live outside `generated/` as they always have —
+  [`examples/gatepass-realization/`](examples/gatepass-realization) and
+  [`examples/gatepass-go-realization/`](examples/gatepass-go-realization) — each with a linker that
+  resolves exactly one implementation per obligation and names both rather than choosing when two
+  are offered. The two were written from the specification rather than from each other, which is
+  what makes "they answer the same way" a claim about the specification.
+
+  **The startup record splits what the model determines from what the process does.** Everything
+  outside a declared `runtime` member — the system, its version, both digests, the components, the
+  plan's disposition counts, the served component, its reach, the transport, and every route — is
+  derived from the specification and must be identical in every language. `runtime` carries the
+  language, the address and the port. The gate *removes* `runtime` and refuses a line that has
+  none, rather than comparing a list of members, so a fact the record gains tomorrow is compared
+  without anyone editing the comparison.
+
+  The browser target refuses this transport out loud rather than emitting one: a page holds the
+  system in one tab and binds no socket, so a network surface is one a page would call rather than
+  contain. `task check` gains no step — `synth-check` grew a fifth reason to fail.
+
+
 - **`protocol ess synthesize --target web` — the billing system in a browser, and the third
-  emitter behind one plan (ESS wave 7, W7.5).** The same specification now synthesises a
+  emitter behind one plan (ESS wave 7, W7.3b).** The same specification now synthesises a
   `WebAssembly` bridge and the page that drives it, committed under `generated/web/` and
   drift-checked in the gate. Open it and you can send any declared command with a typed form,
   watch the outcome it took, read the event log the transport published, redeliver an occurrence
@@ -1048,7 +1110,8 @@ No compiler, no OpenAPI, no test synthesis: those are ESS waves 2 and 3 in
 - **`xtask schema [--check]`** — schemas are generated from the Rust types, and CI proves they match.
 - Repository scaffolding: workspace, `Taskfile.yml` gate, Apache-2.0 licence, `AGENTS.md`.
 
-[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.6.1-ess-wave-6.5...HEAD
+[Unreleased]: https://github.com/codewandler/engineering-protocols/compare/0.7.0-ess-wave-7...HEAD
+[0.7.0-ess-wave-7]: https://github.com/codewandler/engineering-protocols/compare/0.6.1-ess-wave-6.5...0.7.0-ess-wave-7
 [0.6.1-ess-wave-6.5]: https://github.com/codewandler/engineering-protocols/compare/0.6.0-ess-wave-6...0.6.1-ess-wave-6.5
 [0.6.0-ess-wave-6]: https://github.com/codewandler/engineering-protocols/compare/0.5.0-ess-wave-5...0.6.0-ess-wave-6
 [0.5.0-ess-wave-5]: https://github.com/codewandler/engineering-protocols/compare/0.4.0-ess-wave-4...0.5.0-ess-wave-5
