@@ -1,0 +1,15 @@
+version: aep.project/1
+
+# The protocol tree is this repository itself. Every path here is resolved against the `.engineering`
+# directory (`crates/aep-domain/src/project.rs`, `ProjectPaths::resolved`), so the repository root —
+# the directory holding `protocols/`, `principles/`, `workflows/`, `profiles/` and
+# `artifacts/lifecycles/` — is `..`, one level up. An adopting project points this at a sibling
+# checkout or a vendored copy; here it points at the tree the project is.
+protocol: adp/1
+profile: development.standard
+protocols: ..
+
+summary: >-
+  The protocol repository, planned in its own store: the harness family — the reference driver, the
+  planning store's road to being a backend, and the evidence that says a story is done — kept as
+  markdown under .engineering/planning/.

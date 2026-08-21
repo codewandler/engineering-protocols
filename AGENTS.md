@@ -34,7 +34,7 @@ one in part, one taken up whole by a plan page. Their acceptance state is:
 | [`ess-semantic-diff-impact-evolution-design-v0.1.md`](docs/design/ess-semantic-diff-impact-evolution-design-v0.1.md) | **core implemented** as ESS wave 5 (`0.5.0-ess-wave-5`). Two of its seventy-eight sections are rejected outright (the proposal-evaluation loop and architecture search); the rest past §31 stays proposed |
 | [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | **accepted in part** by [`docs/plan/ess-wave-6-structural-synthesis.md`](docs/plan/ess-wave-6-structural-synthesis.md), which is wave 6, in progress. Its obligation/`Realization` programme stays proposed (W7.4 takes a slice), and its §28 is refused by invariant 6 |
 | [`semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | reviewed and **deferred whole**; two ideas harvested |
-| [`harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md) | **Phase 1 accepted** by [`docs/plan/harness-wave-1-planning-plugin.md`](docs/plan/harness-wave-1-planning-plugin.md), which is harness wave 1: the markdown planning store, `protocol artifact`, and the Claude Code plugin. Its Phase 2 **reference driver** is decided by the operator (`docs/VISION.md` § *What this is deliberately not*, narrowed 2026-08-21) and **not accepted for build** — harness wave 2 is a feasibility review of §4 against the code, and the build waits behind it |
+| [`harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md) | **Phase 1 accepted** by [`docs/plan/harness-wave-1-planning-plugin.md`](docs/plan/harness-wave-1-planning-plugin.md), which is harness wave 1: the markdown planning store, `protocol artifact`, and the Claude Code plugin. Its Phase 2 **reference driver** is decided by the operator (`docs/VISION.md` § *What this is deliberately not*, narrowed 2026-08-21), reviewed against the code by harness wave 2, and **built as harness wave 3** — `aep-driver-spec`, `aep-driver`, `drivers/`, `protocol drive`, the plugin's enforcement hooks and a second harness with no model in it. Both halves are recorded in [`docs/plan/harness-wave-2-driver-decision.md`](docs/plan/harness-wave-2-driver-decision.md), which carries wave 2's decisions and wave 3's acceptance. Harness wave 4 is **proposed and not sequenced** |
 | [`transcript-conformance-design-v0.1.md`](docs/design/transcript-conformance-design-v0.1.md) | **accepted, in implementation** as trace wave 1 by [`docs/plan/trace-wave-1-transcript-checker.md`](docs/plan/trace-wave-1-transcript-checker.md), which takes up its milestones T1–T3, sequences them and sets their acceptance criteria. Its open decisions D1–D6 are taken at their stated defaults, with one narrowing: the `regex` matcher of § 3.4 is **refused by name** rather than implemented, because the workspace carries no regular-expression engine. What stays proposed is named on the plan page: assertions over the per-request usage *series* (§ 2.7), an expectation kind for the skill's own text entering context (§ 2.8), and a streaming checker (**D5**) |
 
 Do not implement from an unreviewed design, and do not treat one as evidence of what this repository
@@ -50,7 +50,9 @@ in the repository's first 48 hours, so the count lives in exactly one place, the
 `git tag -n99` is the per-wave record of what actually shipped, and `task check` is the
 measurement; read those before believing any prose about progress.
 
-**Every crate in the workspace is implemented and gated. There are no skeletons left.** The gate
+**Every crate in the workspace is implemented and gated. There are no skeletons left.** Twenty-nine
+workspace members: **twenty-six crates** under `crates/`, two realization examples and `xtask`. The
+document tree holds **six profiles**. The gate
 (`task check`, ten steps) needs three toolchains beside
 Rust's own: the **Go toolchain**, the **`wasm32-unknown-unknown` target** and **Node**. Two of the
 ten steps build the second and third emitters' committed trees, and none of those checks skips
@@ -118,9 +120,22 @@ passing one.
   contradicted, `3` nobody found out. Nothing here calls a model or reads a clock: every duration
   and every cost comes out of the transcript, which is what lets a report be committed and
   diffed. Plan page: `docs/plan/trace-wave-1-transcript-checker.md`.
+* **Harness — the planning store, and the reference driver that walks a workflow.** Wave 1 built
+  `aep-backend-markdown` and `protocol artifact`; wave 3 built the driver. Three crates:
+  `aep-driver-spec` (the leaf — step maps raw→validated, the mandatory workflow pin, the run cursor,
+  `ToolConfig`), `aep-driver` (the deterministic three-valued router, the executor traits and
+  `tool_config`, both clock-free and randomness-free under invariant 9) and `aep-render` (a workflow
+  and a run over it as SVG, HTML, PNG or a terminal frame, byte-stable, depending on `aep-domain`
+  alone so a renderer cannot become a second protocol implementation). `protocol drive
+  run|status|resume` and `protocol workflow render` are the surfaces; step maps are the fifth
+  document kind, under `drivers/`, and `development.driven` is the sixth profile — the only one that
+  grants a shell, held to the `protocol` CLI by the plugin's own hook. **Gates are evaluated only by
+  the engine**: the driver asks and does what it is told, and enforcement sits at two layers — the
+  per-state tool set at session launch and two `PreToolUse` hooks — with `protocol trace check`
+  reading the transcript afterwards to say whether it held. Record:
+  `docs/plan/harness-wave-2-driver-decision.md`; design
+  `docs/design/harness-planning-and-driver-design-v0.1.md` §§ 4.1–4.9.
 * **Not built yet:** W7.4 — obligations as artifacts a task can own — deferred by decision;
-  the **reference driver**, decided by the operator and waiting behind harness wave 2's
-  feasibility review;
   attested evidence (gap register D-3, proposed and unaccepted); a **contract implementation that
   survives a process exit**. That last one is now half true and worth stating as two facts rather
   than one: a durable markdown **store** exists (`aep-backend-markdown`, harness wave 1) and holds
@@ -193,12 +208,21 @@ enforcement here that you cannot point at.
    `SystemTime::now` is allowed to live, behind the `Clock` trait.
 9. **Determinism.** Same validated state plus same evidence set ⇒ same decision. Iterate over
    `BTreeMap`/`BTreeSet`, never `HashMap`, so output ordering is stable.
-   *Enforced by* banned-token scans over ten crates that claim the property or feed one that
+   *Enforced by* banned-token scans over thirteen crates that claim the property or feed one that
    does — `ess-compiler` (`tests/billing.rs`), `ess-diff` (`tests/canonical.rs`), `ess-synth`
-   (`tests/synthesis.rs`), `aep-domain`, `ess-gen`, `infra-domain`, `infra-compiler` and
-   `infra-analyze` (`tests/determinism.rs` in each) — beside tests that compile, diff, generate
+   (`tests/synthesis.rs`), `aep-domain`, `ess-gen`, `infra-domain`, `infra-compiler`,
+   `infra-analyze`, `infra-project`, `infra-spec`, `aep-driver-spec`, `aep-driver` and `aep-render`
+   (`tests/determinism.rs` in each) — beside tests that compile, diff, generate
    or render twice and compare bytes, and a seeded property test that does the same for every
    generated adversarial specification (`crates/ess-compiler/tests/adversarial.rs`).
+   Three of the thirteen are the harness's. § 4.1 makes a purity claim for the two driver crates
+   stronger than `aep-engine`'s: the routing core is clock-free and randomness-free, and the store
+   lock, the pid-liveness probe and the run directory are `protocol-cli`'s precisely because a probe
+   reads ambient OS state and would slip past this scan. `aep-render`'s scan is stronger again and
+   bans **floats** as well, because its criterion is not *the same decision twice* but *the same
+   bytes twice* — a committed figure that regenerates differently is a diff nobody chose — and the
+   `--watch` loop, its poll interval and the terminal live in `protocol-cli` for the same reason the
+   lock does.
    Deliberately unscanned, because each owns a clock or a terminal: `aep-engine` (invariant 8),
    `ess-conformance` (the runner takes a clock, wave 3.5 decision 3), the backends, the CLI and
    `xtask`. `ess-domain` states no determinism claim of its own.
@@ -210,12 +234,12 @@ enforcement here that you cannot point at.
     clippy-pedantic clean.
     *Enforced by* `missing_docs` and `clippy::pedantic` in `[workspace.lints]`, raised to errors by
     the `clippy` step's `-D warnings`, plus the `doc-check` step (`RUSTDOCFLAGS=-D warnings`) for
-    broken intra-doc links. All eighteen workspace members opt in with `[lints] workspace = true`; a
-    new crate that omits that line is outside every lint here.
+    broken intra-doc links. All twenty-nine workspace members opt in with `[lints] workspace = true`;
+    a new crate that omits that line is outside every lint here.
 12. **No `unsafe`** (`unsafe_code = "forbid"`).
     *Enforced by* that lint in `[workspace.lints.rust]`. `forbid` cannot be lifted by an inner
-    `allow`, so this one is closed rather than merely checked — again, for the seventeen members that
-    opt in. **One crate cannot declare it and says so**: a `WebAssembly` export is a `#[no_mangle]`
+    `allow`, so this one is closed rather than merely checked — again, for the twenty-nine members
+    that opt in. **One crate cannot declare it and says so**: a `WebAssembly` export is a `#[no_mangle]`
     item, which rustc's own `unsafe_code` lint flags, so the emitted browser bridge under
     `generated/web/` and the host that links a realization into it (`examples/billing-web`, excluded
     from the workspace for exactly this reason) declare `#![deny(missing_docs)]` alone. Neither

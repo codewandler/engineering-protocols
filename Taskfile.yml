@@ -163,3 +163,13 @@ tasks:
     desc: Run the Claude Code plugin eval (headless agent + mechanical inspection).
     cmds:
       - integrations/claude-code/eval/run.sh
+
+  # The second eval, and it judges the layer above the first: `protocol drive` holding the workflow,
+  # one model session per `llm` step, the plugin's hooks as the driver's enforcement arm. Same rule
+  # as its neighbour and for the same reason — it reaches the API, so it is never a step of `check`.
+  # Two sessions, one of which is deliberately refused what the guardrails forbid; the first real
+  # runs cost about **$0.70** each. Needs `claude` and `jq` on PATH, and says which is missing.
+  driven-eval:
+    desc: Run the driven eval (protocol drive + real model sessions + the enforcement hooks).
+    cmds:
+      - integrations/claude-code/eval/run-driven.sh

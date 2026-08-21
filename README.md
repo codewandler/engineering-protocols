@@ -57,6 +57,13 @@ and nine principles, a workflow and twelve capability decisions are derived from
 * **Capabilities default to deny**, and `deny` cannot be granted back by a later document.
 * **Nothing is deleted.** Archive and supersede are the vocabulary; every mutation crosses one
   boundary carrying actor, executor, correlation, causation and an idempotency key.
+* **`protocol drive` runs the workflow instead of suggesting it.** The tools an agent holds in a
+  state are the ones the protocol grants there, a refused action is refused by a program rather than
+  by a paragraph, and every transition is the engine's. A step that calls a model has no field to put
+  evidence in — the type, not a rule.
+* **`protocol workflow render` draws the run.** A workflow, and where a run has been, what it
+  produced and why it stopped, as SVG, HTML, PNG or a live terminal frame. The reasons are the
+  engine's own sentences, verbatim.
 
 ## Is this for you
 
@@ -78,8 +85,9 @@ workflows and the `protocol` CLI; ESS specifications compiling to documentation,
 JSON Schema, generated conformance suites, and structural skeletons in Rust, Go and a browser
 realization — with one specification run as two applications and compared in every gate run; a
 Kubernetes observation checked three-valued against a desired state, with gaps projected back as
-reviewable patches; a durable markdown planning store; and a
-[Claude Code plugin](integrations/claude-code/) that plans through it.
+reviewable patches; a durable markdown planning store; a
+[Claude Code plugin](integrations/claude-code/) that plans through it; and the **reference driver**
+that walks a workflow rather than being steered along one.
 
 Not working yet, stated plainly: no durable backend implements the storage contract — the reference
 implementation is in memory; generated code is structural, never behavioural — every algorithm
@@ -101,6 +109,9 @@ The gate is the measurement — run `task check` rather than trusting a number w
 | [`docs/status.md`](docs/status.md) | the status report: waves, components, limitations, and the full document index |
 | [`AGENTS.md`](AGENTS.md) | the working agreement, including the invariant register — every rule names the check that enforces it |
 | [`docs/design/`](docs/design/), [`docs/plan/`](docs/plan/) | designs — proposed until a plan page accepts them — and the plan pages that did |
+| [`crates/`](crates/) | the workspace: the protocol, the ESS toolchain, the infrastructure and trace domains, the driver and the CLI |
+| [`protocols/`](protocols/), [`principles/`](principles/), [`workflows/`](workflows/), [`profiles/`](profiles/), [`drivers/`](drivers/) | the document tree — the rules themselves, and the step maps that say how a harness obtains what a workflow asks for |
+| [`integrations/claude-code/`](integrations/claude-code/) | the plugin: the planning skill, two agents, and the driver's enforcement hooks |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |
 
 ## Build
