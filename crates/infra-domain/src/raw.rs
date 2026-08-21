@@ -654,6 +654,141 @@ pub struct RawClaimResources {
     pub requests: BTreeMap<String, String>,
 }
 
+/// A replicaset — the rung between a deployment and its pods.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawReplicaSet {
+    /// Identity, labels and owner references; the owner is the deployment.
+    #[serde(default)]
+    pub metadata: RawMeta,
+    /// The declared spec; only the replica count is read.
+    #[serde(default)]
+    pub spec: RawReplicaSetSpec,
+}
+
+/// The slice of a replicaset's spec the model reads.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawReplicaSetSpec {
+    /// Desired replicas.
+    #[serde(default)]
+    pub replicas: Option<u32>,
+}
+
+/// A job.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawJob {
+    /// Identity, labels and owner references; the owner, when there is one, is a cronjob.
+    #[serde(default)]
+    pub metadata: RawMeta,
+    /// The declared spec; only the completion target is read.
+    #[serde(default)]
+    pub spec: RawJobSpec,
+    /// The observed status; only the succeeded/failed pod counts are read.
+    #[serde(default)]
+    pub status: RawJobStatus,
+}
+
+/// The slice of a job's spec the model reads.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawJobSpec {
+    /// How many completions the job wants; the API's default is one.
+    #[serde(default)]
+    pub completions: Option<u32>,
+}
+
+/// The slice of a job's status the model reads.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawJobStatus {
+    /// Pods that reached `Succeeded`.
+    #[serde(default)]
+    pub succeeded: u32,
+    /// Pods that reached `Failed`.
+    #[serde(default)]
+    pub failed: u32,
+}
+
+/// A cronjob.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawCronJob {
+    /// Identity and labels.
+    #[serde(default)]
+    pub metadata: RawMeta,
+    /// The declared spec; schedule and suspension are read.
+    #[serde(default)]
+    pub spec: RawCronJobSpec,
+}
+
+/// The slice of a cronjob's spec the model reads.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawCronJobSpec {
+    /// The cron schedule expression.
+    #[serde(default)]
+    pub schedule: Option<String>,
+    /// Whether the controller is told not to start new jobs.
+    #[serde(default)]
+    pub suspend: bool,
+}
+
+/// A pod disruption budget.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawPodDisruptionBudget {
+    /// Identity and labels.
+    #[serde(default)]
+    pub metadata: RawMeta,
+    /// The declared spec: the selector and the budget.
+    #[serde(default)]
+    pub spec: RawPodDisruptionBudgetSpec,
+}
+
+/// The slice of a pod disruption budget's spec the model reads.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawPodDisruptionBudgetSpec {
+    /// The pod selector.
+    #[serde(default)]
+    pub selector: Option<RawSelector>,
+    /// The floor, a count or a percentage — kept as [`Value`] until validation.
+    #[serde(default, rename = "minAvailable")]
+    pub min_available: Option<Value>,
+    /// The ceiling, a count or a percentage — kept as [`Value`] until validation.
+    #[serde(default, rename = "maxUnavailable")]
+    pub max_unavailable: Option<Value>,
+}
+
+/// A horizontal pod autoscaler.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RawHorizontalPodAutoscaler {
+    /// Identity and labels.
+    #[serde(default)]
+    pub metadata: RawMeta,
+    /// The declared spec: the target and the replica range.
+    #[serde(default)]
+    pub spec: RawHorizontalPodAutoscalerSpec,
+}
+
+/// The slice of an autoscaler's spec the model reads.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawHorizontalPodAutoscalerSpec {
+    /// What the autoscaler scales.
+    #[serde(default, rename = "scaleTargetRef")]
+    pub scale_target_ref: Option<RawScaleTargetRef>,
+    /// The lower bound; the API's default is one.
+    #[serde(default, rename = "minReplicas")]
+    pub min_replicas: Option<u32>,
+    /// The upper bound; required by the API.
+    #[serde(default, rename = "maxReplicas")]
+    pub max_replicas: Option<u32>,
+}
+
+/// An autoscaler's `scaleTargetRef`.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct RawScaleTargetRef {
+    /// The target's kind, such as `Deployment`.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// The target's name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 /// A pod.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawPod {
@@ -710,6 +845,25 @@ pub struct RawContainerWaiting {
     /// The machine-readable reason, such as `CrashLoopBackOff`.
     #[serde(default)]
     pub reason: Option<String>,
+}
+
+/// Pulls one *optional* kind's items out of the bundle: `None` when the kind key is absent.
+///
+/// The compatibility door for the kinds that joined the scanner after `infra-observation/1`
+/// shipped (replicasets, jobs, cronjobs, pod disruption budgets, autoscalers): a bundle written
+/// by an older scanner carries no key for them, and refusing it would invalidate every scan
+/// taken before the scanner grew. Absent stays distinguishable from empty — `None` means "the
+/// scan did not look", which is exactly what keeps a downstream rule from claiming "no PDB
+/// covers this workload" out of a bundle where nobody looked
+/// ([`crate::code::InfraCode::MissingKind`]'s own argument, honoured in the other direction).
+/// A key that *is* present goes through the same item-level checks as a required kind.
+pub(crate) fn optional_items<T: serde::de::DeserializeOwned>(
+    raw: &RawBundle,
+    kind: &str,
+    errors: &mut ValidationErrors,
+) -> Option<Vec<(String, T)>> {
+    raw.kinds.get(kind)?;
+    Some(items(raw, kind, errors))
 }
 
 /// Pulls one kind's items out of the bundle, refusing an absent kind and any item that does not

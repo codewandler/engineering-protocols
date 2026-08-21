@@ -112,6 +112,39 @@ pub fn compile(observation: &Observation) -> InfraIr {
         })
         .collect();
 
+    // The optional kinds: carried when scanned, absent when not — `None` survives into the
+    // model so no consumer mistakes "nobody looked" for "none exist".
+    let scoped_map = |identity: &infra_domain::observation::Identity| {
+        scoped_key(identity.namespace.as_deref(), &identity.name)
+    };
+    let replica_sets: Option<BTreeMap<String, _>> = observation.replica_sets.as_ref().map(|all| {
+        all.iter()
+            .map(|item| (scoped_map(&item.identity), item.clone()))
+            .collect()
+    });
+    let jobs: Option<BTreeMap<String, _>> = observation.jobs.as_ref().map(|all| {
+        all.iter()
+            .map(|item| (scoped_map(&item.identity), item.clone()))
+            .collect()
+    });
+    let cron_jobs: Option<BTreeMap<String, _>> = observation.cron_jobs.as_ref().map(|all| {
+        all.iter()
+            .map(|item| (scoped_map(&item.identity), item.clone()))
+            .collect()
+    });
+    let pod_disruption_budgets: Option<BTreeMap<String, _>> =
+        observation.pod_disruption_budgets.as_ref().map(|all| {
+            all.iter()
+                .map(|item| (scoped_map(&item.identity), item.clone()))
+                .collect()
+        });
+    let horizontal_pod_autoscalers: Option<BTreeMap<String, _>> =
+        observation.horizontal_pod_autoscalers.as_ref().map(|all| {
+            all.iter()
+                .map(|item| (scoped_map(&item.identity), item.clone()))
+                .collect()
+        });
+
     // Pods next: services' selectors are checked against them.
     let mut pods = BTreeMap::new();
     for pod in &observation.pods {
@@ -315,6 +348,45 @@ pub fn compile(observation: &Observation) -> InfraIr {
                 .map(|(key, entry)| (key.clone(), entry.identity.namespace.clone()))
                 .collect(),
         ),
+        (
+            "replica_sets",
+            replica_sets
+                .iter()
+                .flatten()
+                .map(|(key, entry)| (key.clone(), entry.identity.namespace.clone()))
+                .collect(),
+        ),
+        (
+            "jobs",
+            jobs.iter()
+                .flatten()
+                .map(|(key, entry)| (key.clone(), entry.identity.namespace.clone()))
+                .collect(),
+        ),
+        (
+            "cron_jobs",
+            cron_jobs
+                .iter()
+                .flatten()
+                .map(|(key, entry)| (key.clone(), entry.identity.namespace.clone()))
+                .collect(),
+        ),
+        (
+            "pod_disruption_budgets",
+            pod_disruption_budgets
+                .iter()
+                .flatten()
+                .map(|(key, entry)| (key.clone(), entry.identity.namespace.clone()))
+                .collect(),
+        ),
+        (
+            "horizontal_pod_autoscalers",
+            horizontal_pod_autoscalers
+                .iter()
+                .flatten()
+                .map(|(key, entry)| (key.clone(), entry.identity.namespace.clone()))
+                .collect(),
+        ),
     ] {
         for (key, namespace) in keys_and_namespaces {
             if let Some(namespace) = namespace {
@@ -352,6 +424,11 @@ pub fn compile(observation: &Observation) -> InfraIr {
             service_accounts,
             claims,
             pods,
+            replica_sets,
+            jobs,
+            cron_jobs,
+            pod_disruption_budgets,
+            horizontal_pod_autoscalers,
             unresolved: facts,
         },
     }

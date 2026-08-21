@@ -46,6 +46,36 @@ fn two_diagnoses_of_one_ir_serialize_byte_identically() {
     );
 }
 
+#[test]
+fn candidates_directions_and_the_html_page_render_byte_identically_across_two_runs() {
+    use infra_analyze::{
+        candidates, candidates_to_json, candidates_to_text, directions, directions_to_json,
+        directions_to_text, properties_with, render_html,
+    };
+
+    let ir = example_ir();
+    let render = || {
+        let graph = InfraGraph::of(&ir);
+        let diagnosis = diagnose(&ir);
+        let mined = candidates(&ir);
+        let ranked = directions(&diagnosis, &mined);
+        let all = properties_with(&ir, &graph);
+        (
+            candidates_to_json(&mined),
+            candidates_to_text(&mined),
+            directions_to_json(&ranked),
+            directions_to_text(&ranked),
+            render_html(&graph, &diagnosis, &all, None),
+            render_html(&graph, &diagnosis, &all, Some("sbf")),
+        )
+    };
+    assert_eq!(
+        render(),
+        render(),
+        "no IW2.5 rendering may differ in a single byte between two runs"
+    );
+}
+
 /// What a deterministic crate must not mention in code — the scan `infra-compiler` runs,
 /// applied to this crate for the same claim.
 const BANNED: &[&str] = &[

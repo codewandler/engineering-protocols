@@ -133,6 +133,98 @@ Each applied, watched fail with the failing test named, reverted (the `AGENTS.md
 * The real k3d bundle (1186 pods) and a dev-cluster bundle (301 pods, 29 namespaces) validate,
   compile, graph and diagnose end to end; numbers on the wave report.
 
+## Refinement (IW2.5)
+
+The scanner grew five kinds — replicasets, jobs, cronjobs, pod disruption budgets, horizontal
+pod autoscalers — and the operator's story sharpened to "analyze tree → extract invariants,
+properties, directions, diagnosis". This section records what that refinement changed.
+
+### The ownership upgrade
+
+Pod ownership is now **exact where the chain was observed**: pod → replicaset → deployment and
+pod → job → cronjob close on `ownerReferences` alone, every rung an observed object and every
+edge's site the reference that states it. The `pod-template-hash` derivation of decision 4
+survives as the **fallback for bundles that predate the replicaset kind**, and an edge it
+produces carries `pod-template-hash` as its site — a reader of any rendered graph can tell the
+declared mechanism from the heuristic by looking at the edge. `UnderivedOwner` shrinks to what
+is genuinely underivable: bare pods, owners naming something unobserved, kinds outside what the
+bundle scanned. On the committed fixture the underived set went from three facts to one (the
+bare `debug-shell` pod); job pods derive to their job, deliberately without entering
+`pod_owners`, so `INFRA-DIAG-010`'s readiness expectation stays scoped to workload-managed pods
+(a job pod's expectation is its job's completion arithmetic, `INFRA-DIAG-019`).
+
+### The compatibility choice
+
+The five kinds are **optional in a bundle**. A scan written before the scanner collected them
+still validates; their absence is `None` on the observation and in the IR — never rewritten
+into "none exist" — and every consumer gates on it: the coverage rule, the coverage candidate
+and the coverage property all stay silent on a bundle that did not scan budgets, because
+**unobserved is not uncovered** (`INFRA-BUNDLE-002`'s own argument, honoured in the other
+direction). The original twelve kinds stay required. The IR model grew five maps, so every
+digest moved; the committed `cluster.ir.json` is regenerated and the drift gate unchanged.
+
+### Properties, invariants, directions
+
+* **Properties** (`WorkloadProperties`) widened: declared *and observed* replicas (ready pods
+  counted through derived ownership), the image reference split down to its registry (the
+  runtimes' dot/colon/`localhost` disambiguation rule, one owner in `parse_image`), and which
+  budgets and autoscalers cover each workload — `Option`-typed, `None` meaning unscanned.
+* **Invariant candidates** (`infra-analyze::invariants`, codes `INFRA-PROP-001`…`003`): the
+  uniformity a cluster *almost* keeps — one registry, budgets on every multi-replica workload,
+  bounds on every container — each carrying its conforming count, its population and its
+  **exceptions as evidence, not violations**: nobody declared the rule yet, so an exception is
+  a fact about uniformity for IW3 to offer for promotion. A candidate exists only when a strict
+  majority conforms; a 1-vs-1 split is not uniformity.
+* **Directions** (`infra-analyze::directions`): the severity-ranked, deduplicated "what next" —
+  one entry per (code, shared root cause), grouped where a code's evidence names a cause rather
+  than a subject (the missing reference's name, the waiting reason, the autoscaler's absent
+  target), prescribing nothing beyond the code's registered meaning. Candidates with exceptions
+  join as info-ranked entries restating their counts.
+* **The HTML component view** (`infra-analyze::html::render_html`): one self-contained page —
+  directions on top, namespaces as sections, workloads/services/ingresses as Mermaid nodes
+  badge-colored by their worst finding (pod findings rolled up to the owning workload), pods
+  aggregated as `ready/declared`, findings and edge evidence in tables beside each diagram, and
+  an optional namespace filter as the primary shape for many-namespace clusters. The Mermaid
+  renderer loads from a version-pinned CDN script tag; the repo's gate never touches the
+  network — only a viewer's browser does.
+* Canonical renderings throughout: `candidates_to_json/text`, `directions_to_json/text` and the
+  HTML page are byte-identical across runs, held by `tests/determinism.rs`. **CLI wiring is
+  deliberately absent** — flags land after the concurrent ESS wave settles `protocol-cli`.
+
+### The finding catalogue, continued
+
+| code | severity | fires when |
+|---|---|---|
+| `INFRA-DIAG-015` | warning | a disruption budget's selector matches no observed pod |
+| `INFRA-DIAG-016` | info | a multi-replica workload has no covering disruption budget |
+| `INFRA-DIAG-017` | info | an autoscaler's minimum equals its maximum |
+| `INFRA-DIAG-018` | error | an autoscaler targets a workload that was not observed |
+| `INFRA-DIAG-019` | warning | a job has failed pods and is short of its completions |
+| `INFRA-DIAG-020` | info | a cronjob is suspended |
+
+None of the six can fire on a bundle that did not scan its kind.
+
+### Mutations run (IW2.5)
+
+Each applied, watched fail with the failing test named, reverted:
+
+| mutation | caught by |
+|---|---|
+| each of the six new rule functions early-returned | its per-rule test **and** `every_registered_code_fires_at_least_once…`, naming the code |
+| unscanned budgets treated as an empty map | `the_new_rules_stay_silent_on_a_bundle_that_did_not_scan_their_kinds` |
+| budget selector AND weakened to OR | `a_budget_guarding_nothing_fires_and_the_one_guarding_asterisk_does_not` (two-label fixture selector) |
+| exact ownership path skipped (always heuristic) | `a_deployment_pod_is_owned_exactly_through_its_observed_replicaset` |
+| fallback edge site relabelled `ownerReferences` | `on_a_bundle_without_replicasets_the_hash_fallback_derives_and_names_itself` |
+| replicaset→deployment existence check dropped | `a_pod_whose_scanned_replicaset_is_absent_or_deploymentless_is_handled_exactly` |
+| scanned jobs treated as unscanned | `a_job_pod_chains_to_its_job_and_cronjob_and_a_bare_pod_stays_a_typed_fact` |
+| candidate majority bar removed | `a_cluster_without_majority_uniformity_yields_no_candidate` |
+| direction root-cause grouping zeroed | `findings_sharing_a_root_evidence_value_collapse_into_one_direction` |
+| direction severity sort removed | `directions_rank_errors_above_warnings_above_info` |
+| HTML namespace filter dropped | `the_namespace_filter_scopes_sections_findings_and_directions_alike` |
+| registry host rule always-Some | `a_namespaced_hub_image_has_no_registry_because_team_is_not_a_host` |
+| ready-pod count incremented unconditionally | `properties_carry_declared_and_observed_replicas_per_workload` |
+| optional kind refused when absent | `a_bundle_without_the_optional_kinds_validates_and_carries_their_absence_as_absence` |
+
 ## What IW3 is
 
 Desired state: a declared target model, semantic diff observed↔desired over the properties this

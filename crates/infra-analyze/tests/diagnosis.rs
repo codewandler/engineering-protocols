@@ -386,6 +386,170 @@ fn two_services_selecting_one_workload_set_are_reported_once_together() {
 }
 
 #[test]
+fn a_budget_guarding_nothing_fires_and_the_one_guarding_asterisk_does_not() {
+    let diagnosis = example_diagnosis();
+    let dangling = of_code(&diagnosis, DiagCode::PdbSelectsNothing);
+    assert_eq!(dangling.len(), 1, "exactly the retired-workers budget");
+    assert_eq!(
+        dangling[0].subject,
+        "pod_disruption_budgets/sbf/retired-workers"
+    );
+    assert!(
+        !fires_on(
+            &diagnosis,
+            DiagCode::PdbSelectsNothing,
+            "pod_disruption_budgets/sbf/asterisk"
+        ),
+        "the asterisk budget matches asterisk-0; firing on it would be a false claim"
+    );
+}
+
+#[test]
+fn a_multi_replica_workload_without_a_budget_fires_and_a_covered_one_does_not() {
+    let diagnosis = example_diagnosis();
+    assert!(
+        fires_on(
+            &diagnosis,
+            DiagCode::NoPdbCoverage,
+            "workloads/sbf/deployment/storefront-server"
+        ),
+        "two replicas, no covering budget"
+    );
+    assert!(
+        !fires_on(
+            &diagnosis,
+            DiagCode::NoPdbCoverage,
+            "workloads/sbf/statefulset/asterisk"
+        ),
+        "the asterisk budget covers the asterisk template; firing would be a false claim"
+    );
+    assert!(
+        !fires_on(
+            &diagnosis,
+            DiagCode::NoPdbCoverage,
+            "workloads/sbf/deployment/flaky-agent"
+        ),
+        "one replica is DIAG-007's finding, not a coverage gap"
+    );
+}
+
+#[test]
+fn an_autoscaler_pinned_to_one_size_fires_and_a_real_range_does_not() {
+    let diagnosis = example_diagnosis();
+    let pinned = of_code(&diagnosis, DiagCode::HpaFixedRange);
+    assert_eq!(pinned.len(), 1, "exactly the asterisk autoscaler");
+    assert_eq!(pinned[0].subject, "horizontal_pod_autoscalers/sbf/asterisk");
+    assert!(
+        !fires_on(
+            &diagnosis,
+            DiagCode::HpaFixedRange,
+            "horizontal_pod_autoscalers/sbf/storefront-server"
+        ),
+        "1..3 is a range"
+    );
+}
+
+#[test]
+fn an_autoscaler_aimed_at_nothing_is_an_error_and_an_aimed_one_is_not() {
+    let diagnosis = example_diagnosis();
+    let missing = of_code(&diagnosis, DiagCode::HpaTargetMissing);
+    assert_eq!(missing.len(), 1, "exactly the ghost-scaler");
+    assert_eq!(
+        missing[0].subject,
+        "horizontal_pod_autoscalers/sbf/ghost-scaler"
+    );
+    assert_eq!(
+        missing[0].evidence.get("target_name").map(String::as_str),
+        Some("retired-api-server")
+    );
+    assert!(
+        !fires_on(
+            &diagnosis,
+            DiagCode::HpaTargetMissing,
+            "horizontal_pod_autoscalers/sbf/asterisk"
+        ),
+        "the asterisk statefulset exists; firing on its autoscaler would be a false claim"
+    );
+}
+
+#[test]
+fn a_job_short_of_its_completions_with_failures_fires_and_a_completed_one_does_not() {
+    let diagnosis = example_diagnosis();
+    let failed = of_code(&diagnosis, DiagCode::JobFailed);
+    assert_eq!(failed.len(), 1, "exactly the reindex job");
+    assert_eq!(failed[0].subject, "jobs/sbf/reindex-29301120");
+    assert_eq!(
+        failed[0].evidence.get("failed").map(String::as_str),
+        Some("3")
+    );
+    assert!(
+        !fires_on(&diagnosis, DiagCode::JobFailed, "jobs/sbf/cache-warm"),
+        "a job that reached its completions succeeded, whatever the retries cost"
+    );
+}
+
+#[test]
+fn a_suspended_cronjob_is_info_and_a_running_one_is_not() {
+    let diagnosis = example_diagnosis();
+    let suspended = of_code(&diagnosis, DiagCode::CronJobSuspended);
+    assert_eq!(suspended.len(), 1, "exactly nightly-report");
+    assert_eq!(suspended[0].subject, "cron_jobs/sbf/nightly-report");
+    assert!(
+        !fires_on(
+            &diagnosis,
+            DiagCode::CronJobSuspended,
+            "cron_jobs/sbf/reindex"
+        ),
+        "an unsuspended cronjob is not a finding"
+    );
+}
+
+#[test]
+fn the_new_rules_stay_silent_on_a_bundle_that_did_not_scan_their_kinds() {
+    // The compatibility half of every IW2.5 rule: unobserved is not unbound. An IW2-format
+    // bundle (no replicasets, jobs, cronjobs, budgets or autoscalers) must produce none of the
+    // six new findings — a coverage gap must never be manufactured out of a scan gap.
+    let bundle = serde_json::json!({
+        "format": "infra-observation/1",
+        "context": "old-format",
+        "scanned_at": "2026-08-21T08:00:00Z",
+        "scout_version": "0.1.0",
+        "kinds": {
+            "namespaces": { "items": [ { "metadata": { "name": "app", "uid": "ns-1" } } ] },
+            "nodes": { "items": [] },
+            "deployments": { "items": [
+                { "metadata": { "name": "web", "namespace": "app", "uid": "d-1" },
+                  "spec": { "replicas": 3,
+                            "selector": { "matchLabels": { "app": "web" } },
+                            "template": { "metadata": { "labels": { "app": "web" } },
+                                          "spec": { "containers": [
+                                              { "name": "web", "image": "web:1" } ] } } } }
+            ] },
+            "statefulsets": { "items": [] }, "daemonsets": { "items": [] },
+            "pods": { "items": [] }, "services": { "items": [] }, "ingresses": { "items": [] },
+            "configmaps": { "items": [] }, "secrets": { "items": [] },
+            "serviceaccounts": { "items": [] }, "persistentvolumeclaims": { "items": [] }
+        }
+    });
+    let raw: RawBundle = serde_json::from_value(bundle).expect("the bundle parses");
+    let observation = Observation::try_from(raw).expect("an IW2-format bundle still validates");
+    let diagnosis = diagnose(&infra_compiler::compile(&observation));
+    for code in [
+        DiagCode::PdbSelectsNothing,
+        DiagCode::NoPdbCoverage,
+        DiagCode::HpaFixedRange,
+        DiagCode::HpaTargetMissing,
+        DiagCode::JobFailed,
+        DiagCode::CronJobSuspended,
+    ] {
+        assert!(
+            of_code(&diagnosis, code).is_empty(),
+            "{code} fired on a bundle that never scanned its kind — a defect out of a gap"
+        );
+    }
+}
+
+#[test]
 fn the_severity_floor_filters_out_exactly_what_is_below_it() {
     let diagnosis = example_diagnosis();
     let (errors, warnings, infos) = diagnosis.counts();

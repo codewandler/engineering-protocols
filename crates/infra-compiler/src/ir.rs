@@ -38,11 +38,13 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use infra_domain::config::{ConfigMap, Secret};
+use infra_domain::controller::{CronJob, Job, ReplicaSet};
 use infra_domain::network::Service;
 use infra_domain::observation::{
     ContainerStatus, Identity, Namespace, Node, OwnerRef, PersistentVolumeClaim, PodPhase,
     ServiceAccount,
 };
+use infra_domain::policy::{HorizontalPodAutoscaler, PodDisruptionBudget};
 use infra_domain::workload::{Probes, Resources, VolumeMount, WorkloadKind};
 use serde::Serialize;
 
@@ -479,6 +481,29 @@ pub struct InfraModel {
     pub claims: BTreeMap<String, PersistentVolumeClaim>,
     /// Pods, keyed by `namespace/name`.
     pub pods: BTreeMap<String, ResolvedPod>,
+    /// Replicasets, keyed by `namespace/name`; `None` when the bundle predates the kind.
+    ///
+    /// `Option` here and on the four maps below is the compatibility choice carried through
+    /// from [`infra_domain::observation::OPTIONAL_KINDS`]: an unscanned kind stays
+    /// distinguishable from a scanned-and-empty one all the way into the digested model, so a
+    /// consumer can refuse to reason about what nobody looked at. Older bundles therefore
+    /// digest differently from newer ones even when the twelve original kinds agree — the model
+    /// genuinely grew.
+    pub replica_sets: Option<BTreeMap<String, ReplicaSet>>,
+    /// Jobs, keyed by `namespace/name`; `None` when the bundle predates the kind.
+    pub jobs: Option<BTreeMap<String, Job>>,
+    /// Cronjobs, keyed by `namespace/name`; `None` when the bundle predates the kind.
+    pub cron_jobs: Option<BTreeMap<String, CronJob>>,
+    /// Pod disruption budgets, keyed by `namespace/name`; `None` when the bundle predates
+    /// the kind.
+    pub pod_disruption_budgets: Option<BTreeMap<String, PodDisruptionBudget>>,
+    /// Horizontal pod autoscalers, keyed by `namespace/name`; `None` when the bundle predates
+    /// the kind.
+    ///
+    /// A `scaleTargetRef` stays plain data rather than a handle, for [`ResolvedPod::owner`]'s
+    /// reason: an autoscaler aimed at something unobserved is a *diagnosis* about the cluster
+    /// (`INFRA-DIAG-018`), not a resolution failure of the document.
+    pub horizontal_pod_autoscalers: Option<BTreeMap<String, HorizontalPodAutoscaler>>,
     /// Every dangling reference, sorted — the aggregate of every [`Reference::Unresolved`] in
     /// the maps above, plus the checks that have no site to live at (a selector matching
     /// nothing, a namespace nobody observed).

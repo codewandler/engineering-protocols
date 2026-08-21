@@ -9,10 +9,13 @@
 //!
 //! | module | contents |
 //! |---|---|
-//! | [`graph`] | the typed dependency graph: closed edge vocabulary, sites as evidence, derived pod ownership, Mermaid and JSON renderings |
-//! | [`diagnose`](mod@diagnose) | fourteen diagnosis rules, each with a stable `INFRA-DIAG-*` code and a registered severity |
+//! | [`graph`] | the typed dependency graph: closed edge vocabulary, sites as evidence, exact pod ownership through observed controllers, Mermaid and JSON renderings |
+//! | [`diagnose`](mod@diagnose) | twenty diagnosis rules, each with a stable `INFRA-DIAG-*` code and a registered severity |
 //! | [`code`] | the code registry and the severity taxonomy |
-//! | [`properties`](mod@properties) | per-workload replicas, parsed images and resource envelopes |
+//! | [`properties`](mod@properties) | per-workload replicas (declared and observed), parsed images, resource envelopes, budget and autoscaler coverage |
+//! | [`invariants`] | `INFRA-PROP-*` invariant candidates: the uniformity a cluster almost keeps, with its exceptions |
+//! | [`directions`](mod@directions) | the severity-ranked, deduplicated "what next" a diagnosis adds up to |
+//! | [`html`] | the high-level component view as one self-contained HTML page |
 //!
 //! # Diagnosis refuses nothing
 //!
@@ -30,15 +33,24 @@
 
 pub mod code;
 pub mod diagnose;
+pub mod directions;
 pub mod graph;
+pub mod html;
+pub mod invariants;
 pub mod properties;
 
 pub use code::{DiagCode, Severity};
 pub use diagnose::{diagnose, diagnose_with, Diagnosis, Finding, HIGH_RESTART_THRESHOLD};
+pub use directions::{directions, directions_to_json, directions_to_text, Direction};
 pub use graph::{
     EdgeRelation, GraphDocument, GraphEdge, GraphNode, InfraGraph, NodeKind, UnderivedOwner,
     UnderivedReason, GRAPH_FORMAT,
 };
+pub use html::render_html;
+pub use invariants::{
+    candidates, candidates_to_json, candidates_to_text, Exception, InvariantCandidate, PropCode,
+};
 pub use properties::{
-    parse_image, properties, ContainerProperties, ImageReference, WorkloadProperties,
+    parse_image, properties, properties_with, ContainerProperties, ImageReference,
+    WorkloadProperties,
 };

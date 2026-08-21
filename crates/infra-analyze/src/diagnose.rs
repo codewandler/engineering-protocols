@@ -136,6 +136,12 @@ pub fn diagnose_with(ir: &InfraIr, graph: &InfraGraph) -> Diagnosis {
     rule_unbound_claim(ir, &mut findings);
     rule_orphaned_claim(ir, graph, &mut findings);
     rule_duplicate_selectors(graph, &mut findings);
+    rule_pdb_selects_nothing(ir, &mut findings);
+    rule_no_pdb_coverage(ir, &mut findings);
+    rule_hpa_fixed_range(ir, &mut findings);
+    rule_hpa_target_missing(ir, &mut findings);
+    rule_job_failed(ir, &mut findings);
+    rule_cronjob_suspended(ir, &mut findings);
 
     findings.sort();
     Diagnosis { findings }
@@ -475,6 +481,203 @@ fn rule_orphaned_claim(ir: &InfraIr, graph: &InfraGraph, findings: &mut Vec<Find
                 BTreeMap::new(),
             ));
         }
+    }
+}
+
+/// Whether a disruption budget's selector covers a label set, per `policy/v1`: an empty
+/// selector selects everything in the budget's namespace, a non-empty one is an AND over its
+/// `matchLabels`.
+pub(crate) fn pdb_covers(
+    selector: &BTreeMap<String, String>,
+    labels: &BTreeMap<String, String>,
+) -> bool {
+    selector
+        .iter()
+        .all(|(label, value)| labels.get(label) == Some(value))
+}
+
+/// `INFRA-DIAG-015` — a disruption budget whose selector matches no observed pod.
+///
+/// Skips empty selectors (they select the whole namespace — a different statement, not a
+/// dangling one) and cannot fire on a bundle that did not scan budgets.
+fn rule_pdb_selects_nothing(ir: &InfraIr, findings: &mut Vec<Finding>) {
+    let Some(budgets) = &ir.model.pod_disruption_budgets else {
+        return;
+    };
+    for (key, budget) in budgets {
+        if budget.selector.is_empty() {
+            continue;
+        }
+        let guards_something = ir.model.pods.values().any(|pod| {
+            pod.identity.namespace == budget.identity.namespace
+                && pdb_covers(&budget.selector, &pod.labels)
+        });
+        if guards_something {
+            continue;
+        }
+        let rendered = budget
+            .selector
+            .iter()
+            .map(|(label, value)| format!("{label}={value}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        findings.push(Finding::new(
+            DiagCode::PdbSelectsNothing,
+            format!("pod_disruption_budgets/{key}"),
+            Some("selector".to_owned()),
+            format!("the selector `{rendered}` matches no observed pod; the budget guards nothing"),
+            BTreeMap::from([("selector".to_owned(), rendered)]),
+        ));
+    }
+}
+
+/// `INFRA-DIAG-016` — a workload wanting two or more replicas that no budget covers.
+///
+/// Coverage is judged against the workload's *template* labels, so it holds even while the
+/// workload is scaled down; the rule cannot fire on a bundle that did not scan budgets,
+/// because unobserved is not uncovered.
+fn rule_no_pdb_coverage(ir: &InfraIr, findings: &mut Vec<Finding>) {
+    let Some(budgets) = &ir.model.pod_disruption_budgets else {
+        return;
+    };
+    for (key, workload) in &ir.model.workloads {
+        let Some(replicas) = workload.replicas else {
+            continue;
+        };
+        if replicas < 2 {
+            continue;
+        }
+        let covered = budgets.values().any(|budget| {
+            budget.identity.namespace == workload.identity.namespace
+                && pdb_covers(&budget.selector, &workload.template_labels)
+        });
+        if covered {
+            continue;
+        }
+        findings.push(Finding::new(
+            DiagCode::NoPdbCoverage,
+            format!("workloads/{key}"),
+            None,
+            format!(
+                "{replicas} replicas and no disruption budget; a node drain may take every \
+                 replica at once"
+            ),
+            BTreeMap::from([("replicas".to_owned(), replicas.to_string())]),
+        ));
+    }
+}
+
+/// `INFRA-DIAG-017` — an autoscaler pinned to one size. An absent `minReplicas` is the API's
+/// default of one, resolved here because the comparison needs a number.
+fn rule_hpa_fixed_range(ir: &InfraIr, findings: &mut Vec<Finding>) {
+    let Some(autoscalers) = &ir.model.horizontal_pod_autoscalers else {
+        return;
+    };
+    for (key, autoscaler) in autoscalers {
+        let min = autoscaler.min_replicas.unwrap_or(1);
+        if min != autoscaler.max_replicas {
+            continue;
+        }
+        findings.push(Finding::new(
+            DiagCode::HpaFixedRange,
+            format!("horizontal_pod_autoscalers/{key}"),
+            None,
+            format!("min and max replicas are both {min}; the autoscaler can never scale"),
+            BTreeMap::from([
+                ("min_replicas".to_owned(), min.to_string()),
+                (
+                    "max_replicas".to_owned(),
+                    autoscaler.max_replicas.to_string(),
+                ),
+            ]),
+        ));
+    }
+}
+
+/// `INFRA-DIAG-018` — an autoscaler whose target names a workload that was not observed.
+///
+/// Judged only for target kinds the model holds (`Deployment`, `StatefulSet`); a custom kind —
+/// an Argo `Rollout`, say — is outside the observed subset, and claiming it missing would
+/// manufacture a defect out of a gap.
+fn rule_hpa_target_missing(ir: &InfraIr, findings: &mut Vec<Finding>) {
+    let Some(autoscalers) = &ir.model.horizontal_pod_autoscalers else {
+        return;
+    };
+    for (key, autoscaler) in autoscalers {
+        let kind = match autoscaler.target.kind.as_str() {
+            "Deployment" => "deployment",
+            "StatefulSet" => "statefulset",
+            _ => continue,
+        };
+        let namespace = autoscaler.identity.namespace.as_deref().unwrap_or_default();
+        let workload_key = format!("{namespace}/{kind}/{}", autoscaler.target.name);
+        if ir.model.workloads.contains_key(&workload_key) {
+            continue;
+        }
+        findings.push(Finding::new(
+            DiagCode::HpaTargetMissing,
+            format!("horizontal_pod_autoscalers/{key}"),
+            Some("scaleTargetRef".to_owned()),
+            format!(
+                "the target {kind} `{}` was not observed; the autoscaler manages nothing",
+                autoscaler.target.name
+            ),
+            BTreeMap::from([
+                ("target_kind".to_owned(), autoscaler.target.kind.clone()),
+                ("target_name".to_owned(), autoscaler.target.name.clone()),
+            ]),
+        ));
+    }
+}
+
+/// `INFRA-DIAG-019` — a job with observed failed pods that has not reached its completions.
+///
+/// An absent `completions` is the API's default of one. A job that failed on the way and then
+/// completed does not fire: reaching the target is the job succeeding, whatever the retries
+/// cost.
+fn rule_job_failed(ir: &InfraIr, findings: &mut Vec<Finding>) {
+    let Some(jobs) = &ir.model.jobs else { return };
+    for (key, job) in jobs {
+        let target = job.completions.unwrap_or(1);
+        if job.failed == 0 || job.succeeded >= target {
+            continue;
+        }
+        findings.push(Finding::new(
+            DiagCode::JobFailed,
+            format!("jobs/{key}"),
+            None,
+            format!(
+                "{} failed pod(s) and {} of {target} completions reached",
+                job.failed, job.succeeded
+            ),
+            BTreeMap::from([
+                ("failed".to_owned(), job.failed.to_string()),
+                ("succeeded".to_owned(), job.succeeded.to_string()),
+                ("completions".to_owned(), target.to_string()),
+            ]),
+        ));
+    }
+}
+
+/// `INFRA-DIAG-020` — a cronjob told not to run.
+fn rule_cronjob_suspended(ir: &InfraIr, findings: &mut Vec<Finding>) {
+    let Some(cron_jobs) = &ir.model.cron_jobs else {
+        return;
+    };
+    for (key, cron_job) in cron_jobs {
+        if !cron_job.suspend {
+            continue;
+        }
+        findings.push(Finding::new(
+            DiagCode::CronJobSuspended,
+            format!("cron_jobs/{key}"),
+            None,
+            format!(
+                "suspended; the schedule `{}` starts nothing until someone unsets the flag",
+                cron_job.schedule
+            ),
+            BTreeMap::from([("schedule".to_owned(), cron_job.schedule.clone())]),
+        ));
     }
 }
 

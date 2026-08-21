@@ -149,6 +149,32 @@ diag_codes! {
     /// Two or more services select exactly the same set of workloads.
     DuplicateSelectors => "INFRA-DIAG-014", Info,
         "two services target the same workload set; often deliberate, always worth knowing";
+
+    /// A pod disruption budget whose selector matches no observed pod.
+    PdbSelectsNothing => "INFRA-DIAG-015", Warning,
+        "a disruption budget guards no pod; either it is a leftover or its selector drifted";
+
+    /// A workload wanting two or more replicas that no disruption budget covers.
+    ///
+    /// Cannot fire on a bundle that did not scan budgets: unobserved is not uncovered.
+    NoPdbCoverage => "INFRA-DIAG-016", Info,
+        "a multi-replica workload has no disruption budget; a node drain may take every replica at once";
+
+    /// An autoscaler whose minimum equals its maximum.
+    HpaFixedRange => "INFRA-DIAG-017", Info,
+        "an autoscaler pinned to one size scales nothing; the range is the point of having one";
+
+    /// An autoscaler whose `scaleTargetRef` names a workload that was not observed.
+    HpaTargetMissing => "INFRA-DIAG-018", Error,
+        "an autoscaler targets a workload that does not exist; it manages nothing";
+
+    /// A job that has observed failed pods and has not reached its completion target.
+    JobFailed => "INFRA-DIAG-019", Warning,
+        "a job has failed pods and is short of its completions; whatever it was for did not happen";
+
+    /// A cronjob whose `suspend` flag is set.
+    CronJobSuspended => "INFRA-DIAG-020", Info,
+        "a suspended cronjob starts nothing; deliberate pauses are worth remembering";
 }
 
 impl fmt::Display for DiagCode {
@@ -169,7 +195,11 @@ mod tests {
 
     #[test]
     fn every_code_renders_in_the_diag_namespace_and_the_generated_list_holds_them_all() {
-        assert_eq!(DiagCode::ALL.len(), 14, "the catalogue is fourteen codes");
+        assert_eq!(
+            DiagCode::ALL.len(),
+            20,
+            "the catalogue is twenty codes: IW2's fourteen and IW2.5's six"
+        );
         for code in DiagCode::ALL {
             assert!(
                 code.as_str().starts_with("INFRA-DIAG-"),

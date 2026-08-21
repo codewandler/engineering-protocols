@@ -13,8 +13,15 @@
 //! | [`raw`] | the permissive half: what a bundle deserializes into, nothing trusted |
 //! | [`observation`] | the validated observation and the `TryFrom` that is the only way in |
 //! | [`workload`] | deployments, statefulsets, daemonsets: pod-template essentials |
+//! | [`controller`] | replicasets, jobs, cronjobs: the ownership rungs between workloads and pods |
+//! | [`policy`] | pod disruption budgets and autoscalers: claims about workloads |
 //! | [`network`] | services and ingresses |
 //! | [`config`] | configmaps and secrets: keys and digests, never values |
+//!
+//! The [`controller`] and [`policy`] kinds are **optional in a bundle**: the scanner grew them
+//! after `infra-observation/1` shipped, so a bundle without their keys still validates and
+//! carries their absence as `None` — an older scan stays readable, and "not scanned" never
+//! silently becomes "none exist" ([`observation::OPTIONAL_KINDS`]).
 //!
 //! # Two stages, same discipline as everywhere else
 //!
@@ -53,18 +60,23 @@
 
 pub mod code;
 pub mod config;
+pub mod controller;
 pub mod network;
 pub mod observation;
+pub mod policy;
 pub mod raw;
 pub mod workload;
 
 pub use code::{InfraCode, ValidationError, ValidationErrors};
 pub use config::{ConfigMap, Secret, ValueDigest};
+pub use controller::{CronJob, Job, ReplicaSet};
 pub use network::{Ingress, IngressBackend, IngressPath, IngressRule, Service, ServicePort};
 pub use observation::{
     ClaimPhase, ContainerStatus, Identity, Namespace, Node, NodeInfo, Observation, OwnerRef,
     PersistentVolumeClaim, Pod, PodPhase, ServiceAccount, KINDS, OBSERVATION_FORMAT,
+    OPTIONAL_KINDS,
 };
+pub use policy::{HorizontalPodAutoscaler, PodDisruptionBudget, ScaleTarget};
 pub use raw::RawBundle;
 pub use workload::{
     Container, EnvFrom, EnvFromSource, EnvSource, EnvVar, PodTemplate, Probe, ProbeHandler, Probes,

@@ -29,11 +29,13 @@ use std::collections::BTreeMap;
 
 use infra_domain::code::{InfraCode, ValidationErrors};
 use infra_domain::config::{ConfigMap, Secret, ValueDigest};
+use infra_domain::controller::{CronJob, Job, ReplicaSet};
 use infra_domain::network::{Service, ServicePort};
 use infra_domain::observation::{
     ClaimPhase, ContainerStatus, Identity, Namespace, Node, NodeInfo, OwnerRef,
     PersistentVolumeClaim, PodPhase, ServiceAccount,
 };
+use infra_domain::policy::{HorizontalPodAutoscaler, PodDisruptionBudget, ScaleTarget};
 use infra_domain::workload::{Probe, ProbeHandler, Probes, Resources, VolumeMount, WorkloadKind};
 use serde::Deserialize;
 
@@ -161,7 +163,68 @@ struct ModelMirror {
     service_accounts: BTreeMap<String, ServiceAccountMirror>,
     claims: BTreeMap<String, ClaimMirror>,
     pods: BTreeMap<String, PodMirror>,
+    replica_sets: Option<BTreeMap<String, ReplicaSetMirror>>,
+    jobs: Option<BTreeMap<String, JobMirror>>,
+    cron_jobs: Option<BTreeMap<String, CronJobMirror>>,
+    pod_disruption_budgets: Option<BTreeMap<String, PodDisruptionBudgetMirror>>,
+    horizontal_pod_autoscalers: Option<BTreeMap<String, HorizontalPodAutoscalerMirror>>,
     unresolved: Vec<UnresolvedMirror>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReplicaSetMirror {
+    identity: IdentityMirror,
+    labels: BTreeMap<String, String>,
+    owner: Option<OwnerRefMirror>,
+    replicas: Option<u32>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct JobMirror {
+    identity: IdentityMirror,
+    labels: BTreeMap<String, String>,
+    owner: Option<OwnerRefMirror>,
+    completions: Option<u32>,
+    succeeded: u32,
+    failed: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CronJobMirror {
+    identity: IdentityMirror,
+    labels: BTreeMap<String, String>,
+    schedule: String,
+    suspend: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PodDisruptionBudgetMirror {
+    identity: IdentityMirror,
+    labels: BTreeMap<String, String>,
+    selector: BTreeMap<String, String>,
+    min_available: Option<String>,
+    max_unavailable: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HorizontalPodAutoscalerMirror {
+    identity: IdentityMirror,
+    labels: BTreeMap<String, String>,
+    target: ScaleTargetMirror,
+    min_replicas: Option<u32>,
+    max_replicas: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScaleTargetMirror {
+    kind: String,
+    name: String,
 }
 
 #[derive(Deserialize)]
@@ -600,6 +663,14 @@ impl PodPhaseMirror {
 struct OwnerRefMirror {
     kind: String,
     name: String,
+}
+
+/// An optional owner reference, rebuilt — shared by the pod, replicaset and job mirrors.
+fn owner(mirror: Option<OwnerRefMirror>) -> Option<OwnerRef> {
+    mirror.map(|reference| OwnerRef {
+        kind: reference.kind,
+        name: reference.name,
+    })
 }
 
 #[derive(Deserialize)]
@@ -1069,6 +1140,96 @@ impl ModelMirror {
             })
             .collect();
 
+        let replica_sets: Option<BTreeMap<String, ReplicaSet>> = self.replica_sets.map(|mirrors| {
+            mirrors
+                .into_iter()
+                .map(|(key, mirror)| {
+                    (
+                        key,
+                        ReplicaSet {
+                            identity: mirror.identity.into_identity(),
+                            labels: mirror.labels,
+                            owner: owner(mirror.owner),
+                            replicas: mirror.replicas,
+                        },
+                    )
+                })
+                .collect()
+        });
+        let jobs: Option<BTreeMap<String, Job>> = self.jobs.map(|mirrors| {
+            mirrors
+                .into_iter()
+                .map(|(key, mirror)| {
+                    (
+                        key,
+                        Job {
+                            identity: mirror.identity.into_identity(),
+                            labels: mirror.labels,
+                            owner: owner(mirror.owner),
+                            completions: mirror.completions,
+                            succeeded: mirror.succeeded,
+                            failed: mirror.failed,
+                        },
+                    )
+                })
+                .collect()
+        });
+        let cron_jobs: Option<BTreeMap<String, CronJob>> = self.cron_jobs.map(|mirrors| {
+            mirrors
+                .into_iter()
+                .map(|(key, mirror)| {
+                    (
+                        key,
+                        CronJob {
+                            identity: mirror.identity.into_identity(),
+                            labels: mirror.labels,
+                            schedule: mirror.schedule,
+                            suspend: mirror.suspend,
+                        },
+                    )
+                })
+                .collect()
+        });
+        let pod_disruption_budgets: Option<BTreeMap<String, PodDisruptionBudget>> =
+            self.pod_disruption_budgets.map(|mirrors| {
+                mirrors
+                    .into_iter()
+                    .map(|(key, mirror)| {
+                        (
+                            key,
+                            PodDisruptionBudget {
+                                identity: mirror.identity.into_identity(),
+                                labels: mirror.labels,
+                                selector: mirror.selector,
+                                min_available: mirror.min_available,
+                                max_unavailable: mirror.max_unavailable,
+                            },
+                        )
+                    })
+                    .collect()
+            });
+        let horizontal_pod_autoscalers: Option<BTreeMap<String, HorizontalPodAutoscaler>> =
+            self.horizontal_pod_autoscalers.map(|mirrors| {
+                mirrors
+                    .into_iter()
+                    .map(|(key, mirror)| {
+                        (
+                            key,
+                            HorizontalPodAutoscaler {
+                                identity: mirror.identity.into_identity(),
+                                labels: mirror.labels,
+                                target: ScaleTarget {
+                                    kind: mirror.target.kind,
+                                    name: mirror.target.name,
+                                },
+                                min_replicas: mirror.min_replicas,
+                                max_replicas: mirror.max_replicas,
+                            },
+                        )
+                    })
+                    .collect()
+            });
+
         let unresolved = self
             .unresolved
             .into_iter()
@@ -1097,6 +1258,11 @@ impl ModelMirror {
                 service_accounts,
                 claims,
                 pods,
+                replica_sets,
+                jobs,
+                cron_jobs,
+                pod_disruption_budgets,
+                horizontal_pod_autoscalers,
                 unresolved,
             },
         }

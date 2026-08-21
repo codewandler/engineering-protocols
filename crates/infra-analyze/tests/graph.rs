@@ -36,46 +36,228 @@ fn every_edge_relation_is_minted_from_the_committed_observation() {
 }
 
 #[test]
-fn a_deployment_pod_is_owned_through_the_template_hash_without_any_replicaset_observed() {
+fn a_deployment_pod_is_owned_exactly_through_its_observed_replicaset() {
     let graph = InfraGraph::of(&example_ir());
     assert_eq!(
         graph.owner_of("kube-system/coredns-ccb96694c-jkz7w"),
         Some("kube-system/deployment/coredns"),
-        "the replicaset name minus the pod-template-hash is the deployment"
+        "pod -> replicaset -> deployment, every rung observed"
     );
     assert_eq!(
         graph.owner_of("sbf/asterisk-0"),
         Some("sbf/statefulset/asterisk"),
         "a statefulset pod names its workload directly"
     );
+
+    // The chain is drawn as it is declared: the pod's edge lands on the replicaset, the
+    // replicaset's on the deployment, and both sites name the mechanism — `ownerReferences`,
+    // never the hash heuristic, because on this bundle the heuristic is not needed.
+    let pod_edge = graph
+        .edges()
+        .find(|edge| {
+            edge.relation == EdgeRelation::OwnedBy
+                && edge.from.key == "kube-system/coredns-ccb96694c-jkz7w"
+        })
+        .expect("the coredns pod has an ownership edge");
+    assert_eq!(pod_edge.to.kind, NodeKind::ReplicaSet);
+    assert_eq!(pod_edge.to.key, "kube-system/coredns-ccb96694c");
+    assert_eq!(pod_edge.sites, vec!["ownerReferences".to_owned()]);
+
+    let replicaset_edge = graph
+        .edges()
+        .find(|edge| {
+            edge.relation == EdgeRelation::OwnedBy
+                && edge.from.key == "kube-system/coredns-ccb96694c"
+        })
+        .expect("the coredns replicaset has an ownership edge");
+    assert_eq!(replicaset_edge.to.key, "kube-system/deployment/coredns");
+    assert_eq!(replicaset_edge.sites, vec!["ownerReferences".to_owned()]);
 }
 
 #[test]
-fn a_job_pod_and_a_bare_pod_are_typed_facts_not_guesses() {
+fn a_job_pod_chains_to_its_job_and_cronjob_and_a_bare_pod_stays_a_typed_fact() {
     let graph = InfraGraph::of(&example_ir());
     let underived = graph.underived_owners();
 
-    let job_pod = underived
-        .iter()
-        .find(|fact| fact.pod == "sbf/cache-warm-jc7dd")
-        .expect("the Job's pod must be an underived-owner fact");
-    assert_eq!(
-        job_pod.reason,
-        UnderivedReason::KindOutsideModel {
-            kind: "Job".to_owned()
-        },
-        "the reason names the kind the model does not hold"
+    // The Job's pod, an underived fact in IW2, now derives: the job kind is observed.
+    assert!(
+        !underived
+            .iter()
+            .any(|fact| fact.pod == "sbf/cache-warm-jc7dd"),
+        "a pod whose job was observed is no longer underived: {underived:?}"
     );
+    let job_edge = graph
+        .edges()
+        .find(|edge| {
+            edge.relation == EdgeRelation::OwnedBy && edge.from.key == "sbf/cache-warm-jc7dd"
+        })
+        .expect("the job pod's ownership edge exists");
+    assert_eq!(job_edge.to.kind, NodeKind::Job);
+    assert_eq!(job_edge.to.key, "sbf/cache-warm");
+    assert_eq!(
+        graph.owner_of("sbf/cache-warm-jc7dd"),
+        None,
+        "a job is not a workload: DIAG-010's readiness expectation must not reach job pods"
+    );
+
+    // And the cronjob-spawned job chains one rung further.
+    let cron_edge = graph
+        .edges()
+        .find(|edge| {
+            edge.relation == EdgeRelation::OwnedBy && edge.from.key == "sbf/reindex-29301120"
+        })
+        .expect("the cronjob's job has an ownership edge");
+    assert_eq!(cron_edge.to.kind, NodeKind::CronJob);
+    assert_eq!(cron_edge.to.key, "sbf/reindex");
 
     let bare_pod = underived
         .iter()
         .find(|fact| fact.pod == "sbf/debug-shell")
         .expect("the bare pod must be an underived-owner fact");
     assert_eq!(bare_pod.reason, UnderivedReason::NoOwnerDeclared);
-
-    // And neither got an ownership edge — a fact is instead of a guess, not beside one.
-    assert_eq!(graph.owner_of("sbf/cache-warm-jc7dd"), None);
     assert_eq!(graph.owner_of("sbf/debug-shell"), None);
+}
+
+#[test]
+fn on_a_bundle_without_replicasets_the_hash_fallback_derives_and_names_itself() {
+    // The IW2 bundle format: no replicaset kind. The heuristic still closes the chain, and the
+    // edge's site says `pod-template-hash` so nobody mistakes it for the declared mechanism.
+    let bundle = serde_json::json!({
+        "format": "infra-observation/1",
+        "context": "fallback",
+        "scanned_at": "2026-08-21T08:00:00Z",
+        "scout_version": "0.1.0",
+        "kinds": {
+            "namespaces": { "items": [ { "metadata": { "name": "app", "uid": "ns-1" } } ] },
+            "nodes": { "items": [] },
+            "deployments": { "items": [
+                { "metadata": { "name": "web", "namespace": "app", "uid": "d-1" },
+                  "spec": { "replicas": 1,
+                            "selector": { "matchLabels": { "app": "web" } },
+                            "template": { "metadata": { "labels": { "app": "web" } },
+                                          "spec": { "containers": [
+                                              { "name": "web", "image": "web:1" } ] } } } }
+            ] },
+            "statefulsets": { "items": [] }, "daemonsets": { "items": [] },
+            "services": { "items": [] }, "ingresses": { "items": [] },
+            "configmaps": { "items": [] }, "secrets": { "items": [] },
+            "serviceaccounts": { "items": [] }, "persistentvolumeclaims": { "items": [] },
+            "pods": { "items": [
+                { "metadata": { "name": "web-5d9c8b7a6f-aaaaa", "namespace": "app",
+                                "uid": "p-1",
+                                "labels": { "app": "web", "pod-template-hash": "5d9c8b7a6f" },
+                                "ownerReferences": [ { "kind": "ReplicaSet",
+                                                       "name": "web-5d9c8b7a6f",
+                                                       "controller": true } ] },
+                  "status": { "phase": "Running" } }
+            ] }
+        }
+    });
+    let raw: RawBundle = serde_json::from_value(bundle).expect("the bundle parses");
+    let observation = Observation::try_from(raw).expect("the bundle is valid");
+    let graph = InfraGraph::of(&infra_compiler::compile(&observation));
+
+    assert_eq!(
+        graph.owner_of("app/web-5d9c8b7a6f-aaaaa"),
+        Some("app/deployment/web"),
+        "the fallback still derives on an older bundle"
+    );
+    let edge = graph
+        .edges()
+        .find(|edge| edge.relation == EdgeRelation::OwnedBy)
+        .expect("the fallback edge exists");
+    assert_eq!(
+        edge.sites,
+        vec!["pod-template-hash".to_owned()],
+        "the heuristic names itself on the edge"
+    );
+    assert!(
+        graph.underived_owners().is_empty(),
+        "nothing stayed underived"
+    );
+}
+
+#[test]
+fn a_pod_whose_scanned_replicaset_is_absent_or_deploymentless_is_handled_exactly() {
+    // Replicasets ARE scanned here, so the heuristic must not run: a pod naming a replicaset
+    // outside the scanned set is a typed fact naming the replicaset, and a pod whose observed
+    // replicaset has no deployment derives to the replicaset with no workload and no fact.
+    let bundle = serde_json::json!({
+        "format": "infra-observation/1",
+        "context": "exact",
+        "scanned_at": "2026-08-21T08:00:00Z",
+        "scout_version": "0.1.0",
+        "kinds": {
+            "namespaces": { "items": [ { "metadata": { "name": "app", "uid": "ns-1" } } ] },
+            "nodes": { "items": [] }, "deployments": { "items": [] },
+            "statefulsets": { "items": [] }, "daemonsets": { "items": [] },
+            "services": { "items": [] }, "ingresses": { "items": [] },
+            "configmaps": { "items": [] }, "secrets": { "items": [] },
+            "serviceaccounts": { "items": [] }, "persistentvolumeclaims": { "items": [] },
+            "replicasets": { "items": [
+                { "metadata": { "name": "bare-rs", "namespace": "app", "uid": "rs-1" },
+                  "spec": { "replicas": 1 } },
+                { "metadata": { "name": "orphan-rs", "namespace": "app", "uid": "rs-2",
+                                "ownerReferences": [ { "kind": "Deployment", "name": "gone",
+                                                       "controller": true } ] },
+                  "spec": { "replicas": 1 } }
+            ] },
+            "pods": { "items": [
+                { "metadata": { "name": "ghost-pod", "namespace": "app", "uid": "p-1",
+                                "labels": { "pod-template-hash": "5d9c8b7a6f" },
+                                "ownerReferences": [ { "kind": "ReplicaSet",
+                                                       "name": "ghost-5d9c8b7a6f",
+                                                       "controller": true } ] },
+                  "status": { "phase": "Running" } },
+                { "metadata": { "name": "bare-rs-pod", "namespace": "app", "uid": "p-2",
+                                "ownerReferences": [ { "kind": "ReplicaSet", "name": "bare-rs",
+                                                       "controller": true } ] },
+                  "status": { "phase": "Running" } },
+                { "metadata": { "name": "orphan-rs-pod", "namespace": "app", "uid": "p-3",
+                                "ownerReferences": [ { "kind": "ReplicaSet", "name": "orphan-rs",
+                                                       "controller": true } ] },
+                  "status": { "phase": "Running" } }
+            ] }
+        }
+    });
+    let raw: RawBundle = serde_json::from_value(bundle).expect("the bundle parses");
+    let observation = Observation::try_from(raw).expect("the bundle is valid");
+    let graph = InfraGraph::of(&infra_compiler::compile(&observation));
+
+    let reasons: Vec<(&str, &UnderivedReason)> = graph
+        .underived_owners()
+        .iter()
+        .map(|fact| (fact.pod.as_str(), &fact.reason))
+        .collect();
+    assert!(
+        reasons.contains(&(
+            "app/ghost-pod",
+            &UnderivedReason::NoMatchingWorkload {
+                kind: "replicaset".to_owned(),
+                name: "ghost-5d9c8b7a6f".to_owned()
+            }
+        )),
+        "with replicasets scanned, an absent one is the fact — not a hash derivation: {reasons:?}"
+    );
+    assert!(
+        reasons.contains(&(
+            "app/orphan-rs-pod",
+            &UnderivedReason::NoMatchingWorkload {
+                kind: "deployment".to_owned(),
+                name: "gone".to_owned()
+            }
+        )),
+        "an observed replicaset whose deployment is gone names the deployment: {reasons:?}"
+    );
+    assert!(
+        !reasons.iter().any(|(pod, _)| *pod == "app/bare-rs-pod"),
+        "a bare replicaset ends the chain legitimately; nothing is missing: {reasons:?}"
+    );
+    assert_eq!(
+        graph.owner_of("app/bare-rs-pod"),
+        None,
+        "a bare replicaset is not a workload"
+    );
 }
 
 #[test]

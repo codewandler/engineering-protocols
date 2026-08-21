@@ -13,16 +13,18 @@
 //! [`diagnose`](crate::diagnose::diagnose) (`INFRA-DIAG-002`/`003`); drawing a node for an
 //! absent object would put something nobody observed on the map of what was observed.
 //!
-//! # Pod ownership is derived, not guessed
+//! # Pod ownership is exact where the chain was observed, derived where it was not
 //!
-//! A deployment's pods are owned through a `ReplicaSet`, a kind the observation surface does
-//! not include. The chain is still derivable without it: a controller-managed pod carries the
-//! `pod-template-hash` label, and its owning replicaset's name is the deployment's name with
-//! exactly that hash appended — so stripping `-<hash>` off the owner's name and finding that
-//! deployment in the pod's namespace closes the chain on evidence the IR already holds.
+//! With replicasets, jobs and cronjobs in the observation (IW2.5), the chain the API actually
+//! declares closes on owner references alone: pod → replicaset → deployment and
+//! pod → job → cronjob, each rung an observed object and each edge's site the
+//! `ownerReferences` entry that states it. The `pod-template-hash` derivation IW2 shipped —
+//! strip `-<hash>` off the replicaset's name when the pod's label confirms it — remains as the
+//! **fallback for bundles that predate the replicaset kind**, and an edge it produces names
+//! `pod-template-hash` as its site, so a reader can always tell mechanism from heuristic.
 //! Statefulset and daemonset pods name their workload directly. Everything else — a bare pod,
-//! a Job's pod, a replicaset whose deployment is gone — is an [`UnderivedOwner`]: a typed fact
-//! with the reason derivation stopped, never a best guess.
+//! an owner naming something unobserved, a hash that does not confirm — is an
+//! [`UnderivedOwner`]: a typed fact with the reason derivation stopped, never a best guess.
 //!
 //! # Determinism
 //!
@@ -65,6 +67,19 @@ pub enum NodeKind {
     Pod,
     /// A cluster node.
     Node,
+    /// A replicaset — the observed rung between a deployment and its pods.
+    ReplicaSet,
+    /// A job.
+    Job,
+    /// A cronjob.
+    CronJob,
+    /// A pod disruption budget. A node with no edges in this wave: what it guards is a
+    /// property (`WorkloadProperties::pod_disruption_budgets`) and a finding
+    /// (`INFRA-DIAG-015`/`016`), not yet an edge vocabulary entry.
+    PodDisruptionBudget,
+    /// A horizontal pod autoscaler. Like the budget, edgeless in this wave: its target is
+    /// carried as data and judged by `INFRA-DIAG-017`/`018`.
+    HorizontalPodAutoscaler,
 }
 
 impl NodeKind {
@@ -81,6 +96,11 @@ impl NodeKind {
             Self::Claim => "pvc",
             Self::Pod => "pod",
             Self::Node => "node",
+            Self::ReplicaSet => "rs",
+            Self::Job => "job",
+            Self::CronJob => "cj",
+            Self::PodDisruptionBudget => "pdb",
+            Self::HorizontalPodAutoscaler => "hpa",
         }
     }
 
@@ -96,6 +116,11 @@ impl NodeKind {
             Self::Claim => "claim",
             Self::Pod => "pod",
             Self::Node => "node",
+            Self::ReplicaSet => "replicaset",
+            Self::Job => "job",
+            Self::CronJob => "cronjob",
+            Self::PodDisruptionBudget => "pod disruption budget",
+            Self::HorizontalPodAutoscaler => "autoscaler",
         }
     }
 
@@ -175,8 +200,10 @@ pub enum EdgeRelation {
     Claims,
     /// A workload's pods run as a service account.
     RunsAs,
-    /// A pod is managed by a workload — declared for statefulsets and daemonsets, derived
-    /// through the template hash for deployments.
+    /// An object is managed by its controller: a pod by its replicaset, job, statefulset or
+    /// daemonset; a replicaset by its deployment; a job by its cronjob. The edge's site says
+    /// which mechanism stated it — `ownerReferences` for the declared chain,
+    /// `pod-template-hash` for the fallback derivation on bundles without replicasets.
     OwnedBy,
     /// A pod was scheduled onto a cluster node.
     ScheduledOn,
@@ -251,20 +278,23 @@ impl fmt::Display for GraphEdge {
 pub enum UnderivedReason {
     /// The pod declares no controller at all — a bare pod.
     NoOwnerDeclared,
-    /// The controller's kind is outside the observed subset — a `Job`, a `Node`.
+    /// The controller's kind is outside what this bundle observed — a `Node`'s static pod, or
+    /// a `Job`'s pod in a bundle that predates the job kind.
     KindOutsideModel {
         /// The declared kind.
         kind: String,
     },
-    /// The owner is a replicaset but the pod carries no `pod-template-hash` label, or the
-    /// owner's name does not end in that hash, so no deployment name can be recovered.
+    /// Fallback path only (no replicasets in the bundle): the owner is a replicaset but the
+    /// pod carries no `pod-template-hash` label, or the owner's name does not end in that
+    /// hash, so no deployment name can be recovered.
     TemplateHashUnderivable {
         /// The replicaset's name as declared.
         name: String,
     },
-    /// Derivation produced a workload name, but no such workload was observed.
+    /// The chain named something that was not observed: the pod's replicaset or job is absent
+    /// from its scanned kind, or the controller's own owner names a workload nobody observed.
     NoMatchingWorkload {
-        /// The workload kind derivation arrived at.
+        /// The kind derivation arrived at — `replicaset`, `job`, `deployment`, …
         kind: String,
         /// The name it arrived at.
         name: String,
@@ -337,6 +367,7 @@ impl InfraGraph {
         graph.walk_workloads(ir);
         graph.walk_services(ir);
         graph.walk_ingresses(ir);
+        graph.walk_controllers(ir);
         graph.walk_pods(ir);
         graph.underived.sort();
         graph
@@ -602,6 +633,78 @@ impl InfraGraph {
         }
     }
 
+    /// Nodes for the observed controllers and policy objects, and the upper ownership rungs:
+    /// replicaset → deployment and job → cronjob, each stated by the owned object's own
+    /// `ownerReferences` — drawn for every observed controller, so a scaled-to-zero deployment
+    /// keeps its replicaset's edge even with no pod alive to walk it from.
+    fn walk_controllers(&mut self, ir: &InfraIr) {
+        if let Some(replica_sets) = &ir.model.replica_sets {
+            for (key, replica_set) in replica_sets {
+                self.node(NodeKind::ReplicaSet, key);
+                let Some(owner) = &replica_set.owner else {
+                    continue;
+                };
+                if owner.kind != "Deployment" {
+                    continue;
+                }
+                let namespace = replica_set
+                    .identity
+                    .namespace
+                    .as_deref()
+                    .unwrap_or_default();
+                let workload_key = format!("{namespace}/deployment/{}", owner.name);
+                if ir.model.workloads.contains_key(&workload_key) {
+                    self.edge(
+                        GraphNode::new(NodeKind::ReplicaSet, key),
+                        EdgeRelation::OwnedBy,
+                        GraphNode::new(NodeKind::Workload, &workload_key),
+                        "ownerReferences".to_owned(),
+                    );
+                }
+            }
+        }
+        if let Some(jobs) = &ir.model.jobs {
+            for (key, job) in jobs {
+                self.node(NodeKind::Job, key);
+                let Some(owner) = &job.owner else { continue };
+                if owner.kind != "CronJob" {
+                    continue;
+                }
+                let namespace = job.identity.namespace.as_deref().unwrap_or_default();
+                let cron_key = format!("{namespace}/{}", owner.name);
+                if ir
+                    .model
+                    .cron_jobs
+                    .as_ref()
+                    .is_some_and(|cron_jobs| cron_jobs.contains_key(&cron_key))
+                {
+                    self.edge(
+                        GraphNode::new(NodeKind::Job, key),
+                        EdgeRelation::OwnedBy,
+                        GraphNode::new(NodeKind::CronJob, &cron_key),
+                        "ownerReferences".to_owned(),
+                    );
+                }
+            }
+        }
+        if let Some(cron_jobs) = &ir.model.cron_jobs {
+            for key in cron_jobs.keys() {
+                self.node(NodeKind::CronJob, key);
+            }
+        }
+        if let Some(budgets) = &ir.model.pod_disruption_budgets {
+            for key in budgets.keys() {
+                self.node(NodeKind::PodDisruptionBudget, key);
+            }
+        }
+        if let Some(autoscalers) = &ir.model.horizontal_pod_autoscalers {
+            for key in autoscalers.keys() {
+                self.node(NodeKind::HorizontalPodAutoscaler, key);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn walk_pods(&mut self, ir: &InfraIr) {
         for (key, pod) in &ir.model.pods {
             let subject = GraphNode::new(NodeKind::Pod, key);
@@ -617,6 +720,15 @@ impl InfraGraph {
             }
 
             let namespace = pod.identity.namespace.as_deref().unwrap_or_default();
+            let refuse =
+                |graph: &mut Self, owner: &infra_domain::OwnerRef, reason: UnderivedReason| {
+                    graph.underived.push(UnderivedOwner {
+                        pod: key.clone(),
+                        owner_kind: Some(owner.kind.clone()),
+                        owner_name: Some(owner.name.clone()),
+                        reason,
+                    });
+                };
             match &pod.owner {
                 None => self.underived.push(UnderivedOwner {
                     pod: key.clone(),
@@ -624,41 +736,16 @@ impl InfraGraph {
                     owner_name: None,
                     reason: UnderivedReason::NoOwnerDeclared,
                 }),
-                Some(owner) => {
-                    let derived = match owner.kind.as_str() {
-                        "StatefulSet" => Some((WorkloadKind::StatefulSet, owner.name.clone())),
-                        "DaemonSet" => Some((WorkloadKind::DaemonSet, owner.name.clone())),
-                        "ReplicaSet" => {
-                            let Some(deployment) = deployment_of_replicaset(
-                                &owner.name,
-                                pod.labels.get("pod-template-hash").map(String::as_str),
-                            ) else {
-                                self.underived.push(UnderivedOwner {
-                                    pod: key.clone(),
-                                    owner_kind: Some(owner.kind.clone()),
-                                    owner_name: Some(owner.name.clone()),
-                                    reason: UnderivedReason::TemplateHashUnderivable {
-                                        name: owner.name.clone(),
-                                    },
-                                });
-                                continue;
-                            };
-                            Some((WorkloadKind::Deployment, deployment))
-                        }
-                        other => {
-                            self.underived.push(UnderivedOwner {
-                                pod: key.clone(),
-                                owner_kind: Some(other.to_owned()),
-                                owner_name: Some(owner.name.clone()),
-                                reason: UnderivedReason::KindOutsideModel {
-                                    kind: other.to_owned(),
-                                },
-                            });
-                            continue;
-                        }
-                    };
-                    if let Some((kind, name)) = derived {
-                        let workload_key = format!("{namespace}/{}/{name}", kind.as_str());
+                Some(owner) => match owner.kind.as_str() {
+                    // Statefulset and daemonset pods name their workload directly.
+                    kind @ ("StatefulSet" | "DaemonSet") => {
+                        let workload_kind = if kind == "StatefulSet" {
+                            WorkloadKind::StatefulSet
+                        } else {
+                            WorkloadKind::DaemonSet
+                        };
+                        let workload_key =
+                            format!("{namespace}/{}/{}", workload_kind.as_str(), owner.name);
                         if ir.model.workloads.contains_key(&workload_key) {
                             self.edge(
                                 subject.clone(),
@@ -668,18 +755,139 @@ impl InfraGraph {
                             );
                             self.pod_owners.insert(key.clone(), workload_key);
                         } else {
-                            self.underived.push(UnderivedOwner {
-                                pod: key.clone(),
-                                owner_kind: Some(owner.kind.clone()),
-                                owner_name: Some(owner.name.clone()),
-                                reason: UnderivedReason::NoMatchingWorkload {
-                                    kind: kind.as_str().to_owned(),
-                                    name,
+                            refuse(
+                                self,
+                                owner,
+                                UnderivedReason::NoMatchingWorkload {
+                                    kind: workload_kind.as_str().to_owned(),
+                                    name: owner.name.clone(),
                                 },
-                            });
+                            );
                         }
                     }
-                }
+                    // A deployment pod: exactly through its observed replicaset when the kind
+                    // was scanned, by the template-hash derivation when it was not.
+                    "ReplicaSet" => {
+                        if let Some(replica_sets) = &ir.model.replica_sets {
+                            let replicaset_key = format!("{namespace}/{}", owner.name);
+                            let Some(replica_set) = replica_sets.get(&replicaset_key) else {
+                                refuse(
+                                    self,
+                                    owner,
+                                    UnderivedReason::NoMatchingWorkload {
+                                        kind: "replicaset".to_owned(),
+                                        name: owner.name.clone(),
+                                    },
+                                );
+                                continue;
+                            };
+                            self.edge(
+                                subject.clone(),
+                                EdgeRelation::OwnedBy,
+                                GraphNode::new(NodeKind::ReplicaSet, &replicaset_key),
+                                "ownerReferences".to_owned(),
+                            );
+                            // A bare replicaset — no deployment owner — is a chain that
+                            // legitimately ends on an observed controller: not a fact,
+                            // nothing is missing.
+                            if let Some(rs_owner) = replica_set
+                                .owner
+                                .as_ref()
+                                .filter(|rs_owner| rs_owner.kind == "Deployment")
+                            {
+                                let workload_key =
+                                    format!("{namespace}/deployment/{}", rs_owner.name);
+                                if ir.model.workloads.contains_key(&workload_key) {
+                                    self.pod_owners.insert(key.clone(), workload_key);
+                                } else {
+                                    refuse(
+                                        self,
+                                        owner,
+                                        UnderivedReason::NoMatchingWorkload {
+                                            kind: "deployment".to_owned(),
+                                            name: rs_owner.name.clone(),
+                                        },
+                                    );
+                                }
+                            }
+                        } else {
+                            let Some(deployment) = deployment_of_replicaset(
+                                &owner.name,
+                                pod.labels.get("pod-template-hash").map(String::as_str),
+                            ) else {
+                                refuse(
+                                    self,
+                                    owner,
+                                    UnderivedReason::TemplateHashUnderivable {
+                                        name: owner.name.clone(),
+                                    },
+                                );
+                                continue;
+                            };
+                            let workload_key = format!("{namespace}/deployment/{deployment}");
+                            if ir.model.workloads.contains_key(&workload_key) {
+                                self.edge(
+                                    subject.clone(),
+                                    EdgeRelation::OwnedBy,
+                                    GraphNode::new(NodeKind::Workload, &workload_key),
+                                    // The heuristic names itself, so a reader of the rendered
+                                    // graph can tell it from the declared chain.
+                                    "pod-template-hash".to_owned(),
+                                );
+                                self.pod_owners.insert(key.clone(), workload_key);
+                            } else {
+                                refuse(
+                                    self,
+                                    owner,
+                                    UnderivedReason::NoMatchingWorkload {
+                                        kind: "deployment".to_owned(),
+                                        name: deployment,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                    // A job pod: owned by its observed job. No `pod_owners` entry — a job
+                    // pod's readiness expectation is the job's completion arithmetic
+                    // (`INFRA-DIAG-019`), not a replica count, so `INFRA-DIAG-010` stays
+                    // scoped to workload-managed pods.
+                    "Job" => match &ir.model.jobs {
+                        Some(jobs) => {
+                            let job_key = format!("{namespace}/{}", owner.name);
+                            if jobs.contains_key(&job_key) {
+                                self.edge(
+                                    subject.clone(),
+                                    EdgeRelation::OwnedBy,
+                                    GraphNode::new(NodeKind::Job, &job_key),
+                                    "ownerReferences".to_owned(),
+                                );
+                            } else {
+                                refuse(
+                                    self,
+                                    owner,
+                                    UnderivedReason::NoMatchingWorkload {
+                                        kind: "job".to_owned(),
+                                        name: owner.name.clone(),
+                                    },
+                                );
+                            }
+                        }
+                        None => refuse(
+                            self,
+                            owner,
+                            UnderivedReason::KindOutsideModel {
+                                kind: owner.kind.clone(),
+                            },
+                        ),
+                    },
+                    other => refuse(
+                        self,
+                        owner,
+                        UnderivedReason::KindOutsideModel {
+                            kind: other.to_owned(),
+                        },
+                    ),
+                },
             }
         }
     }

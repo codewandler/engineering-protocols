@@ -12,9 +12,12 @@ use serde_json::Value;
 
 use crate::code::{InfraCode, ValidationErrors};
 use crate::config::{ConfigMap, Secret};
+use crate::controller::{CronJob, Job, ReplicaSet};
 use crate::network::{Ingress, Service};
+use crate::policy::{HorizontalPodAutoscaler, PodDisruptionBudget};
 use crate::raw::{
-    items, RawBundle, RawClaim, RawMeta, RawNamespace, RawNode, RawPod, RawServiceAccount,
+    items, optional_items, RawBundle, RawClaim, RawMeta, RawNamespace, RawNode, RawPod,
+    RawServiceAccount,
 };
 use crate::workload::{Workload, WorkloadKind};
 
@@ -35,6 +38,20 @@ pub const KINDS: &[&str] = &[
     "secrets",
     "serviceaccounts",
     "persistentvolumeclaims",
+];
+
+/// The kind keys the scanner grew after `infra-observation/1` shipped, tolerated when absent.
+///
+/// A bundle written before the scanner collected these still validates: absence means "the scan
+/// did not look" and is carried as `None` on [`Observation`], never rewritten into "none exist".
+/// See the crate documentation for why this is the compatible reading and
+/// [`InfraCode::MissingKind`] for why the original twelve stay required.
+pub const OPTIONAL_KINDS: &[&str] = &[
+    "replicasets",
+    "jobs",
+    "cronjobs",
+    "poddisruptionbudgets",
+    "horizontalpodautoscalers",
 ];
 
 /// An object's identity: what everything downstream keys on.
@@ -253,11 +270,25 @@ pub struct Observation {
     pub claims: Vec<PersistentVolumeClaim>,
     /// Pods, runtime essentials only.
     pub pods: Vec<Pod>,
+    /// Replicasets; `None` when the bundle predates the kind ([`OPTIONAL_KINDS`]).
+    pub replica_sets: Option<Vec<ReplicaSet>>,
+    /// Jobs; `None` when the bundle predates the kind.
+    pub jobs: Option<Vec<Job>>,
+    /// Cronjobs; `None` when the bundle predates the kind.
+    pub cron_jobs: Option<Vec<CronJob>>,
+    /// Pod disruption budgets; `None` when the bundle predates the kind.
+    pub pod_disruption_budgets: Option<Vec<PodDisruptionBudget>>,
+    /// Horizontal pod autoscalers; `None` when the bundle predates the kind.
+    pub horizontal_pod_autoscalers: Option<Vec<HorizontalPodAutoscaler>>,
 }
 
 impl TryFrom<RawBundle> for Observation {
     type Error = ValidationErrors;
 
+    // Long because a bundle has seventeen kinds, not because any step is deep: each block is
+    // one kind's collection, and splitting them apart would scatter the one accumulator they
+    // share.
+    #[allow(clippy::too_many_lines)]
     fn try_from(raw: RawBundle) -> Result<Self, Self::Error> {
         let mut errors = ValidationErrors::new();
 
@@ -327,6 +358,52 @@ impl TryFrom<RawBundle> for Observation {
             })
             .collect();
 
+        let replica_sets = optional_items::<crate::raw::RawReplicaSet>(
+            &raw,
+            "replicasets",
+            &mut errors,
+        )
+        .map(|list| {
+            list.into_iter()
+                .filter_map(|(location, item)| ReplicaSet::from_raw(&item, &location, &mut errors))
+                .collect()
+        });
+        let jobs = optional_items::<crate::raw::RawJob>(&raw, "jobs", &mut errors).map(|list| {
+            list.into_iter()
+                .filter_map(|(location, item)| Job::from_raw(&item, &location, &mut errors))
+                .collect()
+        });
+        let cron_jobs = optional_items::<crate::raw::RawCronJob>(&raw, "cronjobs", &mut errors)
+            .map(|list| {
+                list.into_iter()
+                    .filter_map(|(location, item)| CronJob::from_raw(&item, &location, &mut errors))
+                    .collect()
+            });
+        let pod_disruption_budgets = optional_items::<crate::raw::RawPodDisruptionBudget>(
+            &raw,
+            "poddisruptionbudgets",
+            &mut errors,
+        )
+        .map(|list| {
+            list.into_iter()
+                .filter_map(|(location, item)| {
+                    PodDisruptionBudget::from_raw(&item, &location, &mut errors)
+                })
+                .collect()
+        });
+        let horizontal_pod_autoscalers = optional_items::<crate::raw::RawHorizontalPodAutoscaler>(
+            &raw,
+            "horizontalpodautoscalers",
+            &mut errors,
+        )
+        .map(|list| {
+            list.into_iter()
+                .filter_map(|(location, item)| {
+                    HorizontalPodAutoscaler::from_raw(&item, &location, &mut errors)
+                })
+                .collect()
+        });
+
         let observation = Self {
             context: raw.context,
             scanned_at: raw.scanned_at,
@@ -341,6 +418,11 @@ impl TryFrom<RawBundle> for Observation {
             service_accounts,
             claims,
             pods,
+            replica_sets,
+            jobs,
+            cron_jobs,
+            pod_disruption_budgets,
+            horizontal_pod_autoscalers,
         };
         observation.refuse_duplicates(&mut errors);
 
@@ -357,6 +439,8 @@ impl Observation {
     ///
     /// After collection rather than during it, so a duplicate is reported *as* a duplicate and
     /// not as whatever second-order defect the collision would have caused downstream.
+    /// One `scan` call per kind is what makes the length; the logic is the closure.
+    #[allow(clippy::too_many_lines)]
     fn refuse_duplicates(&self, errors: &mut ValidationErrors) {
         fn scan<'a>(
             kind: &str,
@@ -436,6 +520,37 @@ impl Observation {
             errors,
         );
         scan("pods", self.pods.iter().map(|item| &item.identity), errors);
+        if let Some(replica_sets) = &self.replica_sets {
+            scan(
+                "replicasets",
+                replica_sets.iter().map(|item| &item.identity),
+                errors,
+            );
+        }
+        if let Some(jobs) = &self.jobs {
+            scan("jobs", jobs.iter().map(|item| &item.identity), errors);
+        }
+        if let Some(cron_jobs) = &self.cron_jobs {
+            scan(
+                "cronjobs",
+                cron_jobs.iter().map(|item| &item.identity),
+                errors,
+            );
+        }
+        if let Some(budgets) = &self.pod_disruption_budgets {
+            scan(
+                "poddisruptionbudgets",
+                budgets.iter().map(|item| &item.identity),
+                errors,
+            );
+        }
+        if let Some(autoscalers) = &self.horizontal_pod_autoscalers {
+            scan(
+                "horizontalpodautoscalers",
+                autoscalers.iter().map(|item| &item.identity),
+                errors,
+            );
+        }
     }
 }
 
@@ -735,10 +850,66 @@ mod tests {
     }
 
     #[test]
-    fn a_thirteenth_kind_the_model_never_heard_of_is_tolerated() {
+    fn a_kind_the_model_never_heard_of_is_tolerated() {
         let mut bundle = minimal_bundle();
-        bundle["kinds"]["horizontalpodautoscalers"] = serde_json::json!({ "items": [{}] });
+        bundle["kinds"]["networkpolicies"] = serde_json::json!({ "items": [{}] });
         validate(bundle).expect("an unknown kind is a scanner ahead of the model, not a defect");
+    }
+
+    #[test]
+    fn a_bundle_without_the_optional_kinds_validates_and_carries_their_absence_as_absence() {
+        // The compatibility choice: `minimal_bundle()` is the *original* twelve-kind format, and
+        // it must stay a valid observation after the scanner grew — refusing it would invalidate
+        // every scan taken before replicasets, jobs, cronjobs, budgets and autoscalers joined.
+        let observation = validate(minimal_bundle()).expect("an older bundle still validates");
+        assert!(
+            observation.replica_sets.is_none()
+                && observation.jobs.is_none()
+                && observation.cron_jobs.is_none()
+                && observation.pod_disruption_budgets.is_none()
+                && observation.horizontal_pod_autoscalers.is_none(),
+            "an unscanned kind is None — not an empty list, which would claim nobody has any"
+        );
+    }
+
+    #[test]
+    fn an_optional_kind_that_is_present_is_validated_not_waved_through() {
+        let mut bundle = minimal_bundle();
+        // A cronjob without a schedule: present, so the rules run and refuse it.
+        bundle["kinds"]["cronjobs"] = serde_json::json!({ "items": [
+            { "metadata": { "name": "broken", "namespace": "app", "uid": "cj-1" } }
+        ] });
+        let errors = validate(bundle).expect_err("a present optional kind is checked");
+        assert!(
+            errors.contains(InfraCode::MalformedObject),
+            "expected INFRA-OBJECT-001, got: {errors}"
+        );
+    }
+
+    #[test]
+    fn an_empty_optional_kind_is_an_observation_of_none_distinguishable_from_unscanned() {
+        let mut bundle = minimal_bundle();
+        bundle["kinds"]["poddisruptionbudgets"] = serde_json::json!({ "items": [] });
+        let observation = validate(bundle).expect("an empty list is observable");
+        assert_eq!(
+            observation.pod_disruption_budgets,
+            Some(Vec::new()),
+            "scanned-and-empty is Some([]), never None"
+        );
+    }
+
+    #[test]
+    fn two_replicasets_sharing_namespace_and_name_are_refused_as_a_duplicate() {
+        let mut bundle = minimal_bundle();
+        bundle["kinds"]["replicasets"] = serde_json::json!({ "items": [
+            { "metadata": { "name": "web-abc", "namespace": "app", "uid": "rs-1" } },
+            { "metadata": { "name": "web-abc", "namespace": "app", "uid": "rs-2" } }
+        ] });
+        let errors = validate(bundle).expect_err("a duplicate identity is refused");
+        assert!(
+            errors.contains(InfraCode::DuplicateIdentity),
+            "expected INFRA-OBJECT-003, got: {errors}"
+        );
     }
 
     #[test]

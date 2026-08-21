@@ -44,7 +44,7 @@ See the status table in [`README.md`](README.md); keep it accurate when you land
 is the per-wave record of what actually shipped — read it before believing any prose about progress.
 
 **Every crate in the workspace is implemented and gated. There are no skeletons left.** The most
-recent tag is `0.6.0-ess-wave-6`; `task check` (eight steps) currently passes 69 suites and 1379
+recent tag is `0.6.1-ess-wave-6.5`; `task check` (nine steps) currently passes 84 suites and 1497
 tests, with 0 clippy warnings and 0 rustdoc warnings.
 
 * **AEP — the protocol; the v0.2 scope is implemented.** `aep-domain`, `aep-schema`, `aep-engine`,
@@ -66,6 +66,16 @@ tests, with 0 clippy warnings and 0 rustdoc warnings.
   the one scenario that exists to catch it). `generated/` holds the committed projections and the
   synthesised workspace, `suites/generated/` the committed conformance suites; all drift-checked
   in the gate.
+* **Infra — observed infrastructure as a second instance of the ESS pattern.** Three crates:
+  `infra-domain` (the k8s observation subset, raw→validated, eleven `INFRA-*` refusal codes,
+  secrets only ever as digests — IW1), `infra-compiler` (the content-addressed `infra-ir/1`
+  with unresolved references as typed facts, plus the validating read-back of a persisted
+  document — IW1/IW2) and `infra-analyze` (the typed dependency graph with derived pod
+  ownership, fourteen `INFRA-DIAG-*` diagnosis rules with registered severities, workload
+  properties — IW2). `protocol infra validate|compile|inspect|graph|diagnose` is the surface;
+  the scanner (`infra-scout`) is a separate repository holding the credentials, and nothing
+  here reaches a network. Plan pages: `docs/plan/infra-wave-1-observe.md`,
+  `docs/plan/infra-wave-2-analyze.md`.
 * **Not built yet:** wave 7, scheduled on the roadmap (the wave 6.5 hardening batch is done:
   chunk A closed the three unenforced invariants, the digest widening and `proptest` phase 1;
   chunk B closed the input→event-payload model gap — an outcome's `payload:` declaration — and
@@ -135,10 +145,11 @@ enforcement here that you cannot point at.
    `SystemTime::now` is allowed to live, behind the `Clock` trait.
 9. **Determinism.** Same validated state plus same evidence set ⇒ same decision. Iterate over
    `BTreeMap`/`BTreeSet`, never `HashMap`, so output ordering is stable.
-   *Enforced by* banned-token scans over five crates that claim the property — `ess-compiler`
-   (`tests/billing.rs`), `ess-diff` (`tests/canonical.rs`), `ess-synth` (`tests/synthesis.rs`),
-   `aep-domain` and `ess-gen` (`tests/determinism.rs` in each) — beside tests that compile, diff or
-   generate twice and compare bytes, and a seeded property test that does the same for every
+   *Enforced by* banned-token scans over eight crates that claim the property or feed one that
+   does — `ess-compiler` (`tests/billing.rs`), `ess-diff` (`tests/canonical.rs`), `ess-synth`
+   (`tests/synthesis.rs`), `aep-domain`, `ess-gen`, `infra-domain`, `infra-compiler` and
+   `infra-analyze` (`tests/determinism.rs` in each) — beside tests that compile, diff, generate
+   or render twice and compare bytes, and a seeded property test that does the same for every
    generated adversarial specification (`crates/ess-compiler/tests/adversarial.rs`).
    Deliberately unscanned, because each owns a clock or a terminal: `aep-engine` (invariant 8),
    `ess-conformance` (the runner takes a clock, wave 3.5 decision 3), the backends, the CLI and
