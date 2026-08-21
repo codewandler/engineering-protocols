@@ -8,12 +8,13 @@ tasks:
 
   check:
     desc: >-
-      Format check, lint, test, doc check, schema check, projection check, suite check,
-      observation check and synthesis check — everything CI runs. The observation check now also
-      covers the committed manifest projection. The last one needs the Go toolchain, the
+      Format check, status check, lint, test, doc check, schema check, projection check, suite
+      check, observation check and synthesis check — everything CI runs. The observation check now
+      also covers the committed manifest projection. The last one needs the Go toolchain, the
       wasm32-unknown-unknown Rust target and Node beside Rust's own.
     cmds:
       - task: fmt-check
+      - task: status-check
       - task: clippy
       - task: test
       - task: doc-check
@@ -36,6 +37,19 @@ tasks:
     desc: Fail if any workspace member is unformatted. Generated workspaces are exempt by design.
     cmds:
       - cargo xtask fmt --check
+
+  # The one status surface prose kept getting wrong, derived instead: the table is generated from
+  # the annotated tags, so a wave that ships without retagging cannot leave the page claiming
+  # otherwise. Early in the gate because it is sub-second and needs no compile beyond xtask itself.
+  status:
+    desc: Regenerate the delivered-waves record in docs/status.md from the repository's tags.
+    cmds:
+      - cargo xtask status
+
+  status-check:
+    desc: Fail if the delivered-waves record in docs/status.md no longer matches the tags.
+    cmds:
+      - cargo xtask status --check
 
   clippy:
     desc: Lint every target, warnings are errors.

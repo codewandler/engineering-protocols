@@ -121,27 +121,30 @@ an owner rather than a horizon.
 
 ## Where this stands
 
-Honest as of `0.3.2-ess-wave-3`. `task check` passes 41 suites and 953 tests, with 0 clippy warnings
-and 0 rustdoc warnings. `git tag -n99` is the per-wave record; see [`README.md`](../README.md) for the
-measured status table.
+Stale numbers were this section's failure mode: in the repository's first 48 hours the hand-written
+gate count here drifted against three other documents' counts, every copy true when written and
+wrong within hours. So this section no longer carries counts or a tag pin. The delivered-waves
+table in [`docs/status.md`](status.md) is generated from the annotated tags and drift-checked in
+the gate; `git tag -n99` is the per-wave record; `task check` is the measurement.
 
 | | State |
 |---|---|
 | AEP — domain model, engine, documents, CLI | implemented |
 | AEP — interaction contract, identity, audit | implemented, with an in-memory reference backend |
 | AEP — conformance suites for backends | implemented, 16 suites checked against a deliberately broken backend |
-| AEP — running on a real project | in progress: a project can now be discovered, but nothing has been governed by it yet |
-| ESS — the typed model, `ess-domain` | implemented, `0.3.0-ess-wave-1` |
-| ESS — resolution, IR and diagnostics, `ess-compiler` | implemented, `0.3.1-ess-wave-2`; an unresolved reference is unrepresentable |
-| ESS — four projections, `ess-gen` | implemented, `0.3.2-ess-wave-3`; 27 artifacts and a generated index committed under `generated/`, drift-checked |
-| ESS — the specification as an oracle, and generated code | specified, not built. [`docs/design/`](design/) |
+| AEP — running on a real project | in progress: a project can be discovered and planning artifacts have a durable store, but no team's work has been governed by it yet |
+| ESS — model, compiler, four projections | implemented, waves 1–3 |
+| ESS — the specification as an oracle | implemented, wave 4: the generated suites are the verdict |
+| ESS — semantic diff, what a revision invalidates | implemented, wave 5, first slice; extended by wave 7 down to the generated artifact |
+| ESS — structural synthesis: three emitters, one plan, the dual-target demonstration | implemented, waves 6–7 |
+| Infra — observation, diagnosis, desired state, gaps projected back as patches | implemented, infrastructure waves 1–4 |
+| Harness — the planning store and the Claude Code plugin | implemented, harness wave 1; the driver is decided and not built |
 
-The next honest milestone for AEP is not a feature; it is a team whose work it actually governs. ESS's
-first — parsing and validating one small system end to end, the billing example — was wave 1, and the
-specification now produces the documentation and the contracts too. Its next is the specification as
-an *oracle*: a verdict on an implementation rather than a projection of a model. That waits behind the
-gates in [`docs/plan/ess-wave-3.5-reconciliation.md`](plan/ess-wave-3.5-reconciliation.md), because a
-verdict is only worth what the guards under it are worth.
+The next honest milestone for AEP is not a feature; it is a team whose work it actually governs.
+ESS closed its loop — one specification into contracts, generated suites, three structural
+skeletons and a verdict on two running applications — and what remains open there is behavioural:
+every algorithm is still a typed obligation a person implements. The open gaps, each with what
+closes it, are in [`docs/plan/gap-register.md`](plan/gap-register.md).
 
 ## Proposed, not accepted
 
@@ -157,7 +160,7 @@ preamble is the first thing to go stale, and the status column is the answer.
 | [structural synthesis, obligations and realizations](design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | generated applications, and human or agent work carried as typed obligations | proposed; reviewed once and not reconciled — that review reads it as four waves, not one; unsequenced |
 | [infrastructure discovery and multi-cloud realization](design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | a **fourth domain**: infrastructure, with `InfraSpec` and `InfraIr` beside the ESS pair | reviewed, and deferred whole with two ideas harvested; unsequenced |
 | [the planning store and the reference driver](design/harness-planning-and-driver-design-v0.1.md) | a durable store for planning artifacts, a Claude Code plugin that uses it, and the first in-repository implementation of the harness contract | **Phase 1 accepted as harness wave 1; driver decided and sketched, build unsequenced.** The narrowing it rests on is the one recorded above |
-| [transcript conformance](design/transcript-conformance-design-v0.1.md) | a typed, executable specification over an *agent-run transcript* — the `infra-spec/1` pattern pointed at a third observation domain, with the same three verdicts and a checker that contains no model | **proposed, not accepted.** It is what would make a behavioural claim about an agent admissible as evidence, which the driver's `llm` step needs and no other mechanism supplies |
+| [transcript conformance](design/transcript-conformance-design-v0.1.md) | a typed, executable specification over an *agent-run transcript* — the `infra-spec/1` pattern pointed at a third observation domain, with the same three verdicts and a checker that contains no model | **accepted, in implementation** as trace wave 1 (`docs/plan/trace-wave-1-transcript-checker.md`). It is what makes a behavioural claim about an agent admissible as evidence, which the driver's `llm` step needs and no other mechanism supplies. Its per-request *series* assertions and its streaming checker stay proposed, by name |
 
 Closed-loop conformance and structural synthesis are horizons the two halves already implied — the
 thesis promises the tests and the skeleton, and wave 4 delivered the first of them. Semantic diff was

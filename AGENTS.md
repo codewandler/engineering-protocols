@@ -25,8 +25,8 @@ proposal is not a work order, however long and however recent it is.
 `ess-implementor-design-v0.1.md` and `ess-review-v0.1.md` show what acceptance looks like:
 [`docs/plan/ess-roadmap.md`](docs/plan/ess-roadmap.md) and the wave 1–3 plan pages took them up, and
 waves 1 to 3 shipped from them. Six further proposals now sit in that directory — four filed
-2026-08-20 and since reviewed, and two filed 2026-08-21, of which one was accepted in part the same
-day and one is unreviewed. Their acceptance state is:
+2026-08-20 and since reviewed, and two filed 2026-08-21, both of which were accepted the same day —
+one in part, one taken up whole by a plan page. Their acceptance state is:
 
 | proposed design | status |
 |---|---|
@@ -35,7 +35,7 @@ day and one is unreviewed. Their acceptance state is:
 | [`ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | **accepted in part** by [`docs/plan/ess-wave-6-structural-synthesis.md`](docs/plan/ess-wave-6-structural-synthesis.md), which is wave 6, in progress. Its obligation/`Realization` programme stays proposed (W7.4 takes a slice), and its §28 is refused by invariant 6 |
 | [`semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | reviewed and **deferred whole**; two ideas harvested |
 | [`harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md) | **Phase 1 accepted** by [`docs/plan/harness-wave-1-planning-plugin.md`](docs/plan/harness-wave-1-planning-plugin.md), which is harness wave 1: the markdown planning store, `protocol artifact`, and the Claude Code plugin. Its Phase 2 **reference driver** is decided by the operator (`docs/VISION.md` § *What this is deliberately not*, narrowed 2026-08-21) and **not accepted for build** — harness wave 2 is a feasibility review of §4 against the code, and the build waits behind it |
-| [`transcript-conformance-design-v0.1.md`](docs/design/transcript-conformance-design-v0.1.md) | **proposed, not accepted, unreviewed.** A typed specification over an agent-run transcript — the `infra-spec/1` pattern in a third observation domain. No plan page has taken it up and its milestones are unsequenced; do not implement from it |
+| [`transcript-conformance-design-v0.1.md`](docs/design/transcript-conformance-design-v0.1.md) | **accepted, in implementation** as trace wave 1 by [`docs/plan/trace-wave-1-transcript-checker.md`](docs/plan/trace-wave-1-transcript-checker.md), which takes up its milestones T1–T3, sequences them and sets their acceptance criteria. Its open decisions D1–D6 are taken at their stated defaults, with one narrowing: the `regex` matcher of § 3.4 is **refused by name** rather than implemented, because the workspace carries no regular-expression engine. What stays proposed is named on the plan page: assertions over the per-request usage *series* (§ 2.7), an expectation kind for the skill's own text entering context (§ 2.8), and a streaming checker (**D5**) |
 
 Do not implement from an unreviewed design, and do not treat one as evidence of what this repository
 is. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* says what each would add, and
@@ -43,14 +43,17 @@ is. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* says what eac
 
 ## Current state
 
-See the status table in [`README.md`](README.md); keep it accurate when you land work. `git tag -n99`
-is the per-wave record of what actually shipped — read it before believing any prose about progress.
+The status report is [`docs/status.md`](docs/status.md); keep it accurate when you land work. Its
+delivered-waves table is generated from the annotated tags (`cargo xtask status`) and drift-checked
+in the gate, and prose here states no suite or test counts — four hand-written counts drifted apart
+in the repository's first 48 hours, so the count lives in exactly one place, the gate's own output.
+`git tag -n99` is the per-wave record of what actually shipped, and `task check` is the
+measurement; read those before believing any prose about progress.
 
-**Every crate in the workspace is implemented and gated. There are no skeletons left.** The most
-recent tag is `0.6.1-ess-wave-6.5`; `task check` (nine steps) currently passes 94 suites and 1693
-tests, with 0 clippy warnings and 0 rustdoc warnings. The gate now needs three toolchains beside
+**Every crate in the workspace is implemented and gated. There are no skeletons left.** The gate
+(`task check`, ten steps) needs three toolchains beside
 Rust's own: the **Go toolchain**, the **`wasm32-unknown-unknown` target** and **Node**. Two of the
-nine steps build the second and third emitters' committed trees, and none of those checks skips
+ten steps build the second and third emitters' committed trees, and none of those checks skips
 when its toolchain is absent — it fails and names it, because a skipped check reads exactly like a
 passing one.
 
@@ -105,10 +108,9 @@ passing one.
   the scanner (`infra-scout`) is a separate repository holding the credentials, and nothing
   here reaches a network. Plan pages: `docs/plan/infra-wave-1-observe.md`,
   `docs/plan/infra-wave-2-analyze.md`.
-* **Not built yet:** wave 7, scheduled on the roadmap (the wave 6.5 hardening batch is done:
-  chunk A closed the three unenforced invariants, the digest widening and `proptest` phase 1;
-  chunk B closed the input→event-payload model gap — an outcome's `payload:` declaration — and
-  the value-object invariant scenarios);
+* **Not built yet:** W7.4 — obligations as artifacts a task can own — deferred by decision;
+  the **reference driver**, decided by the operator and waiting behind harness wave 2's
+  feasibility review;
   attested evidence (gap register D-3, proposed and unaccepted); a **contract implementation that
   survives a process exit**. That last one is now half true and worth stating as two facts rather
   than one: a durable markdown **store** exists (`aep-backend-markdown`, harness wave 1) and holds
@@ -235,24 +237,31 @@ enforcement here that you cannot point at.
 task check
 ```
 
-Nine steps, all nine of which CI also runs, in this order:
+Ten steps, all ten of which CI also runs, in this order:
 
 1. `fmt-check` — `cargo xtask fmt --check`, which formats exactly the workspace members. Not
    `cargo fmt --all`: that flag also reaches every member's local path dependencies, which since
    `examples/billing-realization` would hand the synthesised workspaces under `generated/rust/`
    to rustfmt — and their bytes are the emitter's, held byte-identical by `synth-check`.
-2. `clippy` — `--workspace --all-targets -D warnings`, which is also what turns `missing_docs` and
+2. `status-check` — `cargo xtask status --check`, which fails if the delivered-waves table in
+   `docs/status.md` no longer matches what the annotated tags record. The one status surface that
+   kept going stale by hand is derived instead; the fix is `cargo xtask status`.
+3. `clippy` — `--workspace --all-targets -D warnings`, which is also what turns `missing_docs` and
    `clippy::pedantic` from warnings into failures.
-3. `test` — `cargo test --workspace`.
-4. `doc-check` — `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS=-D warnings`. Doc comments carry
+4. `test` — `cargo test --workspace`.
+5. `doc-check` — `cargo doc --workspace --no-deps` with `RUSTDOCFLAGS=-D warnings`. Doc comments carry
    the design reasoning here, so a broken intra-doc link loses an argument, not a hyperlink.
-5. `schema-check` — `cargo xtask schema --check`.
-6. `generate-check` — `cargo xtask generate --check`, which fails if the committed projections under
+6. `schema-check` — `cargo xtask schema --check`.
+7. `generate-check` — `cargo xtask generate --check`, which fails if the committed projections under
    `generated/` differ from what the specification produces.
-7. `suite-check` — `cargo xtask suite --check`, which fails if the committed conformance suites under
+8. `suite-check` — `cargo xtask suite --check`, which fails if the committed conformance suites under
    `suites/generated/` differ from what the specifications produce. A suite is a contract an
    implementation is checked against, so a stale one certifies the wrong thing.
-8. `synth-check` — `cargo xtask synth --check`, which fails if any committed synthesised tree —
+9. `infra-check` — `cargo xtask infra --check`, which fails if the committed observation IR,
+   simulation, drift or projection tree under `examples/k3d-dev-cluster/` differs from what its
+   inputs produce — including a projection file nothing generates any more. (This step was in the
+   Taskfile and CI before it was in this list; the list was itself a stale copy.)
+10. `synth-check` — `cargo xtask synth --check`, which fails if any committed synthesised tree —
    `generated/rust/`, `generated/go/` and `generated/web/`, three emitters behind one
    language-neutral plan, for two specifications — differs from what the specifications determine; if a matching tree no
    longer builds (`cargo check` for the Rust workspace; `gofmt -l` empty, `go build ./...` and
@@ -277,7 +286,7 @@ Nine steps, all nine of which CI also runs, in this order:
    like a check that passed. `cargo test` needs all three too, because `xtask`'s own tests write
    all three trees and build them.
 
-Land nothing that does not pass all nine.
+Land nothing that does not pass all ten.
 
 **A green local gate does not guarantee a green CI.** The steps mirror each other exactly, but the
 *toolchain* does not: CI installs whatever `stable` is on the day, and a newer clippy can introduce a

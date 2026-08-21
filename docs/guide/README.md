@@ -8,8 +8,8 @@ reasons; the protocol decides what the resulting facts permit.
 
 ## What is not built yet
 
-From the [status table](../../README.md#status). Everything else there is at 100% and gated by
-`task check`.
+From the status report, [`docs/status.md`](../status.md). Everything else there is at 100% and
+gated by `task check`.
 
 | Missing | Consequence for you |
 |---|---|

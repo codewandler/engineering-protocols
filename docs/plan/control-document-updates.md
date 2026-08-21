@@ -69,6 +69,67 @@ nothing a user of the protocol sees, and `AGENTS.md` § *Changelog* scopes entri
 | R-5 | `README.md` § Status, § Documents | five→six in the count sentence, and the row. The row states what the document *is* rather than what it would add, because a reader scanning that table is deciding whether to open the file |
 | A-7 | `AGENTS.md` § Which documents are normative | the row, with **unreviewed** stated in it and not only implied by the absence of a plan page. A-1's whole point was that an agent reading the newest design and implementing it is following the letter of that page, and the row says "do not implement from it" in words |
 
+## Applied, 2026-08-21 — third pass, the front page and the counts
+
+A different cause again, and this time the reader is the subject. A cold outside read of the
+repository — six documents, in the order a visitor actually meets them — found that the substance
+holds up and the entry path does not: the README was a 321-line status report whose first tables
+were internal bookkeeping, the page that answers *"what is this and is it for me"*
+(`docs/guide/README.md`) was unlinked from the top, and the hand-maintained gate counts disagreed
+four ways inside 48 hours — 41 suites/953 tests in the vision, 94/1693 in the README, 106/1811 on
+the website, 107/1865 in the newest commit message, every one true when written. The repository's
+own thesis — derive, don't maintain beside — had been applied to every surface except its own
+prose, and `AGENTS.md` already knew it: *"read `git tag -n99` before believing any prose about
+progress."*
+
+Four items. The status detail was **moved, not deleted** — this repository does not erase its own
+record to look tidy — and the count problem was fixed by removing the copies rather than by
+freshening them, because a freshened copy is stale again at the next tag.
+
+| item | applied where | difference from the proposal |
+|---|---|---|
+| R-6 | `README.md`, rewritten whole; `docs/status.md`, new | the README is now 118 lines: the hook, the AEP/ESS two-row table, the `explain` transcript, the guide's four-row "for you if" table, one honest working/not-working passage, links, build. Everything it carried — the weight and wave tables, the transcripts, the layout tree, the document index — moved intact to `docs/status.md`. Wave vocabulary stays off the front page; the plan pages keep the wave history |
+| V-8 | `docs/VISION.md` § Where this stands | rewritten against the tags at `0.7.1-infra-waves-1-4` — it had been honest as of `0.3.2-ess-wave-3`, four waves and two domains behind, still calling the oracle "specified, not built". The section now carries no counts and no tag pin, and says why; the closing milestone sentence ("a team whose work it actually governs") kept, because it is still true and still the point |
+| A-8 | `AGENTS.md` § Current state, § Gate | the stale tag line and count removed; "Not built yet: wave 7" corrected to what is actually not built (W7.4, the driver, D-3, the durable contract implementor — the two-facts split from A-6 kept verbatim). § Gate renumbered to ten steps: it claimed nine and listed eight — `infra-check` was in the Taskfile and CI but not in the list, which made the list itself a stale copy |
+| X-1 | `xtask/src/main.rs`, `Taskfile.yml`, `.github/workflows/ci.yml`, `docs/status.md` | the mechanism, so V-8/R-6/A-8 cannot regress: `cargo xtask status` derives the delivered-waves table in `docs/status.md` from the annotated tags, `status-check` joins the gate and CI (the one job that fetches tags), and a tagless clone fails loudly rather than passing on an empty record. Verified by mutation: corrupting one generated row makes `--check` exit 1 naming the fix |
+
+Beside the items, two adjacent changes with the same cause: the website's status page
+(`website/docs/status/where-this-stands.md`) carried its own count and a nine-step gate
+description, both corrected to the no-counts rule; and `.github/workflows/pages.yml` now exists,
+because the site was written, gated with `onBrokenLinks: 'throw'`, its transcripts re-verified
+against the binary — and unreachable: the Pages URL returned 404 and no workflow deployed it.
+Deploying needs one repository setting (Settings → Pages → Source: GitHub Actions), which is the
+operator's to flip.
+
+**There is no `CHANGELOG.md` entry**, on the second pass's reasoning: nothing a user of the
+protocol sees changed — the documents moved and the gate grew a drift check.
+
+## Applied, 2026-08-21 — fourth pass, the transcript design is accepted
+
+The same document as the second pass, three hours later and in the opposite direction. That pass
+recorded a proposal *arriving*; this one records it being **taken up**. The two are worth keeping
+as separate entries rather than editing the first one, because the interesting fact is not the
+current status — the table carries that — but that a design went from *"do not implement from it"*
+to *"in implementation"* on the day it was filed, which is a thing a reader should be able to see
+happen rather than infer.
+
+The acceptance is the operator's, in session, 2026-08-21. The plan page that carries it is
+[`trace-wave-1-transcript-checker.md`](trace-wave-1-transcript-checker.md), and it — not the design
+— sequences the milestones, sets the acceptance criteria, takes D1–D6 at their defaults and names
+what was cut.
+
+Three items, and the third is a **no-op with a reason**, recorded because a reader comparing this
+round against the second pass would otherwise look for the missing README change.
+
+| item | applied where | difference from the proposal |
+|---|---|---|
+| A-9 | `AGENTS.md` § *Which documents are normative*, § *Current state*, § *Invariants* | the row as proposed, **plus two things the row alone would have left false**. § *Current state* gains a bullet for the third observation domain, because a crate pair nothing mentions is a crate pair nobody finds — the same argument R-4 made for the plugin. And invariants 11 and 12 carried member counts (*"all sixteen"*, *"the fifteen"*) that this wave moved to eighteen and seventeen; a count in an enforcement clause is worse than a count in a preamble, because it reads as the *scope* of a lint |
+| V-9 | `docs/VISION.md` § *Proposed, not accepted* | the status cell only. The "what it would add" cell moves from conditional to present tense — *"it is what makes a behavioural claim admissible"*, not *"would make"* — and the two named deferrals go into the status cell, because a row that says only "accepted" invites the next reader to assume the whole document was |
+| R-7 | `README.md` — **nothing to change** | the second pass's R-5 added a per-design row to § *Documents*. R-6 then rewrote the README whole and moved that table to `docs/status.md`, so there is no per-design row on the front page to flip any more. `docs/status.md:307` still carries the row and still says *proposed, not accepted*; that file is generated in part and owned by the wave that tags this work, and correcting it is that wave's, not this page's. Recorded rather than silently skipped: an item that vanishes between rounds reads like an oversight |
+
+**There is no `CHANGELOG.md` entry from this page.** The wave itself writes one — a new document
+type, a new verb family and a new published schema are all things a user of the protocol sees — and
+that entry belongs in the commit that makes the change, not in a control-document round.
 
 ---
 
@@ -207,6 +268,25 @@ needs exactly that and has no other mechanism for it.
 
 ---
 
+### V-9 — the sixth design is no longer a proposal (medium, follows V-7) — **applied**
+
+V-7 added the row on the day the document was filed, with the plainest status on the table:
+**proposed, not accepted**. It was accepted the same day, by the operator, in session, and
+[`trace-wave-1-transcript-checker.md`](trace-wave-1-transcript-checker.md) is the plan page that
+took it up.
+
+A row that now said only *"accepted"* would be worse than the one it replaces. The design is 1 047
+lines and the plan page does not take all of it: the per-request *series* assertions of § 2.7 and
+the streaming checker of **D5** stay proposed, and both are deferred *by the design itself* rather
+than cut by the wave. Put the acceptance and the two deferrals in the same cell, so the reader who
+scans the status column cannot come away thinking the whole document is now policy.
+
+The "what it would add" cell moves to the present tense in the same edit. It described a capability
+that did not exist; it now describes one that does, and a conditional there would be the same class
+of staleness V-7 removed from the preamble.
+
+---
+
 ## `README.md`
 
 ### R-1 — nine documents exist and none is in the table (high) — **applied**
@@ -255,6 +335,24 @@ opening `docs/design/` and forming their own view of what this project is buildi
 One thing worth keeping in the row rather than compressing away: that the checker contains no model.
 It is the single most surprising property of a transcript-checking tool, and the one a reader will
 otherwise assume the opposite of.
+
+### R-7 — the front page has no row left to flip, and that is the finding (low, follows R-5 and R-6) — **applied as a no-op**
+
+R-5 put a per-design row for the transcript design into `README.md` § *Documents*. R-6 then rewrote
+the README whole — 321 lines to 118 — and moved that whole table to `docs/status.md`. So the
+acceptance flip that A-9 and V-9 make has **no counterpart on the front page**: there is nothing
+there that says the design is proposed, and nothing to correct.
+
+`docs/status.md:307` does still carry the row, and it still reads *proposed, not accepted*. That
+page's delivered-waves table is generated (`cargo xtask status`) and its prose belongs to whoever
+tags the wave; correcting it before there is a tag would put a claim on a page whose whole purpose
+is to be derived from what actually shipped.
+
+Recorded as an item rather than left out. A reader comparing this round against the second pass
+will look for the README change R-5 made, and *"there is no longer a row there"* is a better answer
+than silence — it is also the second time in three rounds that R-6's rewrite has changed where a
+status lives, which is worth having written down once.
+
 
 ---
 
@@ -343,3 +441,26 @@ State it in the row rather than leaving it to be inferred from a missing plan pa
 because an agent reading the newest, largest document in `docs/design/` and implementing it is
 following the letter of the page it is on, and the cheapest possible fix is for the row itself to
 say **do not implement from it**.
+
+### A-9 — the row A-7 wrote now says the opposite, and two counts moved underneath it (medium) — **applied**
+
+A-7's whole argument was that the row should say **do not implement from it** in words, because an
+agent reading the newest, largest document in `docs/design/` and implementing it is following the
+letter of the page it is on. That argument was right and it is now spent: a plan page has taken the
+design up, and the row has to say so — with the same explicitness, in the other direction, naming
+the plan page and naming what was *not* accepted.
+
+Two things the row alone would leave false, and both are in the same file:
+
+* **§ *Current state* has no bullet for the third observation domain.** Every other family has
+  one — AEP, ESS, Infra — and the section is where a reader learns what exists. R-4 made exactly
+  this argument for the plugin: a capability list that omits the newest capability is a list people
+  stop trusting.
+* **Invariants 11 and 12 carry member counts.** *"All sixteen workspace members opt in with
+  `[lints] workspace = true`"* and *"for the fifteen members that opt in"* were true when written
+  and are now eighteen and seventeen. A stale count in a preamble is untidy; a stale count in an
+  **enforcement clause** is a claim about the *scope of a lint*, and the next person to add a crate
+  will read it as the list they have to be on.
+
+The three edits are one item because they have one cause: a wave landed and the page describes the
+repository before it.

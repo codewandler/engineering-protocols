@@ -98,6 +98,28 @@ jobs:
       - name: Check generated schemas
         run: cargo xtask schema --check
 
+  # Its own job for the reason `schemas` is: a stale delivered-waves record reads as a stale
+  # record, not as "the gate failed". The table in docs/status.md is derived from the annotated
+  # tags — the one status surface that kept going stale when it was maintained by hand — and this
+  # job fails when the committed block no longer matches what the tags say shipped. The fix is
+  # `cargo xtask status`. It is the one job that needs the tags: `actions/checkout` omits them by
+  # default, and the check fails loudly on a tagless clone rather than passing on an empty record.
+  status:
+    name: Delivered-waves record up to date
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-tags: true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the delivered-waves record
+        run: cargo xtask status --check
+
   # Its own job for the same reason as `schemas`: a stale projection reads as a stale projection.
   # A generated OpenAPI document that no longer matches the specification is a contract someone is
   # building against, and "the gate failed" would bury that behind a test log. The fix is

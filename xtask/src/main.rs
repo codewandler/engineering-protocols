@@ -4,7 +4,8 @@
 //! `cargo xtask generate` regenerates the committed projections of the normative specification;
 //! `cargo xtask suite` regenerates the committed conformance suites the example specifications
 //! oblige; `cargo xtask infra` regenerates the committed infrastructure IR compiled from the
-//! example observation bundle. All take `--check`, which verifies the committed files still match instead of
+//! example observation bundle; `cargo xtask status` regenerates the delivered-waves record in
+//! `docs/status.md` from the annotated tags. All take `--check`, which verifies the committed files still match instead of
 //! writing them, and that is what CI runs — one job each, so a stale artifact reads as a stale
 //! artifact rather than as "the gate failed". All three directories are outputs: editing one by hand
 //! is always wrong, because the next regeneration silently reverts it.
@@ -347,6 +348,12 @@ enum Command {
         #[arg(long)]
         check: bool,
     },
+    /// Regenerate the delivered-waves record in `docs/status.md` from the repository's tags.
+    Status {
+        /// Verify the committed record matches instead of writing it.
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 fn main() -> Result<()> {
@@ -371,6 +378,7 @@ fn main() -> Result<()> {
         }
         Command::Infra { check } => infra(&workspace_root(), check),
         Command::Fmt { check } => fmt(check),
+        Command::Status { check } => status(&workspace_root(), check),
         Command::Synth { check } => {
             let root = workspace_root();
             let specifications: Vec<(PathBuf, &[&str])> = SYNTH_SPECIFICATIONS
@@ -401,6 +409,119 @@ fn workspace_root() -> PathBuf {
         .parent()
         .expect("xtask lives one level below the workspace root")
         .to_path_buf()
+}
+
+/// The page holding the delivered-waves record.
+const STATUS_PAGE: &str = "docs/status.md";
+
+/// The first line of the generated region `cargo xtask status` owns inside that page.
+///
+/// The rest of the page is hand-written; this pair of markers bounds the one part of it that is
+/// derived. In place rather than a file of its own, so the reader gets one status page and not a
+/// stub pointing at a fragment.
+const STATUS_BEGIN: &str =
+    "<!-- generated:delivered-waves:begin — do not edit; run `cargo xtask status` -->";
+
+/// The last line of that region.
+const STATUS_END: &str = "<!-- generated:delivered-waves:end -->";
+
+/// Writes or checks the delivered-waves record in `docs/status.md`.
+///
+/// The table is derived from the repository's annotated tags, oldest first, because `git tag -n99`
+/// is the per-wave record of what actually shipped — and because the delivered-waves list was the
+/// one status surface still maintained by hand. Four hand-written gate counts drifted apart within
+/// the repository's first 48 hours; the fix is the rule invariant 1 already applies to the
+/// schemas: derive, then drift-check.
+fn status(root: &Path, check: bool) -> Result<()> {
+    let output = std::process::Command::new("git")
+        .args([
+            "for-each-ref",
+            "refs/tags",
+            "--sort=creatordate",
+            "--format=%(refname:short)\t%(subject)",
+        ])
+        .current_dir(root)
+        .output()
+        .context("running git — the delivered-waves record is derived from the tags")?;
+    if !output.status.success() {
+        bail!(
+            "git for-each-ref failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let stdout = String::from_utf8(output.stdout).context("reading the tag list as UTF-8")?;
+    let tags: Vec<(&str, &str)> = stdout
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .collect();
+    if tags.is_empty() {
+        bail!(
+            "no tags are visible, so there is nothing to derive the delivered-waves record from — \
+             fetch them first (`git fetch --tags`). Failing here rather than writing an empty \
+             table, because an empty record reads exactly like a project that shipped nothing"
+        );
+    }
+
+    let path = root.join(STATUS_PAGE);
+    let current =
+        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let updated = splice_generated(&current, STATUS_BEGIN, STATUS_END, &delivered_waves(&tags))?;
+
+    if check {
+        if updated != current {
+            bail!(
+                "{STATUS_PAGE}'s delivered-waves record no longer matches the tags; run \
+                 `cargo xtask status` and commit the result"
+            );
+        }
+        println!("delivered-waves record is up to date ({} tags)", tags.len());
+    } else if updated == current {
+        println!(
+            "delivered-waves record already matches the tags ({} tags)",
+            tags.len()
+        );
+    } else {
+        fs::write(&path, updated).with_context(|| format!("writing {}", path.display()))?;
+        println!("wrote the delivered-waves record ({} tags)", tags.len());
+    }
+    Ok(())
+}
+
+/// Renders the delivered-waves table from `(tag, subject)` pairs, oldest first.
+///
+/// The subject is an annotated tag message's first line, which in this repository already names
+/// the wave and what it delivered. A `|` in either column would silently break the table, so it is
+/// escaped rather than trusted absent.
+fn delivered_waves(tags: &[(&str, &str)]) -> String {
+    let mut table = String::from("| tag | delivered |\n|---|---|\n");
+    for (tag, subject) in tags {
+        let tag = tag.replace('|', "\\|");
+        let subject = subject.replace('|', "\\|");
+        let _ = writeln!(table, "| `{tag}` | {subject} |");
+    }
+    table
+}
+
+/// Replaces everything between `begin` and `end` with `replacement`, keeping both marker lines.
+///
+/// A missing or reversed marker is an error rather than a no-op, because a page that has lost its
+/// markers would otherwise be reported clean while the generator had silently stopped maintaining
+/// it — the same defect class as a source scan that stopped seeing constructions.
+fn splice_generated(content: &str, begin: &str, end: &str, replacement: &str) -> Result<String> {
+    let begin_at = content
+        .find(begin)
+        .with_context(|| format!("the begin marker `{begin}` is missing from the page"))?;
+    let after_begin = begin_at + begin.len();
+    let end_offset = content[after_begin..].find(end).with_context(|| {
+        format!("the end marker `{end}` is missing from the page, or precedes the begin marker")
+    })?;
+    let end_at = after_begin + end_offset;
+    let mut updated = String::with_capacity(content.len() + replacement.len());
+    updated.push_str(&content[..after_begin]);
+    updated.push('\n');
+    updated.push_str(replacement);
+    updated.push_str(&content[end_at..]);
+    Ok(updated)
 }
 
 /// Writes or checks `schemas/generated/`.
@@ -2689,10 +2810,70 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        contract_digest_in, generate, go_tool, schema, suite, synth, workspace_root, INDEX,
-        NORMATIVE_EXAMPLE, OBSERVATION_PROJECTION, PROJECTIONS, PROJECTION_EXCLUSIONS, SUITES,
-        SUITE_SPECIFICATIONS, SYNTH, SYNTH_GO, SYNTH_SPECIFICATIONS, SYNTH_WEB,
+        contract_digest_in, delivered_waves, generate, go_tool, schema, splice_generated, suite,
+        synth, workspace_root, INDEX, NORMATIVE_EXAMPLE, OBSERVATION_PROJECTION, PROJECTIONS,
+        PROJECTION_EXCLUSIONS, SUITES, SUITE_SPECIFICATIONS, SYNTH, SYNTH_GO, SYNTH_SPECIFICATIONS,
+        SYNTH_WEB,
     };
+
+    #[test]
+    fn the_delivered_waves_table_keeps_the_tags_in_the_order_given() {
+        let table = delivered_waves(&[
+            ("0.1.0", "0.1.0 — domain model and document layer"),
+            ("0.2.0-wave-1", "0.2.0-wave-1 — the execution core"),
+        ]);
+        assert_eq!(
+            table,
+            "| tag | delivered |\n\
+             |---|---|\n\
+             | `0.1.0` | 0.1.0 — domain model and document layer |\n\
+             | `0.2.0-wave-1` | 0.2.0-wave-1 — the execution core |\n"
+        );
+    }
+
+    #[test]
+    fn a_pipe_in_a_tag_subject_cannot_break_the_table() {
+        let table = delivered_waves(&[("0.1.0", "left | right")]);
+        assert!(
+            table.contains("left \\| right"),
+            "the pipe must be escaped, not passed through as a column break: {table}"
+        );
+    }
+
+    #[test]
+    fn splicing_replaces_only_the_generated_region_and_twice_changes_nothing() {
+        let page = "before\n<begin>\nstale line one\nstale line two\n<end>\nafter\n";
+        let once = splice_generated(page, "<begin>", "<end>", "fresh\n")
+            .expect("both markers are present");
+        assert_eq!(once, "before\n<begin>\nfresh\n<end>\nafter\n");
+        let twice = splice_generated(&once, "<begin>", "<end>", "fresh\n")
+            .expect("both markers survive a splice");
+        assert_eq!(
+            twice, once,
+            "a second splice with the same table must be byte-identical, or `--check` after a \
+             write would report drift that is not there"
+        );
+    }
+
+    #[test]
+    fn a_page_that_lost_its_markers_is_an_error_not_a_clean_pass() {
+        let error = splice_generated("no markers here\n", "<begin>", "<end>", "fresh\n")
+            .expect_err("a page without markers cannot be reported clean");
+        assert!(
+            error.to_string().contains("<begin>"),
+            "the error names the marker that is missing: {error}"
+        );
+    }
+
+    #[test]
+    fn an_end_marker_before_the_begin_marker_is_an_error_not_a_clean_pass() {
+        let error = splice_generated("<end>\nmiddle\n<begin>\n", "<begin>", "<end>", "fresh\n")
+            .expect_err("reversed markers cannot be spliced");
+        assert!(
+            error.to_string().contains("<end>"),
+            "the error names the marker that could not be found in order: {error}"
+        );
+    }
 
     /// A scratch tree with a freshly generated `schemas/generated/` in it.
     fn generated(name: &str) -> PathBuf {

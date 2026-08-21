@@ -7,12 +7,13 @@ description: What is implemented, per component, with the numbers the repository
 # Where this stands
 
 Current as of the tag `0.7.1-infra-waves-1-4` (2026-08-21). The repository's gate, `task check`,
-runs nine steps — formatting, clippy with warnings as errors, the test suite, rustdoc with warnings
-as errors, and five drift checks that regenerate every schema, projection, suite and synthesized
-tree and compare bytes — and at this tag reports **106 suites, 1811 tests, 0 failures, 0 clippy
-warnings, 0 rustdoc warnings**.
+runs ten steps — formatting, clippy with warnings as errors, the test suite, rustdoc with warnings
+as errors, and six drift checks that regenerate every schema, projection, suite, synthesized tree
+and the delivered-waves record and compare bytes. This page states no suite or test counts: four
+hand-written counts drifted apart within the repository's first 48 hours, so the count now lives in
+exactly one place — the gate's own output. Run `task check` for the measurement.
 
-CI runs the same nine steps; nothing lands that does not pass all of them. The gate needs the Go
+CI runs the same ten steps; nothing lands that does not pass all of them. The gate needs the Go
 toolchain, the `wasm32-unknown-unknown` Rust target and Node beside Rust's own, and a step whose
 toolchain is missing fails and names it rather than skipping — a skipped check reads exactly like a
 passing one.
@@ -84,7 +85,7 @@ The compact list; [Limitations](./limitations.md) carries the consequences of ea
 
 ---
 
-**Sources.** `task check` run at the working tree of `0.7.1-infra-waves-1-4`, 2026-08-21 (exit 0;
-106 `test result:` lines, 1811 tests passed, 0 failed); `README.md` § *Status*; `AGENTS.md`
-§ *Current state*; `CHANGELOG.md` §§ *0.7.0*, *0.7.1*; `git tag -n99`; document counts from
-`protocols/`, `principles/`, `workflows/`, `profiles/`, `artifacts/lifecycles/`.
+**Sources.** `task check` run at the working tree of `0.7.1-infra-waves-1-4`, 2026-08-21 (exit 0);
+the repository's `docs/status.md`; `AGENTS.md` § *Current state*; `CHANGELOG.md` §§ *0.7.0*,
+*0.7.1*; `git tag -n99`; document counts from `protocols/`, `principles/`, `workflows/`,
+`profiles/`, `artifacts/lifecycles/`.
