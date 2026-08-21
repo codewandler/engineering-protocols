@@ -53,15 +53,15 @@ stories, each carrying the evidence for its own row.
 
 **Every row here was found by writing a tree, not by reading the guide**, which is the fact that makes
 the list worth its space on this page: none of it was visible to the people who built the thing. The
-order of the rows is the adopter's own ranking by evidence density and not ours — horizons first
-because the corpus behind it is largest, the unambiguous bugs last because they are cheapest.
+order of the rows is the adopter's own ranking by evidence density and not ours. The ranked-first
+row — horizons, because the corpus behind it is largest — is **closed by code as of 2026-08-21**
+and has moved to its own section below; the unambiguous bugs sit last because they are cheapest.
 
 None of it is sequenced yet. Where a row says a wave, the wave does not exist; naming what closes a
 gap is this page's job, and scheduling it is the roadmap's.
 
 | gap | what closes it |
 |---|---|
-| **An admitted fact is timeless.** Nothing records when an observation was made or how long it is worth anything, so a green result from three weeks ago still permits a transition today. The adopter maintains a 145-claim dated corpus by hand for exactly this reason, built after one re-checking round found four claims that were true when written and false when read | `story:evidence-horizons` — a horizon on an evidence requirement, past which the fact decays to `Unknown` and never to `False`, so the failure mode is a refused transition rather than a wrong one. Ranked **first** by the adopter and first here. Owes a design note on where the horizon is declared and on the two inherited traps (a claim can be false inside its horizon; re-verifying re-dates and never extends). The general clock is `story:time-based-transitions`, and this row is explicitly allowed to land before it |
 | **Nothing models a claim leaving the boundary, and the status vocabulary could not hold one anyway.** All evidence flows inward; an assertion handed to a customer is near-irreversible and has no lifecycle here. `ArtifactStatus` is a closed ten-variant enum, so `correction-owed` — sent, known wrong, audience not yet told — has no rung and no near neighbour, and `expired`/`failed`/`blocked` all flatten onto rungs that mean something else | `story:outbound-claims-and-status-vocabulary`, the two as one story because either alone ships half a mechanism. Additive rather than a redesign: `cleared` is already an approval gate and an outbound communication is already a `production.write`-shaped act against a human system. Owes a decision of the shape **D-5** took for `EvidenceKind` — what stays closed and what guarantee the closure buys — with `evidence_kinds` staying closed on the adopter's own judgement that this one is correct |
 | **One enforcement level, and no tier that reports and counts.** A check is blocking or it is deleted; there is no state for *not ready to block yet*. Independently invented three times in the adopter's stack, and their advisory checks carry standing findings that would have been switched off within a day if they blocked. **This repository has the same tier in exactly one place** — the trace checker's `--advisory`, where the downgrade moves the exit code, the record names every downgraded id and `trace_conformance.passed` ignores the flag — and the protocol layer has none | `story:advisory-enforcement-tier`: an advisory tier whose declaration **requires an owner and an exit criterion**, refused at validation without them, because an advisory gate with no route back to blocking is a muted gate with better manners. Generalises the trace checker's precedent (see *Closed by code — transcript conformance, phase 2* below) instead of inventing a second shape. Two constraints ride along: a bypass must be cheap and loud, and a gate outside the versioned tree is not deployed |
 | **Evidence does not name its subject.** A fact observed of one thing can move another, which is not hypothetical: an e2e job held a legacy service while the deployment rolled its successor, and produced weeks of green about a component nobody was shipping. The approvals rule already refuses a record bound to the wrong revision; there is no analogue for the wrong subject | `story:evidence-subject-binding` — evidence names its subject and a guard refuses a fact whose subject is not the transition's, with both names printed. Same refusal as the revision rule over a different axis. **C3** (a test naming no revision of the environment it observed), **C4** (no determinism model for verifiers) and **C5** (a verifier's own coverage is not a fact) are the same family, are **not** taken by this round, and are named here so their absence is on the record rather than in the review |
@@ -71,6 +71,17 @@ gap is this page's job, and scheduling it is the roadmap's.
 | **Things the docs invite an adopter to declare keep turning out to be fixed in the engine.** Three instances in one afternoon — the closed status enum, a project directory name that is a compile-time constant, and a kind ladder defined over built-in variants only. The constraint on the fix is the other half of the finding: phases, verifiers, artifact kinds, capabilities and observables **were** open, and `evidence_kinds` is closed **correctly**, being the seam whose semantics are guaranteed | `story:open-vocabulary-audit`: one table over every adopter-facing declaration — open or closed, and for each closed one the guarantee the closure buys — with any closure that turns out to have no guarantee behind it owing a story or a recorded decision. The output is not *open everything*; it is that no vocabulary is closed by accident, and that the reason is written where an adopter reads it |
 | **Three unambiguous bugs, and the guide is wrong about one of them.** A lifecycle document that omits `kind:` is refused although the code documents and implements a fallback for exactly that; `parent()` is defined over built-in variants only, so custom kinds cannot share a ladder; and `docs/guide/adopting.md` implies project-local workflows while the project merge takes only principles and profiles | `story:adopter-bugs`, five defects with no design question, being fixed in `crates/` on the day the story was written and likely to complete immediately. Two things the fix owes beyond the code: A3's direction is a **decision** — widen the merge or state the vendoring rule, defaulting to stating it — and the A1×A2 interaction gets a **stated precedence**, `exact kind → parent chain nearest-ancestor-first → global fallback last`, documented on `for_kind` and in the lifecycle guidance and pinned by a disambiguation test, because the alternative is a rule that emerges from whichever lookup the code tries first |
 | **Common step behaviours are hand-written in every step map, and a dependency nobody here owns cannot be driven at all.** Not adopter feedback — the operator's, on top of the reference driver. Retry and circuit-break exist as prose in maps rather than as anything a test can exercise, and a workflow that touches a third party has no offline form | `story:reusable-workflow-nodes` under `epic:reference-driver`: typed step decorators validated before the run, and **a dependency declared as simulated against a named ESS specification** — machinery this repository already has and has never pointed at a step map (`ess conform` synthesises behaviour from a specification, the `external:` construct says an input cannot decide an outcome, and `--inject` breaks one property on purpose). Accepted when one `protocol drive` run exercises a retry and a spec-simulated external with no network, no credential and no third party — the dependency-seam analogue of what `story:shell-echo-harness` did for the model seam |
+
+| **A requirement that declares a horizon and no subject is revived by any fresh record of its kind.** `EvidenceRequirement::matches` (`crates/aep-domain/src/requirement.rs:243`) checks `subject` only when one is given, so a fresh run for an unrelated component restores a gate about this one. Inherited from the matcher, not introduced by the horizon work; recorded by its adversarial review as finding F26 (`docs/design/evidence-horizons-design-v0.1.md` § 4) | `story:evidence-subject-binding`, already in this table — this is that row's axis meeting the new clock: until evidence names its subject, freshness is per-kind. The stated mitigation until then: a requirement that must be about one subject says so |
+
+## Closed by code, 2026-08-21 — evidence horizons
+
+The adopter's ranked-first row, closed the day it was triaged. The gap as the open table carried it,
+and what closed it:
+
+| gap | closed by |
+|---|---|
+| **An admitted fact is timeless.** Nothing records when an observation was made or how long it is worth anything, so a green result from three weeks ago still permits a transition today. The adopter maintains a 145-claim dated corpus by hand for exactly this reason, built after one re-checking round found four claims that were true when written and false when read | `story:evidence-horizons`, **implemented** (revision 4). `observed_at` is required and is the identity of the fact; a future value is refused (`observation_in_future`). The `horizon` lives on the requirement and nowhere else — no API mutates one, asserted by a source scan over five crates (`crates/aep-domain/tests/horizon_immutability.rs`). Past it the fact decays to `Unknown`, never `False`, and a lapsed record's facts are withheld under the plan's strictest declared horizon for the kind, so a guard that reads facts refuses too. Re-submitting the identical record restores nothing; a new observation time does — asserted, not documented. Corpus: **42/42** annotations with divergence 0 on `examples/evidence-horizons-corpus/` (the adopter's reference finds 37 and `expected.json` names its misses), both deliberate negatives handled, both traps classify `ok` on purpose. Gate: `task check` exit 0, 141 suites, 2,201 tests. Design: `docs/design/evidence-horizons-design-v0.1.md`, corrected by adversarial review — 19 CONFIRMED, 15 NEEDS-CHANGE all applied, 3 INFEASIBLE resolved in-doc. Follow-ups it leaves are on the record: F26 is an open row above, D-6 and D-7 below |
 
 ## Closed by code, 2026-08-21 — harness wave 3, the reference driver
 
@@ -151,6 +162,24 @@ code, 2026-08-21 — transcript conformance, phase 2* above.
   own name, and `aep/1` already declares `evidence.**` (`protocols/aep/1.yaml:119`). The
   `trace_conformance.**` family belongs with the payload that projects facts into it, which is the
   open row above.
+
+### D-6 — an in-flight run from before `observed_at` cannot be restored, and says so
+
+An in-flight run directory written before `observed_at` existed cannot be restored:
+`crates/aep-driver/src/run.rs:212` persists a snapshot, and deserialization now fails with
+`missing field observed_at`. Decided, not overlooked — a record from before the field existed
+cannot say when it was observed, and inventing a time would be exactly the back-dating the field
+exists to refuse. The refusal names the field; the remedy is to start the run again. Design § 3.1,
+review finding F33. First casualty, same day: `W4-1/1`, the first governed dogfood run, blocked in
+`establish_verifiers` under the old engine — its `protocol drive resume` now refuses, its record
+stands, and the two reasons it blocked are unchanged by this.
+
+### D-7 — `evidence.missing == 0` reads `False` on a lapse; `evidence.lapsed` keeps the causes apart
+
+`evidence.missing` is a count, so `evidence.missing == 0` reads `False` on a lapse where the
+requirement reads `Unknown`. Pre-existing polarity of a count — it already reads `False` for a
+requirement nobody has met yet — not a breach of invariant 5. `evidence.lapsed` exists so the two
+causes stay distinguishable in a completion condition. Design § 5.4, review findings F21 and F38.
 
 ## Closed by decision, 2026-08-20
 

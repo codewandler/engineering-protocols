@@ -379,17 +379,27 @@ fn principle_evidence(execution: &Execution, principle: &Principle) -> Vec<Requi
     )
 }
 
-/// Checks that each verifier a principle requires has actually produced something.
+/// Checks that each verifier a principle requires has actually produced something **recently
+/// enough**.
 ///
 /// A verifier requirement is not about a fact being true; it is about *who established it*. A green
 /// suite that only an agent ever reported does not satisfy `verifier: test-runner`.
+///
+/// # And a verifier who spoke three weeks ago has not spoken about today
+///
+/// Without the liveness filter this check would answer *has anyone ever?* rather than *does anyone
+/// still say so?*, and it would be the one surface where a lapsed record still reads `True` — a
+/// hole under the requirement beside it that reads `?`. It uses
+/// [`Execution::has_lapsed`], which is the same rule the fact store applies, so a
+/// verification requirement and an evidence requirement cannot disagree about one record.
 fn principle_verification(execution: &Execution, principle: &Principle) -> Vec<Requirement> {
     principle
         .verification
         .iter()
         .map(|requirement| {
             let spoken = execution.recorded_evidence().iter().any(|recorded| {
-                produced_by(&recorded.record, &requirement.verifier)
+                !execution.has_lapsed(&recorded.record)
+                    && produced_by(&recorded.record, &requirement.verifier)
                     && requirement
                         .claim
                         .as_ref()

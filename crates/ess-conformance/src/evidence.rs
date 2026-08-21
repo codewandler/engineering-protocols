@@ -69,6 +69,7 @@
 //! produced the record, checked structurally; it is not a claim that the component proved who it was.
 
 use aep_domain::evidence::{EssConformanceResult, Evidence, Producer, Provenance};
+use aep_domain::time::ObservedAt;
 use aep_domain::verification::{VerificationStatus, Verifier};
 
 use crate::report::{ConformanceReport, ConformanceStatus, Status};
@@ -87,6 +88,13 @@ pub struct ConformanceEvidence {
     /// The observation, tagged `kind: ess_conformance`.
     #[serde(flatten)]
     evidence: Evidence,
+    /// When the run happened.
+    ///
+    /// The caller's, because this crate holds no clock and a report is not a moment. It is written
+    /// into the record because a conformance run is exactly the kind of observation that decays: an
+    /// implementation that satisfied a specification three weeks ago satisfies nothing today unless
+    /// somebody ran it again.
+    observed_at: ObservedAt,
     /// Who produced it: always [`Self::PRODUCER`].
     producer: Producer,
     /// How it was obtained. The caller may say which command it ran; it may not say who it is.
@@ -137,6 +145,11 @@ impl ConformanceEvidence {
         &self.provenance
     }
 
+    /// When the run happened.
+    pub fn observed_at(&self) -> ObservedAt {
+        self.observed_at
+    }
+
     /// Records the command that produced the record, builder-style.
     ///
     /// Provenance, not producership: a caller saying *how* it ran the suite adds to the record, and a
@@ -167,7 +180,7 @@ impl ConformanceReport {
     /// without it unable to demonstrate which revision produced it, and made the binding fail
     /// closed. It is carried straight from [`SuiteProvenance`](crate::scenario::SuiteProvenance),
     /// which took it from the compiled model, so there is no step at which it could be typed in.
-    pub fn to_evidence(&self) -> ConformanceEvidence {
+    pub fn to_evidence(&self, observed_at: ObservedAt) -> ConformanceEvidence {
         let result = EssConformanceResult {
             // `billing/v3`: the label a person reads. `spec_digest` is what identifies it.
             specification: format!("{}/{}", self.suite.system, self.suite.specification_version),
@@ -190,6 +203,7 @@ impl ConformanceReport {
         };
         ConformanceEvidence {
             evidence: Evidence::EssConformance(result),
+            observed_at,
             producer: ConformanceEvidence::PRODUCER,
             provenance: Provenance::default(),
         }
@@ -216,6 +230,7 @@ mod tests {
     use crate::scenario::{CommandRef, ScenarioId, SuiteFormat, SuiteProvenance};
     use crate::target::ImplementationIdentity;
     use aep_domain::evidence::SpecDigest;
+    use aep_domain::time::Timestamp;
     use ess_domain::command::OutcomeName;
     use ess_domain::name::QualifiedName;
 
@@ -301,7 +316,7 @@ mod tests {
             "accepted",
             Status::Passed,
         )])
-        .to_evidence();
+        .to_evidence(ObservedAt::new(Timestamp::EPOCH));
 
         let result = evidence.result();
         assert_eq!(
@@ -326,7 +341,7 @@ mod tests {
             "accepted",
             Status::Passed,
         )])
-        .to_evidence()
+        .to_evidence(ObservedAt::new(Timestamp::EPOCH))
         .obtained_by("protocol ess conform evidence --path examples/billing --target billing");
 
         assert_eq!(evidence.producer(), &ConformanceEvidence::PRODUCER);
@@ -364,20 +379,33 @@ mod tests {
         assert_eq!(errored.status, ConformanceStatus::Error);
 
         assert_eq!(
-            passed.to_evidence().result().status,
+            passed
+                .to_evidence(ObservedAt::new(Timestamp::EPOCH))
+                .result()
+                .status,
             VerificationStatus::Passed
         );
         assert_eq!(
-            failed.to_evidence().result().status,
+            failed
+                .to_evidence(ObservedAt::new(Timestamp::EPOCH))
+                .result()
+                .status,
             VerificationStatus::Failed
         );
         assert_eq!(
-            errored.to_evidence().result().status,
+            errored
+                .to_evidence(ObservedAt::new(Timestamp::EPOCH))
+                .result()
+                .status,
             VerificationStatus::Inconclusive,
             "a run that could not be carried out is not a run that found a contradiction"
         );
         assert!(
-            !errored.to_evidence().result().status.is_pass(),
+            !errored
+                .to_evidence(ObservedAt::new(Timestamp::EPOCH))
+                .result()
+                .status
+                .is_pass(),
             "and it is still not a pass"
         );
     }
@@ -392,7 +420,7 @@ mod tests {
             scenario("billing.invoice.CreateInvoice", "accepted", Status::Passed),
             scenario("billing.invoice.PayInvoice", "settled", Status::Unsupported),
         ])
-        .to_evidence();
+        .to_evidence(ObservedAt::new(Timestamp::EPOCH));
 
         let result = evidence.result();
         assert_eq!(result.status, VerificationStatus::Failed);
@@ -415,7 +443,7 @@ mod tests {
             scenario("billing.invoice.CreateInvoice", "accepted", Status::Passed),
             scenario("billing.invoice.CreateInvoice", "rejected", Status::Failed),
         ])
-        .to_evidence();
+        .to_evidence(ObservedAt::new(Timestamp::EPOCH));
 
         let facts: std::collections::BTreeMap<String, String> = evidence
             .evidence()
@@ -451,7 +479,7 @@ mod tests {
             "accepted",
             Status::Passed,
         )])
-        .to_evidence()
+        .to_evidence(ObservedAt::new(Timestamp::EPOCH))
         .obtained_by("protocol ess conform evidence");
 
         let json = serde_json::to_value(&record).expect("an evidence record serialises");

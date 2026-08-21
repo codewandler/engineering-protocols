@@ -29,7 +29,7 @@ use crate::error::ParseError;
 use crate::facts::{FactPath, FactValue, Number};
 use crate::ids::{ApprovalId, ClaimId, EvidenceId, ServiceId, SubjectRef, ToolRef};
 use crate::review::ReviewResult;
-use crate::time::Timestamp;
+use crate::time::{ObservedAt, Timestamp};
 use crate::verification::{Counterexample, Seed, VerificationStatus, Verifier};
 
 /// Which body of tests was run.
@@ -1912,7 +1912,17 @@ impl Evidence {
 pub struct EvidenceEnvelope<T> {
     /// Its identifier.
     pub id: EvidenceId,
-    /// When it was produced.
+    /// When somebody looked.
+    ///
+    /// The caller's, and required. See [`ObservedAt`] for why it is a type of its own and why a
+    /// future value is a refusal rather than a fresh record.
+    pub observed_at: ObservedAt,
+    /// When the record entered the log.
+    ///
+    /// The engine's. It says when this was *submitted*, which is a fact about the log and not about
+    /// the world — a suite run three weeks ago and recorded this morning has a `produced_at` of
+    /// minutes ago and an [`observed_at`](Self::observed_at) of three weeks. Nothing about a
+    /// horizon reads this field.
     pub produced_at: Timestamp,
     /// What produced it.
     pub producer: Producer,
@@ -1933,9 +1943,20 @@ fn is_default_provenance(provenance: &Provenance) -> bool {
 
 impl<T> EvidenceEnvelope<T> {
     /// Wraps a value with the minimum metadata.
-    pub fn new(id: EvidenceId, produced_at: Timestamp, producer: Producer, value: T) -> Self {
+    ///
+    /// Both times are required and neither defaults to the other: an observation time the API can
+    /// infer is an observation time some caller will let it infer, and the inference would be the
+    /// one-field convention this type exists to split.
+    pub fn new(
+        id: EvidenceId,
+        observed_at: ObservedAt,
+        produced_at: Timestamp,
+        producer: Producer,
+        value: T,
+    ) -> Self {
         Self {
             id,
+            observed_at,
             produced_at,
             producer,
             subject: None,

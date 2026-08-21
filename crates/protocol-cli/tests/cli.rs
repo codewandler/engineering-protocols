@@ -2173,6 +2173,12 @@ fn the_committed_conformance_evidence_is_what_the_runner_produces_and_not_what_s
             SPECIFICATION,
             "--target",
             "billing",
+            // Pinned, because the record now states when the run happened and a wall clock cannot
+            // be compared byte for byte. This is the one legitimate use of the flag: regenerating a
+            // committed document. Every other caller gets `now`, which for a verb that runs the
+            // suite itself is the truth.
+            "--observed-at",
+            "2023-11-14",
         ];
         if let Some(fault) = fault {
             args.push("--inject");
@@ -3903,6 +3909,175 @@ fn infra_project_leaves_a_file_it_did_not_write_alone_and_says_so() {
     assert!(
         stderr(&output).contains("patches/hand-written.json"),
         "and the command said so:\n{}",
+        stderr(&output)
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// `protocol evidence` — the observation surface. A green result from three weeks ago is not a fact.
+// ---------------------------------------------------------------------------------------------
+
+/// The vendored corpus, whose expectations are the regression target for the scanner.
+const CORPUS: &str = "examples/evidence-horizons-corpus/corpus";
+
+/// The corpus's own reference date, warning window and record count.
+const REFERENCE_DATE: &str = "2026-09-01";
+
+#[test]
+fn the_scan_finds_every_annotation_the_corpus_holds_and_says_so_in_one_line() {
+    // 42 raw occurrences, 42 records, zero unparsed. The reference implementation the fixture's
+    // expectations were generated from finds 37 and `expected.json` names the five it misses, so
+    // this number is the conformance target rather than a reproduction of the baseline.
+    let output = protocol(&[
+        "evidence",
+        "scan",
+        CORPUS,
+        "--at",
+        REFERENCE_DATE,
+        "--warn-days",
+        "2",
+        "--strict",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(
+        report.contains("42 occurrence(s), 42 record(s), 0 unparsed"),
+        "the coverage line is the point of the verb: {report}"
+    );
+    assert!(
+        report.contains("16 ok, 17 expiring, 9 expired, 8 malformed"),
+        "the classification, at the corpus's own reference date: {report}"
+    );
+}
+
+#[test]
+fn a_scan_that_is_blind_to_an_annotation_fails_strict_and_says_which_file() {
+    // The guard verified by breaking it: a document with an annotation this parser refuses would
+    // report a divergence. The hyphen separator is the corpus's deliberate negative — it is not an
+    // annotation and is not counted, so a file of them diverges by zero and `--strict` passes.
+    let directory = scratch("protocol-cli-evidence-scan");
+    let file = directory.join("notes.md");
+    write(
+        &file,
+        "Verify: 2026-08-30 - a hyphen is not an annotation. (horizon: 7d)\n",
+    );
+    let output = protocol(&[
+        "evidence",
+        "scan",
+        printable(&file),
+        "--at",
+        REFERENCE_DATE,
+        "--strict",
+    ]);
+    assert_eq!(
+        code(&output),
+        0,
+        "a deliberate near-miss is not a coverage gap: {}",
+        stdout(&output)
+    );
+    assert!(
+        stdout(&output).contains("0 occurrence(s), 0 record(s), 0 unparsed"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
+fn an_expired_claim_fails_only_the_flag_that_exists_to_judge_it() {
+    // Two flags, two questions: `--strict` asks whether the gate is blind, `--fail-on-expired`
+    // whether a claim is stale. The corpus deliberately carries nine expired records, so a verb
+    // that conflated them could never be run over it as a pass condition.
+    let strict = protocol(&[
+        "evidence",
+        "scan",
+        CORPUS,
+        "--at",
+        REFERENCE_DATE,
+        "--warn-days",
+        "2",
+        "--strict",
+    ]);
+    assert_eq!(code(&strict), 0, "coverage is complete");
+
+    let stale = protocol(&[
+        "evidence",
+        "scan",
+        CORPUS,
+        "--at",
+        REFERENCE_DATE,
+        "--warn-days",
+        "2",
+        "--fail-on-expired",
+    ]);
+    assert_eq!(code(&stale), 1, "and nine claims are past their horizon");
+}
+
+#[test]
+fn inspect_reports_when_each_submitted_record_was_observed() {
+    let output = protocol(&[
+        "evidence",
+        "inspect",
+        "examples/development-passkeys/evidence/03-verification.yaml",
+        "--at",
+        "2023-11-20",
+        "--horizon",
+        "7d",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    let records: serde_json::Value =
+        serde_json::from_str(&stdout(&output)).expect("the report is JSON");
+    let records = records.as_array().expect("a list of records");
+    assert_eq!(records.len(), 6, "the document holds six records");
+    assert_eq!(records[0]["observed_at"], "2023-11-13");
+    assert_eq!(records[0]["age_days"], 7);
+    assert_eq!(
+        records[0]["state"], "ok",
+        "seven days old against a seven-day horizon is the boundary, and the boundary is not expired"
+    );
+}
+
+#[test]
+fn inspect_refuses_an_observation_that_has_not_happened_yet() {
+    // The same one comparison the engine applies at submission, available before anything is
+    // submitted. A scheduled re-check stored as a performed one is the freshest record in the log.
+    let directory = scratch("protocol-cli-evidence-inspect");
+    let file = directory.join("scheduled.yaml");
+    write(
+        &file,
+        "- kind: test_result\n  observed_at: 2026-12-24\n  suite: unit\n  passed: 12\n  failed: 0\n  producer:\n    producer: verifier\n    verifier: test-runner\n",
+    );
+    let output = protocol(&[
+        "evidence",
+        "inspect",
+        printable(&file),
+        "--at",
+        REFERENCE_DATE,
+    ]);
+    assert_eq!(code(&output), 1, "a planned check is not an observation");
+    assert!(
+        stderr(&output).contains("has not happened yet"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn an_evidence_document_without_an_observation_time_is_refused_by_name() {
+    // The field is required, and the refusal has to say which field — a harness author who omits it
+    // is the person the rule exists for, and "invalid document" would send them reading YAML.
+    let directory = scratch("protocol-cli-evidence-undated");
+    let file = directory.join("undated.yaml");
+    write(
+        &file,
+        "- kind: test_result\n  suite: unit\n  passed: 12\n  failed: 0\n  producer:\n    producer: verifier\n    verifier: test-runner\n",
+    );
+    let output = protocol(&["evidence", "inspect", printable(&file)]);
+    assert_eq!(code(&output), 1, "{}", stdout(&output));
+    assert!(
+        stderr(&output).contains("observed_at"),
+        "the refusal names the field: {}",
         stderr(&output)
     );
 }

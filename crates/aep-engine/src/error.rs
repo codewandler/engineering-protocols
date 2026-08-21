@@ -41,6 +41,21 @@ pub enum ProtocolError {
         declared: String,
     },
 
+    /// Evidence was submitted claiming an observation that has not happened yet.
+    ///
+    /// One comparison, and it is the cheapest guard in the engine. A planned re-check is a
+    /// different object from a decaying observation, and storing the first as the second makes it
+    /// the *freshest* record in the log — a negative age inflates the remaining horizon, and the
+    /// store can no longer answer whether anybody has ever looked. Refusing it is what makes the
+    /// conflation unwritable rather than merely discouraged.
+    #[error("the observation time {observed_at} is in the future; it is {now}")]
+    ObservationInFuture {
+        /// What the submission claimed.
+        observed_at: aep_domain::time::ObservedAt,
+        /// What the engine's clock says.
+        now: aep_domain::time::Timestamp,
+    },
+
     /// No transition out of the current state is permitted.
     #[error("no transition out of `{state}` is permitted: {}", reasons.join("; "))]
     NoTransitionPermitted {
@@ -65,6 +80,7 @@ impl ProtocolError {
             Self::Resolution(_) => "resolution_failed",
             Self::UnknownState { .. } => "unknown_state",
             Self::EvidenceRejected { .. } => "evidence_rejected",
+            Self::ObservationInFuture { .. } => "observation_in_future",
             Self::NoTransitionPermitted { .. } => "no_transition_permitted",
             Self::AlreadyComplete { .. } => "already_complete",
         }

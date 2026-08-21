@@ -33,6 +33,7 @@ use aep_domain::ids::{EvidenceId, ExecutionId, StateId};
 use aep_domain::plan::ExecutionPlan;
 use aep_domain::predicate::Truth;
 use aep_domain::requirement::{EvidenceRequirement, RequirementContext, RequirementSet};
+use aep_domain::time::Horizon;
 use aep_domain::time::Timestamp;
 use aep_domain::workflow::State;
 
@@ -93,6 +94,7 @@ pub struct Execution {
     facts: FactStore,
     records: Vec<EvidenceRecord>,
     evidence_entities: std::collections::BTreeMap<EvidenceId, EntityRef>,
+    evaluated_at: Option<Timestamp>,
 }
 
 impl Execution {
@@ -112,6 +114,7 @@ impl Execution {
             facts: FactStore::new(),
             records: Vec::new(),
             evidence_entities: std::collections::BTreeMap::new(),
+            evaluated_at: None,
         };
         execution.refresh_facts();
         execution
@@ -287,9 +290,49 @@ impl Execution {
             facts: FactStore::new(),
             records: Vec::new(),
             evidence_entities: std::collections::BTreeMap::new(),
+            // Deliberately not restored from the snapshot, and the snapshot deliberately does not
+            // carry it: a snapshot that held the instant it was taken at would restore a green
+            // verdict with a shelf life of forever. The restoring engine reads its own clock, so an
+            // execution snapshotted while a 3d requirement was satisfied and restored six days
+            // later evaluates to `Unknown` — from the same bytes.
+            evaluated_at: None,
         };
         execution.refresh_facts();
         Ok(execution)
+    }
+
+    /// Records the instant this execution is being read at, and re-derives everything that depends
+    /// on it.
+    ///
+    /// The engine calls this at every entry point that holds `&mut` — initialising, restoring,
+    /// submitting evidence and transitioning — so that a horizon is decided against a clock the
+    /// engine read, never against a wall clock the domain reached for (invariant 8).
+    ///
+    /// # One instant, two readers
+    ///
+    /// `evidence.missing` is a *fact*, derived here, and it guards real transitions
+    /// (`workflows/development/default.yaml:134`). Requirement evaluation reads the same field
+    /// through [`RequirementContext::now`]. Storing one instant rather than passing two is what
+    /// keeps a document saying `evidence.missing == 0` from passing while the evaluation beside it
+    /// reads `?` — the failure [`crate::evaluate`] exists to prevent, where a harness and a human
+    /// are told different things from the same data.
+    ///
+    /// # Why not read the clock inside `evaluate`
+    ///
+    /// Because `evaluate` takes `&Execution`, by a published trait, in three crates. Threading an
+    /// instant through it would break every caller to buy sub-second accuracy in a value measured
+    /// in days. The cost is stated instead: an execution nothing has touched since the last engine
+    /// call is evaluated as of that call, so a process that holds one open for a week and never
+    /// transitions sees a frozen clock. Every mutation re-reads it, and a transition is a mutation,
+    /// so no gate can be passed on a stale instant.
+    pub fn observe_at(&mut self, now: Timestamp) {
+        self.evaluated_at = Some(now);
+        self.refresh_facts();
+    }
+
+    /// The instant this execution was last read at, when an engine has read one.
+    pub fn evaluated_at(&self) -> Option<Timestamp> {
+        self.evaluated_at
     }
 
     /// Rebuilds the fact store from the plan, the artifact graph, the evidence log and the engine's
@@ -307,6 +350,9 @@ impl Execution {
         let mut observed = self.plan.facts.clone();
         observed.extend(self.artifacts.facts());
         for recorded in &self.evidence {
+            if self.has_lapsed(&recorded.record) {
+                continue;
+            }
             observed.extend_facts(recorded.record.facts());
         }
         observed.set_scales(self.plan.protocol.scales.clone());
@@ -316,6 +362,89 @@ impl Execution {
             facts.set(path, value);
         }
         self.facts = facts;
+    }
+
+    /// The strictest horizon this plan declares for `kind`, anywhere.
+    ///
+    /// A horizon is declared on a *requirement*, and a fact is not a requirement — so the question
+    /// *how long is an observation of this kind worth something?* is answered by the plan as a
+    /// whole, and the strictest answer wins. Two requirements over one deployment record, one at 3d
+    /// and one at 30d, mean the record's facts stand for three days: the shorter is the one
+    /// somebody wrote down because they knew how fast the subject moves.
+    ///
+    /// # Why facts decay at all, when the horizon is on the requirement
+    ///
+    /// Because a transition's guard reads facts, not requirements — [`crate::evaluate`] calls
+    /// `transition.when.outcome(execution.fact_store())`. Without this, a workflow guarded on
+    /// `deployment.status == succeeded` would still fire on a deployment nobody has looked at
+    /// since: the requirement beside it would read `?` and the guard would wave it through, which
+    /// is exactly the transition that must be refused.
+    ///
+    /// A withheld fact is *absent*, and an absent fact evaluates to
+    /// [`Truth::Unknown`](aep_domain::predicate::Truth::Unknown) — never `False`. The polarity is
+    /// the design: the gate refuses because nobody knows, not because something failed.
+    fn strictest_horizon(&self, kind: EvidenceKind) -> Option<Horizon> {
+        let mut strictest: Option<Horizon> = None;
+        let mut narrow = |requirement: &EvidenceRequirement| {
+            if requirement.kind != kind {
+                return;
+            }
+            if let Some(horizon) = requirement.horizon {
+                strictest = Some(match strictest {
+                    Some(current) if current <= horizon => current,
+                    _ => horizon,
+                });
+            }
+        };
+        let mut consider = |requirements: &RequirementSet| {
+            for requirement in requirements.evidence.iter().chain(
+                requirements
+                    .conditional
+                    .iter()
+                    .flat_map(|conditional| conditional.require.evidence.iter()),
+            ) {
+                narrow(requirement);
+            }
+        };
+
+        for obligation in &self.plan.obligations {
+            consider(&obligation.requires);
+        }
+        consider(&self.plan.completion);
+        for principle in &self.plan.principles {
+            for requirement in &principle.evidence {
+                consider(&RequirementSet {
+                    evidence: vec![requirement.clone()],
+                    ..RequirementSet::empty()
+                });
+            }
+        }
+        for state in self.plan.workflow.states.values() {
+            consider(&state.requires);
+        }
+        for transition in &self.plan.workflow.transitions {
+            consider(&transition.requires);
+        }
+        strictest
+    }
+
+    /// Whether this record no longer stands, under the strictest horizon the plan declares for its
+    /// kind.
+    ///
+    /// Public because it is the same question two callers ask about one record: this module
+    /// withholds a lapsed record's facts, and [`crate::evaluate`]'s verifier check must not accept
+    /// a lapsed record as *somebody spoke*. Two answers to one question is how a fact and an
+    /// outcome come to disagree, so there is one.
+    ///
+    /// Fails closed twice, exactly as requirement evaluation does: no declared horizon means no
+    /// decay at all, and a declared horizon with no clock means the record cannot be shown to still
+    /// stand.
+    pub fn has_lapsed(&self, record: &EvidenceRecord) -> bool {
+        let Some(horizon) = self.strictest_horizon(record.kind()) else {
+            return false;
+        };
+        self.evaluated_at
+            .is_none_or(|now| !horizon.covers(record.observed_at.timestamp(), now))
     }
 
     /// The facts only the engine can know, computed against the observed ones.
@@ -387,6 +516,20 @@ impl Execution {
             .count();
         facts.push((path(&["approvals", "granted"]), FactValue::count(granted)));
 
+        // A count of its own, beside `evidence.missing`, because the two say different things and
+        // a reader has to be able to tell them apart: `missing` means nobody produced it, `lapsed`
+        // means somebody did and nobody has looked since. Collapsed into one number, a stale gate
+        // is indistinguishable from an empty one on the surface an operator actually reads.
+        facts.push((
+            path(&["evidence", "lapsed"]),
+            FactValue::count(
+                self.evidence
+                    .iter()
+                    .filter(|recorded| self.has_lapsed(&recorded.record))
+                    .count(),
+            ),
+        ));
+
         let missing = self.count_missing_evidence(observed);
         facts.push((path(&["evidence", "missing"]), FactValue::count(missing)));
         facts.push((
@@ -444,12 +587,34 @@ impl Execution {
         missing
     }
 
-    /// `true` when enough matching evidence has been submitted.
+    /// `true` when enough matching evidence has been submitted **and still stands**.
+    ///
+    /// The horizon filter is here as well as in
+    /// [`EvidenceRequirement`](aep_domain::requirement::EvidenceRequirement)'s own evaluation
+    /// because this is a second implementation of the same question, and it feeds
+    /// `evidence.missing`. Without it, a document guarded on `evidence.missing == 0` would keep
+    /// passing while the evaluation beside it reported `?`, and the engine would be telling a
+    /// predicate and a person two different things about one record.
+    ///
+    /// The two are *consistent*, not equal, and the difference is worth stating: this produces a
+    /// count and the evaluation produces a truth value. `evidence.missing` counts a lapsed
+    /// requirement as missing, so `evidence.missing == 0` reads `False` where the requirement
+    /// reads `Unknown`. That is the pre-existing polarity of a count — it reads `False` for a
+    /// requirement nobody has met yet, too — and `evidence.lapsed` exists so the two causes are
+    /// distinguishable rather than merged.
     fn satisfies_evidence(&self, requirement: &EvidenceRequirement) -> bool {
         let matching = self
             .records
             .iter()
             .filter(|record| requirement.matches(record))
+            .filter(|record| match requirement.horizon {
+                None => true,
+                // No clock, no claim: the same failing-closed rule the requirement applies, so the
+                // fact and the outcome cannot disagree about a horizon nobody can check.
+                Some(horizon) => self
+                    .evaluated_at
+                    .is_some_and(|now| horizon.covers(record.observed_at.timestamp(), now)),
+            })
             .count();
         matching >= requirement.at_least
     }
@@ -467,6 +632,10 @@ impl RequirementContext for Execution {
     fn evidence(&self) -> &[EvidenceRecord] {
         &self.records
     }
+
+    fn now(&self) -> Option<Timestamp> {
+        self.evaluated_at
+    }
 }
 
 #[cfg(test)]
@@ -479,6 +648,7 @@ mod tests {
     };
     use aep_domain::facts::FactPath;
     use aep_domain::ids::EvidenceId;
+    use aep_domain::time::ObservedAt;
     use aep_domain::verification::Verifier;
 
     fn execution() -> Execution {
@@ -494,6 +664,7 @@ mod tests {
     fn record(ordinal: usize, producer: Producer, evidence: Evidence) -> EvidenceRecord {
         EvidenceRecord::new(
             EvidenceId::new(format!("e{ordinal}")).expect("id"),
+            ObservedAt::new(Timestamp::from_epoch_millis(ordinal as u64)),
             Timestamp::from_epoch_millis(ordinal as u64),
             producer,
             evidence,

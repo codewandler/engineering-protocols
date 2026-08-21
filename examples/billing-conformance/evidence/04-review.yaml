@@ -1,6 +1,7 @@
 # A human approval of version 3 of the design, which is the version the manifest holds — so unlike
 # the passkeys example this one is fresh, and `development.critical`'s `fresh: true` is satisfied.
 - kind: review
+  observed_at: 2023-11-10
   subject: design:billing-invoicing
   subject_kind: design
   reviewer:

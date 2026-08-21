@@ -3,6 +3,7 @@
 # that the invariants hold for inputs nobody wrote a case for, and that the contracts on each
 # operation were checked. Each is a claim id from the shared vocabulary, not a new one.
 - kind: verification
+  observed_at: 2023-11-13
   claim: mutation
   verifier: mutation-runner
   status: passed
@@ -11,6 +12,7 @@
     verifier: mutation-runner
 
 - kind: verification
+  observed_at: 2023-11-13
   claim: differential
   verifier: differential-runner
   status: passed
@@ -19,6 +21,7 @@
     verifier: differential-runner
 
 - kind: verification
+  observed_at: 2023-11-13
   claim: invariant
   verifier: model-checker
   status: passed
@@ -27,6 +30,7 @@
     verifier: model-checker
 
 - kind: verification
+  observed_at: 2023-11-13
   claim: precondition
   verifier: model-checker
   status: passed
@@ -35,6 +39,7 @@
     verifier: model-checker
 
 - kind: verification
+  observed_at: 2023-11-13
   claim: postcondition
   verifier: model-checker
   status: passed
@@ -43,6 +48,7 @@
     verifier: model-checker
 
 - kind: verification
+  observed_at: 2023-11-13
   claim: provenance
   verifier: policy-engine
   status: passed

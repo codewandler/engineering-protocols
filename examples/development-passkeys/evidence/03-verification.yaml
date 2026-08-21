@@ -1,6 +1,7 @@
 # What the verifiers found. Every record here comes from something other than the agent that wrote
 # the code, which is what the `independent: true` requirements in the profile's principles demand.
 - kind: test_result
+  observed_at: 2023-11-13
   suite: unit
   passed: 34
   failed: 0
@@ -9,6 +10,7 @@
     verifier: test-runner
 
 - kind: test_result
+  observed_at: 2023-11-13
   suite: regression
   passed: 812
   failed: 0
@@ -17,6 +19,7 @@
     verifier: test-runner
 
 - kind: contract_result
+  observed_at: 2023-11-13
   checked: 4
   failed: 0
   breaking_changes: 0
@@ -25,6 +28,7 @@
     verifier: contract-runner
 
 - kind: static_analysis
+  observed_at: 2023-11-13
   errors: 0
   warnings: 3
   producer:
@@ -32,6 +36,7 @@
     verifier: static-analyzer
 
 - kind: property_test_result
+  observed_at: 2023-11-13
   property: session-isolation
   cases: 10000
   seed: "0x5f3a91c2"
@@ -41,6 +46,7 @@
     verifier: property-tester
 
 - kind: specification
+  observed_at: 2023-11-13
   artifact: spec:passkeys-auth
   satisfied: true
   requirements_total: 4

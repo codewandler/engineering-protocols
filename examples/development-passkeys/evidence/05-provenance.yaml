@@ -2,6 +2,7 @@
 # agent, that the change is the one described. Without it `evidence.missing` never reaches zero and
 # the work cannot leave adversarial verification — which is the principle doing its job.
 - kind: verification
+  observed_at: 2023-11-13
   claim: provenance
   verifier: policy-engine
   status: passed

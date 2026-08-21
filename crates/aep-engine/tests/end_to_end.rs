@@ -17,6 +17,7 @@ use aep_domain::evidence::{
 use aep_domain::facts::FactSource;
 use aep_domain::review::{ReviewDisposition, ReviewResult, Reviewer};
 use aep_domain::task::Task;
+use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::{Seed, VerificationStatus, Verifier};
 use aep_engine::engine::{EvidenceSubmission, ProtocolEngine, TransitionResult};
 use aep_engine::{load_tree, Engine, FixedClock, Registry};
@@ -76,17 +77,25 @@ fn engine() -> Engine<FixedClock> {
     Engine::with_clock(registry(), FixedClock::new(1_700_000_000_000))
 }
 
+/// When every fixture submission says it looked.
+///
+/// A minute before the fixed clock these tests run on, so it is always in the past — a submission
+/// claiming a future observation is refused, and that rule has its own test rather than being a
+/// trap laid under every other one.
+const OBSERVED: ObservedAt = ObservedAt::new(Timestamp::from_epoch_millis(1_699_999_940_000));
+
 fn by_runner(evidence: Evidence) -> EvidenceSubmission {
     EvidenceSubmission::new(
         evidence,
         Producer::Verifier {
             verifier: Verifier::TestRunner,
         },
+        OBSERVED,
     )
 }
 
 fn by_verifier(evidence: Evidence, verifier: Verifier) -> EvidenceSubmission {
-    EvidenceSubmission::new(evidence, Producer::Verifier { verifier })
+    EvidenceSubmission::new(evidence, Producer::Verifier { verifier }, OBSERVED)
 }
 
 fn by_agent(evidence: Evidence) -> EvidenceSubmission {
@@ -95,6 +104,7 @@ fn by_agent(evidence: Evidence) -> EvidenceSubmission {
         Producer::Agent {
             id: "opus-5".to_owned(),
         },
+        OBSERVED,
     )
 }
 
@@ -172,7 +182,8 @@ fn the_example_walks_to_completion_on_its_own_evidence() {
         let inputs = aep_schema::parse::evidence_list(&text, Some(&file.display().to_string()))
             .unwrap_or_else(|error| panic!("{} is not valid evidence: {error}", file.display()));
         for input in inputs {
-            let mut submission = EvidenceSubmission::new(input.evidence, input.producer);
+            let mut submission =
+                EvidenceSubmission::new(input.evidence, input.producer, input.observed_at);
             submission.subject = input.about;
             if let Some(provenance) = input.provenance {
                 submission.provenance = provenance;
@@ -230,7 +241,8 @@ fn a_conditional_requirement_that_does_not_apply_is_not_counted_as_missing() {
     ] {
         let text = fs::read_to_string(example(file)).expect("readable");
         for input in aep_schema::parse::evidence_list(&text, None).expect("valid") {
-            let mut submission = EvidenceSubmission::new(input.evidence, input.producer);
+            let mut submission =
+                EvidenceSubmission::new(input.evidence, input.producer, input.observed_at);
             submission.subject = input.about;
             engine
                 .submit_evidence(&mut execution, submission)
@@ -818,6 +830,7 @@ fn an_approval_of_design_version_three_does_not_cover_version_seven() {
                 Producer::Human {
                     id: "ada".to_owned(),
                 },
+                OBSERVED,
             ),
         )
         .expect("recorded");
@@ -863,6 +876,7 @@ fn an_approval_of_design_version_three_does_not_cover_version_seven() {
                 Producer::Human {
                     id: "ada".to_owned(),
                 },
+                OBSERVED,
             ),
         )
         .expect("recorded");
@@ -1031,7 +1045,8 @@ fn submit_file(engine: &Engine<FixedClock>, execution: &mut aep_engine::Executio
     let inputs = aep_schema::parse::evidence_list(&text, Some(&path.display().to_string()))
         .unwrap_or_else(|error| panic!("{} is not valid evidence: {error}", path.display()));
     for input in inputs {
-        let mut submission = EvidenceSubmission::new(input.evidence, input.producer);
+        let mut submission =
+            EvidenceSubmission::new(input.evidence, input.producer, input.observed_at);
         submission.subject = input.about;
         if let Some(provenance) = input.provenance {
             submission.provenance = provenance;

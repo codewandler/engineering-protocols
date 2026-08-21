@@ -68,6 +68,13 @@ fn printable(path: &Path) -> &str {
 ///
 /// One evidence record, so `--run` has an evidence count to draw and an empty table would not pass
 /// for a working one.
+///
+/// It carries **two** times, and the fixture is written out rather than generated so that the
+/// difference is visible: `produced_at` is when the record entered the log and `observed_at` is when
+/// somebody looked. A snapshot written before the second field existed does not deserialize, and the
+/// refusal names the field — which is the correct outcome, because a record from before the field
+/// existed cannot say when it was observed and inventing a time for it is the defect the field
+/// exists to remove.
 const SNAPSHOT: &str = r#"{
   "execution": "AUTH-142.1",
   "task": "AUTH-142",
@@ -77,6 +84,7 @@ const SNAPSHOT: &str = r#"{
     {
       "record": {
         "id": "ev-0001",
+        "observed_at": 0,
         "produced_at": 0,
         "producer": { "producer": "verifier", "verifier": "test-runner" },
         "value": { "kind": "test_result", "suite": "unit", "passed": 34, "failed": 2 }

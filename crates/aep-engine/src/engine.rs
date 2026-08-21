@@ -31,6 +31,7 @@ use aep_domain::evidence::{
 };
 use aep_domain::ids::{EvidenceId, ExecutionId, StateId, SubjectRef};
 use aep_domain::task::Task;
+use aep_domain::time::ObservedAt;
 use aep_domain::verification::VerificationStatus;
 
 use crate::clock::{Clock, SystemClock};
@@ -42,14 +43,24 @@ use crate::policy::{authorize, effective_policy, Decision};
 use crate::registry::Registry;
 use crate::resolve::resolve;
 
-/// Evidence as a harness submits it: the observation, who produced it, and how.
+/// Evidence as a harness submits it: the observation, when it was made, who produced it, and how.
 ///
-/// The engine assigns the identifier and the timestamp. A caller cannot backdate evidence or reuse
-/// an id, which is the least that has to be true for the log to be worth reading.
+/// The engine assigns the identifier and the **log** timestamp. A caller cannot reuse an id or
+/// backdate the record's arrival, which is the least that has to be true for the log to be worth
+/// reading.
+///
+/// The **observation** time is the caller's, because the caller is the only party that knows it —
+/// and it is required, not defaulted. A suite that ran three weeks ago and is recorded this
+/// morning is three weeks old; the alternative, inferring the observation time from the submission
+/// time, is the single-field convention that classifies a stale reading as the freshest record
+/// there is. A value in the future is refused outright:
+/// [`ProtocolError::ObservationInFuture`].
 #[derive(Debug, Clone)]
 pub struct EvidenceSubmission {
     /// The observation.
     pub evidence: Evidence,
+    /// When the observation was made.
+    pub observed_at: ObservedAt,
     /// What produced it.
     pub producer: Producer,
     /// What it is about.
@@ -66,9 +77,13 @@ pub struct EvidenceSubmission {
 
 impl EvidenceSubmission {
     /// A submission with no provenance beyond its producer.
-    pub fn new(evidence: Evidence, producer: Producer) -> Self {
+    ///
+    /// `observed_at` has no default on purpose: a caller who has to write down when they looked is
+    /// a caller who cannot accidentally claim they looked just now.
+    pub fn new(evidence: Evidence, producer: Producer, observed_at: ObservedAt) -> Self {
         Self {
             evidence,
+            observed_at,
             producer,
             subject: None,
             provenance: Provenance::default(),
@@ -214,6 +229,7 @@ impl<C: Clock> Engine<C> {
 
         let mut execution = Execution::new(id, plan, artifacts);
         let now = self.clock.now();
+        execution.observe_at(now);
         let task_id = execution.plan().task.id.clone();
         let kind = execution.plan().task.kind.clone();
         execution.emit(
@@ -255,7 +271,12 @@ impl<C: Clock> Engine<C> {
     ) -> Result<Execution, ProtocolError> {
         let plan = resolve(&task, &self.registry)?;
         drop(task);
-        Execution::restore(plan, artifacts, snapshot)
+        let mut execution = Execution::restore(plan, artifacts, snapshot)?;
+        // The restoring engine's clock, never the snapshotting one's: a horizon is re-decided
+        // against the present, which is what stops a restored snapshot from carrying a verdict
+        // that was true when it was taken.
+        execution.observe_at(self.clock.now());
+        Ok(execution)
     }
 
     /// Explains why an action was allowed or refused.
@@ -332,13 +353,25 @@ impl<C: Clock> ProtocolEngine for Engine<C> {
             });
         }
 
+        let now = self.clock.now();
+        // One comparison, and it is the whole gate. A planned re-check is a different object from a
+        // decaying observation: stored as one, it reads as the freshest record in the log — a
+        // negative age inflates the remaining horizon — and the model can no longer answer *has
+        // anyone ever looked at this?*.
+        if submission.observed_at.is_after(now) {
+            return Err(ProtocolError::ObservationInFuture {
+                observed_at: submission.observed_at,
+                now,
+            });
+        }
+
         let ordinal = execution.recorded_evidence().len() + 1;
         let id = EvidenceId::new(format!("{}.evidence.{ordinal}", execution.id()))
             .unwrap_or_else(|_| EvidenceId::new(format!("evidence.{ordinal}")).expect("valid id"));
-        let now = self.clock.now();
 
         let record = EvidenceRecord {
             id: id.clone(),
+            observed_at: submission.observed_at,
             produced_at: now,
             producer: submission.producer.clone(),
             subject: submission.subject,
@@ -349,6 +382,7 @@ impl<C: Clock> ProtocolEngine for Engine<C> {
         if let Some(entity) = submission.entity.clone() {
             execution.link_evidence(id.clone(), entity);
         }
+        execution.observe_at(now);
         execution.record_evidence(record);
 
         execution.emit(
@@ -372,6 +406,7 @@ impl<C: Clock> ProtocolEngine for Engine<C> {
     }
 
     fn transition(&self, execution: &mut Execution) -> Result<TransitionResult, ProtocolError> {
+        execution.observe_at(self.clock.now());
         let evaluation = evaluate(execution);
 
         if evaluation.is_complete {
@@ -511,7 +546,15 @@ mod tests {
     use crate::fixtures;
     use aep_domain::action::{Action, RepositoryWrite};
     use aep_domain::evidence::{ChangeSet, HealthObservation, HealthStatus, TestResult, TestSuite};
+    use aep_domain::time::Timestamp;
     use aep_domain::verification::Verifier;
+
+    /// The instant every fixture submission says it observed something at.
+    ///
+    /// The epoch, so that it is always in the past of the stepping clock these tests run on: a
+    /// submission claiming a future observation is refused, which is a rule with its own test
+    /// rather than a trap for every other one.
+    const OBSERVED: ObservedAt = ObservedAt::new(Timestamp::EPOCH);
 
     fn engine() -> Engine<SteppingClock> {
         Engine::with_clock(fixtures::standard_registry(), SteppingClock::new(1_000, 10))
@@ -530,6 +573,7 @@ mod tests {
             Producer::Agent {
                 id: "opus".to_owned(),
             },
+            OBSERVED,
         )
     }
 
@@ -539,6 +583,7 @@ mod tests {
             Producer::Verifier {
                 verifier: Verifier::TestRunner,
             },
+            OBSERVED,
         )
     }
 
@@ -642,6 +687,7 @@ mod tests {
                     Producer::Verifier {
                         verifier: Verifier::TelemetryQuery,
                     },
+                    OBSERVED,
                 ),
             )
             .expect_err("undeclared kind");
@@ -834,6 +880,7 @@ transitions:
                         Producer::Human {
                             id: "ada".to_owned(),
                         },
+                        OBSERVED,
                     ),
                 )
                 .expect("recorded")

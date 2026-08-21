@@ -40,6 +40,7 @@ use aep_backend_markdown::MarkdownStore;
 use aep_domain::capability::{Capability, CapabilityPolicy};
 use aep_domain::evidence::{ChangeSet, Evidence, EvidenceKind, Producer, TestResult, TestSuite};
 use aep_domain::task::Task;
+use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::{VerificationStatus, Verifier};
 use aep_driver::executor::{
     CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepContext, StepOutcome,
@@ -434,12 +435,14 @@ impl CommandStepExecutor for ShellEcho {
                 Producer::Verifier {
                     verifier: Verifier::Compiler,
                 },
+                ObservedAt::new(Timestamp::EPOCH),
             ))),
             Act::Tests { failed } => StepOutcome::Observed(Box::new(EvidenceSubmission::new(
                 Evidence::TestResult(TestResult::failing(TestSuite::Unit, 7, failed)),
                 Producer::Verifier {
                     verifier: Verifier::TestRunner,
                 },
+                ObservedAt::new(Timestamp::EPOCH),
             ))),
         }
     }
@@ -813,7 +816,7 @@ fn a_transcript_no_claude_code_wrote_is_checked_and_mints_a_trace_conformance_re
     );
 
     let evidence = report
-        .to_evidence()
+        .to_evidence(ObservedAt::new(Timestamp::EPOCH))
         .expect("the report's digests are digests");
     assert_eq!(
         evidence.evidence().kind(),

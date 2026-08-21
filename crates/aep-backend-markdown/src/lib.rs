@@ -60,6 +60,15 @@
 //! protocol anything about YAML fences — and it cannot if the protocol crate carries one storage
 //! format's spelling.
 //!
+//! # Reading a document a person wrote
+//!
+//! [`claim`] is the second thing this crate does, and it reads the other kind of markdown: not a
+//! document this backend rendered, but one a person wrote, carrying the adopter's dated-claim
+//! convention (`Verify: 2026-08-30 — … (horizon: 7d)`). It reports its own coverage — occurrences
+//! seen against records produced — because a scanner over human-written documents that cannot say
+//! what it missed is a gate that goes quiet instead of failing. See
+//! `docs/design/evidence-horizons-design-v0.1.md` § 6.
+//!
 //! # No clock, no randomness
 //!
 //! Nothing here reads the wall clock or an RNG, so rendering a document twice produces the same
@@ -68,10 +77,15 @@
 //! the tooling maintains beside it is a second answer that goes stale the first time somebody
 //! rebases. The same reasoning fixes the CLI's seeding clock to `Timestamp::EPOCH`.
 
+pub mod claim;
 pub mod document;
 pub mod frontmatter;
 pub mod store;
 
+pub use claim::{
+    horizon_growth, raw_occurrences, scan, scan_at, ClaimRecord, ClaimRejection,
+    ClaimRejectionReason, ClaimScan, ClaimState, HorizonGrowth, DEFAULT_HORIZON_DAYS,
+};
 pub use document::{MoveRefusal, PlanningDocument, PlanningDocumentError};
 pub use frontmatter::{PlanningFrontmatter, RawPlanningFrontmatter, PLANNING_FORMAT};
 pub use store::{MarkdownStore, StoreError, StoreFailure, StoreReport, StoredDocument};

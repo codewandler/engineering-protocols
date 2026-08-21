@@ -1,6 +1,7 @@
 # The review that approved version 3 of the design. The manifest has the design at version 7, so this
 # approval does not cover what exists now — which is the point of recording the version at all.
 - kind: review
+  observed_at: 2023-11-10
   subject: design:passkeys-auth
   subject_kind: design
   reviewer:

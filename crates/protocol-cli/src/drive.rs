@@ -52,6 +52,7 @@ use aep_domain::evidence::{
 };
 use aep_domain::ids::{StateId, TaskId, ToolRef};
 use aep_domain::task::Task;
+use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::Verifier;
 use aep_driver::executor::{
     CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepContext, StepOutcome,
@@ -1007,7 +1008,7 @@ impl CommandStepExecutor for CliExecutors {
             };
         };
 
-        match mint(mapping, code == 0, &rendered) {
+        match mint(mapping, code == 0, &rendered, observed_now()) {
             Some(submission) => StepOutcome::Observed(Box::new(submission)),
             None => StepOutcome::NoVerdict {
                 reason: format!(
@@ -1240,12 +1241,32 @@ fn allowed_tools(config: &ToolConfig) -> Vec<String> {
     tools
 }
 
+/// The instant the driver just observed something, from the wall clock.
+///
+/// The driver runs the program and reads its exit status, so *now* is the truthful observation
+/// time — this is the one case where the two times an evidence record carries legitimately
+/// coincide, and it is stated rather than assumed. It lives in `protocol-cli` and not in a pure
+/// crate for the reason the store lock does: reading ambient OS state is this binary's job.
+fn observed_now() -> ObservedAt {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        });
+    ObservedAt::new(Timestamp::from_epoch_millis(millis))
+}
+
 /// Turns a verdict into the evidence the map said it establishes.
 ///
 /// The per-kind rule, in one place: three kinds carry a verdict and can therefore say *no*; `diff`
 /// has no failing form — a `ChangeSet` cannot state that no change happened — so a failed
 /// observation of one is an absence rather than a `False`, and absence is spelled *submit nothing*.
-fn mint(mapping: &EvidenceMapping, passed: bool, command: &str) -> Option<EvidenceSubmission> {
+fn mint(
+    mapping: &EvidenceMapping,
+    passed: bool,
+    command: &str,
+    observed_at: ObservedAt,
+) -> Option<EvidenceSubmission> {
     let evidence = match mapping.kind {
         EvidenceKind::TestResult => {
             let suite = mapping.suite.clone().unwrap_or(TestSuite::Unit);
@@ -1290,6 +1311,10 @@ fn mint(mapping: &EvidenceMapping, passed: bool, command: &str) -> Option<Eviden
         Producer::Verifier {
             verifier: mapping.verifier.clone(),
         },
+        // And the observation happened when the program ran, which for this driver is now. That is
+        // the honest value here and it is passed in rather than read here, so the one place this
+        // binary reads a wall clock stays countable.
+        observed_at,
     );
     submission.subject.clone_from(&mapping.subject);
     submission.provenance = Provenance {
@@ -1435,7 +1460,7 @@ mod tests {
             subject: None,
             tool: None,
         };
-        let failed = mint(&mapping, false, "cargo test").expect("a verdict");
+        let failed = mint(&mapping, false, "cargo test", observed_now()).expect("a verdict");
         match &failed.evidence {
             Evidence::TestResult(result) => assert_eq!(result.failed, 1),
             other => panic!("expected a test result, got {other:?}"),
@@ -1455,7 +1480,7 @@ mod tests {
             tool: None,
         };
         assert!(
-            mint(&diff, false, "git diff").is_none(),
+            mint(&diff, false, "git diff", observed_now()).is_none(),
             "a ChangeSet has no form that says no change happened, so the honest answer is to \
              submit nothing"
         );

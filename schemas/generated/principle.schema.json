@@ -401,7 +401,7 @@
       ]
     },
     "EvidenceRequirement": {
-      "description": "Evidence that must have been produced: an evidence kind on its own, or a mapping naming the `kind` and adding `at_least` (1 by default), `subject`, `verifier` and `independent` (false by default).",
+      "description": "Evidence that must have been produced: an evidence kind on its own, or a mapping naming the `kind` and adding `at_least` (1 by default), `subject`, `verifier`, `independent` (false by default) and `horizon` (never, by default) — the age past which an observation stops counting and the requirement reads unknown.",
       "oneOf": [
         {
           "$ref": "#/definitions/EvidenceKind"
@@ -414,6 +414,11 @@
           "properties": {
             "at_least": {
               "type": "integer",
+              "minimum": 0.0
+            },
+            "horizon": {
+              "type": "integer",
+              "format": "uint32",
               "minimum": 0.0
             },
             "independent": {

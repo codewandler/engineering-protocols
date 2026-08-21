@@ -24,6 +24,7 @@ use aep_domain::artifact::ArtifactGraph;
 use aep_domain::evidence::{ChangeSet, Evidence, Producer, TestResult, TestSuite};
 use aep_domain::facts::{FactPath, FactSource, FactValue};
 use aep_domain::task::Task;
+use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::Verifier;
 use aep_driver::executor::{
     CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepContext, StepOutcome,
@@ -253,12 +254,14 @@ impl Fake {
                 Producer::Verifier {
                     verifier: Verifier::Compiler,
                 },
+                ObservedAt::new(Timestamp::EPOCH),
             ))),
             Act::Tests { failed } => StepOutcome::Observed(Box::new(EvidenceSubmission::new(
                 Evidence::TestResult(TestResult::failing(TestSuite::Unit, 7, failed)),
                 Producer::Verifier {
                     verifier: Verifier::TestRunner,
                 },
+                ObservedAt::new(Timestamp::EPOCH),
             ))),
             Act::Crash(reason) => StepOutcome::NoVerdict {
                 reason: reason.to_owned(),

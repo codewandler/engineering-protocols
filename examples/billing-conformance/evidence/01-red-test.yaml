@@ -1,6 +1,7 @@
 # The failing test, before any code. Same rule as the passkeys example: red before green is an
 # ordering fact the engine records, not a promise the agent makes.
 - kind: test_result
+  observed_at: 2023-11-12
   suite: unit
   passed: 0
   failed: 1

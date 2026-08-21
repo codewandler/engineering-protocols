@@ -375,6 +375,17 @@ enum Command {
         /// The type to describe, such as `aep.design/v1`.
         entity_type: String,
     },
+    /// Read the dated claims a document makes, and say which of them nobody has looked at since.
+    ///
+    /// The observation half of evidence horizons. `scan` reads human-written markdown for the
+    /// annotation convention a claim is written in; `inspect` reads an evidence file of the kind
+    /// `protocol evaluate --evidence` submits. Neither writes anything, neither resolves a plan and
+    /// neither decides a gate: they report what a document says about when somebody last looked.
+    Evidence {
+        /// Which question to ask.
+        #[command(subcommand)]
+        command: EvidenceCommand,
+    },
     /// Print the generated JSON Schemas.
     Schema {
         /// Which schema, by file stem, such as `workflow`. Omitted lists them all.
@@ -406,6 +417,73 @@ enum Command {
         #[arg(long)]
         inject: Option<String>,
         /// How to render the result.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+}
+
+/// The two questions the evidence surface answers.
+///
+/// Both take `--at`, and every test passes it: a report whose answer depends on the day it is run
+/// is a report that cannot be checked into a repository. Without it, `--at` is today.
+#[derive(Debug, Subcommand)]
+enum EvidenceCommand {
+    /// Scan markdown documents for dated claims, and report coverage beside the classification.
+    ///
+    /// # The coverage line is the point
+    ///
+    /// A scanner over human-written documents needs a coverage claim of its own. This one counts
+    /// annotation-shaped occurrences *without* the parser and compares that number with the records
+    /// the parser produced; a divergence means an annotation is present, correct, legible to a
+    /// human and invisible to the gate. The comparison is one line and it belongs in the gate
+    /// rather than in an investigation — on a real corpus it is what surfaced 15 unwatched
+    /// annotations out of 160.
+    Scan {
+        /// The markdown files to read. A directory is read one level deep for `*.md`.
+        #[arg(required = true)]
+        paths: Vec<PathBuf>,
+        /// The day to classify against, such as `2026-09-01`. Defaults to today.
+        #[arg(long, value_name = "DATE")]
+        at: Option<String>,
+        /// How many days of remaining life still count as `expiring`.
+        #[arg(long, default_value_t = 0)]
+        warn_days: u32,
+        /// Exit non-zero when the parser found fewer records than there are occurrences.
+        ///
+        /// Coverage only. An expired record is a normal, expected finding — a corpus with none is a
+        /// corpus nobody has kept — so it is `--fail-on-expired` that judges it, and the two are
+        /// separate flags because they answer different questions: *is the gate blind?* and *is the
+        /// claim stale?*.
+        #[arg(long)]
+        strict: bool,
+        /// Exit non-zero when any record is past its horizon.
+        #[arg(long)]
+        fail_on_expired: bool,
+        /// How to render the report.
+        #[arg(long, value_enum, default_value_t = Format::Text)]
+        format: Format,
+    },
+    /// Read an evidence file and report, per record, when somebody last looked.
+    ///
+    /// Reads the same document `protocol evaluate --evidence` submits, and applies the same refusal
+    /// to a future observation time — so the check that makes a scheduled re-check unwritable is
+    /// available before anything is submitted to an engine.
+    Inspect {
+        /// The evidence files to read.
+        #[arg(required = true)]
+        evidence: Vec<PathBuf>,
+        /// The day to age the records against. Defaults to today.
+        #[arg(long, value_name = "DATE")]
+        at: Option<String>,
+        /// A horizon to apply for the report, such as `7d`.
+        ///
+        /// **Report only.** It is a what-if applied to a printed table: it reaches no requirement,
+        /// no evaluation and no document, and nothing it prints can extend the life of a record.
+        /// The horizon that decides a gate is declared on a requirement, in a reviewed document,
+        /// and is re-read on every resolve.
+        #[arg(long, value_name = "DAYS")]
+        horizon: Option<String>,
+        /// How to render the report.
         #[arg(long, value_enum, default_value_t = Format::Text)]
         format: Format,
     },
@@ -580,6 +658,34 @@ fn run() -> Result<ExitCode> {
             backend,
             entity_type,
         } => describe(&backend, &entity_type),
+        Command::Evidence { command } => match command {
+            EvidenceCommand::Scan {
+                paths,
+                at,
+                warn_days,
+                strict,
+                fail_on_expired,
+                format,
+            } => evidence_scan(
+                &paths,
+                observation_day(at.as_deref())?,
+                warn_days,
+                strict,
+                fail_on_expired,
+                format,
+            ),
+            EvidenceCommand::Inspect {
+                evidence,
+                at,
+                horizon,
+                format,
+            } => evidence_inspect(
+                &evidence,
+                observation_day(at.as_deref())?,
+                horizon.as_deref(),
+                format,
+            ),
+        },
         Command::Schema { name } => schema(name.as_deref()),
         Command::Conformance {
             level,
@@ -651,14 +757,18 @@ fn run_ess(command: EssCommand) -> Result<ExitCode> {
                 target,
                 inject,
                 untraced,
+                observed_at,
                 out,
                 format,
             } => ess_conform_evidence(
-                &path,
-                suite.as_deref(),
-                target,
-                inject.as_deref(),
-                untraced,
+                &EssEvidenceRun {
+                    path: &path,
+                    suite_file: suite.as_deref(),
+                    target,
+                    inject: inject.as_deref(),
+                    untraced,
+                    observed_at: observation_time(observed_at.as_deref())?,
+                },
                 out.as_deref(),
                 format,
             ),
@@ -1110,6 +1220,14 @@ enum EssConformCommand {
         /// Hide the one observation §16 refuses to require of every implementation.
         #[arg(long)]
         untraced: bool,
+        /// When the run is to be recorded as having happened, as a date or epoch milliseconds.
+        ///
+        /// Defaults to now, which is the truth: the suite is executed by this process, in this
+        /// second. It is settable so that a *committed* record can be regenerated byte for byte —
+        /// the one legitimate reason to pin an observation time, and the reason it is spelled as an
+        /// explicit flag rather than inferred from anything.
+        #[arg(long, value_name = "DATE")]
+        observed_at: Option<String>,
         /// Where to write the record. Without it the document goes to standard output.
         #[arg(long)]
         out: Option<PathBuf>,
@@ -2237,6 +2355,66 @@ fn ess_conform_perform(
     }))
 }
 
+/// The observation time a verb was given, or now.
+///
+/// `now` is the honest default for a verb that performs the observation it is recording — the run
+/// happens in this process, in this second. Everything else about horizons refuses to infer an
+/// observation time, and the difference is worth naming: inferring one for a *reported* observation
+/// is the defect; stating one for an observation you are making yourself is not.
+pub(crate) fn observation_time(written: Option<&str>) -> Result<aep_domain::time::ObservedAt> {
+    match written {
+        Some(value) => {
+            let at = aep_domain::time::CivilDate::parse(value)
+                .map(aep_domain::CivilDate::to_timestamp)
+                .or_else(|error| {
+                    value
+                        .parse::<u64>()
+                        .map(aep_domain::time::Timestamp::from_epoch_millis)
+                        .map_err(|_| error)
+                })
+                .with_context(|| {
+                    format!("`{value}` is not a date such as 2026-08-30 or epoch milliseconds")
+                })?;
+            Ok(aep_domain::time::ObservedAt::new(at))
+        }
+        None => Ok(now_observed()),
+    }
+}
+
+/// The wall clock, as an observation time.
+///
+/// One of the two places this binary reads a clock, and it is here rather than in a pure crate for
+/// the reason `crate::drive`'s store lock is: reading ambient OS state is the CLI's job.
+pub(crate) fn now_observed() -> aep_domain::time::ObservedAt {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| {
+            u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
+        });
+    aep_domain::time::ObservedAt::new(aep_domain::time::Timestamp::from_epoch_millis(millis))
+}
+
+/// What a conformance-evidence run was asked for.
+///
+/// A struct rather than six parameters, because the seventh — the observation time — took the call
+/// past what one signature should carry, and a bag of `Option<&Path>`s and `bool`s is where a
+/// caller swaps two arguments without the compiler noticing.
+#[derive(Debug, Clone, Copy)]
+struct EssEvidenceRun<'a> {
+    /// The specification to synthesise the suite from.
+    path: &'a Path,
+    /// A written suite to run instead.
+    suite_file: Option<&'a Path>,
+    /// Which reference implementation to run against.
+    target: EssTarget,
+    /// The fault to inject, if any.
+    inject: Option<&'a str>,
+    /// Whether to hide the trace observation.
+    untraced: bool,
+    /// When the run is recorded as having happened.
+    observed_at: aep_domain::time::ObservedAt,
+}
+
 /// `protocol ess conform evidence`
 ///
 /// The whole handoff, in one place: run the suite, ask the runner's own crate for the record that
@@ -2244,14 +2422,18 @@ fn ess_conform_perform(
 /// [`ess_conformance::ConformanceReport::to_evidence`] does that, on the producing side of the
 /// boundary invariant 7 draws, and this function cannot influence the outcome it writes down.
 fn ess_conform_evidence(
-    path: &Path,
-    suite_file: Option<&Path>,
-    target: EssTarget,
-    inject: Option<&str>,
-    untraced: bool,
+    run: &EssEvidenceRun<'_>,
     out: Option<&Path>,
     format: Format,
 ) -> Result<ExitCode> {
+    let EssEvidenceRun {
+        path,
+        suite_file,
+        target,
+        inject,
+        untraced,
+        observed_at,
+    } = *run;
     let fault = match inject {
         None => None,
         Some(name) => Some(ess_fault(name, target)?),
@@ -2263,7 +2445,7 @@ fn ess_conform_evidence(
 
     let record = run
         .report
-        .to_evidence()
+        .to_evidence(observed_at)
         .obtained_by(ess_conform_invocation(
             path, suite_file, target, inject, untraced,
         ))
@@ -3739,7 +3921,7 @@ fn read_evidence(path: &Path) -> Result<Vec<EvidenceSubmission>> {
 
 /// Turns a parsed evidence input into a submission.
 fn submission(input: aep_schema::parse::EvidenceInput) -> EvidenceSubmission {
-    let mut submission = EvidenceSubmission::new(input.evidence, input.producer);
+    let mut submission = EvidenceSubmission::new(input.evidence, input.producer, input.observed_at);
     submission.subject = input.about;
     if let Some(provenance) = input.provenance {
         submission.provenance = provenance;
@@ -3866,6 +4048,317 @@ fn print_serialised<T: serde::Serialize>(value: &T, format: Format) -> Result<()
 }
 
 /// `0` when the answer is yes, `1` when it is no.
+/// The day a report classifies against: what was asked for, or today.
+fn observation_day(written: Option<&str>) -> Result<aep_domain::time::CivilDate> {
+    match written {
+        Some(value) => aep_domain::time::CivilDate::parse(value)
+            .with_context(|| format!("`{value}` is not a date such as 2026-09-01")),
+        None => Ok(aep_domain::time::CivilDate::from_timestamp(
+            now_observed().timestamp(),
+        )),
+    }
+}
+
+/// One document's coverage and its records, ready to render.
+#[derive(serde::Serialize)]
+struct ScannedFile {
+    file: String,
+    raw_occurrences: usize,
+    records: usize,
+    divergence: usize,
+    claims: Vec<ScannedClaim>,
+    rejections: Vec<ScannedRejection>,
+}
+
+#[derive(serde::Serialize)]
+struct ScannedClaim {
+    line: usize,
+    date: String,
+    horizon: String,
+    malformed: bool,
+    state: &'static str,
+    days: u32,
+    claim: String,
+}
+
+#[derive(serde::Serialize)]
+struct ScannedRejection {
+    line: usize,
+    reason: String,
+    text: String,
+}
+
+#[derive(serde::Serialize)]
+struct ScanReport {
+    at: String,
+    warn_days: u32,
+    files: Vec<ScannedFile>,
+    totals: ScanTotals,
+}
+
+#[derive(serde::Serialize)]
+struct ScanTotals {
+    raw_occurrences: usize,
+    records: usize,
+    divergence: usize,
+    ok: usize,
+    expiring: usize,
+    expired: usize,
+    malformed: usize,
+}
+
+/// `protocol evidence scan`
+fn evidence_scan(
+    paths: &[PathBuf],
+    at: aep_domain::time::CivilDate,
+    warn_days: u32,
+    strict: bool,
+    fail_on_expired: bool,
+    format: Format,
+) -> Result<ExitCode> {
+    let mut files = Vec::new();
+    let mut totals = ScanTotals {
+        raw_occurrences: 0,
+        records: 0,
+        divergence: 0,
+        ok: 0,
+        expiring: 0,
+        expired: 0,
+        malformed: 0,
+    };
+
+    for path in markdown_files(paths)? {
+        let text =
+            fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let scan = aep_backend_markdown::claim::scan_at(&text, at);
+        let mut claims = Vec::new();
+        for record in &scan.records {
+            let state = record.state(at, warn_days);
+            match state {
+                aep_backend_markdown::claim::ClaimState::Ok { .. } => totals.ok += 1,
+                aep_backend_markdown::claim::ClaimState::Expiring { .. } => totals.expiring += 1,
+                aep_backend_markdown::claim::ClaimState::Expired { .. } => totals.expired += 1,
+            }
+            if record.malformed {
+                totals.malformed += 1;
+            }
+            claims.push(ScannedClaim {
+                line: record.line,
+                date: record.date.to_string(),
+                horizon: record.horizon.to_string(),
+                malformed: record.malformed,
+                state: state.label(),
+                days: state.days(),
+                claim: record.claim.clone(),
+            });
+        }
+        totals.raw_occurrences += scan.raw_occurrences;
+        totals.records += scan.records.len();
+        totals.divergence += scan.divergence();
+        files.push(ScannedFile {
+            file: path.display().to_string(),
+            raw_occurrences: scan.raw_occurrences,
+            records: scan.records.len(),
+            divergence: scan.divergence(),
+            claims,
+            rejections: scan
+                .rejections
+                .iter()
+                .map(|rejection| ScannedRejection {
+                    line: rejection.line,
+                    reason: rejection.reason.to_string(),
+                    text: rejection.text.clone(),
+                })
+                .collect(),
+        });
+    }
+
+    let report = ScanReport {
+        at: at.to_string(),
+        warn_days,
+        files,
+        totals,
+    };
+
+    match format {
+        Format::Json => outln!(
+            "{}",
+            serde_json::to_string_pretty(&report).context("rendering the scan")?
+        ),
+        Format::Yaml => out!(
+            "{}",
+            serde_yaml::to_string(&report).context("rendering the scan")?
+        ),
+        Format::Text => render_scan(&report),
+    }
+
+    let blind = strict && report.totals.divergence > 0;
+    let stale = fail_on_expired && report.totals.expired > 0;
+    Ok(exit_code(!blind && !stale))
+}
+
+/// The human rendering: one line per claim, and the coverage line per file.
+fn render_scan(report: &ScanReport) {
+    for file in &report.files {
+        outln!(
+            "{} — {} record(s) from {} occurrence(s){}",
+            file.file,
+            file.records,
+            file.raw_occurrences,
+            if file.divergence == 0 {
+                String::new()
+            } else {
+                format!(", {} NOT PARSED", file.divergence)
+            }
+        );
+        for claim in &file.claims {
+            outln!(
+                "  {:>4}  {:8} {:>3}d  {} {}{}",
+                claim.line,
+                claim.state,
+                claim.days,
+                claim.date,
+                if claim.malformed { "[malformed] " } else { "" },
+                truncated(&claim.claim)
+            );
+        }
+        for rejection in &file.rejections {
+            outln!("  {:>4}  refused  {}", rejection.line, rejection.reason);
+        }
+    }
+    let totals = &report.totals;
+    outln!(
+        "{} occurrence(s), {} record(s), {} unparsed — {} ok, {} expiring, {} expired, {} malformed (at {})",
+        totals.raw_occurrences,
+        totals.records,
+        totals.divergence,
+        totals.ok,
+        totals.expiring,
+        totals.expired,
+        totals.malformed,
+        report.at
+    );
+}
+
+/// A claim, short enough for one terminal line.
+fn truncated(claim: &str) -> String {
+    const LIMIT: usize = 68;
+    if claim.chars().count() <= LIMIT {
+        return claim.to_owned();
+    }
+    let kept: String = claim.chars().take(LIMIT - 1).collect();
+    format!("{kept}…")
+}
+
+/// Every markdown file named, expanding a directory one level.
+fn markdown_files(paths: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for path in paths {
+        if path.is_dir() {
+            let mut found: Vec<PathBuf> = fs::read_dir(path)
+                .with_context(|| format!("reading {}", path.display()))?
+                .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+                .filter(|entry| entry.extension().is_some_and(|kind| kind == "md"))
+                .collect();
+            found.sort();
+            files.extend(found);
+            continue;
+        }
+        files.push(path.clone());
+    }
+    Ok(files)
+}
+
+/// One submitted record, aged.
+#[derive(serde::Serialize)]
+struct InspectedRecord {
+    file: String,
+    kind: String,
+    observed_at: String,
+    age_days: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<&'static str>,
+    producer: String,
+}
+
+/// `protocol evidence inspect`
+fn evidence_inspect(
+    paths: &[PathBuf],
+    at: aep_domain::time::CivilDate,
+    horizon: Option<&str>,
+    format: Format,
+) -> Result<ExitCode> {
+    let horizon = match horizon {
+        Some(written) => Some(
+            aep_domain::time::Horizon::parse(written)
+                .with_context(|| format!("`{written}` is not a horizon such as `7d`"))?,
+        ),
+        None => None,
+    };
+    let now = at.to_timestamp();
+
+    let mut records = Vec::new();
+    let mut future = Vec::new();
+    for path in paths {
+        let text =
+            fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        let origin = path.display().to_string();
+        let inputs = aep_schema::parse::evidence_list(&text, Some(&origin))?;
+        for input in inputs {
+            let observed = input.observed_at;
+            if observed.is_after(now) {
+                future.push(format!(
+                    "{origin}: an observation on {} has not happened yet at {at}",
+                    aep_domain::time::CivilDate::from_timestamp(observed.timestamp())
+                ));
+            }
+            records.push(InspectedRecord {
+                file: origin.clone(),
+                kind: input.evidence.kind().to_string(),
+                observed_at: aep_domain::time::CivilDate::from_timestamp(observed.timestamp())
+                    .to_string(),
+                age_days: observed.age_days(now),
+                state: horizon.map(|horizon| {
+                    if horizon.covers(observed.timestamp(), now) {
+                        "ok"
+                    } else {
+                        "expired"
+                    }
+                }),
+                producer: input.producer.to_string(),
+            });
+        }
+    }
+
+    match format {
+        Format::Json => outln!(
+            "{}",
+            serde_json::to_string_pretty(&records).context("rendering the records")?
+        ),
+        Format::Yaml => out!(
+            "{}",
+            serde_yaml::to_string(&records).context("rendering the records")?
+        ),
+        Format::Text => {
+            for record in &records {
+                outln!(
+                    "{:24} {} {:>4}d old  {}  {}",
+                    record.kind,
+                    record.observed_at,
+                    record.age_days,
+                    record.state.unwrap_or("-"),
+                    record.producer
+                );
+            }
+            outln!("{} record(s), aged at {}", records.len(), at);
+        }
+    }
+    for refusal in &future {
+        eprintln!("{refusal}");
+    }
+    Ok(exit_code(future.is_empty()))
+}
+
 fn exit_code(ok: bool) -> ExitCode {
     if ok {
         ExitCode::SUCCESS

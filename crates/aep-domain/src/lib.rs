@@ -42,6 +42,7 @@
 //! | [`plan`] | resolved execution plans |
 //! | [`event`] | the audit event vocabulary |
 //! | [`audit`] | the audit trail: who authorised it, what ran, why it was allowed |
+//! | [`time`] | instants, calendar dates, evidence horizons and observation times |
 //! | [`error`] | parse and validation errors |
 
 pub mod action;
@@ -115,7 +116,7 @@ pub use requirement::{
 };
 pub use review::{Finding, ReviewDisposition, ReviewResult, Reviewer, Severity};
 pub use task::{Constraints, Objective, Task, TaskKind};
-pub use time::Timestamp;
+pub use time::{CivilDate, Horizon, ObservedAt, Timestamp};
 pub use verification::{Counterexample, Seed, VerificationResult, VerificationStatus, Verifier};
 pub use version::{MajorVersion, PrincipleRef, ProfileVersionedRef, ProtocolRef, WorkflowRef};
 pub use workflow::{State, StateKind, Transition, Workflow};

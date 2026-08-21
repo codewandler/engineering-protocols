@@ -17,7 +17,7 @@ use aep_domain::raw::RawProtocol;
 use aep_domain::requirement::RequirementFlavour;
 use aep_domain::{
     ApprovalId, ApprovalRequirement, ArtifactGraph, Capability, Environment, Evidence, EvidenceId,
-    EvidenceRecord, FactPath, FactSource, FactStore, FactValue, Producer, Protocol,
+    EvidenceRecord, FactPath, FactSource, FactStore, FactValue, ObservedAt, Producer, Protocol,
     RequirementContext, RequirementSet, SubjectRef, Timestamp, Truth,
 };
 
@@ -128,6 +128,7 @@ fn refusal() -> EvidenceRecord {
     };
     EvidenceRecord::new(
         EvidenceId::new("approval-4711").expect("an evidence id"),
+        ObservedAt::new(Timestamp::from_epoch_millis(1_700_000_000_000)),
         Timestamp::from_epoch_millis(1_700_000_000_000),
         alice.clone(),
         Evidence::Approval(ApprovalRecord {

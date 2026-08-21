@@ -217,7 +217,7 @@ mod tests {
     use aep_domain::capability::Environment;
     use aep_domain::evidence::{ApprovalRecord, Evidence, EvidenceRecord, Producer, TestSuite};
     use aep_domain::ids::{EvidenceId, ExecutionId};
-    use aep_domain::time::Timestamp;
+    use aep_domain::time::{ObservedAt, Timestamp};
 
     const GUARDED_PROFILE: &str = r"
 id: test.guarded
@@ -290,6 +290,7 @@ profile: test.guarded
         };
         EvidenceRecord::new(
             EvidenceId::new("a1").expect("id"),
+            ObservedAt::new(Timestamp::from_epoch_millis(1)),
             Timestamp::from_epoch_millis(1),
             Producer::Human {
                 id: "ada".to_owned(),

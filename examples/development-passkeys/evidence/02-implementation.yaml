@@ -1,6 +1,7 @@
 # The change itself. Produced by an agent, and recorded as such — authorship is not a judgement about
 # correctness, but it is what lets a later reader tell an agent's claim from a verifier's finding.
 - kind: diff
+  observed_at: 2023-11-13
   files_changed: 6
   lines_added: 214
   lines_removed: 18

@@ -57,6 +57,7 @@ use aep_domain::error::ParseError;
 use aep_domain::evidence::{
     Evidence, Producer, Provenance, SpecDigest, TraceConformanceResult, TranscriptDigest,
 };
+use aep_domain::time::ObservedAt;
 use aep_domain::verification::{VerificationStatus, Verifier};
 
 use crate::report::{CheckReport, Verdict};
@@ -77,6 +78,12 @@ pub struct TraceEvidence {
     /// The observation, tagged `kind: trace_conformance`.
     #[serde(flatten)]
     evidence: Evidence,
+    /// When the check was made.
+    ///
+    /// The caller's, because this crate holds no clock. A transcript is a recording of a past run,
+    /// and a verdict about one is exactly the kind of observation that goes stale: the agent ran
+    /// again, the specification moved, and nobody checked the new transcript.
+    observed_at: ObservedAt,
     /// Who produced it: always [`Self::PRODUCER`].
     producer: Producer,
     /// How it was obtained. The caller may say which command it ran; it may not say who it is.
@@ -118,6 +125,11 @@ impl TraceEvidence {
     /// What produced it. Always [`Self::PRODUCER`].
     pub fn producer(&self) -> &Producer {
         &self.producer
+    }
+
+    /// When the check was made.
+    pub fn observed_at(&self) -> ObservedAt {
+        self.observed_at
     }
 
     /// How it was obtained.
@@ -166,7 +178,7 @@ impl CheckReport {
     /// this crate produced — both come from `trace_domain::digest`, which writes 64 lowercase hex
     /// characters and nothing else — and reachable for a `CheckReport` assembled by hand through
     /// its public fields, which is exactly where a silent `expect` would be wrong.
-    pub fn to_evidence(&self) -> Result<TraceEvidence, ParseError> {
+    pub fn to_evidence(&self, observed_at: ObservedAt) -> Result<TraceEvidence, ParseError> {
         let result = TraceConformanceResult {
             specification: self.spec_id.clone(),
             spec_digest: SpecDigest::new(self.spec_digest.clone())?,
@@ -181,6 +193,7 @@ impl CheckReport {
         };
         Ok(TraceEvidence {
             evidence: Evidence::TraceConformance(result),
+            observed_at,
             producer: TraceEvidence::PRODUCER,
             provenance: Provenance::default(),
         })

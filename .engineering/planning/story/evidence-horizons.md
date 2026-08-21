@@ -2,7 +2,7 @@
 format: aep.planning-md/1
 id: story:evidence-horizons
 kind: story
-status: draft
+status: implemented
 title: A green result from three weeks ago is not a fact
 summary: Evidence requirements carry a horizon; past it the fact reads Unknown, which permits no transition.
 owner: protocol
@@ -11,7 +11,7 @@ tags:
 - evidence
 relations:
 - decomposes: epic:adopter-feedback-round-1
-revision: 1
+revision: 4
 ---
 # Story: A green result from three weeks ago is not a fact
 

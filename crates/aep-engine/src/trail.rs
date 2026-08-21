@@ -261,6 +261,7 @@ mod tests {
     use aep_domain::action::ActionRequest;
     use aep_domain::action::{Action, SecretRead};
     use aep_domain::evidence::{Evidence, Producer, TestResult, TestSuite};
+    use aep_domain::time::ObservedAt;
     use aep_domain::verification::Verifier;
 
     fn execution() -> (Engine<FixedClock>, crate::Execution) {
@@ -325,6 +326,7 @@ mod tests {
                     Producer::Verifier {
                         verifier: Verifier::TestRunner,
                     },
+                    ObservedAt::new(Timestamp::EPOCH),
                 ),
             )
             .expect("recorded");
@@ -395,6 +397,7 @@ mod tests {
                     Producer::Verifier {
                         verifier: Verifier::TestRunner,
                     },
+                    ObservedAt::new(Timestamp::EPOCH),
                 )
                 .stored_as(entity.clone()),
             )

@@ -2,6 +2,7 @@
 # engine records submission order, so `evidence.first_seq.test_result < evidence.first_seq.diff` is a
 # fact, not an intention.
 - kind: test_result
+  observed_at: 2023-11-12
   suite: unit
   passed: 0
   failed: 1

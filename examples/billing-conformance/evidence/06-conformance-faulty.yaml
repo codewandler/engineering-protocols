@@ -10,6 +10,7 @@
   generator_version: 0.1.0
   failed_scenarios:
   - failed billing.invoice.CreateInvoice/outcome/rejected
+  observed_at: 1699920000000
   producer:
     producer: verifier
     verifier: conformance-runner

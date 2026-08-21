@@ -9,6 +9,39 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+### Added
+
+- **Evidence horizons — a green result from three weeks ago is not a fact.** An evidence record now
+  carries two times. `observed_at` is when somebody looked, is required, is supplied by the caller
+  and is the identity of the fact; `produced_at` remains the engine's, and says when the record
+  entered the log. A value in the future is refused outright (`observation_in_future`): a
+  scheduled-but-never-performed check stored as an observation reads as the freshest record in the
+  log, and the store can no longer answer whether anybody has ever looked.
+
+  An evidence requirement may declare a `horizon: 3d`. Past it the requirement reads `Unknown` —
+  never `False`, because a lapsed check has not failed, nobody has run it — with a reason naming the
+  horizon, the observation date and the day it lapsed. The transition it used to permit is refused,
+  including when the guard reads a fact rather than the requirement: a lapsed record's facts are
+  withheld from the store under the strictest horizon the plan declares for its kind, and an absent
+  fact is `Unknown`. `evidence.lapsed` joins `evidence.missing` so a stale gate is distinguishable
+  from an empty one.
+
+  The horizon is on the requirement and nowhere else. A record has no horizon field, there is no
+  operation anywhere that mutates one, and a source scan over five crates refuses both `.horizon =`
+  and any `fn` taking `&mut self` with `horizon` in its name — because if `extend` is as easy to
+  call as `re-check`, it is the one that gets called. Re-submitting an identical record restores
+  nothing; only a new observation time does, and a test says so.
+
+  `aep-backend-markdown` gained a scanner for the one-line dated-claim annotation convention, which
+  finds all 42 annotations in the vendored corpus at `examples/evidence-horizons-corpus/` — the
+  reference implementation the fixture's expectations came from finds 37 and names the five it
+  misses. It reports its own coverage: raw occurrences seen versus records produced, per file, a
+  divergence being a finding rather than a silent drop. New verbs: `protocol evidence scan` and
+  `protocol evidence inspect`; `--observed-at` on `ess conform evidence` and `trace evidence`.
+
+  Design: `docs/design/evidence-horizons-design-v0.1.md`, corrected by adversarial review
+  (19 CONFIRMED / 15 NEEDS-CHANGE / 3 INFEASIBLE, all applied).
+
 ### Fixed
 
 - **Four things the documents invited an adopter to declare, which the engine then refused, ignored

@@ -7,6 +7,7 @@
 
 use aep_domain::evidence::{Evidence, Producer, TranscriptDigest};
 use aep_domain::facts::{FactPath, FactValue};
+use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::{VerificationStatus, Verifier};
 use trace_domain::ir::TraceIr;
 use trace_domain::spec::TraceSpec;
@@ -14,6 +15,12 @@ use trace_spec::adapter::read_transcript;
 use trace_spec::check::check;
 use trace_spec::evidence::TraceEvidence;
 use trace_spec::report::CheckReport;
+
+/// When every fixture in this file says the check was made.
+///
+/// The epoch, because nothing here is about time: these tests are about what the checker says,
+/// and a fixed instant keeps the records byte-comparable.
+const OBSERVED: ObservedAt = ObservedAt::new(Timestamp::EPOCH);
 
 /// The committed transcript of eval run `7hTYjT`.
 const SEVEN_H: &[u8] = include_bytes!("fixtures/plugin-eval-7hTYjT.jsonl");
@@ -63,7 +70,9 @@ fn the_record_carries_the_digest_pair_the_report_computed() {
         "the fixture reaches a passing state"
     );
 
-    let record = checked.to_evidence().expect("a real report converts");
+    let record = checked
+        .to_evidence(OBSERVED)
+        .expect("a real report converts");
     let result = record.result();
 
     assert_eq!(
@@ -103,7 +112,7 @@ fn the_record_carries_the_digest_pair_the_report_computed() {
 #[test]
 fn the_record_names_the_trace_checker_and_never_the_caller() {
     let record = report(&eval_spec(), &[])
-        .to_evidence()
+        .to_evidence(OBSERVED)
         .expect("a real report converts");
 
     assert_eq!(
@@ -156,7 +165,7 @@ expectations:
         "the fixture reaches the gapping state"
     );
 
-    let record = checked.to_evidence().expect("converts");
+    let record = checked.to_evidence(OBSERVED).expect("converts");
     let result = record.result();
     assert_eq!(result.status, VerificationStatus::Failed);
     assert_eq!(result.expectations_gapped, 1);
@@ -200,7 +209,7 @@ expectations:
     );
     assert_eq!(checked.summary.gap, 0, "nothing was contradicted");
 
-    let record = checked.to_evidence().expect("converts");
+    let record = checked.to_evidence(OBSERVED).expect("converts");
     let result = record.result();
     assert_eq!(
         result.status,
@@ -244,7 +253,7 @@ expectations:
         "the fixture reaches the state the test is about: the gap no longer gates"
     );
 
-    let record = checked.to_evidence().expect("converts");
+    let record = checked.to_evidence(OBSERVED).expect("converts");
     let result = record.result();
     assert_eq!(
         result.status,
@@ -270,7 +279,7 @@ expectations:
 #[test]
 fn the_document_is_one_record_of_the_kind_the_protocol_declares() {
     let record = report(&eval_spec(), &[])
-        .to_evidence()
+        .to_evidence(OBSERVED)
         .expect("a real report converts");
     // A list of one, because that is the shape `protocol evaluate --evidence` reads.
     let document = serde_json::to_string(&[&record]).expect("serialises");
@@ -310,7 +319,7 @@ fn a_report_whose_digests_are_not_digests_is_refused_rather_than_recorded() {
         Vec::new(),
     );
     let error = hand_made
-        .to_evidence()
+        .to_evidence(OBSERVED)
         .expect_err("a specification digest that is not hexadecimal is refused");
     assert!(
         error.to_string().contains("hexadecimal"),

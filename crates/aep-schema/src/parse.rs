@@ -288,18 +288,27 @@ pub fn lifecycle(
 /// - kind: test_result
 ///   suite: unit
 ///   passed: 12
+///   observed_at: 2026-08-30      # when the suite was run, not when this file was written
 ///   producer: {producer: verifier, verifier: test-runner}
-///   about: task:AUTH-142        # optional
+///   about: task:AUTH-142         # optional
 /// ```
 ///
 /// The envelope's subject is spelled `about`, not `subject`: several evidence kinds have a `subject`
 /// of their own — a review's subject is the artifact reviewed — and one name for two things would
 /// silently take the wrong one.
+///
+/// `observed_at` is **required**, and it is the one field in this shape with no reasonable default.
+/// Inferring it from when the document was read is the single-field convention that classifies a
+/// three-week-old reading as this morning's; a date a person has to write is a date a person has to
+/// know. It accepts either spelling
+/// [`ObservedAt`](aep_domain::time::ObservedAt) accepts — a calendar date, or epoch milliseconds.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct EvidenceInput {
     /// The observation.
     #[serde(flatten)]
     pub evidence: aep_domain::evidence::Evidence,
+    /// When the observation was made.
+    pub observed_at: aep_domain::time::ObservedAt,
     /// What produced it.
     pub producer: aep_domain::evidence::Producer,
     /// What the envelope is about.
@@ -359,6 +368,7 @@ states:
             r"
 - kind: review
   subject: design:passkeys
+  observed_at: 2026-08-30
   reviewer: {reviewer: human, id: ada}
   disposition: approved
   producer: {producer: human, id: ada}
@@ -371,6 +381,15 @@ states:
         assert_eq!(
             inputs[0].about.as_ref().map(ToString::to_string),
             Some("task:AUTH-142".to_owned())
+        );
+        assert_eq!(
+            inputs[0].observed_at,
+            aep_domain::time::ObservedAt::new(
+                aep_domain::time::CivilDate::parse("2026-08-30")
+                    .expect("a date")
+                    .to_timestamp()
+            ),
+            "an observation time written as a date reaches the submission as an instant"
         );
         let aep_domain::evidence::Evidence::Review(review) = &inputs[0].evidence else {
             panic!("expected a review");

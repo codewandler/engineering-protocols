@@ -56,6 +56,7 @@ use crate::ids::{ApprovalId, SubjectRef};
 use crate::node::Node;
 use crate::predicate::{Predicate, Truth};
 use crate::review::{ReviewDisposition, ReviewResult};
+use crate::time::{CivilDate, Horizon, Timestamp};
 use crate::verification::Verifier;
 
 /// What the engine needs in order to decide whether requirements are met.
@@ -68,6 +69,21 @@ pub trait RequirementContext {
 
     /// Every piece of evidence submitted so far, in submission order.
     fn evidence(&self) -> &[EvidenceRecord];
+
+    /// When this evaluation is happening, when the context knows.
+    ///
+    /// The domain crate never reads a clock (invariant 8), so an instant arrives here or not at
+    /// all. `None` **fails closed**: a context that cannot say what time it is cannot satisfy a
+    /// requirement that declares a [`Horizon`], and the requirement reads
+    /// [`Truth::Unknown`] — which permits nothing. The opposite polarity would mean a caller who
+    /// forgot to wire a clock silently got the undecayed answer, on the green path, where nobody
+    /// looks.
+    ///
+    /// Defaulted, because a horizon-free requirement does not consult it and every context that
+    /// existed before horizons did evaluates exactly as it did.
+    fn now(&self) -> Option<Timestamp> {
+        None
+    }
 }
 
 /// Which flavour of requirement an outcome came from.
@@ -193,6 +209,30 @@ pub struct EvidenceRequirement {
     /// This is what "generation and verification are separate" reduces to mechanically: an
     /// agent's own claim that the tests passed does not satisfy the requirement.
     pub independent: bool,
+    /// How long an observation of this kind is worth something.
+    ///
+    /// `None` — the default, and what every requirement written before horizons existed parses to
+    /// — means the record never decays, which is the behaviour this crate had. `Some(horizon)`
+    /// means a record whose [`observed_at`](crate::evidence::EvidenceEnvelope::observed_at) is
+    /// further back than the horizon stops counting, and the requirement reads
+    /// [`Truth::Unknown`].
+    ///
+    /// # Why the horizon lives here and not on the record
+    ///
+    /// A record that could set its own expiry is a record that can extend itself. The corpus at
+    /// `examples/evidence-horizons-corpus/corpus/05-traps.md` names the failure exactly: *"if
+    /// `extend` is as easy to call as `re-check`, it is the one that gets called — every time,
+    /// under pressure, by whoever is trying to get a gate green."* Putting the number on the
+    /// requirement is not a defence against a malicious producer; it is a defence against an
+    /// ordinary one on a Friday evening. `EvidenceRecord` has no horizon field at all, so there is
+    /// nothing on a record to grow.
+    ///
+    /// A consequence worth stating rather than hiding: two requirements may read one record on
+    /// different clocks — a 3d deployment gate and a 30d audit gate over the same deployment. That
+    /// is correct. How long an observation is worth something is a property of the question being
+    /// asked, not of the observation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub horizon: Option<Horizon>,
 }
 
 impl EvidenceRequirement {
@@ -204,6 +244,7 @@ impl EvidenceRequirement {
             subject: None,
             verifier: None,
             independent: false,
+            horizon: None,
         }
     }
 
@@ -219,9 +260,33 @@ impl EvidenceRequirement {
                         ParseError::shape("requires.evidence[]", "a `kind` field", "no `kind`")
                     })
                     .and_then(EvidenceKind::parse)?;
+                let at_least = number_field(entries, "at_least")?.unwrap_or(1);
+                let horizon = match entries.get("horizon") {
+                    Some(Node::Text(written)) => Some(Horizon::parse(written)?),
+                    Some(Node::Number(number)) => Some(Horizon::parse(&number.to_string())?),
+                    None | Some(Node::Null) => None,
+                    Some(other) => {
+                        return Err(ParseError::shape(
+                            "requires.evidence[].horizon",
+                            "a horizon such as `7d`",
+                            other.type_name(),
+                        ))
+                    }
+                };
+                // A requirement for zero records is satisfied before any record is read, so a
+                // horizon on one is a decay rule over a set that is never consulted — a gate that
+                // reads as guarded and is not. `Horizon::days(0)` is refused for the same reason,
+                // and the two refusals are kept consistent on purpose.
+                if at_least == 0 && horizon.is_some() {
+                    return Err(ParseError::shape(
+                        "requires.evidence[]",
+                        "at_least of at least 1 beside a horizon",
+                        "at_least: 0, which no observation can fail to satisfy",
+                    ));
+                }
                 Ok(Self {
                     kind,
-                    at_least: number_field(entries, "at_least")?.unwrap_or(1),
+                    at_least,
                     subject: match entries.get("subject").and_then(Node::as_text) {
                         Some(subject) => Some(SubjectRef::new(subject)?),
                         None => None,
@@ -231,6 +296,7 @@ impl EvidenceRequirement {
                         None => None,
                     },
                     independent: bool_field(entries, "independent")?.unwrap_or(false),
+                    horizon,
                 })
             }
             other => Err(ParseError::shape(
@@ -328,25 +394,75 @@ impl EvidenceRequirement {
         Some(format!("the run attests {digest}, and {pinned}"))
     }
 
+    /// Why `record` no longer counts towards this requirement — `None` while it still does, and
+    /// `None` for every requirement that declares no horizon.
+    ///
+    /// # It fails closed, twice
+    ///
+    /// A horizon that cannot be checked refuses, exactly as a horizon that has lapsed refuses. A
+    /// context with no clock cannot demonstrate that an observation still stands, and the
+    /// alternative — treating an unreadable clock as *no decay* — hands the pre-horizon answer to
+    /// every caller who forgot to wire one.
+    ///
+    /// The refusal is [`Truth::Unknown`] at the call site, never [`Truth::False`]. A lapsed
+    /// deployment check does not mean the deployment failed; it means nobody has looked. That
+    /// distinction is what tells a person whether to go and change something or to go and look.
+    fn lapsed(&self, record: &EvidenceRecord, context: &dyn RequirementContext) -> Option<String> {
+        let horizon = self.horizon?;
+        let Some(now) = context.now() else {
+            return Some(format!(
+                "the horizon is {horizon} and this evaluation has no clock, so no observation can \
+                 be shown to still stand"
+            ));
+        };
+        let observed = record.observed_at.timestamp();
+        if horizon.covers(observed, now) {
+            return None;
+        }
+        Some(format!(
+            "the last observation was on {}, the horizon is {horizon}, and it lapsed on {}",
+            CivilDate::from_timestamp(observed),
+            CivilDate::from_timestamp(horizon.expires_at(observed)),
+        ))
+    }
+
     /// Checks this requirement.
     fn evaluate(&self, context: &dyn RequirementContext) -> RequirementOutcome {
         let graph = context.artifacts();
         let mut matching = 0_usize;
         let mut unbound: Option<String> = None;
+        let mut lapsed: Option<(Timestamp, String)> = None;
 
         for record in context
             .evidence()
             .iter()
             .filter(|record| self.matches(record))
         {
-            match Self::unbound_revision(record, graph) {
-                None => matching += 1,
-                Some(reason) => {
-                    if unbound.is_none() {
-                        unbound = Some(reason);
-                    }
+            // Order matters, and it is the same order the two truth values are in. A revision
+            // mismatch is `False` — something was observed and it contradicts the requirement — and
+            // it stays the reported reason even when the record has also gone stale, because
+            // re-running against the model that exists now is the move either way.
+            if let Some(reason) = Self::unbound_revision(record, graph) {
+                if unbound.is_none() {
+                    unbound = Some(reason);
                 }
+                continue;
             }
+            if let Some(reason) = self.lapsed(record, context) {
+                // The *freshest* lapsed record is the one worth naming — the one whose date a
+                // reader will recognise and whose re-check is cheapest — and evidence arrives in
+                // submission order, not in observation order, so this compares rather than taking
+                // the first one it meets.
+                let observed = record.observed_at.timestamp();
+                if lapsed
+                    .as_ref()
+                    .is_none_or(|(previous, _)| observed > *previous)
+                {
+                    lapsed = Some((observed, reason));
+                }
+                continue;
+            }
+            matching += 1;
         }
 
         if matching >= self.at_least {
@@ -356,27 +472,25 @@ impl EvidenceRequirement {
                 Truth::True,
             );
         }
-        match unbound {
+        let (truth, detail) = match (unbound, lapsed) {
             // `False`, not `Unknown`, and for the same reason a review given against another
             // version is: something was observed and it contradicts the requirement. The
             // distinction is what tells a person whether to wait or to go and do something — here,
             // to re-run the suite against the model that exists now.
-            Some(reason) => RequirementOutcome::new(
-                RequirementFlavour::Evidence,
-                self.to_string(),
-                Truth::False,
-            )
-            .with_detail(reason),
-            None => RequirementOutcome::new(
-                RequirementFlavour::Evidence,
-                self.to_string(),
+            (Some(reason), _) => (Truth::False, reason),
+            // `Unknown`, because nothing contradicts the requirement: the observation simply is not
+            // recent enough to stand for the present, and nobody has looked since.
+            (None, Some((_, reason))) => (Truth::Unknown, reason),
+            (None, None) => (
                 Truth::Unknown,
-            )
-            .with_detail(format!(
-                "{matching} of {} required record(s) submitted",
-                self.at_least
-            )),
-        }
+                format!(
+                    "{matching} of {} required record(s) submitted",
+                    self.at_least
+                ),
+            ),
+        };
+        RequirementOutcome::new(RequirementFlavour::Evidence, self.to_string(), truth)
+            .with_detail(detail)
     }
 }
 
@@ -394,6 +508,9 @@ impl fmt::Display for EvidenceRequirement {
         }
         if self.independent {
             f.write_str(" (independent)")?;
+        }
+        if let Some(horizon) = self.horizon {
+            write!(f, " within {horizon}")?;
         }
         Ok(())
     }
@@ -1390,14 +1507,16 @@ impl schemars::JsonSchema for EvidenceRequirement {
             ("subject", generator.subschema_for::<SubjectRef>()),
             ("verifier", generator.subschema_for::<Verifier>()),
             ("independent", <bool>::json_schema(generator)),
+            ("horizon", generator.subschema_for::<Horizon>()),
         ]);
         form.object().required.insert("kind".to_owned());
         either(
             generator.subschema_for::<EvidenceKind>(),
             form,
             "Evidence that must have been produced: an evidence kind on its own, or a mapping \
-             naming the `kind` and adding `at_least` (1 by default), `subject`, `verifier` and \
-             `independent` (false by default).",
+             naming the `kind` and adding `at_least` (1 by default), `subject`, `verifier`, \
+             `independent` (false by default) and `horizon` (never, by default) — the age past \
+             which an observation stops counting and the requirement reads unknown.",
         )
     }
 }
@@ -1586,13 +1705,14 @@ mod tests {
     use crate::facts::{FactStore, FactValue, Scales};
     use crate::ids::EvidenceId;
     use crate::review::{ReviewResult, Reviewer};
-    use crate::time::Timestamp;
+    use crate::time::{ObservedAt, Timestamp};
     use crate::verification::VerificationStatus;
 
     struct Context {
         facts: FactStore,
         artifacts: ArtifactGraph,
         evidence: Vec<EvidenceRecord>,
+        now: Option<Timestamp>,
     }
 
     impl Context {
@@ -1601,6 +1721,7 @@ mod tests {
                 facts: FactStore::new(),
                 artifacts: ArtifactGraph::new(),
                 evidence: Vec::new(),
+                now: None,
             }
         }
 
@@ -1609,10 +1730,39 @@ mod tests {
             self.facts.extend_facts(evidence.facts());
             self.evidence.push(EvidenceRecord::new(
                 EvidenceId::new(format!("e{index}")).expect("id"),
+                ObservedAt::new(Timestamp::from_epoch_millis(index as u64)),
                 Timestamp::from_epoch_millis(index as u64),
                 producer,
                 evidence,
             ));
+            self
+        }
+
+        /// Records evidence observed on a stated day, and reads the clock on another.
+        fn observed_on(mut self, observed: &str, evidence: Evidence) -> Self {
+            let index = self.evidence.len();
+            self.facts.extend_facts(evidence.facts());
+            let at = CivilDate::parse(observed)
+                .expect("a valid date")
+                .to_timestamp();
+            self.evidence.push(EvidenceRecord::new(
+                EvidenceId::new(format!("e{index}")).expect("id"),
+                ObservedAt::new(at),
+                at,
+                Producer::Verifier {
+                    verifier: Verifier::TestRunner,
+                },
+                evidence,
+            ));
+            self
+        }
+
+        fn read_on(mut self, today: &str) -> Self {
+            self.now = Some(
+                CivilDate::parse(today)
+                    .expect("a valid date")
+                    .to_timestamp(),
+            );
             self
         }
 
@@ -1635,6 +1785,140 @@ mod tests {
         fn evidence(&self) -> &[EvidenceRecord] {
             &self.evidence
         }
+
+        fn now(&self) -> Option<Timestamp> {
+            self.now
+        }
+    }
+
+    /// A requirement for one test run, decaying after `horizon`.
+    fn within(horizon: &str) -> EvidenceRequirement {
+        EvidenceRequirement {
+            horizon: Some(Horizon::parse(horizon).expect("a valid horizon")),
+            ..EvidenceRequirement::of_kind(EvidenceKind::TestResult)
+        }
+    }
+
+    /// A green unit suite, which is the observation the horizon then ages.
+    fn green() -> Evidence {
+        Evidence::TestResult(TestResult::passing(TestSuite::Unit, 12))
+    }
+
+    #[test]
+    fn an_observation_past_its_horizon_reads_unknown_and_names_the_horizon_and_the_date() {
+        let context = Context::new()
+            .observed_on("2026-08-24", green())
+            .read_on("2026-09-01");
+        let outcome = within("7d").evaluate(&context);
+
+        // `Unknown`, never `False`: a lapsed test run does not mean the tests fail. It means
+        // nobody has run them since, and the right move is to look rather than to fix.
+        assert_eq!(outcome.truth, Truth::Unknown, "{outcome}");
+        let detail = outcome.detail.clone().expect("a lapse states its reason");
+        assert!(
+            detail.contains("2026-08-24"),
+            "the observation date: {detail}"
+        );
+        assert!(detail.contains("7d"), "the horizon: {detail}");
+        assert!(detail.contains("2026-08-31"), "when it lapsed: {detail}");
+    }
+
+    #[test]
+    fn an_observation_exactly_its_horizon_old_still_satisfies_the_requirement() {
+        // The boundary the corpus is emphatic about: an off-by-one here fires the gate a day early
+        // on every record, which is how a gate gets muted and then deleted.
+        let boundary = Context::new()
+            .observed_on("2026-08-25", green())
+            .read_on("2026-09-01");
+        assert_eq!(within("7d").evaluate(&boundary).truth, Truth::True);
+
+        let over = Context::new()
+            .observed_on("2026-08-25", green())
+            .read_on("2026-09-02");
+        assert_eq!(within("7d").evaluate(&over).truth, Truth::Unknown);
+    }
+
+    #[test]
+    fn a_horizon_that_cannot_be_checked_refuses_rather_than_passing() {
+        // Same evidence, same requirement, no clock. The context predates horizons entirely, which
+        // is exactly the caller who would otherwise get the undecayed answer without asking for it.
+        let context = Context::new().observed_on("2026-08-30", green());
+        assert_eq!(
+            context.now(),
+            None,
+            "the fixture reaches the state the rule is about"
+        );
+
+        let outcome = within("7d").evaluate(&context);
+        assert_eq!(outcome.truth, Truth::Unknown, "{outcome}");
+        assert!(
+            outcome.detail.expect("a reason").contains("no clock"),
+            "the refusal says which of the two inputs is missing"
+        );
+    }
+
+    #[test]
+    fn a_requirement_without_a_horizon_is_untouched_by_the_clock() {
+        // The additive claim, asserted rather than assumed: an observation from 1970 read in 2026
+        // still satisfies a requirement that declares no horizon.
+        let context = Context::new()
+            .observed_on("1970-01-02", green())
+            .read_on("2026-09-01");
+        let requirement = EvidenceRequirement::of_kind(EvidenceKind::TestResult);
+        assert_eq!(
+            requirement.horizon, None,
+            "the fixture is the undecorated case"
+        );
+        assert_eq!(requirement.evaluate(&context).truth, Truth::True);
+    }
+
+    #[test]
+    fn a_stale_revision_outranks_a_lapsed_observation_because_it_is_the_worse_news() {
+        // Both defects at once. `False` wins: the run attests a model that is not the one being
+        // built against, and re-running it is the move whether or not it has also gone stale.
+        let context = Context::new()
+            .observed_on("2026-07-01", conformance_run(YESTERDAY))
+            .with_artifact(specification(Some(CURRENT)))
+            .read_on("2026-09-01");
+        let requirement = EvidenceRequirement {
+            horizon: Some(Horizon::days(7).expect("a horizon")),
+            ..EvidenceRequirement::of_kind(EvidenceKind::EssConformance)
+        };
+        let outcome = requirement.evaluate(&context);
+        assert_eq!(outcome.truth, Truth::False, "{outcome}");
+        assert!(
+            outcome.detail.expect("a reason").contains("attests"),
+            "the revision mismatch is what is reported"
+        );
+    }
+
+    #[test]
+    fn a_horizon_is_read_from_the_document_in_the_spellings_the_convention_uses() {
+        let requirement = EvidenceRequirement::from_node(&Node::Map(
+            [
+                ("kind".to_owned(), Node::Text("test_result".to_owned())),
+                ("horizon".to_owned(), Node::Text("3d".to_owned())),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .expect("a requirement with a horizon");
+        assert_eq!(
+            requirement.horizon,
+            Some(Horizon::days(3).expect("a horizon"))
+        );
+        assert_eq!(requirement.to_string(), "evidence test_result within 3d");
+
+        let refusal = EvidenceRequirement::from_node(&Node::Map(
+            [
+                ("kind".to_owned(), Node::Text("test_result".to_owned())),
+                ("horizon".to_owned(), Node::Text("soon".to_owned())),
+            ]
+            .into_iter()
+            .collect(),
+        ))
+        .expect_err("a horizon that is a word is not a horizon");
+        assert!(refusal.to_string().contains("number of days"), "{refusal}");
     }
 
     fn design(status: ArtifactStatus) -> Artifact {
