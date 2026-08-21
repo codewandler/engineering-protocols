@@ -34,6 +34,7 @@ Two rules keep this page honest, both learned the expensive way:
 | `0.6.1-ess-wave-6.5` | ESS wave 6.5 — hardening, the register emptied |
 | `0.7.0-ess-wave-7` | ESS wave 7 — the loop closed over generated code, in three languages |
 | `0.7.1-infra-waves-1-4` | Infra waves 1 to 4 — a cluster, described, held to account, and answered |
+| `0.8.0-harness-wave-1-trace-wave-1` | 0.8.0-harness-wave-1-trace-wave-1 |
 <!-- generated:delivered-waves:end -->
 
 ## The two halves, and the proposed designs
