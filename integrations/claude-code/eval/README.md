@@ -41,7 +41,7 @@ transcript is judged by a typed document. `run.sh` exits 0 only if both halves h
 protocol trace check --spec expectations.trace.yaml --transcript "$WORK/result.jsonl"
 ```
 
-That file is 41 expectations over 40 kinds of the `trace-spec/1` vocabulary, and it replaced five
+That file is 42 expectations over 41 kinds of the `trace-spec/1` vocabulary, and it replaced five
 assertions written in three idioms — a `grep` for a string anywhere in 86KB of JSON, two `jq`
 filters each carrying a weaker `grep` fallback for when `jq` was absent, and one `jq` filter that
 passed *unconditionally* when it was. The claims it carries include:
@@ -52,17 +52,20 @@ passed *unconditionally* when it was. The claims it carries include:
   tool call with a name and an argument matcher, not a string found somewhere in the file;
 * the terminal record is clean: `is_error: false`, `terminal_reason: completed`, no API error
   status, zero permission denials;
-* the environment is **hermetic** — the init event lists exactly one plugin,
-  `engineering-protocols`. The run gets a scratch `CLAUDE_CONFIG_DIR` holding only a copy of your
-  login credentials, so your own plugins, skills and output style cannot leak in (before this
-  existed, five of them did);
+* the init event lists exactly one plugin, `engineering-protocols`. The run gets a scratch
+  `CLAUDE_CONFIG_DIR` holding only a copy of your login credentials, so your own plugins, skills
+  and output style cannot leak in (before this existed, five of them did). **That is isolation,
+  not hermeticity, and the difference is a directory boundary**: account-level MCP servers come
+  with the *login* and no config home excludes them — see *What the first real runs answered*
+  below. `mcp-servers-from-the-account` reports the count here and gates at zero in both driven
+  specifications;
 * auth is the **login**, not a stray API key: `apiKeySource: none` — the check that catches an
   exported `ANTHROPIC_API_KEY` before a single turn is spent;
 * the skill was consulted *before* the store was touched, nothing shelled out to `rm -rf`, and
   every `protocol artifact` call came back in under two seconds.
 
-Twenty-three further expectations are **advisory**: cost, tokens, cache state, latency, rate-limit
-headroom and the model's resolved name. They are evaluated, printed as `note` rows in the verdict
+Twenty-four further expectations are **advisory**: cost, tokens, cache state, latency, rate-limit
+headroom, the model's resolved name and the account's MCP servers. They are evaluated, printed as `note` rows in the verdict
 table and counted separately — and they never move the exit code, because a gate that goes red
 when a cache was cold is a gate people learn to ignore. An advisory expectation is *not* a disabled
 one: a check that is switched off reads exactly like a check that passed.
@@ -196,6 +199,25 @@ allowed tools and lists thirty-two; the driven runs pass eight and list twenty-e
 still load-bearing here — it rules out "the tool did not exist" as an explanation for a refusal, so
 the refusal is attributable to a layer that chose to refuse — but it cannot stand where the
 enforcement design wanted an allowlist audit, and both specifications say so.
+
+**A scratch `CLAUDE_CONFIG_DIR` does not make a session hermetic.** Two of the four model sessions
+of the governed run `W4-1/1` listed **three account-level MCP servers** in their init event, every
+one `status: needs-auth`; the other two listed none. There is no `.mcp.json` in the tree and no
+`mcpServers` key in the scratch config home, so they arrive over the network with the *login* and
+no directory this eval controls can exclude them — a *flag* can: the runner passes
+`--strict-mcp-config`, which ignores every MCP configuration not given on its own command line,
+so the sessions launch with none. The expectation below is the guard that the flag stays. The bullet above used to call the scratch config
+home hermetic; it isolates a **directory**, which is a narrower thing.
+
+Nothing was reachable through them — the tool inventory is 28 in all four sessions, with servers
+and without, because a `needs-auth` server exposes no tool. That is also why `env.tool_available`
+cannot see this: the inventory is identical either way, and one re-authentication between two runs
+would turn a silent row into a live network surface. The kind that can see it is
+**`env.mcp_servers`**, a bound on the init event's server count — `{count: {at_most: 0}}` is the
+hermetic claim, and a missing field is `unk` rather than `ok`, because absence of evidence is not
+hermeticity. It gates at zero in `expectations.driven-step.trace.yaml` and
+`expectations.denial-step.trace.yaml`, and is advisory in `expectations.trace.yaml`, where a red
+row would be a fact about whoever's account is running the eval rather than about the plugin.
 
 **`subagent.spawned` is decidable after all.** Neither committed fixture records it, but both driven
 runs reported `subagent_stats.spawned = 0`, so the row is gating in both specifications.

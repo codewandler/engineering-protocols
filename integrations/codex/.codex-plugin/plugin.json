@@ -1,0 +1,37 @@
+{
+  "name": "engineering-protocols",
+  "version": "0.1.0",
+  "description": "Plan engineering work as governed markdown artifacts. Teaches Codex to create, relate, move and validate epics, stories and tasks in a `.engineering/planning/` store through the `protocol` CLI, which owns the vocabulary and the lifecycle.",
+  "author": {
+    "name": "Timo Friedl"
+  },
+  "homepage": "https://github.com/codewandler/engineering-protocols",
+  "repository": "https://github.com/codewandler/engineering-protocols",
+  "license": "Apache-2.0",
+  "keywords": [
+    "planning",
+    "backlog",
+    "epics",
+    "stories",
+    "artifacts",
+    "lifecycle",
+    "engineering-protocols"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Engineering Protocols — Planning",
+    "shortDescription": "Plan work as governed markdown artifacts",
+    "longDescription": "Epics, stories, tasks and initiatives as files under `.engineering/planning/`, with kinds, statuses and legal moves supplied by validated documents read from the `protocol` CLI rather than copied into a prompt.",
+    "developerName": "codewandler",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Decompose this epic into stories.",
+      "What is still in draft in the planning store?",
+      "Validate the planning store and report what it found."
+    ]
+  }
+}

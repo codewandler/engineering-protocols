@@ -80,8 +80,13 @@ if [ "${EVAL_USE_API_KEY:-0}" != "1" ]; then unset ANTHROPIC_API_KEY; fi
 PROMPT="$(cat "$SCRIPT_DIR/prompt.md")"
 say "running claude -p (model $MODEL, max $MAX_TURNS turns) …"
 AGENT_EXIT=0
+# `--strict-mcp-config`: account-level MCP servers arrive with the login, over the network, and
+# no directory the runner controls excludes them — observed in governed run W4-1/1, three servers
+# in a scratch home with no `mcpServers` key. The flag is the exclusion; the trace expectation
+# `mcp-servers-from-the-account` is the guard that it keeps working.
 (cd "$PROJECT" && CLAUDE_CONFIG_DIR="$WORK/claude-home" claude -p "$PROMPT" \
   --plugin-dir "$WORK/plugin" \
+  --strict-mcp-config \
   --model "$MODEL" \
   --max-turns "$MAX_TURNS" \
   --permission-mode dontAsk \

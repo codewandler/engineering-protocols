@@ -199,3 +199,8 @@ tasks:
     desc: Run the driven eval (protocol drive + real model sessions + the enforcement hooks).
     cmds:
       - integrations/claude-code/eval/run-driven.sh
+
+  codex-eval:
+    desc: Check the Codex instruction surface (free, no API call, no model).
+    cmds:
+      - integrations/codex/eval/check-instruction-surface.sh

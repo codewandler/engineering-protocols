@@ -23,6 +23,21 @@ belongs in the commit message or in `docs/design/`.
   of evidence is not hermeticity. The init event's `mcp_servers` is lifted into `trace-ir/1` as
   `SessionStart.mcp_servers`, with an absent field and an empty list kept apart all the way down.
 
+- **The eval sessions now launch with zero MCP servers, and the assertion gates everywhere.** The
+  register row that produced `env.mcp_servers` said no directory the runner controls can exclude
+  account-level servers — a flag can: `eval/run.sh` passes `--strict-mcp-config`, which ignores
+  every MCP configuration not on its own command line. With the exclusion in place the expectation
+  gates at `{at_most: 0}` in all three specifications, including the interactive one where it had
+  been advisory: a server in the init event no longer reports somebody's account, it reports a
+  broken exclusion. The driver's own session launcher gains the same flag with the driver wave.
+
+- **A Codex variant of the planning instructions**, at `integrations/codex/`: the same four
+  guardrails and the same read-the-vocabulary-from-the-CLI rule, as a Codex skill and an
+  `AGENTS.md` fragment, verified against codex-cli 0.145.0. Instruction surface only — no
+  enforcement hooks, no transcript adapter and no live eval, each refused with its reason in the
+  README. `task codex-eval` checks the surface itself: free, no API call, no model — nine checks
+  against the files, so drift in the instructions fails a command instead of a reader.
+
 ## [0.11.0-ground-truth-and-docs] — 2026-08-22
 
 ### Fixed

@@ -37,6 +37,30 @@ expectations:
       env.tool_available:
         tool: Write
 
+  - id: no-mcp-servers
+    statement: the session was handed no MCP server, so a driven step reached this repository's CLI and nothing else
+    # **A scratch `CLAUDE_CONFIG_DIR` does not make a session hermetic, and this is the row that
+    # says so.** Account-level MCP servers are attached to the *login*: they arrive over the
+    # network, and two of the four sessions of governed run `W4-1/1` listed three of them in their
+    # init event — in a run whose config home held no `mcpServers` key and whose tree held no
+    # `.mcp.json`. No directory the runner controls can exclude them, so the only thing that can
+    # catch them is an assertion over the transcript.
+    #
+    # **Why a count and not a tool assertion.** All three were `status: needs-auth`, so they
+    # exposed no tool at all: the inventory was 28 in every one of the four sessions, with servers
+    # and without. `env.tool_available` is blind to this by construction, and one
+    # re-authentication between two runs is all it would take to turn a silent row into a
+    # reachable network surface that no expectation stands in the way of.
+    #
+    # Gating, and gating at zero. A driven step's whole claim is that it did the work through the
+    # `protocol` verbs the state permits; a server it could have reached instead is the same class
+    # of defect as a tool it should not have been offered. A `unk` here means the harness stopped
+    # recording the field, which is a red gate on purpose — an audit that quietly stopped being
+    # decidable is the failure mode this section exists to refuse.
+    expect:
+      env.mcp_servers:
+        count: {at_most: 0}
+
   - id: the-skill-was-offered
     statement: the plugin loaded and offered its skill — `--plugin-dir` reached the session
     # Also the closest thing to an audit of the hooks having loaded: they ship in the same plugin,

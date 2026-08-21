@@ -38,6 +38,11 @@ expectations:
     # this asserts it, because isolation that silently stops working is indistinguishable from
     # isolation that works: the run goes green either way, and the contamination shows up months
     # later as an unreproducible result.
+    #
+    # **This row is about plugins and only about plugins.** A scratch config home does not make a
+    # session hermetic: account-level MCP servers arrive with the login, over the network, and no
+    # directory the runner controls excludes them. `mcp-servers-from-the-account` at the bottom of
+    # this file is the row that reports them.
     expect:
       env.exclusive:
         plugins: [engineering-protocols]
@@ -361,6 +366,20 @@ expectations:
     expect:
       rate_limit.utilization:
         at_most: 0.95
+
+  - id: mcp-servers-from-the-account
+    statement: no MCP server was attached to this session
+    # **Gating, since the runner learned to exclude them.** Account-level MCP servers are attached
+    # to the *login*: they arrive over the network, and two of the four sessions of governed run
+    # `W4-1/1` listed three of them in a scratch `CLAUDE_CONFIG_DIR` with no `mcpServers` key.
+    # This row was advisory while nothing the eval controlled could exclude them; the runner now
+    # passes `--strict-mcp-config`, which ignores every MCP configuration not given on the command
+    # line — so a server in the init event no longer reports somebody's account, it reports that
+    # the exclusion flag is gone or broken, and that is the plugin harness's defect to gate on.
+    # Both committed fixtures list `mcp_servers: []`; a missing field reads `unk`, never `ok`.
+    expect:
+      env.mcp_servers:
+        count: {at_most: 0}
 
   - id: the-model-resolved-as-expected
     statement: the alias on the command line resolved to the model the eval means
