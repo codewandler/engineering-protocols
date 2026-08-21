@@ -53,6 +53,23 @@ states evidence the documents themselves do not repeat.
 | R-4 | `README.md` § Status, § Documents, § What works today, § Repository layout | three touches, not one. The design doc **and its plan page** get rows, since a plan page is where a reader checks what was actually accepted; the `protocol artifact` verbs and the plugin get one bullet each where the README already lists what works; `integrations/` and the new crate get lines in the layout tree, since a directory nothing mentions is a directory nobody finds; and § Status's count of proposed designs moves four→five, the same stale-count correction V-6 makes in the vision |
 | A-6 | `AGENTS.md` § Which documents are normative, § Current state | the acceptance row as proposed, **plus** the "Not built yet" line, which said *"any durable backend — the only implementation of the contract is in memory"*. Half of that is now false and half is still true, and the two halves are worth separating: a durable **store** exists; the **contract** still has exactly one implementor until P3 |
 
+## Applied, 2026-08-21 — second pass, the transcript-conformance proposal
+
+Same day, different cause again, and this one is the *ordinary* case: a new design document landed in
+`docs/design/` and the three control documents have to say that it exists and that nobody has agreed
+to build it. This is the routine V-3 established — a proposal is listed with its status the day it
+arrives, so the newest file in that directory can never be mistaken for the plan.
+
+Three items, no fourth. **There is no `CHANGELOG.md` entry**, deliberately: a proposal changes
+nothing a user of the protocol sees, and `AGENTS.md` § *Changelog* scopes entries to exactly that.
+
+| item | applied where | difference from the proposal |
+|---|---|---|
+| V-7 | `docs/VISION.md` § Proposed, not accepted | the row as proposed, and the preamble's **tally removed rather than incremented**. It had said "three have been taken up, one has not, and one is accepted in part" — a sentence that has now been rewritten twice in one day for the same reason. The status column is the answer; a count in a preamble is a second copy of it that goes stale |
+| R-5 | `README.md` § Status, § Documents | five→six in the count sentence, and the row. The row states what the document *is* rather than what it would add, because a reader scanning that table is deciding whether to open the file |
+| A-7 | `AGENTS.md` § Which documents are normative | the row, with **unreviewed** stated in it and not only implied by the absence of a plan page. A-1's whole point was that an agent reading the newest design and implementing it is following the letter of that page, and the row says "do not implement from it" in words |
+
+
 ---
 
 ## `docs/VISION.md`
@@ -168,6 +185,26 @@ directory whose acceptance boundary runs *inside* it:
 
 And correct the preamble's count from four to five.
 
+### V-7 — a sixth design document, and the tally sentence that keeps going stale (medium) — **applied**
+
+`docs/design/transcript-conformance-design-v0.1.md` was filed 2026-08-21: a typed specification over
+an agent-run transcript, which is `infra-spec/1` pointed at a third observation domain. It is
+unreviewed and no plan page has taken it up. The table needs a row saying so.
+
+It also needs the preamble to stop counting. V-6 changed *"Four design documents"* to five that
+morning; this would change it to six the same afternoon. A tally in a preamble is a second copy of
+information the status column already carries, and this is the second time in one day it has been
+the stale copy. Delete the clause and let the column answer.
+
+The row's status is the plainest one on the table:
+
+> **proposed, not accepted.**
+
+Worth one sentence in the "what it would add" cell beyond the summary, because it is the least
+obvious of the six: it is what would make a *behavioural* claim about an agent — the skill was
+loaded, the CLI was consulted before the file was edited — admissible as evidence. The driver design
+needs exactly that and has no other mechanism for it.
+
 ---
 
 ## `README.md`
@@ -208,6 +245,16 @@ naming the behaviour rather than the flags — lifecycle-validated moves whose r
 set, `validate` accumulating, frontmatter private to the backend; and one bullet for the plugin —
 one skill, two agents, no hooks on purpose. Keep it to a few lines: this is a status list, not the
 design document.
+
+### R-5 — the sixth design is not in the table either (low, follows R-1 and R-4) — **applied**
+
+Same fix as R-4, one document later: a row in § *Documents*, and the count in § *Status* from five to
+six. Low, because the pattern is now established and the cost of getting it wrong is one reader
+opening `docs/design/` and forming their own view of what this project is building.
+
+One thing worth keeping in the row rather than compressing away: that the checker contains no model.
+It is the single most surprising property of a transcript-checking tool, and the one a reader will
+otherwise assume the opposite of.
 
 ---
 
@@ -285,3 +332,14 @@ that matters to somebody choosing whether to adopt. Split it:
 
 Both halves stated is the point. "There is a durable backend now" would be a claim the conformance
 suites do not support, and "no durable backend" stops being true the day the store lands.
+
+### A-7 — the acceptance table needs the sixth row, and this one says "unreviewed" out loud (medium) — **applied**
+
+`transcript-conformance-design-v0.1.md` is the first design filed here since A-1 that is *neither*
+reviewed *nor* accepted. Every other row in that table records a review outcome; this one records
+that there has not been one.
+
+State it in the row rather than leaving it to be inferred from a missing plan page. A-1 exists
+because an agent reading the newest, largest document in `docs/design/` and implementing it is
+following the letter of the page it is on, and the cheapest possible fix is for the row itself to
+say **do not implement from it**.

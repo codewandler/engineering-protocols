@@ -35,7 +35,7 @@ This repository has two halves. **AEP** governs how engineering work is performe
 what software must exist. They meet at evidence: a task can be blocked until something proves an
 implementation conforms to its specification. See [`docs/VISION.md`](docs/VISION.md).
 
-Two halves is what exists. Five further designs in [`docs/design/`](docs/design/) proposed extending
+Two halves is what exists. Six further designs in [`docs/design/`](docs/design/) proposed extending
 it. Three have been taken up: the specification as an oracle is **implemented** as ESS wave 4,
 semantic diff — what a revision invalidates — is **implemented** as ESS wave 5 after being accepted
 into the thesis as a stated amendment and extended by wave 7 down to the generated artifact, and
@@ -45,8 +45,10 @@ infrastructure, a fourth domain — stays deferred as designed; a Kubernetes-sco
 built as infrastructure waves, its first two delivered, with the discovery adapter outside this
 workspace, per the boundary the vision draws. The fifth is the newest: a planning store and a
 reference driver, whose Phase 1 — the store, the `protocol artifact` verbs and the Claude Code
-plugin — is accepted as **harness wave 1**, and whose driver is decided and not yet built.
-[`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* is where their status is kept.
+plugin — is accepted as **harness wave 1**, and whose driver is decided and not yet built. The
+sixth is newer still and wholly unaccepted: transcript conformance, a typed specification over an
+agent-run transcript. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* is where their
+status is kept.
 
 ### AEP — the protocol (v0.2 scope, complete)
 
@@ -290,6 +292,7 @@ Without `task`: `cargo xtask fmt --check`, `cargo clippy --workspace --all-targe
 | [`docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md`](docs/design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | *first slice implemented* as ESS wave 6 — the plan, the Rust emission, obligations as plan entries. The review reads the full design as four waves; §36's behavioural synthesis, §41's agent loop and §28's obligation-derived grants are rejected outright, and `Realization`, topology synthesis and formal verification stay proposed with the design |
 | [`docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md`](docs/design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | *proposed, reviewed, deferred whole* — infrastructure as a fourth domain, `InfraSpec`/`InfraIr`. Two ideas harvested; the design itself would put cloud discovery adapters inside this workspace, which the vision refuses. A Kubernetes-scoped subset is planned as infrastructure waves, with the discovery adapter external to this workspace |
 | [`docs/design/harness-planning-and-driver-design-v0.1.md`](docs/design/harness-planning-and-driver-design-v0.1.md) | *Phase 1 accepted* as harness wave 1 — the markdown planning store, the `protocol artifact` verbs and the Claude Code plugin. Its Phase 2, a **reference driver** implementing the harness contract, is decided by the operator and **not accepted for build**: the vision narrowing that admits it is recorded, and the build waits behind a feasibility review |
+| [`docs/design/transcript-conformance-design-v0.1.md`](docs/design/transcript-conformance-design-v0.1.md) | *proposed, not accepted* — a typed, executable specification over an agent-run transcript: which skill was loaded, which tool was called with which arguments, what happened before what, what the run cost. The `infra-spec/1` pattern in a third observation domain, with the same `ok`/`gap`/`unk` verdicts and no model anywhere in the checker |
 | [`docs/plan/ess-wave-1-the-model.md`](docs/plan/ess-wave-1-the-model.md) | ESS wave 1 — the model, and what its review changed |
 | [`docs/plan/ess-wave-2-the-compiler.md`](docs/plan/ess-wave-2-the-compiler.md) | ESS wave 2 — the IR, and where validation turned out to belong |
 | [`docs/plan/ess-wave-3-projections.md`](docs/plan/ess-wave-3-projections.md) | ESS wave 3 — the projections, and what they refuse to guess |

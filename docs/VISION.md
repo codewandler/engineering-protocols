@@ -145,10 +145,10 @@ verdict is only worth what the guards under it are worth.
 
 ## Proposed, not accepted
 
-Five design documents in [`docs/design/`](design/) propose extending this. They are listed here with
+Six design documents in [`docs/design/`](design/) propose extending this. They are listed here with
 their status so that reading the newest file in that directory cannot be mistaken for reading what
-this project has agreed to build — three have been taken up, one has not, and one is accepted in part
-by its own admission.
+this project has agreed to build. The tally is deliberately not stated in a sentence: a count in a
+preamble is the first thing to go stale, and the status column is the answer.
 
 | proposed design | what it would add | status |
 |---|---|---|
@@ -157,6 +157,7 @@ by its own admission.
 | [structural synthesis, obligations and realizations](design/ess-structural-synthesis-obligations-realizations-design-v0.1.md) | generated applications, and human or agent work carried as typed obligations | proposed; reviewed once and not reconciled — that review reads it as four waves, not one; unsequenced |
 | [infrastructure discovery and multi-cloud realization](design/semantic-infrastructure-discovery-specification-conformance-multicloud-design-v0.1.md) | a **fourth domain**: infrastructure, with `InfraSpec` and `InfraIr` beside the ESS pair | reviewed, and deferred whole with two ideas harvested; unsequenced |
 | [the planning store and the reference driver](design/harness-planning-and-driver-design-v0.1.md) | a durable store for planning artifacts, a Claude Code plugin that uses it, and the first in-repository implementation of the harness contract | **Phase 1 accepted as harness wave 1; driver decided and sketched, build unsequenced.** The narrowing it rests on is the one recorded above |
+| [transcript conformance](design/transcript-conformance-design-v0.1.md) | a typed, executable specification over an *agent-run transcript* — the `infra-spec/1` pattern pointed at a third observation domain, with the same three verdicts and a checker that contains no model | **proposed, not accepted.** It is what would make a behavioural claim about an agent admissible as evidence, which the driver's `llm` step needs and no other mechanism supplies |
 
 Closed-loop conformance and structural synthesis are horizons the two halves already implied — the
 thesis promises the tests and the skeleton, and wave 4 delivered the first of them. Semantic diff was
