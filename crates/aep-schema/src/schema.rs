@@ -13,6 +13,7 @@ use aep_domain::evidence::Evidence;
 use aep_domain::raw::{
     RawArtifactManifest, RawPrinciple, RawProfile, RawProtocol, RawTask, RawWorkflow,
 };
+use aep_driver_spec::map::RawStepMap;
 use ess_domain::spec::RawSpecFile;
 use schemars::schema::RootSchema;
 use schemars::{schema_for, JsonSchema};
@@ -111,6 +112,11 @@ pub fn generated_schemas() -> Vec<GeneratedSchema> {
             "trace-spec",
             "what an agent run must have looked like",
         ),
+        entry::<RawStepMap>(
+            "RawStepMap",
+            "driver-steps",
+            "what a harness does in each state of a workflow",
+        ),
     ]
 }
 
@@ -143,6 +149,7 @@ mod tests {
             "ess.schema.json",
             "planning-document.schema.json",
             "trace-spec.schema.json",
+            "driver-steps.schema.json",
         ] {
             assert!(filenames.contains(&expected), "{expected} is not published");
         }
@@ -271,6 +278,49 @@ mod tests {
             &validator,
             &serde_json::json!("test_results"),
             "`EvidenceKind::parse` refuses a kind it does not know",
+        );
+    }
+
+    #[test]
+    fn the_step_map_schema_refuses_the_unpinned_workflow_its_validator_refuses() {
+        // One assertion per side, because the defect review finding F6 names is the two
+        // disagreeing: `WorkflowRef` publishes a pattern whose version group is optional, so a
+        // step map carrying that type's schema would have told an author `workflow: adp/default`
+        // was fine while the loader refused it. `PinnedWorkflowRef` is the type that closes it, and
+        // this is the published half of the check — `crates/aep-driver-spec/src/pin.rs` holds the
+        // validator half.
+        let validator = definition("driver-steps.schema.json", "PinnedWorkflowRef");
+        accepts(
+            &validator,
+            &serde_json::json!("adp/default/1"),
+            "a step map is written against one revision of one state graph",
+        );
+        refuses(
+            &validator,
+            &serde_json::json!("adp/default"),
+            "an unpinned map is an instruction sheet for whatever is in the tree",
+        );
+    }
+
+    #[test]
+    fn the_step_schema_gives_an_llm_step_nowhere_to_put_evidence() {
+        // The type is the mechanism — the `Llm` variant has no evidence field — and the published
+        // schema has to say the same thing, or an editor would offer the key the parser refuses.
+        let validator = definition("driver-steps.schema.json", "RawStep");
+        accepts(
+            &validator,
+            &serde_json::json!({"kind": "llm", "prompt": "implement the acceptance statement"}),
+            "an llm step is a prompt and the skills to load",
+        );
+        refuses(
+            &validator,
+            &serde_json::json!({
+                "kind": "llm",
+                "prompt": "implement it",
+                "evidence": {"kind": "test_result", "verifier": "test-runner"}
+            }),
+            "an agent's own statement never satisfies an independence requirement, so a step kind \
+             that could mint evidence from a model's output would unpick the whole loop",
         );
     }
 

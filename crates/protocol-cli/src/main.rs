@@ -317,6 +317,29 @@ enum Command {
         #[command(subcommand)]
         command: trace::TraceCommand,
     },
+    /// Walk a workflow: run the steps a step map declares, and do only what the engine permits.
+    ///
+    /// The reference driver. It makes the engine's calls in order, executes the three kinds of step
+    /// that touch the world — a program, a model, a person — and records what it did. It evaluates
+    /// no gate itself: a driver that could evaluate a gate would be a second protocol
+    /// implementation with none of the conformance suites, and the first time the two disagreed the
+    /// one nobody tested would win.
+    Drive {
+        /// What to do with a run.
+        #[command(subcommand)]
+        command: drive::DriveCommand,
+    },
+    /// Draw a workflow, and a run over it.
+    ///
+    /// The engine answers *may this move?* in words; this answers *where is it?* in a picture —
+    /// the states down the page, the guards beside the arrows, and, when a run is drawn over them,
+    /// where it is, where it has been, what it produced and why it stopped. It evaluates nothing:
+    /// every overlay it draws was decided by the engine and read out of a run directory.
+    Workflow {
+        /// What to do with it.
+        #[command(subcommand)]
+        command: render::WorkflowCommand,
+    },
     /// Ask the reference backend about the entities an artifact manifest or planning store holds.
     Entity {
         /// Which question to ask about them.
@@ -498,6 +521,16 @@ mod planning;
 // `--format` enum too, because a check report has two useful renderings and not three.
 mod trace;
 
+// The third, on the same criterion again: a verb family with its own store — a run directory — its
+// own vocabulary, and no shared state with the rest. It is also where the three things that touch
+// the world live, which is why they are here and not in `aep-driver`.
+mod drive;
+
+// The fourth, and it holds the same boundary the third does: `aep-render` decides what a picture
+// looks like, and the poll loop, the rasteriser shell-out and the read of a run directory are here
+// because that crate is scanned for exactly those things.
+mod render;
+
 fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
@@ -529,6 +562,8 @@ fn run() -> Result<ExitCode> {
         Command::Explain { execution, action } => evaluate(&execution, action.as_deref()),
         Command::Artifact { command } => planning::run(command),
         Command::Trace { command } => trace::run(command),
+        Command::Drive { command } => drive::run(command),
+        Command::Workflow { command } => render::run(command),
         Command::Entity { command } => entity(&command),
         Command::Audit {
             backend,
@@ -2983,6 +3018,7 @@ fn validate(root: &Path, artifacts: Option<&Path>, format: Format) -> Result<Exi
         workflows: outcome.registry.workflows().count(),
         profiles: outcome.registry.profiles().count(),
         lifecycles: outcome.registry.lifecycles().len(),
+        step_maps: outcome.registry.step_maps().count(),
         problems: problems.clone(),
     };
 
@@ -2990,13 +3026,14 @@ fn validate(root: &Path, artifacts: Option<&Path>, format: Format) -> Result<Exi
         Format::Text => {
             outln!(
                 "{} file(s): {} protocol(s), {} principle(s), {} workflow(s), {} profile(s), {} \
-                 lifecycle(s)",
+                 lifecycle(s), {} step map(s)",
                 summary.files_read,
                 summary.protocols,
                 summary.principles,
                 summary.workflows,
                 summary.profiles,
-                summary.lifecycles
+                summary.lifecycles,
+                summary.step_maps
             );
             if problems.is_empty() {
                 outln!("valid");
@@ -3022,6 +3059,7 @@ struct Summary {
     workflows: usize,
     profiles: usize,
     lifecycles: usize,
+    step_maps: usize,
     problems: Vec<String>,
 }
 

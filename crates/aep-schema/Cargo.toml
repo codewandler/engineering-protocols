@@ -16,6 +16,14 @@ aep-domain.workspace = true
 # than the reverse, because a backend that had to know about schema generation could not be swapped
 # out — and the frontmatter is that backend's private format, deliberately absent from `aep-domain`.
 aep-backend-markdown.workspace = true
+
+# The step map — `drivers/<family>/<name>.yaml` — is read here and published from here, like the
+# four document kinds already in the tree. The dependency is the fourth sideways edge to a leaf,
+# and it is what keeps the driver split honest: `aep-driver-spec` depends on `aep-domain` alone, so
+# the cycle `aep-schema -> aep-driver -> aep-engine -> aep-schema` that review finding F1 found
+# cannot form.
+aep-driver-spec.workspace = true
+
 ess-domain.workspace = true
 
 # The `trace-spec/1` document is published from here for the reason every other authored document

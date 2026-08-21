@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Standard development workflow — adp/default/1</title>
+<style>
+:root { color-scheme: dark; }
+body { margin: 2rem auto; max-width: 78rem; padding: 0 1.5rem;
+  background: #0f1418; color: #d7dde3;
+  font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+h1 { font-size: 1.3rem; font-weight: 600; margin: 0 0 .2rem; }
+h2 { font-size: 1rem; margin: 2.4rem 0 .6rem; color: #8b98a5;
+  letter-spacing: .06em; text-transform: uppercase; }
+p.ref, p.summary { color: #8b98a5; margin: .2rem 0; }
+p.status { margin: .8rem 0 0; }
+figure { margin: 1.4rem 0 0; padding: 0; overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #2b3540; padding: .3rem .6rem; text-align: left;
+  vertical-align: top; }
+th { color: #8b98a5; font-weight: 500; background: #161d24; }
+td.wrap { white-space: normal; }
+code { background: #161d24; padding: 0 .3rem; border-radius: 3px; }
+ul.reasons { margin: .4rem 0 0; padding-left: 1.2rem; }
+.ok { color: #3fb950; } .blue { color: #58a6ff; }
+.amber { color: #d29922; } .red { color: #f85149; } .dim { color: #8b98a5; }
+.bar { border-left: 4px solid #f85149; padding-left: .8rem; }
+.bar-amber { border-left-color: #d29922; }
+</style>
+</head>
+<body>
+<h1>Standard development workflow</h1>
+<p class="ref">adp/default/1 · 9 states · 9 transitions</p>
+<p class="summary">Specification, decomposition, verifier setup, implementation, verification, adversarial verification and review, with an explicit route back to implementation when verification fails.</p>
+<p id="run-line" class="status red">run AUTH-142/3 · in implement · blocked · 7 iteration(s)</p>
+<figure>
+<svg viewBox="0 0 1083 1150" width="1083" height="1150" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="Workflow adp/default/1: 9 states and 9 transitions. A run is in `implement` and is blocked, for 2 stated reason(s).">
+  <style>
+    .bg { fill: #0f1418; }
+    .box { fill: #161d24; stroke: #2b3540; stroke-width: 1; }
+    .box-visited { fill: #161d24; stroke: #2b3540; stroke-width: 1; opacity: .55; }
+    .box-current { fill: #161d24; stroke: #58a6ff; stroke-width: 2; }
+    .box-stopped { fill: #161d24; stroke: #f85149; stroke-width: 2; }
+    .box-done { fill: #161d24; stroke: #3fb950; stroke-width: 2; }
+    .visited { opacity: .55; }
+    .h1 { fill: #d7dde3; font-size: 15px; letter-spacing: .04em; }
+    .h2 { fill: #8b98a5; font-size: 11px; letter-spacing: .06em; }
+    .t { fill: #d7dde3; font-size: 13px; }
+    .dim { fill: #8b98a5; font-size: 10px; }
+    .guard { fill: #8b98a5; font-size: 11px; }
+    .ok { fill: #3fb950; font-size: 11px; }
+    .amber { fill: #d29922; font-size: 11px; }
+    .red { fill: #f85149; font-size: 11px; }
+    .blue { fill: #58a6ff; font-size: 11px; }
+    .edge { fill: none; stroke: #2b3540; stroke-width: 1.5; }
+    .edge-back { stroke-dasharray: 4 4; }
+    .edge-taken { fill: none; stroke: #3fb950; stroke-width: 2; }
+    .edge-retreat { fill: none; stroke: #d29922; stroke-width: 2; }
+  </style>
+  <defs>
+    <marker id="arrow-idle" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2b3540"/>
+    </marker>
+    <marker id="arrow-taken" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-retreat" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d29922"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1083" height="1150"/>
+  <text class="h1" x="28" y="32">Standard development workflow</text>
+  <text class="h2" x="28" y="50">adp/default/1 · 9 states · 9 transitions</text>
+  <text class="red" x="28" y="70">run AUTH-142/3 · in implement · blocked · 7 iteration(s)</text>
+  <polyline class="edge-taken" points="190,152 190,204" marker-end="url(#arrow-taken)"/>
+  <polyline class="edge-taken" points="190,260 190,312" marker-end="url(#arrow-taken)"/>
+  <text class="ok" x="202" y="290">artifact.specification.exists</text>
+  <polyline class="edge-taken" points="190,368 190,420" marker-end="url(#arrow-taken)"/>
+  <polyline class="edge-taken" points="190,476 190,528" marker-end="url(#arrow-taken)"/>
+  <text class="ok" x="202" y="506">test.exists</text>
+  <polyline class="edge-taken" points="190,584 190,636" marker-end="url(#arrow-taken)"/>
+  <text class="ok" x="202" y="614">diff.exists</text>
+  <polyline class="edge" points="190,692 190,744" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="722">(tests.unit.failed == 0 and tests.contract.failed == 0 and static_analysis.errors == 0)</text>
+  <polyline class="edge-retreat" points="60,664 36,664 36,556 60,556" marker-end="url(#arrow-retreat)"/>
+  <text class="amber" x="334" y="614">verify → implement · (tests.unit.failed &gt; 0 or tests.contract.failed &gt; 0 or static_analysis.errors &gt; 0)</text>
+  <polyline class="edge" points="190,800 190,852" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="830">evidence.missing == 0</text>
+  <polyline class="edge" points="190,908 190,960" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="938">review.approved</text>
+  <g id="state-receive" class="visited">
+    <rect class="box-visited" x="60" y="96" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="120">Receive</text>
+    <text class="dim" x="74" y="138">receive · intake</text>
+  </g>
+  <g id="state-specify" class="visited">
+    <rect class="box-visited" x="60" y="204" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="228">Specify</text>
+    <text class="dim" x="74" y="246">specify · specification</text>
+  </g>
+  <g id="state-decompose" class="visited">
+    <rect class="box-visited" x="60" y="312" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="336">Decompose</text>
+    <text class="dim" x="74" y="354">decompose · decomposition, planning</text>
+  </g>
+  <g id="state-establish_verifiers" class="visited">
+    <rect class="box-visited" x="60" y="420" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="444">Establish verifiers</text>
+    <text class="dim" x="74" y="462">establish_verifiers · verification-setup</text>
+  </g>
+  <g id="state-implement">
+    <rect class="box-stopped" x="60" y="528" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="552">Implement</text>
+    <text class="dim" x="74" y="570">implement · implementation</text>
+    <text class="amber" x="308" y="552" text-anchor="end">×2</text>
+  </g>
+  <g id="state-verify" class="visited">
+    <rect class="box-visited" x="60" y="636" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="660">Verify</text>
+    <text class="dim" x="74" y="678">verify · verification</text>
+  </g>
+  <g id="state-adversarial_verify">
+    <rect class="box" x="60" y="744" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="768">Adversarial verify</text>
+    <text class="dim" x="74" y="786">adversarial_verify · adversarial-verification</text>
+    <text class="dim" x="334" y="768">requires evidence test_result from test-runner (independent)</text>
+  </g>
+  <g id="state-review">
+    <rect class="box" x="60" y="852" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="876">Review</text>
+    <text class="dim" x="74" y="894">review · review</text>
+  </g>
+  <g id="state-complete">
+    <rect class="box" x="60" y="960" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="984">Complete</text>
+    <text class="dim" x="74" y="1002">complete · completion · terminal</text>
+  </g>
+  <text class="dim" x="28" y="1050">evidence  static_analysis ×1 · test_result ×3</text>
+  <rect x="28" y="1056" width="4" height="40" fill="#f85149" rx="2"/>
+  <text class="red" x="42" y="1068">blocked:</text>
+  <text class="dim" x="42" y="1086">tests.unit.failed &gt; 0 (observed 2)</text>
+  <text class="dim" x="42" y="1104">no transition out of `implement` is permitted: diff.exists is unknown</text>
+</svg>
+</figure>
+<div class="bar"><p class="red">blocked:</p>
+<ul id="reasons" class="reasons">
+<li>tests.unit.failed &gt; 0 (observed 2)</li>
+<li>no transition out of `implement` is permitted: diff.exists is unknown</li>
+</ul>
+</div>
+<h2>States</h2>
+<table>
+<tr><th>state</th><th>title</th><th>phases</th><th>requires</th><th>run</th></tr>
+<tr><td><code>receive</code></td><td>Receive</td><td class="dim">intake</td><td class="wrap dim"></td><td class="ok">visited · entered ×1</td></tr>
+<tr><td><code>specify</code></td><td>Specify</td><td class="dim">specification</td><td class="wrap dim"></td><td class="ok">visited · entered ×1</td></tr>
+<tr><td><code>decompose</code></td><td>Decompose</td><td class="dim">decomposition, planning</td><td class="wrap dim"></td><td class="ok">visited · entered ×1</td></tr>
+<tr><td><code>establish_verifiers</code></td><td>Establish verifiers</td><td class="dim">verification-setup</td><td class="wrap dim"></td><td class="ok">visited · entered ×1</td></tr>
+<tr><td><code>implement</code></td><td>Implement</td><td class="dim">implementation</td><td class="wrap dim"></td><td class="red">current, stopped · entered ×2</td></tr>
+<tr><td><code>verify</code></td><td>Verify</td><td class="dim">verification</td><td class="wrap dim"></td><td class="ok">visited · entered ×1</td></tr>
+<tr><td><code>adversarial_verify</code></td><td>Adversarial verify</td><td class="dim">adversarial-verification</td><td class="wrap dim">evidence test_result from test-runner (independent)</td><td class="dim">not reached</td></tr>
+<tr><td><code>review</code></td><td>Review</td><td class="dim">review</td><td class="wrap dim"></td><td class="dim">not reached</td></tr>
+<tr><td><code>complete</code></td><td>Complete</td><td class="dim">completion</td><td class="wrap dim"></td><td class="dim">not reached · terminal</td></tr>
+</table>
+<h2>Transitions</h2>
+<table>
+<tr><th>from</th><th>to</th><th>guard</th><th>requires</th><th>means</th><th>run</th></tr>
+<tr><td><code>receive</code></td><td><code>specify</code></td><td class="wrap"><code>—</code></td><td class="wrap dim"></td><td class="wrap dim">Intake is done when there is something to specify; nothing else gates it.</td><td class="ok">taken ×1</td></tr>
+<tr><td><code>specify</code></td><td><code>decompose</code></td><td class="wrap"><code>artifact.specification.exists</code></td><td class="wrap dim"></td><td class="wrap dim">Work is only broken up once there is a specification to break up.</td><td class="ok">taken ×1</td></tr>
+<tr><td><code>decompose</code></td><td><code>establish_verifiers</code></td><td class="wrap"><code>—</code></td><td class="wrap dim"></td><td class="wrap dim">With units identified, each one&#39;s acceptance check can be written.</td><td class="ok">taken ×1</td></tr>
+<tr><td><code>establish_verifiers</code></td><td><code>implement</code></td><td class="wrap"><code>test.exists</code></td><td class="wrap dim"></td><td class="wrap dim">A test must exist before implementation begins. This is the mechanical form of test-driven work: the guard, not the agent&#39;s good intentions, is what enforces the order.</td><td class="ok">taken ×1</td></tr>
+<tr><td><code>implement</code></td><td><code>verify</code></td><td class="wrap"><code>diff.exists</code></td><td class="wrap dim"></td><td class="wrap dim">There is nothing to verify until the working tree has actually changed.</td><td class="ok">taken ×1</td></tr>
+<tr><td><code>verify</code></td><td><code>adversarial_verify</code></td><td class="wrap"><code>(tests.unit.failed == 0 and tests.contract.failed == 0 and static_analysis.errors == 0)</code></td><td class="wrap dim"></td><td class="wrap dim">Unit and contract suites green and static analysis clean. Contracts are in the guard because a change that passes its own tests can still break a consumer.</td><td class="dim">not taken</td></tr>
+<tr><td><code>verify</code></td><td><code>implement</code></td><td class="wrap"><code>(tests.unit.failed &gt; 0 or tests.contract.failed &gt; 0 or static_analysis.errors &gt; 0)</code></td><td class="wrap dim"></td><td class="wrap dim">Verification failed, so the work goes back to implementation. Any failing check sends it back, not just the unit suite — a static-analysis error is a defect that has not been symptomatic yet.</td><td class="amber">went back ×1</td></tr>
+<tr><td><code>adversarial_verify</code></td><td><code>review</code></td><td class="wrap"><code>evidence.missing == 0</code></td><td class="wrap dim"></td><td class="wrap dim">No required evidence outstanding. A reviewer reading a change with gaps in its evidence is being asked to guess, and will guess in favour of the author.</td><td class="dim">not taken</td></tr>
+<tr><td><code>review</code></td><td><code>complete</code></td><td class="wrap"><code>review.approved</code></td><td class="wrap dim"></td><td class="wrap dim">Review concluded in approval.</td><td class="dim">not taken</td></tr>
+</table>
+<h2>Evidence</h2>
+<table>
+<tr><th>kind</th><th>records</th></tr>
+<tr><td><code>static_analysis</code></td><td>1</td></tr>
+<tr><td><code>test_result</code></td><td>3</td></tr>
+</table>
+<script>
+(function () {
+  if (window.location.protocol === 'file:') return;
+  var BOX = { idle: 'box', visited: 'box-visited', current: 'box-current',
+    stopped: 'box-stopped', done: 'box-done' };
+  var STOPPED = ['blocked', 'budget-exhausted', 'store-broken'];
+  function paint(run) {
+    var path = run.path || [];
+    var stopped = STOPPED.indexOf(run.status) !== -1;
+    var groups = document.querySelectorAll('g[id^="state-"]');
+    for (var i = 0; i !== groups.length; i++) {
+      var group = groups[i];
+      var id = group.id.slice('state-'.length);
+      var rect = group.querySelector('rect');
+      if (!rect) continue;
+      var kind = 'idle';
+      if (path.indexOf(id) !== -1) kind = 'visited';
+      if (run.current === id) {
+        kind = stopped ? 'stopped' : (run.status === 'completed' ? 'done' : 'current');
+      }
+      rect.setAttribute('class', BOX[kind]);
+      group.setAttribute('class', kind === 'visited' ? 'visited' : '');
+    }
+    var line = document.getElementById('run-line');
+    if (line && run.line) line.textContent = run.line;
+    var reasons = document.getElementById('reasons');
+    if (reasons && run.reasons) {
+      reasons.textContent = '';
+      reasons.hidden = run.reasons.length === 0;
+      for (var r = 0; r !== run.reasons.length; r++) {
+        var item = document.createElement('li');
+        item.textContent = run.reasons[r];
+        reasons.appendChild(item);
+      }
+    }
+  }
+  function poll() {
+    fetch('run.json', { cache: 'no-store' })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (run) { if (run) paint(run); })
+      .catch(function () { /* no sibling run.json: stay the static page */ });
+  }
+  poll();
+  window.setInterval(poll, 2000);
+})();
+</script>
+</body>
+</html>

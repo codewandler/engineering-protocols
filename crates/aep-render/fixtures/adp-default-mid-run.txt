@@ -1,0 +1,28 @@
+Standard development workflow
+adp/default/1 · 9 states · 9 transitions
+run AUTH-142/3 · in implement · blocked · 7 iteration(s)
+
+  ✓ receive              Receive                  intake
+  │ (taken 1×)
+  ✓ specify              Specify                  specification
+  │ (taken 1×)  artifact.specification.exists
+  ✓ decompose            Decompose                decomposition, planning
+  │ (taken 1×)
+  ✓ establish_verifiers  Establish verifiers      verification-setup
+  │ (taken 1×)  test.exists
+  ■ implement            Implement            ×2  implementation
+  │ (taken 1×)  diff.exists
+  ✓ verify               Verify                   verification
+  │  (tests.unit.failed == 0 and tests.contract.failed == 0 and static_analysis.errors == 0)
+  ╰─◀ implement (taken 1×)  (tests.unit.failed > 0 or tests.contract.failed > 0 or static_analysis.errors > 0)
+  · adversarial_verify   Adversarial verify       adversarial-verification
+  │  evidence.missing == 0
+  · review               Review                   review
+  │  review.approved
+  · complete             Complete                 completion · terminal
+
+evidence  static_analysis ×1 · test_result ×3
+
+blocked:
+  tests.unit.failed > 0 (observed 2)
+  no transition out of `implement` is permitted: diff.exists is unknown

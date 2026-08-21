@@ -1,0 +1,30 @@
+[package]
+name = "aep-render"
+description = "Draws a workflow, and a run over it: one laid-out scene, four renderings — SVG, HTML, a terminal frame and the geometry behind them."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+
+# The only dependency, and the reason this crate exists as a leaf rather than as a module of the
+# driver: a renderer that could see `aep-engine` would put a drawing crate on the far side of the
+# cycle `aep-schema -> aep-driver -> aep-engine -> aep-schema` that review finding F1 found, and a
+# picture is not worth that. The run overlay therefore arrives as `RunView`, a plain struct declared
+# here, which a caller builds from whatever it holds — the engine's `Snapshot`, the driver's cursor,
+# or a fixture in a test.
+aep-domain.workspace = true
+
+[dev-dependencies]
+
+# The fixtures are the repository's own workflow documents, read the way the loader reads them:
+# `RawWorkflow` through `TryFrom`. Reading the real `workflows/development/default.yaml` is what
+# makes the committed snapshots a check on the renderer rather than on a copy of a workflow that
+# nobody keeps in step. Already a workspace dependency; nothing new enters the tree.
+serde_yaml.workspace = true
+
+[lints]
+workspace = true

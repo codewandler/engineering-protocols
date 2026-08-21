@@ -9,7 +9,62 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **`protocol drive` — a workflow you specified is now a workflow that runs, and a step the protocol
+  does not permit does not happen (harness wave 3).** The engine has always decided; nothing in this
+  repository had ever *done* what it decided. `protocol drive run` holds the loop: rebuild the
+  artifact graph from the store, ask the engine what is owed, run the next step of the state the run
+  is in, submit what a verifier produced, and ask to move. It evaluates no gate of its own — a driver
+  that could would be a second protocol implementation with none of the conformance suites behind it,
+  and the first time the two disagreed the one nobody tested would win.
+
+  **A step map is the missing half of a workflow, and it is a document.** `drivers/<family>/<name>.yaml`
+  is the fifth document kind in the tree, loaded, validated and schema-generated like the four before
+  it: per state, an ordered list of steps, and the engine is asked to move when the list is done. It
+  **pins the workflow it was written against** — `workflow: adp/default/1`, mandatory — so a workflow
+  that reaches version 2 orphans the map at load, refused and naming both versions, rather than
+  quietly applying instructions to a state graph nobody wrote them for.
+
+  **Three step kinds, and the important one is what an `llm` step cannot do.** A `command` step runs
+  a program and records `producer: verifier`, which is how `independent: true` is honestly satisfied.
+  An `operator` step prints the engine's explanation verbatim, persists, releases the lock and exits
+  0 with a line somebody else can resume from — because a driver holding a terminal open for a person
+  loses the run when the terminal closes. An `llm` step **has no `evidence` field**: not a rule that
+  could be relaxed, a variant with nothing to put a claim in. Anything a model was supposed to
+  achieve that is checkable is observed by the `command` step after it.
+
+  **What a run leaves behind, and what a refusal reads like.** `.engineering/runs/<task>/<n>/` holds
+  the engine's snapshot and the driver's cursor side by side — two documents because they have two
+  owners — plus each step's log and each model session's transcript. A blocked run prints the
+  engine's own sentences and does not reword them: on the shipped fixture, six moves from `receive`
+  to `adversarial_verify` and then `adversarial_verify -> review: guard: evidence.missing == 0`,
+  character for character in both the report and the cursor. **A crash submits nothing**, because
+  absence is the fact not being in the store, and collapsing a crash into a failure sends an agent to
+  fix code nobody ran. **One run per store**: a lock at one fixed path, created before a run id
+  exists, refused by name to a second invocation with the holder's run id, pid and host, and gone on
+  every exit path the driver controls. `--resume` re-takes it and refuses if the workflow, the step
+  map or the engine moved underneath.
+
+  **The neutrality claim is now a test rather than a sentence.** A second harness — a shell script
+  with no model, no network and no credential in it — implements the same three adapter points and
+  runs inside `task check`: the same step map, the same `tool_config`, the same checker, and a
+  transcript in a dialect of its own that mints a `trace_conformance` record. The Claude Code adapter
+  refuses that dialect, which is asserted, because two readers that accepted each other's formats
+  would be one reader tested twice.
+
+- **`protocol workflow render` — a workflow, and a run over it, as a picture.** Until now a workflow
+  could only be printed as YAML. Four formats behind one scene: a standalone `svg`, a self-contained
+  `html` page that fetches nothing, a `png` by way of `rsvg-convert`, and a `tui` frame for the
+  terminal. Hand it `--run` and it draws where the run has been, how often it entered each state,
+  what evidence it produced and why it stopped — with the engine's reasons **verbatim**, never
+  summarised, because a picture that paraphrased a refusal would be answering a question it did not
+  evaluate. `--watch` redraws the terminal frame as a run advances.
+
+  It **decides nothing**: the overlay is handed in as a plain value and the crate depends on the
+  domain types alone, not on the engine and not on the driver. Rendering is **byte-stable** — the
+  same workflow and the same run produce the same bytes — so a committed figure does not turn up in a
+  diff for a reason nobody chose.
 
 ## [0.8.0-harness-wave-1-trace-wave-1] — 2026-08-21
 

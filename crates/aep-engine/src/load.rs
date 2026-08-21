@@ -1,8 +1,8 @@
 //! Reading a document tree.
 //!
 //! A document tree is the conventional layout — `protocols/`, `principles/`, `workflows/`,
-//! `profiles/`, `artifacts/lifecycles/` — but the convention is only about *where to look*: what a
-//! file is called has no bearing on what it declares.
+//! `profiles/`, `artifacts/lifecycles/`, `drivers/` — but the convention is only about *where to
+//! look*: what a file is called has no bearing on what it declares.
 //!
 //! Loading reports **every** bad file with its path rather than stopping at the first, because
 //! fixing a document set one error per run is how a validation step becomes something people avoid
@@ -25,6 +25,12 @@ const TREE: &[(&str, DocumentKind)] = &[
     ("workflows", DocumentKind::Workflow),
     ("profiles", DocumentKind::Profile),
     ("artifacts/lifecycles", DocumentKind::Lifecycle),
+    // Last, and the order is load-bearing rather than aesthetic: a step map is cross-validated
+    // against the workflow it pins, and the workflows are filled in by the row above this one.
+    // `Registry::validate` is what runs that check, after the whole tree has been read, so a map
+    // read before its workflow is still checked against it — but the reading order is kept honest
+    // here so nobody has to know that to see why this row is last.
+    ("drivers", DocumentKind::StepMap),
 ];
 
 /// File extensions treated as documents.
@@ -201,6 +207,13 @@ fn load_file(registry: &mut Registry, path: &Path, kind: DocumentKind) -> Result
             .and_then(|document| {
                 registry
                     .insert_lifecycle(document)
+                    .map_err(|error| error.to_string())
+            }),
+        DocumentKind::StepMap => parse::step_map(&text, Some(&origin))
+            .map_err(|error| error.to_string())
+            .and_then(|document| {
+                registry
+                    .insert_step_map(document)
                     .map_err(|error| error.to_string())
             }),
         DocumentKind::Task

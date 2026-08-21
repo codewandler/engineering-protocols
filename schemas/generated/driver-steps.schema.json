@@ -1,0 +1,355 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RawStepMap",
+  "description": "A step map as it is written, before anything has checked what it claims.",
+  "type": "object",
+  "required": [
+    "format",
+    "id",
+    "workflow"
+  ],
+  "properties": {
+    "format": {
+      "description": "The format version the document says it is written in.",
+      "type": "string"
+    },
+    "id": {
+      "description": "What this map is, such as `development/default`.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/StepMapId"
+        }
+      ]
+    },
+    "states": {
+      "description": "What to do in each state, by state name.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/RawStateSteps"
+      }
+    },
+    "title": {
+      "description": "A human sentence for a report's heading.",
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "workflow": {
+      "description": "The workflow it is written against, pinned to a major version.\n\nRead as a [`WorkflowRef`] so an unpinned one reaches validation and is refused there, **accumulating** with every other problem in the document rather than short-circuiting as a deserialization error would. The published schema is [`PinnedWorkflowRef`]'s, which is the strict one — the two halves of review finding F6.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/PinnedWorkflowRef"
+        }
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "EvidenceKind": {
+      "description": "A kind of evidence. The canonical names come first; the rest are older spellings still accepted.",
+      "type": "string",
+      "enum": [
+        "test_result",
+        "static_analysis",
+        "contract_result",
+        "property_test_result",
+        "deployment_result",
+        "metric_observation",
+        "health_observation",
+        "approval",
+        "diff",
+        "artifact",
+        "review",
+        "verification",
+        "specification",
+        "ess_conformance",
+        "trace_conformance",
+        "test_execution",
+        "source_diff",
+        "artifact_evidence",
+        "review_result",
+        "verification_record",
+        "specification_record",
+        "ess_conformance_result"
+      ]
+    },
+    "PinnedWorkflowRef": {
+      "description": "Reference to a workflow at a major version, such as `adp/default/1`. The version is mandatory: a step map is an instruction sheet for one state graph.",
+      "type": "string",
+      "pattern": "^(workflow:)?[a-z][a-z0-9-]*([./][a-z0-9-]+)*/[1-9][0-9]*$"
+    },
+    "RawEvidenceMapping": {
+      "description": "How a command's result becomes evidence, as written.",
+      "type": "object",
+      "required": [
+        "kind",
+        "verifier"
+      ],
+      "properties": {
+        "kind": {
+          "description": "Which kind of evidence the program establishes.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/EvidenceKind"
+            }
+          ]
+        },
+        "subject": {
+          "description": "What the evidence is about.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SubjectRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suite": {
+          "description": "Which suite ran, for a `test_result`.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TestSuite"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tool": {
+          "description": "The tool that produced it, for provenance.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verifier": {
+          "description": "Which class of verifier it is.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Verifier"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawStateSteps": {
+      "description": "One state's steps, as written.",
+      "type": "object",
+      "properties": {
+        "steps": {
+          "description": "The steps, in the order the author wants them run.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RawStep"
+          }
+        },
+        "visit_budget": {
+          "description": "How many times this state may be entered before the run stops.",
+          "default": null,
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "RawStep": {
+      "description": "One step, as written.",
+      "oneOf": [
+        {
+          "description": "Run a program and map its result to evidence.",
+          "type": "object",
+          "required": [
+            "kind",
+            "run"
+          ],
+          "properties": {
+            "description": {
+              "description": "What this step is for, in one line.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "evidence": {
+              "description": "What to record when the program produces a verdict.",
+              "anyOf": [
+                {
+                  "$ref": "#/definitions/RawEvidenceMapping"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "command"
+              ]
+            },
+            "retries": {
+              "description": "How many times to retry a step that could not run at all.",
+              "default": null,
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "uint32",
+              "minimum": 0.0
+            },
+            "run": {
+              "description": "The program and its arguments.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Ask a model, with a tool set the protocol derived.",
+          "type": "object",
+          "required": [
+            "kind",
+            "prompt"
+          ],
+          "properties": {
+            "description": {
+              "description": "What this step is for, in one line.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "harness": {
+              "description": "Which harness runs it. `claude-code` when the document is silent.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "llm"
+              ]
+            },
+            "prompt": {
+              "description": "What the model is asked to do.",
+              "type": "string"
+            },
+            "skills": {
+              "description": "Skills the harness should make available, by name.",
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Stop and hand the run to a person.",
+          "type": "object",
+          "required": [
+            "kind",
+            "prompt"
+          ],
+          "properties": {
+            "description": {
+              "description": "What this step is for, in one line.",
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "operator"
+              ]
+            },
+            "prompt": {
+              "description": "What the person is being asked for.",
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "StepMapId": {
+      "description": "Identifier of a step map, such as `development/default`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
+    },
+    "SubjectRef": {
+      "description": "Subject of evidence, written `<kind>:<id>`.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9._/-]*$"
+    },
+    "TestSuite": {
+      "description": "Which body of tests was run.",
+      "examples": [
+        "unit",
+        "integration",
+        "contract",
+        "property",
+        "regression",
+        "mutation",
+        "fuzz",
+        "differential",
+        "e2e",
+        "smoke"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "ToolRef": {
+      "description": "tool identifier.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*([./][a-z0-9]+(-[a-z0-9]+)*)*$"
+    },
+    "Verifier": {
+      "description": "A verifier class; the named classes are listed in `examples`, and any other name is treated as an external tool.",
+      "examples": [
+        "compiler",
+        "test-runner",
+        "contract-runner",
+        "static-analyzer",
+        "property-tester",
+        "model-checker",
+        "telemetry-query",
+        "policy-engine",
+        "human-approval",
+        "human-review",
+        "artifact-validator",
+        "conformance-runner",
+        "trace-checker"
+      ],
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*([./][a-z0-9-]+)*$"
+    }
+  }
+}

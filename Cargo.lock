@@ -69,11 +69,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "aep-driver"
+version = "0.1.0"
+dependencies = [
+ "aep-backend-markdown",
+ "aep-domain",
+ "aep-driver-spec",
+ "aep-engine",
+ "aep-schema",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "thiserror",
+ "trace-domain",
+ "trace-spec",
+]
+
+[[package]]
+name = "aep-driver-spec"
+version = "0.1.0"
+dependencies = [
+ "aep-domain",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "aep-engine"
 version = "0.1.0"
 dependencies = [
  "aep-contract",
  "aep-domain",
+ "aep-driver-spec",
  "aep-schema",
  "serde",
  "serde_json",
@@ -82,11 +111,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "aep-render"
+version = "0.1.0"
+dependencies = [
+ "aep-domain",
+ "serde_yaml",
+]
+
+[[package]]
 name = "aep-schema"
 version = "0.1.0"
 dependencies = [
  "aep-backend-markdown",
  "aep-domain",
+ "aep-driver-spec",
  "ess-domain",
  "jsonschema",
  "schemars",
@@ -1057,7 +1095,10 @@ dependencies = [
  "aep-conformance",
  "aep-contract",
  "aep-domain",
+ "aep-driver",
+ "aep-driver-spec",
  "aep-engine",
+ "aep-render",
  "aep-schema",
  "anyhow",
  "clap",

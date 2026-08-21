@@ -22,6 +22,23 @@ aep-backend-memory.workspace = true
 aep-conformance.workspace = true
 aep-contract.workspace = true
 aep-domain.workspace = true
+
+# `protocol drive`. The routing core and the documents it reads are libraries, so the command line
+# is a shell over them — with one deliberate exception, and it is the crate boundary § 4.1 draws:
+# running a program, invoking a model, pausing for a person, and the store lock with its
+# pid-liveness probe are **here**, because a crate that claims to be clock-free and probe-free
+# cannot hold them and a banned-token scan would not catch a probe that slipped in.
+aep-driver.workspace = true
+aep-driver-spec.workspace = true
+
+# `protocol workflow render`. The scene, the layout and the four renderings live in the library,
+# so the command line is a shell over it: a harness calling `Scene::build(&workflow, Some(&view))`
+# and `svg::render(&scene)` gets the same bytes this verb writes. What is *not* in that crate is
+# what this one adds — the `--watch` poll, the `rsvg-convert` shell-out and the read of a run
+# directory — because it claims to be clock-free, terminal-free and file-free, and a scan enforces
+# the claim.
+aep-render.workspace = true
+
 aep-engine.workspace = true
 aep-schema.workspace = true
 ess-compiler.workspace = true

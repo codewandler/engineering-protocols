@@ -135,6 +135,7 @@ fn the_document_schemas_accept_every_document_this_repository_ships() {
         ("workflow.schema.json", "workflows"),
         ("profile.schema.json", "profiles"),
         ("artifact-lifecycle.schema.json", "artifacts/lifecycles"),
+        ("driver-steps.schema.json", "drivers"),
     ] {
         let validator = validator(filename);
         for file in documents_under(directory) {

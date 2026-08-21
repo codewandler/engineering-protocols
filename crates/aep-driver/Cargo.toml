@@ -1,0 +1,49 @@
+[package]
+name = "aep-driver"
+description = "The reference driver's routing core: a deterministic loop that asks the engine and does only what the answers permit."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+
+# The protocol's vocabulary, the engine whose answers this crate consumes verbatim, and the
+# documents and records the driver reads and writes. Nothing else decides anything here.
+aep-domain.workspace = true
+aep-engine.workspace = true
+aep-driver-spec.workspace = true
+
+# D2: the artifact graph is rebuilt from the planning store at the top of every iteration and
+# handed to `Engine::restore`. The store is the only source of `artifact.**`, and there is no cache.
+aep-backend-markdown.workspace = true
+
+serde.workspace = true
+
+# The run directory's two records, and the errors a refusal is made of.
+thiserror.workspace = true
+
+# The snapshot and the cursor are JSON on disk: two documents, two owners, one directory.
+serde_json.workspace = true
+
+# The tests build their documents the way a project does — through the schema crate's parsers — so
+# a fixture that stopped being a valid document fails here rather than passing against a hand-built
+# struct nobody could have written in YAML. `aep-schema` depends on `aep-driver-spec`, never on this
+# crate, so this edge closes no cycle.
+[dev-dependencies]
+aep-schema.workspace = true
+serde_yaml.workspace = true
+
+# W3.5's shell-echo harness (`tests/shell_echo.rs`) proves § 4.9's third adapter point, which needs
+# the neutral IR and the checker to hand a `trace_conformance` record back. A **dev**-dependency and
+# never a dependency: § 4.1's purity claim for this crate is that it decides nothing outside the
+# engine's answers, and the shipped crate still reads no transcript and mints no evidence — the
+# second reader lives in the test, which is exactly where § 4.9 says a second adapter may live
+# without a trait being added to `trace-spec` for it.
+trace-domain.workspace = true
+trace-spec.workspace = true
+
+[lints]
+workspace = true

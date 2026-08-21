@@ -1,0 +1,100 @@
+<svg viewBox="0 0 1083 1056" width="1083" height="1056" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="Workflow adp/default/1: 9 states and 9 transitions.">
+  <style>
+    .bg { fill: #0f1418; }
+    .box { fill: #161d24; stroke: #2b3540; stroke-width: 1; }
+    .box-visited { fill: #161d24; stroke: #2b3540; stroke-width: 1; opacity: .55; }
+    .box-current { fill: #161d24; stroke: #58a6ff; stroke-width: 2; }
+    .box-stopped { fill: #161d24; stroke: #f85149; stroke-width: 2; }
+    .box-done { fill: #161d24; stroke: #3fb950; stroke-width: 2; }
+    .visited { opacity: .55; }
+    .h1 { fill: #d7dde3; font-size: 15px; letter-spacing: .04em; }
+    .h2 { fill: #8b98a5; font-size: 11px; letter-spacing: .06em; }
+    .t { fill: #d7dde3; font-size: 13px; }
+    .dim { fill: #8b98a5; font-size: 10px; }
+    .guard { fill: #8b98a5; font-size: 11px; }
+    .ok { fill: #3fb950; font-size: 11px; }
+    .amber { fill: #d29922; font-size: 11px; }
+    .red { fill: #f85149; font-size: 11px; }
+    .blue { fill: #58a6ff; font-size: 11px; }
+    .edge { fill: none; stroke: #2b3540; stroke-width: 1.5; }
+    .edge-back { stroke-dasharray: 4 4; }
+    .edge-taken { fill: none; stroke: #3fb950; stroke-width: 2; }
+    .edge-retreat { fill: none; stroke: #d29922; stroke-width: 2; }
+  </style>
+  <defs>
+    <marker id="arrow-idle" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2b3540"/>
+    </marker>
+    <marker id="arrow-taken" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-retreat" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d29922"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1083" height="1056"/>
+  <text class="h1" x="28" y="32">Standard development workflow</text>
+  <text class="h2" x="28" y="50">adp/default/1 · 9 states · 9 transitions</text>
+  <polyline class="edge" points="190,130 190,182" marker-end="url(#arrow-idle)"/>
+  <polyline class="edge" points="190,238 190,290" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="268">artifact.specification.exists</text>
+  <polyline class="edge" points="190,346 190,398" marker-end="url(#arrow-idle)"/>
+  <polyline class="edge" points="190,454 190,506" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="484">test.exists</text>
+  <polyline class="edge" points="190,562 190,614" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="592">diff.exists</text>
+  <polyline class="edge" points="190,670 190,722" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="700">(tests.unit.failed == 0 and tests.contract.failed == 0 and static_analysis.errors == 0)</text>
+  <polyline class="edge edge-back" points="60,642 36,642 36,534 60,534" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="334" y="592">verify → implement · (tests.unit.failed &gt; 0 or tests.contract.failed &gt; 0 or static_analysis.errors &gt; 0)</text>
+  <polyline class="edge" points="190,778 190,830" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="808">evidence.missing == 0</text>
+  <polyline class="edge" points="190,886 190,938" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="916">review.approved</text>
+  <g id="state-receive">
+    <rect class="box" x="60" y="74" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="98">Receive</text>
+    <text class="dim" x="74" y="116">receive · intake</text>
+  </g>
+  <g id="state-specify">
+    <rect class="box" x="60" y="182" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="206">Specify</text>
+    <text class="dim" x="74" y="224">specify · specification</text>
+  </g>
+  <g id="state-decompose">
+    <rect class="box" x="60" y="290" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="314">Decompose</text>
+    <text class="dim" x="74" y="332">decompose · decomposition, planning</text>
+  </g>
+  <g id="state-establish_verifiers">
+    <rect class="box" x="60" y="398" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="422">Establish verifiers</text>
+    <text class="dim" x="74" y="440">establish_verifiers · verification-setup</text>
+  </g>
+  <g id="state-implement">
+    <rect class="box" x="60" y="506" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="530">Implement</text>
+    <text class="dim" x="74" y="548">implement · implementation</text>
+  </g>
+  <g id="state-verify">
+    <rect class="box" x="60" y="614" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="638">Verify</text>
+    <text class="dim" x="74" y="656">verify · verification</text>
+  </g>
+  <g id="state-adversarial_verify">
+    <rect class="box" x="60" y="722" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="746">Adversarial verify</text>
+    <text class="dim" x="74" y="764">adversarial_verify · adversarial-verification</text>
+    <text class="dim" x="334" y="746">requires evidence test_result from test-runner (independent)</text>
+  </g>
+  <g id="state-review">
+    <rect class="box" x="60" y="830" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="854">Review</text>
+    <text class="dim" x="74" y="872">review · review</text>
+  </g>
+  <g id="state-complete">
+    <rect class="box" x="60" y="938" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="962">Complete</text>
+    <text class="dim" x="74" y="980">complete · completion · terminal</text>
+  </g>
+</svg>

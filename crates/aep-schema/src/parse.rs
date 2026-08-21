@@ -25,6 +25,7 @@ use aep_domain::raw::{
 };
 use aep_domain::task::Task;
 use aep_domain::workflow::Workflow;
+use aep_driver_spec::map::{RawStepMap, StepMap};
 use serde::de::DeserializeOwned;
 
 /// Which sort of document is being read.
@@ -48,6 +49,8 @@ pub enum DocumentKind {
     Evidence,
     /// A project's own configuration.
     Project,
+    /// A driver's step map: what a harness does in each state of a workflow.
+    StepMap,
 }
 
 impl DocumentKind {
@@ -63,6 +66,7 @@ impl DocumentKind {
             Self::Lifecycle => "lifecycle",
             Self::Evidence => "evidence",
             Self::Project => "project",
+            Self::StepMap => "step-map",
         }
     }
 
@@ -77,6 +81,7 @@ impl DocumentKind {
         Self::Lifecycle,
         Self::Evidence,
         Self::Project,
+        Self::StepMap,
     ];
 
     /// The repository subdirectory this kind is conventionally stored in.
@@ -91,6 +96,10 @@ impl DocumentKind {
             Self::Lifecycle => "artifacts/lifecycles",
             Self::Evidence => "evidence",
             Self::Project => "project",
+            // Beside `workflows/`, `principles/` and `profiles/`: a step map is a validated,
+            // versioned, schema-generated document exactly like the four already in the tree, and
+            // anywhere else would be a fifth kind loaded by a second mechanism.
+            Self::StepMap => "drivers",
         }
     }
 }
@@ -244,6 +253,16 @@ pub fn project(
         text,
         origin,
     )
+}
+
+/// Reads a driver's step map.
+///
+/// Structural validation only: the format version, the mandatory workflow pin and each step. The
+/// two cross-document phases are elsewhere and cannot be here — the first needs the registry the
+/// document tree is still being read into, and the second needs the protocol the **task** names,
+/// which no document loader has seen.
+pub fn step_map(text: &str, origin: Option<&str>) -> Result<StepMap, DocumentError> {
+    document::<RawStepMap, StepMap>(DocumentKind::StepMap, text, origin)
 }
 
 /// Reads an artifact lifecycle.
@@ -473,6 +492,9 @@ workflow: test/linear
     fn document_kinds_map_to_repository_directories() {
         assert_eq!(DocumentKind::Principle.directory(), "principles");
         assert_eq!(DocumentKind::Lifecycle.directory(), "artifacts/lifecycles");
-        assert_eq!(DocumentKind::ALL.len(), 9);
+        // Beside the four document kinds the tree already held, because a step map is a validated,
+        // versioned, schema-generated document exactly like them.
+        assert_eq!(DocumentKind::StepMap.directory(), "drivers");
+        assert_eq!(DocumentKind::ALL.len(), 10);
     }
 }

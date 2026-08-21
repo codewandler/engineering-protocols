@@ -1,8 +1,8 @@
 //! The documents in force.
 //!
-//! A [`Registry`] holds validated protocols, principles, workflows, profiles and artifact
-//! lifecycles, indexed by the id **declared inside each document** — never by filename, so moving a
-//! file cannot change what a profile resolves to.
+//! A [`Registry`] holds validated protocols, principles, workflows, profiles, artifact lifecycles
+//! and driver step maps, indexed by the id **declared inside each document** — never by filename,
+//! so moving a file cannot change what a profile resolves to.
 //!
 //! It also owns the cross-document checks. Individual documents validate themselves in isolation
 //! (`TryFrom`); only the registry can see that a profile references a principle nobody wrote, or
@@ -24,6 +24,7 @@ use aep_domain::version::{
     MajorVersion, PrincipleRef, ProfileVersionedRef, ProtocolRef, WorkflowRef,
 };
 use aep_domain::workflow::Workflow;
+use aep_driver_spec::map::{StepMap, StepMapId};
 
 /// How deep an `extends` chain may go before it is treated as a loop.
 const MAX_EXTENDS_DEPTH: usize = 8;
@@ -36,6 +37,7 @@ pub struct Registry {
     workflows: BTreeMap<WorkflowId, Workflow>,
     profiles: BTreeMap<ProfileId, Profile>,
     lifecycles: LifecycleRegistry,
+    step_maps: BTreeMap<StepMapId, StepMap>,
 }
 
 impl Registry {
@@ -101,6 +103,30 @@ impl Registry {
         Ok(())
     }
 
+    /// Adds a driver's step map.
+    ///
+    /// Structural validation has already happened; what the registry adds is the half only it can
+    /// see — that the workflow the map pins is in the tree, at the major version it pinned. That
+    /// check lives in [`Registry::validate`] rather than here, because a map may be inserted before
+    /// the workflow it names has been read.
+    pub fn insert_step_map(&mut self, map: StepMap) -> Result<(), ValidationError> {
+        if self.step_maps.contains_key(&map.id) {
+            return Err(duplicate("step map", map.id.as_str()));
+        }
+        self.step_maps.insert(map.id.clone(), map);
+        Ok(())
+    }
+
+    /// The step map registered under `id`.
+    pub fn step_map(&self, id: &StepMapId) -> Option<&StepMap> {
+        self.step_maps.get(id)
+    }
+
+    /// Every registered step map.
+    pub fn step_maps(&self) -> impl Iterator<Item = &StepMap> {
+        self.step_maps.values()
+    }
+
     /// The protocol registered for this reference, at exactly its major version.
     pub fn protocol(&self, reference: &ProtocolRef) -> Option<&Protocol> {
         self.protocols
@@ -160,6 +186,7 @@ impl Registry {
             + self.workflows.len()
             + self.profiles.len()
             + self.lifecycles.len()
+            + self.step_maps.len()
     }
 
     /// `true` when nothing is registered.
@@ -314,7 +341,46 @@ impl Registry {
             errors.extend(self.validate_profile(profile));
         }
 
+        for map in self.step_maps.values() {
+            errors.extend(self.validate_step_map(map));
+        }
+
         errors
+    }
+
+    /// Checks one step map against the workflow it pins.
+    ///
+    /// A major bump orphans a map with no new code: the lookup filters on `WorkflowRef::accepts`,
+    /// which for a pinned reference is equality, so a map pinned to `/1` against a registry holding
+    /// `version: 2` resolves to `None`. This turns that `None` into an accumulating validation
+    /// error naming the map, the pin and the version that is actually present — not a warning and
+    /// not a fallback.
+    fn validate_step_map(&self, map: &StepMap) -> ValidationErrors {
+        let location = format!("step map {}", map.id);
+        let Some(workflow) = self.workflow(map.workflow.reference()) else {
+            let present = self.workflows.get(map.workflow.id());
+            let error = match present {
+                Some(workflow) => ValidationError::new(
+                    ValidationCode::VersionMismatch,
+                    location,
+                    format!(
+                        "the map pins `{}` and the tree holds `{}` at version {}",
+                        map.workflow, workflow.id, workflow.version
+                    ),
+                )
+                .with_hint(
+                    "a major version exists because the change could not be expressed additively, \
+                     so the map is rewritten against the new state graph rather than migrated",
+                ),
+                None => ValidationError::new(
+                    ValidationCode::UnknownWorkflow,
+                    location,
+                    format!("no workflow `{}` is in the tree", map.workflow.id()),
+                ),
+            };
+            return ValidationErrors::from(error);
+        };
+        map.cross_validate(workflow)
     }
 
     /// Checks one profile against the protocol, workflow and principles it names.

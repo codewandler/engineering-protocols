@@ -1,0 +1,157 @@
+# The step map for `adp/default`: what a harness *does* in each state the workflow declares.
+#
+# The workflow says what states exist and what evidence each transition needs. It deliberately does
+# not say how to obtain that evidence — that is a harness's business, and keeping it out of the
+# workflow is what lets one workflow govern a Rust repository and a Terraform one. This document is
+# the missing half, for this repository.
+#
+# Two properties are worth reading before the steps:
+#
+#   * every `cargo` line here is a **command step the driver runs**, never a tool the model holds.
+#     No development profile grants `command.execute`, so an `llm` step in this map has no shell at
+#     all: `tests.execute` is exercised by the driver, and the record it produces carries
+#     `producer: verifier / test-runner` rather than a model's opinion of a test run. That is what
+#     makes `independent: true` honestly satisfiable in `adversarial_verify`.
+#   * an `llm` step has no `evidence:` key and cannot be given one. Anything a model is supposed to
+#     have achieved that is *checkable* is observed by the command step after it.
+format: aep.driver-steps/1
+id: development/default
+# Pinned, and the pin is mandatory. A step map names states and orders steps inside them, so an
+# unpinned one is an instruction sheet for whatever happens to be in the tree. When `adp/default`
+# reaches version 2 this map is orphaned at load — refused, naming both versions — rather than
+# silently applied to a state graph it was not written against.
+workflow: adp/default/1
+title: Driving adp/default in this repository
+
+states:
+  # `receive → specify` is unguarded: intake is done when there is something to specify. The step is
+  # here so the run records what was asked for before anything reinterprets it.
+  receive:
+    steps:
+      - kind: llm
+        description: Read the task and record what is being asked for, unedited.
+        skills: [planning]
+        prompt: >-
+          Read the task under `.engineering/` and the artifacts it references. Record what is being
+          asked for in the planning store, in the requester's own terms. Do not design, do not
+          decompose, and do not create anything the request does not name.
+
+  specify:
+    steps:
+      - kind: llm
+        description: State the required behaviour as a specification artifact.
+        skills: [planning]
+        prompt: >-
+          Write the specification for this task as a planning artifact of kind `specification`,
+          through `protocol artifact new`. State the required behaviour so that a verifier could
+          disagree with it: anything left only in the prompt cannot be checked later. The transition
+          out of this state is guarded on `artifact.specification.exists`, so the artifact is what
+          moves the run, not a description of one.
+
+  decompose:
+    steps:
+      - kind: llm
+        description: Break the specification into units that can each be verified alone.
+        skills: [planning]
+        prompt: >-
+          Break the specification into tasks that can each be implemented and verified on their own,
+          through `protocol artifact new` and `protocol artifact relate`. Every task states its own
+          acceptance. A unit nobody can verify separately is a unit that will be declared done by
+          assertion.
+
+  establish_verifiers:
+    steps:
+      - kind: llm
+        description: Write the tests before there is an implementation to shape them around.
+        skills: [planning]
+        prompt: >-
+          Write the failing tests, contracts and checks that will decide whether each decomposed
+          unit is done. Write no implementation in this state. The next transition is guarded on
+          `test.exists`, and the guard — not good intentions — is what enforces the order.
+      # Expected red. `test.exists` is what the guard reads, and a suite that fails here is the
+      # point of the state: a test that passes before the code exists is a test of nothing.
+      - kind: command
+        description: Run the suite so that a test result exists, whatever it says.
+        run: [cargo, test, --workspace]
+        evidence:
+          kind: test_result
+          suite: unit
+          verifier: test-runner
+
+  implement:
+    steps:
+      - kind: llm
+        description: Make the smallest change that satisfies the unit and its verifiers.
+        skills: [planning]
+        prompt: >-
+          Make the smallest change that satisfies the decomposed unit and the verifiers written for
+          it. Do not weaken a check to make it pass; the workflow has an explicit route back here
+          from `verify`, and taking it is cheaper than a suite nobody trusts.
+      # `verifier: git` is an external tool, which is deliberate and is exercised here rather than
+      # only in a test: `default_verifiers` is a table of defaults, not of constraints, so a step
+      # naming a tool the protocol has never heard of loads, and its kind is checked at run start
+      # against the protocol instead.
+      - kind: command
+        description: Observe that the working tree actually changed.
+        run: [git, --no-pager, diff, --stat, HEAD]
+        evidence:
+          kind: diff
+          verifier: git
+
+  verify:
+    steps:
+      - kind: command
+        description: The unit suite.
+        run: [cargo, test, --workspace]
+        evidence:
+          kind: test_result
+          suite: unit
+          verifier: test-runner
+      # Contracts are in the transition guard because a change that passes its own tests can still
+      # break a consumer. The suite that answers that here is the contract conformance crate.
+      - kind: command
+        description: The contract suites.
+        run: [cargo, test, -p, aep-conformance]
+        evidence:
+          kind: test_result
+          suite: contract
+          verifier: test-runner
+      - kind: command
+        description: Static analysis, warnings as errors.
+        run: [cargo, clippy, --workspace, --all-targets, --, -D, warnings]
+        evidence:
+          kind: static_analysis
+          verifier: static-analyzer
+
+  adversarial_verify:
+    steps:
+      - kind: llm
+        description: Try to break what the previous state just declared working.
+        skills: [planning]
+        prompt: >-
+          Try to break what `verify` just declared working: edge cases, property violations,
+          contract drift, a mutant the suite would not catch. Write the cases that fail. You are not
+          the author here even when you wrote the code, and a state that only re-ran the author's
+          own suite would make the author and the adversary one actor.
+      - kind: command
+        description: Run the suite again, with whatever the adversary added.
+        run: [cargo, test, --workspace]
+        evidence:
+          kind: test_result
+          suite: unit
+          verifier: test-runner
+
+  # A person, and there is no route around them. `review → complete` is guarded on
+  # `review.approved`, which is a record a human review produces: the driver constructs no approval
+  # and stamps no `producer: human`, so this state is where a run stops and waits.
+  review:
+    steps:
+      - kind: operator
+        description: Judge the change as a whole — intent, fit and risk, not just green checks.
+        prompt: >-
+          Review this change as a whole. The run has stopped and released its lock; record your
+          review as evidence and resume it. Nothing the driver can do satisfies this state.
+
+  # Terminal. No steps, and none would run: the engine reports `Completed` on arrival.
+  complete:
+    steps: []

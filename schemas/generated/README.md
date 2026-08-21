@@ -22,3 +22,4 @@ validate them without linking the Rust crates.
 | [`ess.schema.json`](ess.schema.json) | `RawSpecFile` | one file of an executable system specification |
 | [`planning-document.schema.json`](planning-document.schema.json) | `RawPlanningFrontmatter` | the frontmatter of one markdown planning document |
 | [`trace-spec.schema.json`](trace-spec.schema.json) | `RawTraceSpec` | what an agent run must have looked like |
+| [`driver-steps.schema.json`](driver-steps.schema.json) | `RawStepMap` | what a harness does in each state of a workflow |

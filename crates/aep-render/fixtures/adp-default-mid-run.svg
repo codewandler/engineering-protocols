@@ -1,0 +1,107 @@
+<svg viewBox="0 0 1083 1150" width="1083" height="1150" xmlns="http://www.w3.org/2000/svg" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" role="img" aria-label="Workflow adp/default/1: 9 states and 9 transitions. A run is in `implement` and is blocked, for 2 stated reason(s).">
+  <style>
+    .bg { fill: #0f1418; }
+    .box { fill: #161d24; stroke: #2b3540; stroke-width: 1; }
+    .box-visited { fill: #161d24; stroke: #2b3540; stroke-width: 1; opacity: .55; }
+    .box-current { fill: #161d24; stroke: #58a6ff; stroke-width: 2; }
+    .box-stopped { fill: #161d24; stroke: #f85149; stroke-width: 2; }
+    .box-done { fill: #161d24; stroke: #3fb950; stroke-width: 2; }
+    .visited { opacity: .55; }
+    .h1 { fill: #d7dde3; font-size: 15px; letter-spacing: .04em; }
+    .h2 { fill: #8b98a5; font-size: 11px; letter-spacing: .06em; }
+    .t { fill: #d7dde3; font-size: 13px; }
+    .dim { fill: #8b98a5; font-size: 10px; }
+    .guard { fill: #8b98a5; font-size: 11px; }
+    .ok { fill: #3fb950; font-size: 11px; }
+    .amber { fill: #d29922; font-size: 11px; }
+    .red { fill: #f85149; font-size: 11px; }
+    .blue { fill: #58a6ff; font-size: 11px; }
+    .edge { fill: none; stroke: #2b3540; stroke-width: 1.5; }
+    .edge-back { stroke-dasharray: 4 4; }
+    .edge-taken { fill: none; stroke: #3fb950; stroke-width: 2; }
+    .edge-retreat { fill: none; stroke: #d29922; stroke-width: 2; }
+  </style>
+  <defs>
+    <marker id="arrow-idle" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2b3540"/>
+    </marker>
+    <marker id="arrow-taken" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arrow-retreat" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d29922"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1083" height="1150"/>
+  <text class="h1" x="28" y="32">Standard development workflow</text>
+  <text class="h2" x="28" y="50">adp/default/1 · 9 states · 9 transitions</text>
+  <text class="red" x="28" y="70">run AUTH-142/3 · in implement · blocked · 7 iteration(s)</text>
+  <polyline class="edge-taken" points="190,152 190,204" marker-end="url(#arrow-taken)"/>
+  <polyline class="edge-taken" points="190,260 190,312" marker-end="url(#arrow-taken)"/>
+  <text class="ok" x="202" y="290">artifact.specification.exists</text>
+  <polyline class="edge-taken" points="190,368 190,420" marker-end="url(#arrow-taken)"/>
+  <polyline class="edge-taken" points="190,476 190,528" marker-end="url(#arrow-taken)"/>
+  <text class="ok" x="202" y="506">test.exists</text>
+  <polyline class="edge-taken" points="190,584 190,636" marker-end="url(#arrow-taken)"/>
+  <text class="ok" x="202" y="614">diff.exists</text>
+  <polyline class="edge" points="190,692 190,744" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="722">(tests.unit.failed == 0 and tests.contract.failed == 0 and static_analysis.errors == 0)</text>
+  <polyline class="edge-retreat" points="60,664 36,664 36,556 60,556" marker-end="url(#arrow-retreat)"/>
+  <text class="amber" x="334" y="614">verify → implement · (tests.unit.failed &gt; 0 or tests.contract.failed &gt; 0 or static_analysis.errors &gt; 0)</text>
+  <polyline class="edge" points="190,800 190,852" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="830">evidence.missing == 0</text>
+  <polyline class="edge" points="190,908 190,960" marker-end="url(#arrow-idle)"/>
+  <text class="guard" x="202" y="938">review.approved</text>
+  <g id="state-receive" class="visited">
+    <rect class="box-visited" x="60" y="96" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="120">Receive</text>
+    <text class="dim" x="74" y="138">receive · intake</text>
+  </g>
+  <g id="state-specify" class="visited">
+    <rect class="box-visited" x="60" y="204" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="228">Specify</text>
+    <text class="dim" x="74" y="246">specify · specification</text>
+  </g>
+  <g id="state-decompose" class="visited">
+    <rect class="box-visited" x="60" y="312" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="336">Decompose</text>
+    <text class="dim" x="74" y="354">decompose · decomposition, planning</text>
+  </g>
+  <g id="state-establish_verifiers" class="visited">
+    <rect class="box-visited" x="60" y="420" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="444">Establish verifiers</text>
+    <text class="dim" x="74" y="462">establish_verifiers · verification-setup</text>
+  </g>
+  <g id="state-implement">
+    <rect class="box-stopped" x="60" y="528" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="552">Implement</text>
+    <text class="dim" x="74" y="570">implement · implementation</text>
+    <text class="amber" x="308" y="552" text-anchor="end">×2</text>
+  </g>
+  <g id="state-verify" class="visited">
+    <rect class="box-visited" x="60" y="636" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="660">Verify</text>
+    <text class="dim" x="74" y="678">verify · verification</text>
+  </g>
+  <g id="state-adversarial_verify">
+    <rect class="box" x="60" y="744" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="768">Adversarial verify</text>
+    <text class="dim" x="74" y="786">adversarial_verify · adversarial-verification</text>
+    <text class="dim" x="334" y="768">requires evidence test_result from test-runner (independent)</text>
+  </g>
+  <g id="state-review">
+    <rect class="box" x="60" y="852" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="876">Review</text>
+    <text class="dim" x="74" y="894">review · review</text>
+  </g>
+  <g id="state-complete">
+    <rect class="box" x="60" y="960" width="260" height="56" rx="8"/>
+    <text class="t" x="74" y="984">Complete</text>
+    <text class="dim" x="74" y="1002">complete · completion · terminal</text>
+  </g>
+  <text class="dim" x="28" y="1050">evidence  static_analysis ×1 · test_result ×3</text>
+  <rect x="28" y="1056" width="4" height="40" fill="#f85149" rx="2"/>
+  <text class="red" x="42" y="1068">blocked:</text>
+  <text class="dim" x="42" y="1086">tests.unit.failed &gt; 0 (observed 2)</text>
+  <text class="dim" x="42" y="1104">no transition out of `implement` is permitted: diff.exists is unknown</text>
+</svg>

@@ -10,6 +10,11 @@ authors.workspace = true
 
 [dependencies]
 aep-domain.workspace = true
+
+# `drivers/` is the last row of the document tree, so the registry holds step maps and
+# `Registry::validate` is where a map meets the workflow it pins. The dependency is on the leaf, not
+# on the router: `aep-driver` depends on this crate, and the two edges together would be a cycle.
+aep-driver-spec.workspace = true
 aep-contract.workspace = true
 aep-schema.workspace = true
 serde.workspace = true
