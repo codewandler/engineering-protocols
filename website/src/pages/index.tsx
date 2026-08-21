@@ -48,7 +48,7 @@ function HomepageHeader() {
           </Link>
           <Link
             className="button button--secondary button--lg"
-            to="/docs/in-practice/a-specification-and-its-contracts">
+            to="/docs/examples/specification-to-contracts">
             See it work
           </Link>
         </div>
@@ -83,7 +83,7 @@ function TheProblem() {
               plausibly — and reviewing the output does not scale to the volume agents produce.
             </p>
             <p>
-              <Link to="/docs/why-agents-change-this">
+              <Link to="/docs">
                 Why this changes once agents write the code →
               </Link>
             </p>
@@ -121,7 +121,7 @@ function TheClaim() {
           branch generates a suite that never checks the branch where the money does not move.
         </p>
         <p>
-          <Link to="/docs/in-practice/a-specification-and-its-contracts">
+          <Link to="/docs/examples/specification-to-contracts">
             The whole example, including the JSON Schema and the AsyncAPI →
           </Link>
         </p>
@@ -138,8 +138,9 @@ function HonestStatus() {
           <div className="col col--8 col--offset-2">
             <Heading as="h2">What is built, and what is not</Heading>
             <p>
-              The protocol is implemented and gated: <strong>94 suites and 1693 tests</strong>, with
-              0 clippy warnings and 0 rustdoc warnings, as of the tag <code>0.7.0-ess-wave-7</code>.
+              The protocol is implemented and gated: <strong>106 suites and 1811 tests</strong>,
+              with 0 clippy warnings and 0 rustdoc warnings, as of the tag{' '}
+              <code>0.7.1-infra-waves-1-4</code>.
               A specification compiles into documentation, JSON Schema, OpenAPI 3.1 and AsyncAPI 3.0;
               generates its own conformance suite; and synthesises the structural part of its own
               implementation in three targets — the same specification runs as a Rust and a Go
@@ -155,8 +156,8 @@ function HonestStatus() {
             <p>
               <Link to="/docs/status/where-this-stands">Where this stands →</Link>
               {' · '}
-              <Link to="/docs/status/what-you-have-to-trust">
-                What you still have to trust →
+              <Link to="/docs/status/limitations">
+                Limitations and trust assumptions →
               </Link>
             </p>
           </div>

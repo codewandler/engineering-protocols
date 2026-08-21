@@ -103,7 +103,7 @@ const config: Config = {
           label: 'Documentation',
         },
         {
-          to: '/docs/in-practice/a-specification-and-its-contracts',
+          to: '/docs/examples/specification-to-contracts',
           label: 'See it work',
           position: 'left',
         },
@@ -128,31 +128,31 @@ const config: Config = {
       style: 'dark',
       links: [
         {
-          title: 'Start here',
+          title: 'Documentation',
           items: [
-            {label: 'What this is', to: '/docs'},
-            {label: 'Why agents change this', to: '/docs/why-agents-change-this'},
-            {label: 'The two halves', to: '/docs/two-halves'},
-            {label: 'What this is not', to: '/docs/deliberately-not'},
+            {label: 'Introduction', to: '/docs'},
+            {label: 'Getting started', to: '/docs/getting-started'},
+            {label: 'Architecture overview', to: '/docs/concepts/overview'},
+            {label: 'Design principles', to: '/docs/concepts/design-principles'},
+            {label: 'CLI reference', to: '/docs/reference/cli'},
           ],
         },
         {
-          title: 'In practice',
+          title: 'Examples',
           items: [
             {
               label: 'A specification and its contracts',
-              to: '/docs/in-practice/a-specification-and-its-contracts',
+              to: '/docs/examples/specification-to-contracts',
             },
-            {label: 'What a refusal looks like', to: '/docs/in-practice/refusals'},
-            {label: 'A governed task', to: '/docs/in-practice/a-governed-task'},
+            {label: 'A governed task, end to end', to: '/docs/examples/governed-task'},
           ],
         },
         {
-          title: 'Where this stands',
+          title: 'Project',
           items: [
             {label: 'Status', to: '/docs/status/where-this-stands'},
-            {label: 'What you still have to trust', to: '/docs/status/what-you-have-to-trust'},
-            {label: 'Proposed, not accepted', to: '/docs/status/proposed-not-accepted'},
+            {label: 'Limitations and trust assumptions', to: '/docs/status/limitations'},
+            {label: 'Roadmap and proposals', to: '/docs/status/roadmap'},
             {label: 'Releases, in practice', to: '/releases'},
             {
               label: 'Source',

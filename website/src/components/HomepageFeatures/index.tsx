@@ -27,7 +27,7 @@ const FeatureList: FeatureItem[] = [
         answer is deterministic, and it can always say why.
       </>
     ),
-    href: '/docs/two-halves',
+    href: '/docs/concepts/aep',
   },
   {
     title: 'ESS',
@@ -40,7 +40,7 @@ const FeatureList: FeatureItem[] = [
         Schema, the OpenAPI and the AsyncAPI — derived, not maintained beside it.
       </>
     ),
-    href: '/docs/in-practice/a-specification-and-its-contracts',
+    href: '/docs/examples/specification-to-contracts',
   },
   {
     title: 'The join',
@@ -53,7 +53,7 @@ const FeatureList: FeatureItem[] = [
         and guess — and the protocol refuses to call the task done until it has.
       </>
     ),
-    href: '/docs/in-practice/the-join',
+    href: '/docs/concepts/evidence',
   },
 ];
 

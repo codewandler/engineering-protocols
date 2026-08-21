@@ -1,9 +1,9 @@
 import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 
 /**
- * One hand-written sidebar. The order is the order a reader who arrives cold should meet things in:
- * the problem, why it is a problem now, the two halves, the commitments — then the artifacts that
- * make the claims checkable, then what is honestly not built.
+ * One hand-written sidebar, ordered the way an engineer adopts the tool: what it is and how to run
+ * it, the model behind it, task-oriented guides, the reference tables, worked examples with real
+ * output, and an honest account of what is and is not built.
  */
 const sidebars: SidebarsConfig = {
   docsSidebar: [
@@ -11,34 +11,58 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Start here',
       collapsed: false,
+      items: ['index', 'getting-started'],
+    },
+    {
+      type: 'category',
+      label: 'Concepts',
+      collapsed: false,
       items: [
-        'index',
-        'why-agents-change-this',
-        'two-halves',
-        'pillars',
-        'deliberately-not',
+        'concepts/overview',
+        'concepts/aep',
+        'concepts/evidence',
+        'concepts/ess',
+        'concepts/design-principles',
       ],
     },
     {
       type: 'category',
-      label: 'In practice',
+      label: 'Guides',
       collapsed: false,
       items: [
-        'in-practice/a-specification-and-its-contracts',
-        'in-practice/refusals',
-        'in-practice/a-governed-task',
-        'in-practice/the-join',
+        'guides/govern-a-task',
+        'guides/write-a-principle',
+        'guides/integrate-a-harness',
+        'guides/write-a-specification',
+        'guides/generate-artifacts',
+        'guides/verify-conformance',
+        'guides/track-change',
+        'guides/synthesize',
+        'guides/check-infrastructure',
       ],
     },
     {
       type: 'category',
-      label: 'Where this stands',
+      label: 'Reference',
       collapsed: false,
       items: [
-        'status/where-this-stands',
-        'status/what-you-have-to-trust',
-        'status/proposed-not-accepted',
+        'reference/cli',
+        'reference/documents',
+        'reference/vocabulary',
+        'reference/glossary',
       ],
+    },
+    {
+      type: 'category',
+      label: 'Examples',
+      collapsed: false,
+      items: ['examples/specification-to-contracts', 'examples/governed-task'],
+    },
+    {
+      type: 'category',
+      label: 'Project status',
+      collapsed: false,
+      items: ['status/where-this-stands', 'status/limitations', 'status/roadmap'],
     },
   ],
 };

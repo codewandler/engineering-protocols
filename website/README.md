@@ -19,7 +19,8 @@ pointing at it, and no imports across the boundary. Source documents are read by
 from; they are not ingested.
 
 Code and artifacts quoted on the site are copied verbatim from `examples/`, `generated/`,
-`principles/` and the crates, and every page names its sources at the bottom.
+`principles/` and the crates. Concept, example and status pages name their sources at the bottom;
+guide pages show commands a reader can run against a checkout instead.
 
 ## Running it
 
