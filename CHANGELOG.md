@@ -83,6 +83,33 @@ belongs in the commit message or in `docs/design/`.
   once. Every status word already existed in the vocabulary, so nothing else changed to make room
   for them.
 
+- **A Claude Code plugin, at [`integrations/claude-code/`](integrations/claude-code/).** One
+  `planning` skill and two agents: `decomposer`, which breaks an epic into stories and produces
+  drafts only, and `plan-reviewer`, which reads the store and changes nothing. Install it from the
+  marketplace entry at the repository root.
+
+  **The skill carries rules and no vocabulary.** It does not list the kinds, the statuses or the
+  legal moves; it asks `protocol artifact kinds`, `relations` and `lifecycle <kind>` at the moment it
+  needs them. A prose copy of a validated document inside a skill file is neither validated nor
+  versioned, and it goes stale the first time a kind gains a status — after which the agent recites
+  last month's ladder confidently and proposes a move that does not exist.
+
+  What it does inline is four guardrails: a status changes only through `protocol artifact move`,
+  the body is edited directly because the CLI does not own prose, `validate` runs after a batch of
+  edits and its output is relayed verbatim, and a refusal is the answer rather than an obstacle — the
+  legal moves get reported to you, not routed around by editing the file.
+
+  **No hooks, on purpose.** Deterministic interception of what an agent may do is the reference
+  driver's job, and a hook layer would be a second, weaker driver — one that sees tool calls instead
+  of workflow states and cannot ask the engine anything. There is no `commands/` directory either:
+  the CLI is the command surface, and a slash command wrapping a verb is a second spelling that
+  drifts from the first.
+
+  Its behaviour is checked by a repeatable eval — `integrations/claude-code/eval/run.sh` runs a
+  headless session in a scratch directory and then inspects the store it left behind, asserting on
+  the artifacts, statuses and edges rather than on the model's wording; it is deliberately not a step
+  of `task check`, because the gate reaches no network and this calls a model.
+
 ## [0.7.1-infra-waves-1-4] — 2026-08-21
 
 ### Added

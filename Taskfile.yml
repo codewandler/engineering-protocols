@@ -142,3 +142,10 @@ tasks:
       RUSTDOCFLAGS: -D warnings
     cmds:
       - cargo doc --workspace --no-deps
+
+  # Talks to the Claude API: network and money. Deliberately not a step of `check` — the gate
+  # stays hermetic. See integrations/claude-code/eval/README.md for what green means.
+  plugin-eval:
+    desc: Run the Claude Code plugin eval (headless agent + mechanical inspection).
+    cmds:
+      - integrations/claude-code/eval/run.sh

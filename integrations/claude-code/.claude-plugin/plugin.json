@@ -1,0 +1,20 @@
+{
+  "name": "engineering-protocols",
+  "displayName": "Engineering Protocols — Planning",
+  "description": "Plan engineering work as governed markdown artifacts. Teaches Claude Code to create, relate, move and validate epics, stories and tasks in a `.engineering/planning/` store through the `protocol` CLI, which owns the vocabulary and the lifecycle.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Timo Friedl"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/codewandler/engineering-protocols",
+  "keywords": [
+    "planning",
+    "backlog",
+    "epics",
+    "stories",
+    "artifacts",
+    "lifecycle",
+    "engineering-protocols"
+  ]
+}

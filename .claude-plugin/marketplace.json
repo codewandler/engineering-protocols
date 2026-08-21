@@ -1,0 +1,13 @@
+{
+  "name": "engineering-protocols",
+  "owner": {
+    "name": "codewandler"
+  },
+  "plugins": [
+    {
+      "name": "engineering-protocols",
+      "source": "./integrations/claude-code",
+      "description": "Plan engineering work as governed markdown artifacts — epics, stories and tasks in a `.engineering/planning/` store, with kinds, statuses and legal moves supplied by the `protocol` CLI rather than by prose."
+    }
+  ]
+}
