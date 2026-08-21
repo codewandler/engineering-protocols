@@ -9,6 +9,10 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.8.0-harness-wave-1-trace-wave-1] — 2026-08-21
+
 ### Added
 
 - **`protocol trace check` — what an agent run did, judged by a typed document instead of a shell
