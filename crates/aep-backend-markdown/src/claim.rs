@@ -380,7 +380,10 @@ pub fn raw_occurrences(text: &str) -> usize {
     let mut fenced = false;
     let mut kept = String::with_capacity(text.len());
     for line in text.lines() {
-        let bare = line.trim_start().trim_start_matches(['>', ' ']).trim_start();
+        let bare = line
+            .trim_start()
+            .trim_start_matches(['>', ' '])
+            .trim_start();
         if bare.starts_with("```") {
             fenced = !fenced;
             continue;
@@ -648,7 +651,11 @@ fn read_lines(text: &str) -> Vec<Line<'_>> {
                 // A fence stops a body on the way in, and nothing inside one may start or
                 // continue a claim: a fenced annotation is an illustration, not an assertion.
                 stops_a_body: excluded || is_stop_line(stripped),
-                segments: if excluded { Vec::new() } else { split_segments(stripped) },
+                segments: if excluded {
+                    Vec::new()
+                } else {
+                    split_segments(stripped)
+                },
             }
         })
         .collect()

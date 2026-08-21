@@ -399,11 +399,17 @@ fn a_backticked_annotation_after_prose_is_found_and_a_fenced_one_is_not() {
     let record = record_about("06-reference-gaps.md", "2026-08-30", 1, "mainspring 3.0.1");
     let state = record.state(reference_date(), WARN_DAYS);
     assert!(!record.malformed, "position 7 is well-formed");
-    assert_eq!(state.label(), "expired", "a 1d horizon observed 2026-08-30, read 2026-09-01");
+    assert_eq!(
+        state.label(),
+        "expired",
+        "a 1d horizon observed 2026-08-30, read 2026-09-01"
+    );
 
     let scan = scan_file("06-reference-gaps.md");
     assert!(
-        scan.records.iter().all(|found| !found.claim.contains("EXAMPLE")),
+        scan.records
+            .iter()
+            .all(|found| !found.claim.contains("EXAMPLE")),
         "the fenced example was parsed as a claim: {:#?}",
         scan.records
     );
