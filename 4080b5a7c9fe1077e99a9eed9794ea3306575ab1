@@ -1,0 +1,6 @@
+Correction (2026-08-22): this message claims "task check exit 0, ten steps". That was false when
+written. The gate run backing it aborted at its first step — fmt-check, "Error: formatting differs",
+on the two files this very commit introduced — and the invocation `task check 2>&1 | tail` followed
+by `$status` read tail's exit instead of the gate's, so the failure was reported as green. The other
+verifications the message cites (corpus 43/43, crate tests, store validation) were run directly and
+stand. The formatting and the first genuinely green gate over this content land in 062faee.
