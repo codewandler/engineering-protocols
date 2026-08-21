@@ -3925,9 +3925,9 @@ const REFERENCE_DATE: &str = "2026-09-01";
 
 #[test]
 fn the_scan_finds_every_annotation_the_corpus_holds_and_says_so_in_one_line() {
-    // 42 raw occurrences, 42 records, zero unparsed. The reference implementation the fixture's
-    // expectations were generated from finds 37 and `expected.json` names the five it misses, so
-    // this number is the conformance target rather than a reproduction of the baseline.
+    // 43 raw occurrences, 43 records, zero unparsed — `expected.json`'s own summary, which is
+    // ground truth since the corpus revision of 2026-08-21: the reference implementation was fixed
+    // against this corpus and finds all 43, and the fenced example counts for neither side.
     let output = protocol(&[
         "evidence",
         "scan",
@@ -3941,11 +3941,11 @@ fn the_scan_finds_every_annotation_the_corpus_holds_and_says_so_in_one_line() {
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     let report = stdout(&output);
     assert!(
-        report.contains("42 occurrence(s), 42 record(s), 0 unparsed"),
+        report.contains("43 occurrence(s), 43 record(s), 0 unparsed"),
         "the coverage line is the point of the verb: {report}"
     );
     assert!(
-        report.contains("16 ok, 17 expiring, 9 expired, 8 malformed"),
+        report.contains("16 ok, 17 expiring, 10 expired, 8 malformed"),
         "the classification, at the corpus's own reference date: {report}"
     );
 }
