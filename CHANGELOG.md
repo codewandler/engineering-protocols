@@ -11,6 +11,11 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`protocol infra view --path <bundle|ir> [--namespace <ns>]`** — the component view as one
+  self-contained HTML page, written and opened (`$BROWSER`, else `xdg-open`). `infra graph`
+  gains `--format html` for the same page on stdout. The page badge-colours each component by
+  its worst finding and scopes findings and directions to the namespace when one is given; its
+  only external reference is a version-pinned Mermaid script tag the viewer's browser fetches.
 - **The infrastructure observation reads five more kinds, and analysis grows invariants,
   directions and an HTML component view (IW2.5).** Replicasets, jobs, cronjobs, pod disruption
   budgets and autoscalers join the model — each *optional* in a bundle, so a scan taken before

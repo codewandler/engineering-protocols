@@ -3339,3 +3339,69 @@ fn infra_inspect_properties_reports_the_workload_envelope_from_either_input() {
         .expect("properties ride along in JSON");
     assert_eq!(properties.len(), 6, "one entry per workload");
 }
+
+#[test]
+fn infra_graph_html_is_self_contained_and_a_namespace_filter_scopes_it() {
+    let full = protocol(&["infra", "graph", "--path", OBSERVATION, "--format", "html"]);
+    assert_eq!(code(&full), 0, "{}", stderr(&full));
+    let page = stdout(&full);
+    assert!(
+        page.contains("<!doctype html>") || page.contains("<!DOCTYPE html>"),
+        "the html format renders a whole page, not a fragment"
+    );
+    assert!(
+        page.contains("mermaid"),
+        "the page carries its diagram machinery"
+    );
+    let scoped = protocol(&[
+        "infra",
+        "graph",
+        "--path",
+        OBSERVATION,
+        "--format",
+        "html",
+        "--namespace",
+        "sbf",
+    ]);
+    assert_eq!(code(&scoped), 0, "{}", stderr(&scoped));
+    assert!(
+        stdout(&scoped).len() < page.len(),
+        "one namespace's page must be smaller than the whole cluster's"
+    );
+}
+
+#[test]
+fn infra_view_writes_the_page_and_a_missing_browser_is_a_warning_not_a_failure() {
+    let dir = std::env::temp_dir().join("protocol-cli-view-test");
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let out = dir.join("view.html");
+    let output = Command::new(env!("CARGO_BIN_EXE_protocol"))
+        .args([
+            "infra",
+            "view",
+            "--path",
+            OBSERVATION,
+            "--namespace",
+            "sbf",
+            "--out",
+            out.to_str().expect("utf-8 path"),
+        ])
+        // A deliberately absent opener: the page must still be written and the verb still
+        // succeed, because the report existing beats the browser opening.
+        .env("BROWSER", "/nonexistent/no-such-browser")
+        .current_dir(root())
+        .output()
+        .expect("the protocol binary runs");
+    assert_eq!(code(&output), 0, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("warning: could not open"),
+        "the missing opener is named as a warning: {}",
+        stderr(&output)
+    );
+    let written = std::fs::read_to_string(&out).expect("the page was written");
+    assert!(
+        written.contains("mermaid"),
+        "the written page is the html view"
+    );
+    std::fs::remove_dir_all(&dir).ok();
+}

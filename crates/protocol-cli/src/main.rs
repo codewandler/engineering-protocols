@@ -3767,6 +3767,22 @@ enum InfraCommand {
         #[arg(long, value_enum, default_value_t = InfraGraphFormat::Mermaid)]
         format: InfraGraphFormat,
     },
+    /// Render the HTML component view and open it in a browser.
+    ///
+    /// `graph --format html` writes the same page to stdout; this verb writes it to a file and
+    /// opens it — `$BROWSER` if set, else `xdg-open`. The one verb in this CLI that spawns
+    /// another program, because opening the page is its whole purpose.
+    View {
+        /// A bundle or a persisted IR document.
+        #[arg(long)]
+        path: PathBuf,
+        /// Restrict the page to one namespace's components, findings and directions.
+        #[arg(long)]
+        namespace: Option<String>,
+        /// Where to write the page; defaults to the system temp directory, named by digest.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     /// Diagnose an observed cluster: typed findings, each with a stable `INFRA-DIAG-*` code.
     ///
     /// A diagnosis is a report, not a gate: observed infrastructure is allowed to be wrong, so
@@ -3792,6 +3808,10 @@ enum InfraGraphFormat {
     Mermaid,
     /// The canonical graph document, carrying every node, edge, site and ownership fact.
     Json,
+    /// One self-contained HTML page: components badge-coloured by their worst finding, the
+    /// findings and directions beside the diagram. The page's only external reference is a
+    /// version-pinned Mermaid script tag the *viewer's browser* fetches — nothing here does.
+    Html,
 }
 
 /// How `infra diagnose` renders.
@@ -3839,6 +3859,11 @@ fn run_infra(command: &InfraCommand) -> Result<ExitCode> {
             namespace,
             format,
         } => infra_graph(path, namespace.as_deref(), *format),
+        InfraCommand::View {
+            path,
+            namespace,
+            out,
+        } => infra_view(path, namespace.as_deref(), out.as_deref()),
         InfraCommand::Diagnose {
             path,
             format,
@@ -3903,6 +3928,49 @@ fn infra_graph(path: &Path, namespace: Option<&str>, format: InfraGraphFormat) -
             "{}",
             infra_analyze::GraphDocument::of(&graph, &ir, namespace).to_json()
         ),
+        InfraGraphFormat::Html => out!("{}", infra_html(&ir, namespace)),
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// The self-contained HTML page for one IR, optionally one namespace of it.
+///
+/// The full graph is built and `render_html` scopes it, because the page's namespace section
+/// still names edges that leave the namespace — a service selecting into another namespace is
+/// exactly the kind of fact a scoped view must not hide.
+fn infra_html(ir: &infra_compiler::InfraIr, namespace: Option<&str>) -> String {
+    let graph = infra_analyze::InfraGraph::of(ir);
+    let diagnosis = infra_analyze::diagnose_with(ir, &graph);
+    let properties = infra_analyze::properties_with(ir, &graph);
+    infra_analyze::render_html(&graph, &diagnosis, &properties, namespace)
+}
+
+/// `protocol infra view`
+///
+/// Writes the HTML page and opens it. The opener is `$BROWSER` if set, else `xdg-open` — the
+/// one place this CLI spawns another program, and it is this verb's whole purpose. A missing
+/// opener is a warning, not a failure: the page exists and its path was printed.
+fn infra_view(path: &Path, namespace: Option<&str>, out: Option<&Path>) -> Result<ExitCode> {
+    let ir = match infra_ir_at(path)? {
+        InfraIrLoaded::Ir(ir) => ir,
+        InfraIrLoaded::Refused(errors) => {
+            infra_refusals(&errors);
+            return Ok(exit_code(false));
+        }
+    };
+    let page = infra_html(&ir, namespace);
+    let target = out.map_or_else(
+        || {
+            let scope = namespace.map_or(String::new(), |ns| format!("-{ns}"));
+            std::env::temp_dir().join(format!("infra-view-{}{scope}.html", &ir.digest()[..12]))
+        },
+        Path::to_path_buf,
+    );
+    std::fs::write(&target, &page).with_context(|| format!("writing {}", target.display()))?;
+    out!("{}", target.display());
+    let opener = std::env::var("BROWSER").unwrap_or_else(|_| "xdg-open".to_owned());
+    if let Err(error) = std::process::Command::new(&opener).arg(&target).spawn() {
+        eprintln!("warning: could not open `{opener}`: {error}");
     }
     Ok(ExitCode::SUCCESS)
 }
