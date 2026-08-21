@@ -82,6 +82,16 @@ Inputs are files written by an external scanner; no verb reaches a cluster.
 | `protocol infra diff --from <ir> --to <ir>` | what moved between two scans of one cluster, over declared state |
 | `protocol infra project --spec expected.yaml --path <bundle\|ir> --out <dir>` | writes the patch tree that would close the gaps, plus `OBLIGATIONS.md` and `SUMMARY.md`; applies nothing |
 
+## Trace surface
+
+Inputs are transcripts a harness already wrote; no verb runs an agent.
+
+| Command | Does |
+|---|---|
+| `protocol trace inspect --transcript <file>` | the transcript's census from the typed event IR: event families, per-tool traffic in both directions, per-step `gen`/`exec` timing |
+| `protocol trace check --spec <file> --transcript <file> [--redact] [--advisory <id>]` | judges the run against a `trace-spec/1` document: `ok` / `gap` / `unk` per expectation, every verdict citing event indices — exit 0 conformant, 1 contradicted, 3 unknown |
+| `protocol trace evidence --spec <file> --transcript <file> [--out <file>]` | mints the verdict as a `trace_conformance` evidence record (producer `trace-checker`, digest pair binding it to one transcript and one spec) that `protocol evaluate --evidence` accepts |
+
 ## Repository automation (`cargo xtask`)
 
 For contributors to the repository itself; each `--check` variant fails on any byte of drift.

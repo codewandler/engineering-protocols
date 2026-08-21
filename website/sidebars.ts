@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
         'guides/track-change',
         'guides/synthesize',
         'guides/check-infrastructure',
+        'guides/check-a-transcript',
       ],
     },
     {
