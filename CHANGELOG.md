@@ -9,6 +9,10 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.10.0-horizons-dogfood-lab] — 2026-08-21
+
 ### Added
 
 - **Evidence horizons — a green result from three weeks ago is not a fact.** An evidence record now
