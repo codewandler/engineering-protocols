@@ -1,52 +1,66 @@
-# Deploys the public documentation site to GitHub Pages.
+# Builds the Docusaurus site under website/ and deploys it to GitHub Pages on every push to main.
 #
-# The site is the *built output* of `website/` — never the repository's internal `docs/` tree.
-# That distinction is load-bearing: `docs/` is the internal engineering record (unaccepted
-# proposals and defect catalogues included), and the one-click "deploy from /docs" Pages option
-# would publish it verbatim at the public URL. This workflow, with the repository's Pages source
-# set to "GitHub Actions", is what keeps that option out of reach. The same warning lives in
-# website/README.md and website/docusaurus.config.ts.
-name: pages
+# The site is the project's best on-ramp and it is already gated harder than most prose gets:
+# `onBrokenLinks: 'throw'` fails the build on a dangling link, and every quoted transcript was
+# re-verified against the built `protocol` binary when the pages were written. What was missing was
+# only the deploy — the site was written, gated and unreachable.
+#
+# The build job also runs on pull requests, as a link gate without a deploy: a PR that breaks a
+# link fails here before it lands. Deploys happen from main only.
+#
+# One-time repository setup this workflow needs: Settings → Pages → Source: "GitHub Actions".
+name: Website
 
 on:
   push:
     branches: [main]
-    paths: ["website/**", ".github/workflows/pages.yml"]
+  pull_request:
+    paths: [website/**]
   workflow_dispatch:
+
+# One Pages deployment at a time; a superseded push should not race a running deploy.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-# One deployment at a time; a superseded build stops rather than racing the newer one.
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
   build:
+    name: Build the site
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: website/package-lock.json
-      - name: Build the site
+
+      - name: Install dependencies
+        run: npm ci
         working-directory: website
-        run: |
-          npm ci
-          npm run build
-      - uses: actions/configure-pages@v5
+
+      - name: Build
+        run: npm run build
+        working-directory: website
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: website/build
 
   deploy:
+    name: Deploy to Pages
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
