@@ -53,6 +53,41 @@ belongs in the commit message or in `docs/design/`.
   refuses that dialect, which is asserted, because two readers that accepted each other's formats
   would be one reader tested twice.
 
+- **A driven agent's shell holds only the protocol verbs, and a hand-edit of machine-owned
+  frontmatter comes back refused with a reason.** The plugin now ships two `PreToolUse` hooks, and
+  they are the driver's enforcement arm rather than a second, weaker driver.
+
+  `store-integrity` is **always on**, with or without a run: under `.engineering/planning/**` a
+  whole-file `Write` or `NotebookEdit` is denied by path, and an `Edit` is denied when it crosses the
+  `---` fence or writes `id`, `kind`, `status`, `revision`, `relations` or `format`. A targeted body
+  edit below the fence stays legal, because prose is not the CLI's business and there is no verb for
+  it. What comes back is not "denied": it names the field, says that `status` moves only through
+  `protocol artifact move`, and says why — a hand-retyped frontmatter is indistinguishable from a
+  silently-altered one until something downstream breaks.
+
+  `driven-surface` is **inert outside a driven run** and, inside one, holds a shell to one simple
+  invocation of `protocol artifact …` or `protocol trace …` — no pipes, no redirection, no `&&`, no
+  command substitution, because a composed command line is a second command wearing the first one's
+  name. Both hooks **fail closed**: with neither `jq` nor `python3` on `PATH` they refuse rather than
+  pass an unread call through, and every decision is appended to the run's own
+  `hook-decisions.jsonl`, which is the only record that can tell *denied* from *never attempted*.
+
+  **A new profile, `development.driven`, and it is not a relaxation.** It is `development.standard`
+  plus `command.execute`, and it exists because the planning store has no tool surface other than the
+  `protocol` CLI: under the two older development profiles a driven step can be told to write a
+  specification as an artifact and has no way to create one. The narrower grant cannot be written —
+  `command.execute:protocol` is a parse error, since capability scoping exists for deployment
+  environments and nothing else — so the grant's outer bound is the profile and its inner bound is
+  the hook. The approval floor is untouched, and the store's write guard no longer rests on there
+  being no shell: it rests on the shell not being able to say `sed -i`. Choose it only for a run
+  under `protocol drive`; interactive work and any harness without an equivalent constraint want
+  `development.standard`.
+
+  Both are exercised by a second eval, `integrations/claude-code/eval/run-driven.sh`, which drives a
+  real model through an honest step and a deliberately refused one and then judges the result by the
+  store, the decision log and two trace specifications. Like its neighbour it reaches the API and
+  costs money, so it is **not** part of `task check`.
+
 - **`protocol workflow render` — a workflow, and a run over it, as a picture.** Until now a workflow
   could only be printed as YAML. Four formats behind one scene: a standalone `svg`, a self-contained
   `html` page that fetches nothing, a `png` by way of `rsvg-convert`, and a `tui` frame for the

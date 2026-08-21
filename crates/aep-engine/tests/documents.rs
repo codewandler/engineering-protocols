@@ -43,7 +43,12 @@ fn the_document_tree_loads_and_is_internally_consistent() {
     let registry = &outcome.registry;
     assert_eq!(registry.protocols().count(), 3, "aep/1, adp/1 and aop/1");
     assert_eq!(registry.workflows().count(), 4);
-    assert_eq!(registry.profiles().count(), 5);
+    assert_eq!(
+        registry.profiles().count(),
+        6,
+        "three development points on one scale, `development.driven` beside them, incident and \
+         release"
+    );
     assert!(
         registry.principles().count() >= 20,
         "expected the full principle set, found {}",
@@ -62,6 +67,7 @@ fn every_profile_resolves_for_a_task_of_its_kind() {
         ("development.fast", "feature", "adp/1"),
         ("development.standard", "feature", "adp/1"),
         ("development.critical", "feature", "adp/1"),
+        ("development.driven", "feature", "adp/1"),
         ("incident.standard", "incident", "aop/1"),
         ("release.progressive", "release", "aop/1"),
     ];

@@ -146,6 +146,15 @@ expectations:
   - id: no-permission-denials
     statement: the sandbox contract held — nothing was refused permission
     # run.sh assertion 3.6, second half.
+    #
+    # **This row got sharper when the plugin gained hooks, and it stays `exactly: 0`.** The plugin
+    # this eval copies in now ships `hooks/store-integrity.sh`, which is active with or without a
+    # driven run and denies a `Write` under `.engineering/planning/**` or an `Edit` that reaches the
+    # frontmatter. So a denial here no longer means "the sandbox refused something ambient" — it
+    # means **the agent tried to hand-write a machine-owned field**, which is precisely the behaviour
+    # guardrail 1 forbids and precisely what an eval of this plugin should go red for. Relaxing the
+    # bound to accommodate the new mechanism would be discarding the finding it exists to produce.
+    # (`hooks/driven-surface.sh` cannot fire here: it is inert outside a `protocol drive` run.)
     expect:
       permission.denied:
         count: {exactly: 0}

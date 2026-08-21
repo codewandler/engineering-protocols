@@ -1,0 +1,77 @@
+# The profile a **driven** run uses, and the only one in this directory that grants a shell.
+#
+# ## What forced it
+#
+# `development.fast` and `development.standard` grant no `command.execute`, and the design says so
+# as a *strength*: under either of them a model holds no shell at all, `cargo test` runs as a
+# `command` step the driver executes, and the record it produces carries a verifier's provenance
+# rather than a model's opinion of a test run. Nothing here weakens that claim — this profile keeps
+# every one of those command steps exactly where they are.
+#
+# What the claim did not cost out is that the planning store has **no tool surface other than the
+# `protocol` CLI**. Its whole vocabulary — `artifact new`, `artifact move`, `artifact relate`,
+# `artifact validate` — is shell commands, on purpose: the CLI owns the frontmatter precisely so
+# that nothing else writes it. So a driven `llm` step under `development.standard` can be told to
+# write a specification as a planning artifact and has no way to create one. The state's transition
+# is guarded on `artifact.specification.exists`, so the run does not fail loudly; it simply never
+# moves.
+#
+# ## Why a capability grant and not a narrower one
+#
+# The narrow fix would be a scoped capability — `command.execute:protocol` — and the grammar cannot
+# express it. Scoping exists for exactly one thing, an `Environment` on `deployment.create` and
+# `deployment.rollback`; every other capability is simple and `Capability::parse` refuses a scope on
+# one. Inventing a second scoping axis to serve one profile would put a new dimension into the
+# protocol's vocabulary to solve a harness's problem, which is the wrong layer.
+#
+# So this takes the other half of the design's own shape for the same class of rule — **a
+# capability grant plus a hook constraint**:
+#
+#   * this document grants `command.execute`, and says here that the grant exists so that the
+#     `protocol` CLI is reachable and for no other reason;
+#   * `integrations/claude-code/hooks/driven-surface.sh` is the constraint. It reads the driven
+#     run's step context, and denies any `Bash` call that is not one simple invocation of
+#     `protocol artifact …` or `protocol trace …` — no pipes, no redirection, no `&&`, no command
+#     substitution, because a composed command line is a second command wearing the first one's
+#     name.
+#
+# The constraint is **pattern-based and best-effort**, and this file says so rather than claiming
+# `command.execute` is fully enforced: granting it grants a superset of the shell's reach, and a
+# hook narrows that reach rather than making it a function of a capability. Two properties keep the
+# residual risk small and are worth stating because they are what make the grant survivable:
+#
+#   1. **The approval floor is untouched.** `command.execute` is not in `protocols/aep/1.yaml`'s
+#      `approval_floor`, so nothing that needed a recorded approval before needs one less now. The
+#      floor's two entries — `production.write` and `deployment.create:production` — are as far out
+#      of this profile's reach as they are out of `development.fast`'s.
+#   2. **The store's own guard does not depend on the shell being absent.** The design's store
+#      integrity row is exhaustive over `Edit`, `Write` and `NotebookEdit` *given* that no
+#      development profile grants a shell; under this profile that premise is gone, and it is
+#      replaced rather than dropped — the surface hook denies every shell command that is not a
+#      `protocol` verb, which is what would otherwise have routed around the write guard by way of
+#      `sed -i`. Both hooks ship together for that reason.
+#
+# ## When to choose it
+#
+# Only for a run under `protocol drive`. An interactive session needs no shell grant from a profile
+# — the operator has one — and a run driven by a harness that ships no equivalent of the surface
+# hook is a run where this profile's grant is unconstrained. Use `development.standard` there.
+id: development.driven
+version: 1
+title: Driven development
+summary: >-
+  Choose this only for a run under `protocol drive`, where a model's shell is held to the `protocol`
+  CLI by the driver's own enforcement hooks. It is `development.standard` plus `command.execute`,
+  granted so that the planning store's verbs are reachable from a driven step and for nothing else.
+  Choose `development.standard` for interactive work and for any harness that cannot constrain a
+  shell to a named surface.
+protocol: adp/1
+# Workflow, principles and completion conditions are inherited unchanged; extension can add and
+# tighten, never grant back. Every completion condition `development.standard` imposes still holds.
+extends: development.standard
+
+capabilities:
+  allow:
+    # The one addition, and the whole reason this document exists. Read the header before widening
+    # it: this list is the enforcement's outer bound, and the hook is the inner one.
+    - command.execute
