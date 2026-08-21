@@ -1,4 +1,4 @@
-import {themes as prismThemes} from 'prism-react-renderer';
+import type {PrismTheme} from 'prism-react-renderer';
 import type {Config} from '@docusaurus/types';
 import type * as Preset from '@docusaurus/preset-classic';
 
@@ -13,6 +13,63 @@ import type * as Preset from '@docusaurus/preset-classic';
 // `/docs` folder of the default branch. Do not use that option for this repository. It would publish
 // `docs/` — the internal record — verbatim, at the project's public URL. Publish the *built output*
 // of this directory to the `gh-pages` branch (or upload it as an Actions Pages artifact) instead.
+
+// Syntax highlighting, in the site's own palette rather than a stock theme.
+//
+// The code block is the diagrams' panel: `#161d24` on `#0f1418`, a `#2b3540` hairline drawn in CSS.
+// Docusaurus writes the theme's plain colours onto the block as inline custom properties, so a
+// stylesheet cannot reach them — the background has to be set here or the block will not match the
+// panels beside it. The token hues are the palette's own: green for the keys a specification is
+// mostly made of, blue for values and types, amber for variables, one red for keywords, and the
+// muted grey for comments and punctuation. No purple: it is not a colour this project uses.
+const MONO_STACK =
+  "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace";
+
+const darkCodeTheme: PrismTheme = {
+  plain: {color: '#d7dde3', backgroundColor: '#161d24'},
+  styles: [
+    {
+      types: ['comment', 'prolog', 'doctype', 'cdata'],
+      style: {color: '#8b98a5', fontStyle: 'italic'},
+    },
+    {types: ['punctuation', 'operator', 'entity'], style: {color: '#8b98a5'}},
+    {
+      types: ['keyword', 'selector', 'tag', 'deleted', 'important', 'rule'],
+      style: {color: '#ff7b72'},
+    },
+    {types: ['string', 'char', 'attr-value', 'inserted', 'regex'], style: {color: '#a5d6ff'}},
+    {
+      types: ['number', 'boolean', 'constant', 'symbol', 'class-name', 'function', 'builtin'],
+      style: {color: '#79c0ff'},
+    },
+    {types: ['atrule', 'attr-name', 'property', 'key'], style: {color: '#7ee787'}},
+    {types: ['variable', 'parameter'], style: {color: '#ffa657'}},
+    {types: ['namespace'], style: {opacity: 0.75}},
+  ],
+};
+
+const lightCodeTheme: PrismTheme = {
+  plain: {color: '#1f2830', backgroundColor: '#f6f8fa'},
+  styles: [
+    {
+      types: ['comment', 'prolog', 'doctype', 'cdata'],
+      style: {color: '#5c6570', fontStyle: 'italic'},
+    },
+    {types: ['punctuation', 'operator', 'entity'], style: {color: '#57636f'}},
+    {
+      types: ['keyword', 'selector', 'tag', 'deleted', 'important', 'rule'],
+      style: {color: '#cf222e'},
+    },
+    {types: ['string', 'char', 'attr-value', 'inserted', 'regex'], style: {color: '#0a3069'}},
+    {
+      types: ['number', 'boolean', 'constant', 'symbol', 'class-name', 'function', 'builtin'],
+      style: {color: '#0550ae'},
+    },
+    {types: ['atrule', 'attr-name', 'property', 'key'], style: {color: '#116329'}},
+    {types: ['variable', 'parameter'], style: {color: '#953800'}},
+    {types: ['namespace'], style: {opacity: 0.75}},
+  ],
+};
 
 const config: Config = {
   title: 'Engineering Protocols',
@@ -98,6 +155,15 @@ const config: Config = {
     },
     navbar: {
       title: 'Engineering Protocols',
+      // The mark is the evidence panel from the social card, reduced to one glyph. It carries its
+      // own dark fill, so one file reads on both themes and no `srcDark` variant is needed.
+      // `static/img/favicon.ico` is rasterized from it — see the note in `static/img/mark.svg`.
+      logo: {
+        alt: 'engineering-protocols',
+        src: 'img/mark.svg',
+        width: 26,
+        height: 26,
+      },
       items: [
         {
           type: 'docSidebar',
@@ -124,6 +190,10 @@ const config: Config = {
           href: 'https://github.com/codewandler/engineering-protocols',
           label: 'GitHub',
           position: 'right',
+          // Icon and word: `custom.css` masks the GitHub mark in front of the label with
+          // `currentColor`, and suppresses the external-link arrow Docusaurus would add beside it.
+          className: 'navbar-github-link',
+          'aria-label': 'GitHub repository',
         },
       ],
     },
@@ -164,12 +234,34 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `engineering-protocols · Apache-2.0 · built with Docusaurus.`,
+      // The mark signs the page, and the claim under it is the site's tagline verbatim — the same
+      // sentence the hero opens with, closing the page where it started.
+      logo: {
+        alt: 'engineering-protocols',
+        src: 'img/mark.svg',
+        href: '/',
+        width: 22,
+        height: 22,
+      },
+      copyright:
+        '<span class="footer__claim">Constrain agent-written engineering work with rules a program ' +
+        'executes, and decide completion from evidence rather than assertion.</span>' +
+        'engineering-protocols · Apache-2.0 · built with Docusaurus.',
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: lightCodeTheme,
+      darkTheme: darkCodeTheme,
       additionalLanguages: ['rust', 'yaml', 'json', 'bash'],
+    },
+    // The generated diagrams are set in the same typeface as the drawn ones, and light mode uses
+    // Mermaid's `neutral` base rather than its default: the default fills every state node
+    // lavender, which is a colour this project does not use anywhere else. `neutral` is grey on
+    // white, which is what the drawn diagrams are, inverted.
+    mermaid: {
+      theme: {light: 'neutral', dark: 'dark'},
+      options: {
+        fontFamily: MONO_STACK,
+      },
     },
   } satisfies Preset.ThemeConfig,
 };

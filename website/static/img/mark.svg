@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"
+     role="img" aria-label="engineering-protocols">
+  <!-- The project mark: the evidence panel from `static/img/social-card.svg`, reduced to one glyph.
+       A dark panel with a hairline edge, the accent rule of the social card across its top, and the
+       verdict inside it in the protocol's green. The panel fill carries its own contrast, so the
+       mark reads on a light navbar and a dark one without a second file.
+       Re-rasterize the favicon after editing:
+         rsvg-convert -w 32 -h 32 static/img/mark.svg -o <tmp>/mark-32.png
+         rsvg-convert -w 16 -h 16 static/img/mark.svg -o <tmp>/mark-16.png
+         magick <tmp>/mark-16.png <tmp>/mark-32.png static/img/favicon.ico -->
+  <defs>
+    <linearGradient id="epAccent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3fb950"/>
+      <stop offset="1" stop-color="#58a6ff"/>
+    </linearGradient>
+    <clipPath id="epPanel">
+      <rect x="1" y="1" width="30" height="30" rx="7"/>
+    </clipPath>
+  </defs>
+
+  <rect x="1" y="1" width="30" height="30" rx="7" fill="#161d24"/>
+  <g clip-path="url(#epPanel)">
+    <rect x="1" y="1" width="30" height="2.5" fill="url(#epAccent)"/>
+  </g>
+  <rect x="1.6" y="1.6" width="28.8" height="28.8" rx="6.4" fill="none" stroke="#2b3540" stroke-width="1.2"/>
+  <path d="M9.4 17 L13.9 21.5 L22.8 12" fill="none" stroke="#3fb950" stroke-width="2.7"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

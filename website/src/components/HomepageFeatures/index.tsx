@@ -1,5 +1,4 @@
 import type {ReactNode} from 'react';
-import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import Heading from '@theme/Heading';
 import styles from './styles.module.css';
@@ -59,24 +58,39 @@ const FeatureList: FeatureItem[] = [
 
 function Feature({title, governs, question, description, href}: FeatureItem) {
   return (
-    <div className={clsx('col col--4')}>
-      <div className={styles.card}>
-        <Heading as="h3" className={styles.cardTitle}>
-          <Link to={href}>{title}</Link>
-        </Heading>
-        <p className={styles.cardGoverns}>{governs}</p>
-        <p className={styles.cardQuestion}>{question}</p>
-        <p>{description}</p>
+    <article className={styles.card}>
+      <div className={styles.cardHeader}>
+        <span className={styles.cardGoverns}>{governs}</span>
+        <span className={styles.cardArrow} aria-hidden="true">
+          →
+        </span>
       </div>
-    </div>
+      <Heading as="h3" className={styles.cardTitle}>
+        {/* The link covers the whole panel — see `.cardLink::after` — so the card is one target. */}
+        <Link to={href} className={styles.cardLink}>
+          {title}
+        </Link>
+      </Heading>
+      <p className={styles.cardQuestion}>{question}</p>
+      <p className={styles.cardBody}>{description}</p>
+    </article>
   );
 }
 
 export default function HomepageFeatures(): ReactNode {
   return (
     <section className={styles.features}>
-      <div className="container">
-        <div className="row">
+      <div className={styles.inner}>
+        <div className={styles.header}>
+          <div className={styles.eyebrow}>
+            <span className={styles.ordinal}>02</span>
+            <span>How it fits</span>
+          </div>
+        </div>
+        <Heading as="h2" className={styles.title}>
+          Two halves, and the join
+        </Heading>
+        <div className={styles.grid}>
           {FeatureList.map((props, idx) => (
             <Feature key={idx} {...props} />
           ))}
