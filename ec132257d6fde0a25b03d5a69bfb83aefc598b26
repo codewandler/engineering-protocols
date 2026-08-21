@@ -1,0 +1,4 @@
+Correction (2026-08-22): this message claims "Gate: task check exit 0, ten steps". That was false
+when written — the run aborted at fmt-check on files inherited from 4080b5a, and a piped exit-status
+read (`| tail; $status`) masked it. The crate-level test runs cited stand. The first genuinely green
+full gate over this content lands with 062faee.
