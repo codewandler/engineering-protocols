@@ -2,24 +2,33 @@ import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
+import useBaseUrl from '@docusaurus/useBaseUrl';
 import Layout from '@theme/Layout';
 
-import {INVOICE_YAML_LINES} from './_source';
-import {EFFECT_GLYPH, IR_ROWS, STEPS} from './_run';
-import type {Effect, IrRow, LineRange} from './_run';
+import {INVOICE_YAML_LINES} from './_source.ts';
+import {EFFECT_GLYPH, loadRun} from './_run.ts';
+import type {Effect, IrRow, LineRange, Run, Step} from './_run.ts';
 import styles from './styles.module.css';
 
 /**
- * The lab — a LAYOUT DRAFT.
+ * The lab.
  *
- * Three panels and a canned run: the specification on the left, what the compiler resolved it to in
+ * Three panels over one system: the specification on the left, what the compiler resolved it to in
  * the middle, and what a run of it did on the right. Stepping moves all three at once, which is the
  * whole point of the arrangement — a line of YAML, the IR node it became and the effect it caused
  * are the same fact seen three ways, and the layout's job is to let a reader hold them together.
  *
- * WHAT THIS IS NOT: there is no engine here. `_run.ts` is a hardcoded array of steps (the underscore keeps Docusaurus from making it a route). The names in
- * it are real and the mechanism is not, and the toolbar says so in as many words rather than
- * leaving a reader to find out. The footnote at the bottom says what the implemented version runs.
+ * WHAT RUNS. `billing_web_realized.wasm`, fetched beside this page: the browser realization the
+ * repository synthesises from `examples/billing/` (`generated/web/billing/`), linked with the
+ * hand-written behaviour under `examples/billing-realization/`. Five commands go in over the
+ * module's own boundary and the outcomes, the published events, the binding invocations and the
+ * view rows come back out; `_run.ts` turns that answer into the steps below and `_spans.ts` finds
+ * the lines each step stands on in the file itself. Nothing on this page is a transcript of a run
+ * that happened once on somebody's machine.
+ *
+ * The module is a build artifact and is not committed, so this page can be opened without one. It
+ * says so when that happens, and names the command that builds it, rather than showing a run it
+ * did not do.
  *
  * THEME: dark only, deliberately. This follows the landing page's hero, which is also a literal
  * dark field under the light theme: the lab is an instrument panel rather than a page rendered in
@@ -28,8 +37,14 @@ import styles from './styles.module.css';
  * navbar above it still follows the site theme.
  */
 
-const STEP_MS = 1200;
-const LAST = STEPS.length - 1;
+/** How long one step is held while the run plays itself. */
+const STEP_MS = 1000;
+
+/** The stream before the module has answered — a stable identity, so the memos below do not churn. */
+const NO_STEPS: Step[] = [];
+
+/** The same, for the middle panel. */
+const NO_ROWS: IrRow[] = [];
 
 /* ------------------------------------------------------------------ *
  * The source panel
@@ -148,7 +163,7 @@ function SourcePanel({ranges}: {ranges: LineRange[]}) {
  * The intermediate layer
  * ------------------------------------------------------------------ */
 
-function IrPanel({active}: {active: string[]}) {
+function IrPanel({rows, active}: {rows: IrRow[]; active: string[]}) {
   const body = useRef<HTMLDivElement>(null);
   const first = active[0];
 
@@ -169,10 +184,11 @@ function IrPanel({active}: {active: string[]}) {
   return (
     <Panel
       label="the intermediate layer"
-      title="protocol ess compile"
+      title="request: catalog"
+      meta={rows.length > 0 ? `${rows.length} rows` : undefined}
       bodyRef={body}
       bodyClassName={styles.irBody}>
-      {IR_ROWS.map((row: IrRow) => (
+      {rows.map((row: IrRow) => (
         <div
           key={row.id}
           data-ir={row.id}
@@ -191,9 +207,11 @@ function IrPanel({active}: {active: string[]}) {
  * The run: state, then effects
  * ------------------------------------------------------------------ */
 
-type Status = 'idle' | 'running' | 'halted' | 'done';
+type Status = 'loading' | 'failed' | 'idle' | 'running' | 'halted' | 'done';
 
 const STATUS_WORD: Record<Status, string> = {
+  loading: 'loading',
+  failed: 'no module',
   idle: 'idle',
   running: 'running',
   halted: 'halted',
@@ -205,15 +223,20 @@ type LedgerEntry = Effect & {key: string; step: number};
 function RunPanel({
   status,
   index,
+  steps,
   entries,
+  failure,
 }: {
   status: Status;
   index: number;
+  steps: Step[];
   entries: LedgerEntry[];
+  failure: string | null;
 }) {
   const body = useRef<HTMLDivElement>(null);
-  const step = index >= 0 ? STEPS[index] : undefined;
+  const step = index >= 0 ? steps[index] : undefined;
   const done = index + 1;
+  const total = Math.max(steps.length, 1);
 
   useEffect(() => {
     const host = body.current;
@@ -226,7 +249,7 @@ function RunPanel({
     <Panel
       label="the run"
       title="state and effects"
-      meta={`step ${done} / ${STEPS.length}`}
+      meta={`step ${done} / ${steps.length}`}
       bodyRef={body}
       bodyClassName={styles.runBody}
       head={
@@ -237,23 +260,34 @@ function RunPanel({
               {STATUS_WORD[status]}
             </span>
             <span className={styles.stateCount}>
-              {done} / {STEPS.length}
+              {done} / {steps.length}
             </span>
           </div>
-          <div className={styles.stateName}>{step ? step.label : 'no run yet'}</div>
+          <div className={styles.stateName}>
+            {step ? step.label : status === 'loading' ? 'instantiating the module' : 'no run yet'}
+          </div>
           <div className={styles.stateNote}>
-            {step ? step.note : 'Press play, or step forward one at a time.'}
+            {step
+              ? step.note
+              : status === 'failed'
+                ? (failure ?? 'the module did not load')
+                : status === 'loading'
+                  ? 'Fetching billing_web_realized.wasm and asking it for its catalogue.'
+                  : 'Press play, or step forward one at a time.'}
           </div>
           <div className={styles.progress}>
-            <span
-              className={styles.progressFill}
-              style={{width: `${(done / STEPS.length) * 100}%`}}
-            />
+            <span className={styles.progressFill} style={{width: `${(done / total) * 100}%`}} />
           </div>
         </div>
       }>
       {entries.length === 0 ? (
-        <p className={styles.ledgerEmpty}>The ledger is empty. Nothing has been asked of the system yet.</p>
+        <p className={styles.ledgerEmpty}>
+          {status === 'failed'
+            ? 'Nothing ran: this page fetches a WebAssembly module that is not there. It is a build artifact and is not committed — `task lab` builds it and puts it beside the page.'
+            : status === 'loading'
+              ? 'Loading the module the run happens in.'
+              : 'The ledger is empty. Nothing has been asked of the system yet.'}
+        </p>
       ) : (
         <ol className={styles.ledger}>
           {entries.map((entry) => (
@@ -314,30 +348,70 @@ function Panel({
  * ------------------------------------------------------------------ */
 
 export default function Lab(): ReactNode {
+  const [run, setRun] = useState<Run | null>(null);
+  const [bytes, setBytes] = useState(0);
+  const [failure, setFailure] = useState<string | null>(null);
   const [index, setIndex] = useState(-1);
   const [playing, setPlaying] = useState(false);
   const [full, setFull] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const module = useBaseUrl('/lab/billing_web_realized.wasm');
 
-  const status: Status = playing ? 'running' : index < 0 ? 'idle' : index >= LAST ? 'done' : 'halted';
+  // The run, once — instantiated in the browser, because a module cannot be instantiated during
+  // the static render and a run rendered into the HTML would be a transcript again.
+  useEffect(() => {
+    let live = true;
+    loadRun(module).then(
+      (loaded) => {
+        if (live) {
+          setRun(loaded.run);
+          setBytes(loaded.bytes);
+        }
+      },
+      (error: unknown) => {
+        if (live) {
+          setFailure(error instanceof Error ? error.message : String(error));
+        }
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [module]);
 
-  const step = index >= 0 ? STEPS[index] : undefined;
+  const steps = run ? run.steps : NO_STEPS;
+  const rows = run ? run.ir : NO_ROWS;
+  const last = steps.length - 1;
+
+  const status: Status = failure
+    ? 'failed'
+    : !run
+      ? 'loading'
+      : playing
+        ? 'running'
+        : index < 0
+          ? 'idle'
+          : index >= last
+            ? 'done'
+            : 'halted';
+
+  const step = index >= 0 ? steps[index] : undefined;
   const ranges = step ? step.source : [];
   const irActive = step ? step.ir : [];
 
   const entries = useMemo<LedgerEntry[]>(() => {
     const out: LedgerEntry[] = [];
-    for (let s = 0; s <= index; s += 1) {
-      STEPS[s].effects.forEach((effect, i) => {
-        out.push({...effect, key: `${STEPS[s].id}-${i}`, step: s});
+    for (let s = 0; s <= index && s < steps.length; s += 1) {
+      steps[s].effects.forEach((effect, i) => {
+        out.push({...effect, key: `${steps[s].id}-${i}`, step: s});
       });
     }
     return out;
-  }, [index]);
+  }, [index, steps]);
 
   const forward = useCallback(() => {
-    setIndex((i) => Math.min(i + 1, LAST));
-  }, []);
+    setIndex((i) => Math.min(i + 1, last));
+  }, [last]);
   const back = useCallback(() => {
     setPlaying(false);
     setIndex((i) => Math.max(i - 1, -1));
@@ -347,14 +421,17 @@ export default function Lab(): ReactNode {
     setIndex(-1);
   }, []);
   const toggle = useCallback(() => {
+    if (steps.length === 0) {
+      return;
+    }
     setPlaying((p) => {
       if (p) {
         return false;
       }
-      setIndex((i) => (i >= LAST ? -1 : i));
+      setIndex((i) => (i >= last ? -1 : i));
       return true;
     });
-  }, []);
+  }, [last, steps.length]);
 
   // Auto-advance. One timer per step, cleared on every state change, so a click during a run
   // takes effect on the click rather than on the next tick.
@@ -362,13 +439,13 @@ export default function Lab(): ReactNode {
     if (!playing) {
       return undefined;
     }
-    if (index >= LAST) {
+    if (index >= last) {
       setPlaying(false);
       return undefined;
     }
     const timer = window.setTimeout(forward, STEP_MS);
     return () => window.clearTimeout(timer);
-  }, [playing, index, forward]);
+  }, [playing, index, last, forward]);
 
   // Space plays and pauses, the arrows step. Ignored while a form control has focus, so the
   // shortcut never eats a keystroke someone meant for something else.
@@ -437,7 +514,7 @@ export default function Lab(): ReactNode {
     <Layout
       noFooter
       title="The lab"
-      description="A specification, the IR it compiles to, and a run of it — the three side by side, stepped together. A layout draft over a canned run.">
+      description="A specification, the IR it compiles to, and a real run of it in WebAssembly — the three side by side, stepped together.">
       <div ref={root} className={styles.lab}>
         <div className={styles.toolbar}>
           <div className={styles.transport}>
@@ -445,6 +522,7 @@ export default function Lab(): ReactNode {
               type="button"
               className={clsx(styles.tbutton, styles.tprimary)}
               onClick={toggle}
+              disabled={!run}
               aria-label={playing ? 'Halt the run' : 'Play the run'}
               title={playing ? 'Halt (space)' : 'Play (space)'}>
               {playing ? '\u25AE\u25AE' : '\u25B8'}
@@ -466,7 +544,7 @@ export default function Lab(): ReactNode {
                 setPlaying(false);
                 forward();
               }}
-              disabled={index >= LAST}
+              disabled={!run || index >= last}
               aria-label="Step forward"
               title="Step forward (→)">
               {'\u25B8\u25B8'}
@@ -483,10 +561,18 @@ export default function Lab(): ReactNode {
           </div>
 
           <div className={styles.toolbarMid}>
-            <span className={styles.runTitle}>billing v3 · CreateInvoice</span>
-            <span className={styles.draftTag} title="No engine runs here yet. The steps are hardcoded.">
-              draft — canned run
-            </span>
+            <span className={styles.runTitle}>{run ? run.title : 'billing · loading'}</span>
+            {run ? (
+              <span
+                className={styles.liveTag}
+                title="The steps come from a WebAssembly module answering over its own boundary.">
+                wasm · {Math.round(bytes / 1024)} KiB
+              </span>
+            ) : (
+              <span className={styles.absentTag} title={failure ?? 'Fetching the module.'}>
+                {failure ? 'no module' : 'loading'}
+              </span>
+            )}
           </div>
 
           <div className={styles.toolbarEnd}>
@@ -509,22 +595,22 @@ export default function Lab(): ReactNode {
 
         <div className={styles.panels}>
           <SourcePanel ranges={ranges} />
-          <IrPanel active={irActive} />
-          <RunPanel status={status} index={index} entries={entries} />
+          <IrPanel rows={rows} active={irActive} />
+          <RunPanel status={status} index={index} steps={steps} entries={entries} failure={failure} />
         </div>
 
         <footer className={styles.footnote}>
-          <span className={styles.footnoteLabel}>what the real version will do</span>
+          <span className={styles.footnoteLabel}>what is actually running</span>
           <p>
-            The material here is real — <code>invoice.yaml</code> verbatim, the middle panel{' '}
-            <code>protocol ess compile</code> trimmed, the outcomes and errors the ones the
-            specification declares — and the run through it is a hardcoded array of eleven steps.
-            Nothing is executed. It need not stay that way: the repository already synthesizes a
-            browser realization of this same specification to WebAssembly —{' '}
-            <code>generated/web/billing/</code>, a bridge taking JSON in over linear memory and
-            handing JSON back, with <code>examples/billing-web/</code> the hand-written host that
-            links a realization into it. The implemented lab loads that module and steps a real run
-            through these same three panels.
+            The left panel is <code>invoice.yaml</code> verbatim. The middle panel is what{' '}
+            <code>{'{"request":"catalog"}'}</code> answers — the compiler&rsquo;s own model, read out
+            of the module rather than drawn beside it. The right panel is five commands sent over
+            that module&rsquo;s boundary, and the outcomes, events, binding invocations and view rows
+            it sent back. The module is{' '}
+            <code>generated/web/billing/</code> — synthesised from this specification — linked with
+            the hand-written realization in <code>examples/billing-realization/</code>, built for{' '}
+            <code>wasm32-unknown-unknown</code>. Identifiers come from a counter rather than from
+            randomness, so the same module answers the same run every time you load this page.
           </p>
         </footer>
       </div>

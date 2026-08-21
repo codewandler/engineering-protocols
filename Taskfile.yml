@@ -132,6 +132,32 @@ tasks:
     cmds:
       - cargo xtask infra --check
 
+  # The website's lab runs the real thing rather than a recording of it: `website/src/pages/lab/`
+  # fetches a WebAssembly module beside the page, sends five commands over its boundary and reads
+  # its three panels off the answers. This builds that module — the generated bridge under
+  # `generated/web/billing/` linked with the hand-written realization, which is exactly what
+  # `examples/billing-web` already is — and puts it where the site serves static files from.
+  #
+  # The `.wasm` is not committed, for the reason `generated/web/README.md` gives: it is a build
+  # artifact, and a binary nobody can diff is not evidence. `.gitignore` keeps it out, and the Pages
+  # workflow runs these same commands before `npm run build`.
+  #
+  # The `cmp` comes first. `website/src/pages/lab/_bridge.mjs` is a byte-identical copy of the
+  # emitted glue, so that the page and the boundary smoke test drive the module through the same
+  # code; a copy that had drifted would be a page proving something else, so this refuses rather
+  # than builds. The node step at the end is the run's own test: same module, same glue, and the
+  # same engine the page calls.
+  lab:
+    desc: >-
+      Build the browser module the website's lab runs, place it in website/static/lab/, and hold
+      the run it produces to its test. Needs the wasm32-unknown-unknown target and Node 22.18+.
+    cmds:
+      - cmp generated/web/billing/bridge.js website/src/pages/lab/_bridge.mjs
+      - cargo build --release --target wasm32-unknown-unknown --manifest-path examples/billing-web/Cargo.toml
+      - mkdir -p website/static/lab
+      - cp examples/billing-web/target/wasm32-unknown-unknown/release/billing_web_realized.wasm website/static/lab/billing_web_realized.wasm
+      - node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON website/src/pages/lab/_run.test.mjs
+
   schema:
     desc: Regenerate schemas/generated/ from the Rust types.
     cmds:

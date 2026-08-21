@@ -2,9 +2,9 @@
  * The lab launcher, on a documentation page.
  *
  * It reads as an instrument rather than as a call to action: a panel with a play glyph, one line of
- * what it does, and the same amber `draft` tag the lab's own toolbar carries — a reader should know
- * before clicking that what opens is a draft. Both themes, unlike the lab itself: this sits inside
- * a documentation page, so it follows the page.
+ * what it does, and the same green `wasm` tag the lab's own toolbar carries — a reader should know
+ * before clicking that what opens actually runs. Both themes, unlike the lab itself: this sits
+ * inside a documentation page, so it follows the page.
  */
 
 .launch {
@@ -71,7 +71,7 @@
   color: var(--ep-muted);
 }
 
-/* The same honesty tag the lab's toolbar carries, in the same amber. */
+/* The same tag the lab's toolbar carries, in the same green: something is behind the button. */
 .tag {
   flex: 0 0 auto;
   margin-left: auto;
@@ -79,9 +79,9 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   padding: 0.12rem 0.42rem;
-  color: var(--ep-amber-text);
-  background-color: rgba(210, 153, 34, 0.1);
-  border: 1px solid rgba(210, 153, 34, 0.35);
+  color: var(--ifm-color-primary);
+  background-color: rgba(63, 185, 80, 0.1);
+  border: 1px solid rgba(63, 185, 80, 0.35);
   border-radius: 4px;
 }
 

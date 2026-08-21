@@ -29,9 +29,12 @@ export default function LabLaunch(): ReactNode {
       </span>
       <span className={styles.text}>
         <strong>Open in the lab</strong>
-        <span>Step this file, the IR it compiles to and a run of it, side by side.</span>
+        <span>
+          Step this file, the model it compiles to and a real run of it in WebAssembly, side by
+          side.
+        </span>
       </span>
-      <span className={styles.tag}>draft</span>
+      <span className={styles.tag}>wasm</span>
     </Link>
   );
 }

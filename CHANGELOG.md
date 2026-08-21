@@ -42,6 +42,19 @@ belongs in the commit message or in `docs/design/`.
   Design: `docs/design/evidence-horizons-design-v0.1.md`, corrected by adversarial review
   (19 CONFIRMED / 15 NEEDS-CHANGE / 3 INFEASIBLE, all applied).
 
+- **The lab runs the specification instead of replaying it.** `/lab` on the website used to step a
+  hardcoded array of eleven steps with real names in it. It now fetches
+  `billing_web_realized.wasm` — the browser realization this repository synthesises from
+  `examples/billing/`, linked with the hand-written behaviour in `examples/billing-realization/` —
+  and sends five commands over its boundary: create, issue, pay, cancel-a-paid-invoice, and one
+  refused amount. The middle panel is what `{"request":"catalog"}` answers, the right panel is the
+  outcomes, published events, binding invocations and view rows that came back, and the lines the
+  left panel highlights are found in the file itself rather than written down. Same module, same
+  glue and same engine as the page, asserted outside a browser by `npm run test:lab`; the run is
+  deterministic, so two loads of the page produce the same stream byte for byte. `task lab` builds
+  the module — it is a build artifact and stays uncommitted, and a page opened without one says so
+  rather than showing a run it did not do.
+
 ### Fixed
 
 - **Four things the documents invited an adopter to declare, which the engine then refused, ignored

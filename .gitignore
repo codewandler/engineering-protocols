@@ -28,3 +28,9 @@ examples/billing-web/target/
 # The module a reader copies in beside the page, as the tree's own README tells them to: it is the
 # page's last candidate path, and a build artifact either way.
 generated/web/*/*.wasm
+
+# The module the website's lab runs, built by `task lab` from `examples/billing-web`. Not
+# committed for the reason the tree it comes from is not: a `.wasm` is a build artifact, and the
+# page fetches it at runtime rather than importing it, so a missing one is a state the lab shows
+# rather than a build that breaks.
+website/static/lab/

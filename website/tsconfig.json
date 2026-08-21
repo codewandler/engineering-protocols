@@ -6,7 +6,12 @@
   "compilerOptions": {
     "baseUrl": ".",
     "ignoreDeprecations": "6.0",
-    "strict": true
+    "strict": true,
+    // The lab's modules import each other with the `.ts` extension written out. Node runs them
+    // that way too — `src/pages/lab/_run.test.mjs` loads the engine directly and strips the types
+    // — and extensionless specifiers are the one form Node will not resolve. Safe here because
+    // this configuration emits nothing (`noEmit`, from @docusaurus/tsconfig).
+    "allowImportingTsExtensions": true
   },
   "exclude": [".docusaurus", "build"]
 }

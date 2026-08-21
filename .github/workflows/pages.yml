@@ -1,5 +1,11 @@
 # Builds the Docusaurus site under website/ and deploys it to GitHub Pages on every push to main.
 #
+# The build has a Rust half now. `/lab` fetches a WebAssembly module beside the page and runs five
+# commands through it, and that module is a build artifact rather than a committed binary — so the
+# job builds `examples/billing-web` for wasm32-unknown-unknown and drops the result into
+# `website/static/lab/` before Docusaurus runs. Those steps mirror `task lab`; keep the two in step.
+# Without them the site still builds and the lab says, in as many words, that there is no module.
+#
 # The site is the project's best on-ramp and it is already gated harder than most prose gets:
 # `onBrokenLinks: 'throw'` fails the build on a dangling link, and every quoted transcript was
 # re-verified against the built `protocol` binary when the pages were written. What was missing was
@@ -15,7 +21,9 @@ on:
   push:
     branches: [main]
   pull_request:
-    paths: [website/**]
+    # The lab's module is built from the specification and its realization, so a change to either
+    # can break this build without touching a file under website/.
+    paths: [website/**, examples/**, generated/web/**]
   workflow_dispatch:
 
 # One Pages deployment at a time; a superseded push should not race a running deploy.
@@ -34,14 +42,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 22, not 20: the lab's run test imports the engine as TypeScript and Node strips the types
+      # itself (unflagged since 22.18). The site build runs on either; this job runs both.
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: website/package-lock.json
 
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Mirrors `task lab`, step for step. The `cmp` is the gate on the page's copy of the emitted
+      # glue: the lab drives the module through the same code the boundary smoke test does, and a
+      # copy that had drifted would make that claim false without failing anything else.
+      - name: Check the lab's copy of the emitted glue
+        run: cmp generated/web/billing/bridge.js website/src/pages/lab/_bridge.mjs
+
+      - name: Build the module the lab runs
+        run: cargo build --release --target wasm32-unknown-unknown --manifest-path examples/billing-web/Cargo.toml
+
+      - name: Place it beside the page
+        run: |
+          mkdir -p website/static/lab
+          cp examples/billing-web/target/wasm32-unknown-unknown/release/billing_web_realized.wasm \
+            website/static/lab/billing_web_realized.wasm
+
       - name: Install dependencies
         run: npm ci
+        working-directory: website
+
+      # The run the page will show, asserted outside a browser: the step count, the identities the
+      # module minted, the transitions it took, and that two instantiations answer identically.
+      - name: Check the lab's run
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON src/pages/lab/_run.test.mjs
         working-directory: website
 
       - name: Build
