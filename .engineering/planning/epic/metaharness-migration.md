@@ -2,11 +2,11 @@
 format: aep.planning-md/1
 id: epic:metaharness-migration
 kind: epic
-status: active
+status: implemented
 title: Everything harness-shaped leaves this repository for metaharness
 relations:
 - decomposes: initiative:the-repo-governs-itself
-revision: 4
+revision: 5
 ---
 # Epic: Everything harness-shaped leaves this repository for metaharness
 
@@ -51,9 +51,14 @@ logic, recorded transcripts, contracts, results and metrics alike.
 4. **The bare argv retires** — **delivered 2026-08-22.** `claude_argv`, the settings file and the
    step-context side channel left `drive.rs`; `harness: claude-code` and `harness: metaharness`
    both reach the one executor.
-5. **Codex arrives as an adapter** — the 2026-08-21 Codex research (rollout JSONL, portable
-   `PreToolUse` hook, 0.145) is implemented as `metaharness-codex`, not as a second executor
-   here; the codex integration residue is migrated to metaharness `evals/codex/`.
+5. **Codex arrives as an adapter** — **delivered 2026-08-22 as CX-M1** (metaharness `abf46c2`):
+   `metaharness-codex` reads the session rollout (version-gated, drift preserved as opaque),
+   declares its capabilities with every undriven claim labelled, and pins 0.145.0 through
+   `doctor codex`; `conformance codex` runs 4 replay vectors. The codex integration residue and
+   its research record migrated with it (`evals/codex/`, `docs/research/`). Named remainder:
+   **CX-M2**, the driven spawn — `run codex` refuses by that name, and `tool.decide` stays
+   refused until a live run proves the vendor's documented hook contract from metaharness's own
+   seam.
 
 ## Out of Scope
 
