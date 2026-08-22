@@ -4,7 +4,9 @@ id: story:metaharness-executor
 kind: story
 status: implemented
 title: 'The metaharness executor: one policy, one enforcer'
-revision: 4
+relations:
+- decomposes: epic:metaharness-migration
+revision: 5
 ---
 # Story: The metaharness executor — one policy, one enforcer
 
