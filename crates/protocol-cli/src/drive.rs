@@ -45,6 +45,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as Process, ExitCode, Stdio};
 
 use aep_backend_markdown::store::MarkdownStore;
+use aep_domain::action::{
+    Action, ActionRequest, CommandExecute, NetworkIntent, NetworkRequest, RepositoryRead,
+    RepositoryWrite,
+};
 use aep_domain::capability::Capability;
 use aep_domain::evidence::{
     ChangeSet, ContractResult, Evidence, EvidenceKind, Producer, Provenance, StaticAnalysisResult,
@@ -56,7 +60,8 @@ use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::Verifier;
 use aep_driver::coverage::CoverageReport;
 use aep_driver::executor::{
-    CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepContext, StepOutcome,
+    CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepAuthorizer, StepContext,
+    StepOutcome,
 };
 use aep_driver::lock::{Liveness, LockState};
 use aep_driver::run::{DriveError, DriverOptions, RunDirectory, RunReport};
@@ -66,6 +71,7 @@ use aep_driver_spec::map::{
 };
 use aep_driver_spec::tool::ToolConfig;
 use aep_engine::engine::EvidenceSubmission;
+use aep_engine::policy::Decision;
 use aep_engine::project::project_directory;
 use aep_engine::{Engine, Registry};
 use anyhow::{bail, Context, Result};
@@ -420,6 +426,14 @@ fn start(args: &RunArgs) -> Result<ExitCode> {
         return Ok(ExitCode::from(1));
     }
 
+    // The static pre-flights, both checked before the lock is taken for the same reason: a run
+    // that cannot spawn its `llm` steps — or that no map step can ever evidence out of — should
+    // not own a run id and a lock to find that out.
+    if let Some(refusal) = metaharness_preflight(&inputs.map) {
+        outln!("{refusal}");
+        return Ok(ExitCode::from(1));
+    }
+
     // F-W4.2-4: the other half of `check_run`, and the half that was missing. `check_run` asks
     // whether every kind the map declares is one the protocol knows; this asks whether every kind
     // the *plan* will demand is one some step can produce. Both questions were answerable from the
@@ -513,6 +527,14 @@ fn resume(args: &ResumeArgs) -> Result<ExitCode> {
     let directory = RunDirectory::at(run_path(&runs, &run_id));
     if !directory.path().is_dir() {
         bail!("no run {run_id} in {}", runs.display());
+    }
+
+    // The same pre-flight `run` does, and a resume needs it just as much: a resume re-takes the
+    // lock, so discovering the missing binary mid-step costs a lock and an attempt in the cursor of
+    // a run that was already stopped once.
+    if let Some(refusal) = metaharness_preflight(&inputs.map) {
+        outln!("{refusal}");
+        return Ok(ExitCode::from(1));
     }
 
     // A paused run holds no lock, because the pause has no bound — so a resume must **re-take** it,
@@ -1023,12 +1045,18 @@ impl CliExecutors {
     /// The step's surface travels twice, deliberately (F9's "both halves"): the sealed
     /// `metaharness.frame/1` document pins what the step *is*, and this process answers every
     /// `tool.requested` event at decision time through [`decide_tool`] — the two retired shell
-    /// hooks, ported, plus the per-state allowlist that used to ride on `--allowedTools`. The
-    /// decisions and denials arrive as `tool.decided` events in the event stream this executor
-    /// writes as the transcript, never in a side-channel log a forgotten flag can silence: run
-    /// `W4-2` lost all eight of its post-fix sessions to exactly that, a resume that dropped
-    /// `--plugin-dir` and ran unenforced while looking clean.
-    fn run_llm_metaharness(&mut self, step: &LlmStep, context: &StepContext<'_>) -> StepOutcome {
+    /// hooks, ported, plus the per-state allowlist that used to ride on `--allowedTools` — and then
+    /// through the **engine**, which is what `authorize` is. The decisions and denials arrive as
+    /// `tool.decided` events in the event stream this executor writes as the transcript, never in a
+    /// side-channel log a forgotten flag can silence: run `W4-2` lost all eight of its post-fix
+    /// sessions to exactly that, a resume that dropped `--plugin-dir` and ran unenforced while
+    /// looking clean.
+    fn run_llm_metaharness(
+        &mut self,
+        step: &LlmStep,
+        context: &StepContext<'_>,
+        authorize: StepAuthorizer<'_>,
+    ) -> StepOutcome {
         let transcripts = self.run_directory.join(TRANSCRIPTS);
         if let Err(error) = fs::create_dir_all(&transcripts) {
             return StepOutcome::NoVerdict {
@@ -1092,7 +1120,13 @@ impl CliExecutors {
                 };
             }
         };
-        answer_events(context, events, &mut commands, &mut transcript_file);
+        answer_events(
+            context,
+            events,
+            &mut commands,
+            &mut transcript_file,
+            authorize,
+        );
         drop(commands);
         let status = child.wait();
         let stderr_text = stderr_thread.join().unwrap_or_default();
@@ -1232,7 +1266,12 @@ impl OperatorStepExecutor for CliExecutors {
 }
 
 impl LlmStepExecutor for CliExecutors {
-    fn run_llm(&mut self, step: &LlmStep, context: &StepContext<'_>) -> StepOutcome {
+    fn run_llm(
+        &mut self,
+        step: &LlmStep,
+        context: &StepContext<'_>,
+        authorize: StepAuthorizer<'_>,
+    ) -> StepOutcome {
         // The seam § 4.9 point 3 names, and the reason it is a name rather than a trait: a
         // second harness is a second executor selected by this string. Since
         // `epic:metaharness-migration` there is no bare-argv path left to select — `claude-code`
@@ -1248,7 +1287,7 @@ impl LlmStepExecutor for CliExecutors {
                 ),
             };
         }
-        self.run_llm_metaharness(step, context)
+        self.run_llm_metaharness(step, context, authorize)
     }
 }
 
@@ -1344,15 +1383,138 @@ fn allowed_tools(config: &ToolConfig) -> Vec<String> {
     tools
 }
 
+/// One vendor tool call as the `ActionRequest` the engine decides on, or nothing when no honest one
+/// exists.
+///
+/// **The reverse direction of [`allowed_tools`], and it lives beside it for that reason** — the
+/// answer to `story:metaharness-executor`'s open question. `allowed_tools` renders *capability →
+/// tool names*; this renders *one call → the action it is*. Neither decides anything: the protocol
+/// owns which capability an action needs (`Action::required_capability`), and a table here that
+/// tried to be clever would be a second, weaker policy.
+///
+/// | tool | action | capability it therefore needs |
+/// |---|---|---|
+/// | `Read` | `repository.read` of the named file | `repository.read` |
+/// | `Glob`, `Grep` | `repository.read` of the searched directory | `repository.read` |
+/// | `Edit`, `Write` | `repository.write` of the named file | `repository.write` |
+/// | `NotebookEdit` | `repository.write` of the named notebook | `repository.write` |
+/// | `Bash` | `command.execute` of the program and its arguments | `command.execute` |
+/// | `WebFetch` | a reading network request to the named URL | `network.read` |
+///
+/// **Two offered tools deliberately return `None`, and the engine is not consulted about them:**
+///
+/// * `Skill` — it loads instructions and takes no action. It is a named exemption in
+///   [`allowed_tools`] for the same reason, and everything it *causes* is a subsequent, governed
+///   call that arrives here on its own.
+/// * `WebSearch` — a search names no URL, and a `NetworkRequest` carrying a query string in its
+///   `url` field would state a destination nobody requested. The capability layer still gates it:
+///   the tool is only offered when `network.read` is admitted.
+///
+/// Everything else — `Task` above all — never reaches this function, because [`decide_tool`] has
+/// already refused a tool the state does not offer.
+///
+/// One disagreement is worth naming rather than discovering: [`allowed_tools`] offers `Read`,
+/// `Glob` and `Grep` when **either** `repository.read` **or** `artifact.read` is admitted, and this
+/// renders all three as a repository read. A state admitting only `artifact.read` therefore has the
+/// engine refuse what the rendering table offered — and the engine wins, which is the right way
+/// round: reading a file is a repository read whatever tool asked for it.
+fn action_for(tool: &str, input: &serde_json::Value) -> Option<ActionRequest> {
+    /// Every path a payload names under `keys`, in the order the keys are given.
+    fn paths(input: &serde_json::Value, keys: &[&str]) -> Vec<String> {
+        keys.iter()
+            .filter_map(|key| input[*key].as_str())
+            .map(ToOwned::to_owned)
+            .collect()
+    }
+
+    let action = match tool {
+        "Read" => Action::RepositoryRead(RepositoryRead {
+            paths: paths(input, &["file_path"]),
+        }),
+        // A search with no `path` is a search of the working directory, which is what it is
+        // recorded as rather than as a read of nothing.
+        "Glob" | "Grep" => Action::RepositoryRead(RepositoryRead {
+            paths: match paths(input, &["path"]) {
+                empty if empty.is_empty() => vec![".".to_owned()],
+                named => named,
+            },
+        }),
+        "Edit" | "Write" => Action::RepositoryWrite(RepositoryWrite {
+            paths: paths(input, &["file_path"]),
+            intent: None,
+        }),
+        "NotebookEdit" => Action::RepositoryWrite(RepositoryWrite {
+            paths: paths(input, &["notebook_path"]),
+            intent: None,
+        }),
+        // Splitting on whitespace is honest **here and only here**: `driven_surface` has already
+        // refused anything that composes, redirects or substitutes, so what is left is one simple
+        // invocation and its arguments.
+        "Bash" => {
+            let mut words = input["command"]
+                .as_str()
+                .unwrap_or_default()
+                .split_whitespace();
+            Action::CommandExecute(CommandExecute {
+                program: words.next().unwrap_or_default().to_owned(),
+                args: words.map(ToOwned::to_owned).collect(),
+            })
+        }
+        "WebFetch" => Action::NetworkRequest(NetworkRequest {
+            url: input["url"].as_str().unwrap_or_default().to_owned(),
+            intent: NetworkIntent::Read,
+        }),
+        _ => return None,
+    };
+    Some(ActionRequest::new(action))
+}
+
+/// The engine's refusal as one line the model can act on.
+///
+/// The engine's own `DecisionExplanation` is four lines and belongs in a terminal; a `tool.decided`
+/// event carries one reason string. Nothing is re-worded — the operation, the capability, the
+/// decision, the document that decided and what is missing are all the engine's — and the layer is
+/// named, so the event stream says who refused.
+fn engine_refusal(decision: &Decision) -> String {
+    let rule = decision.reason.as_ref().map_or_else(String::new, |reason| {
+        format!(" ({} rule {})", reason.source, reason.rule)
+    });
+    let missing = if decision.missing.is_empty() {
+        String::new()
+    } else {
+        format!(". Missing: {}", decision.missing.join("; "))
+    };
+    format!(
+        "the engine refuses this call: `{}` needs the capability `{}`, which is {} in state \
+         `{}`{rule}{missing}",
+        decision.operation, decision.capability, decision.decision, decision.current_state
+    )
+}
+
 /// The session loop: every event line into the transcript, every decision back down stdin.
 ///
 /// A free function of its streams so the executor stays under its own roof: nothing here knows a
-/// process, only a reader of event lines and a writer of command lines.
+/// process, only a reader of event lines, a writer of command lines, and the engine.
+///
+/// # Two layers, in this order, and the reason it is this one
+///
+/// 1. **[`decide_tool`]** — the ported hooks and the per-state allowlist. It runs first because it
+///    is the only layer that sees a call's *arguments*: `protocol artifact list | tee out` and
+///    `protocol artifact list` need the same capability and are not the same act, and no
+///    `ActionRequest` can express the difference.
+/// 2. **the engine** — [`action_for`] renders the call as an `ActionRequest` and `authorize`
+///    decides. Asked only about calls layer 1 admitted, so a refusal is attributed to the layer
+///    that took it rather than to both, and **the engine's deny wins**: the two layers read the
+///    same effective policy, so a disagreement means the rendering table is looser than the
+///    protocol, and the protocol is what governs.
+///
+/// Every reason names its layer, because the event stream is where a person finds out who refused.
 fn answer_events(
     context: &StepContext<'_>,
     events: impl std::io::Read,
     commands: &mut impl std::io::Write,
     transcript: &mut impl std::io::Write,
+    authorize: StepAuthorizer<'_>,
 ) {
     for line in std::io::BufRead::lines(std::io::BufReader::new(events)) {
         let Ok(line) = line else { break };
@@ -1365,9 +1527,24 @@ fn answer_events(
         if event["event"] == "tool.requested" && event["decision_required"] == true {
             let call_id = event["call_id"].as_str().unwrap_or_default();
             let name = event["name"].as_str().unwrap_or_default();
+            let deny = |reason: String| serde_json::json!({ "decision": "deny", "reason": reason });
             let decision = match decide_tool(context, name, &event["input"]) {
-                Ok(()) => serde_json::json!({ "decision": "allow" }),
-                Err(reason) => serde_json::json!({ "decision": "deny", "reason": reason }),
+                Err(reason) => deny(format!("the driver's per-call policy refuses: {reason}")),
+                // Nothing renders this call as an action — `Skill` and `WebSearch` are the two, and
+                // [`action_for`] says why — so the engine is not consulted and the policy's allow
+                // stands. Inventing a request would put an act nobody performed in the engine's
+                // record, which is invariant 7's failure one layer up.
+                Ok(()) => match action_for(name, &event["input"]) {
+                    None => serde_json::json!({ "decision": "allow" }),
+                    Some(request) => {
+                        let verdict = authorize(&request);
+                        if verdict.is_allowed() {
+                            serde_json::json!({ "decision": "allow" })
+                        } else {
+                            deny(engine_refusal(&verdict))
+                        }
+                    }
+                },
             };
             let command = serde_json::json!({
                 "format": "metaharness.command/1",
@@ -1542,6 +1719,58 @@ fn driven_surface(context: &StepContext<'_>, input: &serde_json::Value) -> Resul
 /// The harness name that selects the metaharness executor.
 const METAHARNESS_HARNESS: &str = "metaharness";
 
+/// The binary every `llm` step is spawned through.
+const METAHARNESS_BINARY: &str = "metaharness";
+
+/// Refuses a run before it is allocated when the seam's binary is not installed.
+///
+/// **A launch-time check for a launch-time fact.** Without it the missing binary is discovered at
+/// the first `llm` step, as a [`StepOutcome::NoVerdict`] — by which point the run has a directory,
+/// an id, the store lock and a snapshot, and the report says *no verdict* for something that was
+/// never a verdict: nothing was observed because nothing was ever run. `NoVerdict` is D5's
+/// `Unknown` and this is not unknown, it is decidable from `PATH` before a cent or a lock is spent.
+///
+/// Scoped to maps that have an `llm` step, because that is the only kind of step that spawns it: a
+/// map of `command` and `operator` steps drives correctly on a machine with no vendor and no
+/// metaharness, and refusing that run would be refusing work the driver can do.
+///
+/// The refusal answers the question it creates, which is this repository's posture for every
+/// refusal — it names the one command that installs the binary.
+fn metaharness_preflight(map: &StepMap) -> Option<String> {
+    let llm_steps = map
+        .states
+        .values()
+        .flat_map(|state| state.steps.iter())
+        .filter(|step| matches!(step, Step::Llm(_)))
+        .count();
+    if llm_steps == 0 || on_path(METAHARNESS_BINARY) {
+        return None;
+    }
+    Some(format!(
+        "this map has {llm_steps} `llm` step(s) and `{METAHARNESS_BINARY}` is not on PATH.\n\
+         \n\
+         Every `llm` step is spawned through `{METAHARNESS_BINARY} run claude --decisions ask`: the \
+         step's surface travels as a sealed frame document and this process answers every tool call \
+         the session makes. There is no path around it — the bare vendor argv was retired with \
+         `epic:metaharness-migration`, because a second way to launch a session is a second policy \
+         to forget.\n\
+         \n\
+         Install it with `cargo install --path crates/metaharness-cli` from a metaharness checkout, \
+         or drive a map whose steps are all `command` and `operator` steps, which needs neither."
+    ))
+}
+
+/// Whether `program` is on `PATH` as a file that is there to be executed.
+///
+/// A lookup and never a spawn: running the binary to find out whether it exists is a side effect in
+/// a pre-flight, and a binary that exists and then fails is a different finding — that one is a
+/// step with no verdict, which is what the retry budget is for.
+fn on_path(program: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths).any(|directory| directory.join(program).is_file())
+    })
+}
+
 /// The format tag the frame document carries, as the metaharness design § 5.5 spells it.
 const METAHARNESS_FRAME_FORMAT: &str = "metaharness.frame/1";
 
@@ -1633,7 +1862,7 @@ fn metaharness_argv(
     prompt: &str,
 ) -> Vec<String> {
     let mut argv = vec![
-        "metaharness".to_owned(),
+        METAHARNESS_BINARY.to_owned(),
         "run".to_owned(),
         "claude".to_owned(),
         "--hermetic".to_owned(),
@@ -2335,6 +2564,364 @@ mod tests {
         assert!(has("-p", "do the thing"));
         assert!(has("--plugin-dir", "/plugins/claude-code"));
         assert!(argv.contains(&"--hermetic".to_owned()));
+    }
+
+    // ------------------------------------------------------------ the engine at decision time
+
+    /// A protocol declaring more than the profile below grants, so a capability can be *known* and
+    /// still not be granted — which is the state a `NotGranted` decision needs.
+    const AUTHORIZE_PROTOCOL: &str = r"
+id: aep
+version: 1
+title: Test protocol
+capabilities: [repository.read, repository.write, command.execute, tests.execute]
+evidence_kinds: [test_result, diff, approval]
+verifiers: [test-runner, compiler, human-approval]
+artifact_kinds: [story]
+phases: [implementation]
+observables:
+  - 'task.**'
+  - 'tests.**'
+  - 'diff.**'
+  - 'artifact.**'
+  - 'evidence.**'
+  - 'state.**'
+  - 'workflow.**'
+  - 'approvals.**'
+";
+
+    const AUTHORIZE_WORKFLOW: &str = r"
+id: test/linear
+version: 1
+title: Linear
+initial: implement
+states:
+  implement:
+    title: Implement
+    phases: [implementation]
+  complete:
+    title: Complete
+    terminal: true
+    phases: [implementation]
+transitions:
+  - from: implement
+    to: complete
+    when: diff.exists
+";
+
+    /// The profile that makes the fixture load-bearing: it grants `repository.read` and **not**
+    /// `repository.write`, so a state whose rendered surface offers `Edit` is a state where the two
+    /// layers disagree and the engine is the one that refuses.
+    const AUTHORIZE_PROFILE: &str = r"
+id: test.reading
+title: Reading only
+protocol: aep/1
+workflow: test/linear
+capabilities:
+  allow: [repository.read]
+completion:
+  - diff.exists
+";
+
+    const AUTHORIZE_TASK: &str = r"
+id: T-1
+kind: feature
+objective: drive something
+protocol: aep/1
+profile: test.reading
+";
+
+    /// An engine over those documents, and an execution of that task in `implement`.
+    fn authorizing_execution() -> (Engine, aep_engine::execution::Execution) {
+        use aep_engine::ProtocolEngine as _;
+        let mut registry = Registry::new();
+        registry
+            .insert_protocol(
+                aep_schema::parse::protocol(AUTHORIZE_PROTOCOL, None).expect("the protocol parses"),
+            )
+            .expect("the protocol is unique");
+        registry
+            .insert_workflow(
+                aep_schema::parse::workflow(AUTHORIZE_WORKFLOW, None).expect("the workflow parses"),
+            )
+            .expect("the workflow is unique");
+        registry
+            .insert_profile(
+                aep_schema::parse::profile(AUTHORIZE_PROFILE, None).expect("the profile parses"),
+            )
+            .expect("the profile is unique");
+        let engine = Engine::new(registry);
+        let execution = engine
+            .initialize(aep_schema::parse::task(AUTHORIZE_TASK, None).expect("the task parses"))
+            .expect("the task resolves");
+        (engine, execution)
+    }
+
+    /// One `tool.requested` event line of the shape metaharness writes in ask mode.
+    fn requested(tool: &str, input: &serde_json::Value) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "format": "metaharness.event/1",
+                "event": "tool.requested",
+                "decision_required": true,
+                "call_id": "call-1",
+                "name": tool,
+                "input": input,
+            })
+        )
+    }
+
+    /// Runs one scripted call through the whole seam and returns the decision written back down
+    /// stdin — the same object metaharness reads, never a summary of it.
+    fn decide_through_the_seam(
+        context: &StepContext<'_>,
+        engine: &Engine,
+        execution: &mut aep_engine::execution::Execution,
+        tool: &str,
+        input: &serde_json::Value,
+    ) -> serde_json::Value {
+        use aep_engine::ProtocolEngine as _;
+        let mut commands: Vec<u8> = Vec::new();
+        let mut transcript: Vec<u8> = Vec::new();
+        {
+            let mut authorize =
+                |request: &ActionRequest| engine.authorize(&mut *execution, request);
+            answer_events(
+                context,
+                requested(tool, input).as_bytes(),
+                &mut commands,
+                &mut transcript,
+                &mut authorize,
+            );
+        }
+        assert!(
+            !transcript.is_empty(),
+            "every event line reaches the transcript, decided or not"
+        );
+        serde_json::from_slice(&commands).expect("one `tool.decide` command line")
+    }
+
+    /// Every event the execution recorded, by name.
+    fn event_names(execution: &aep_engine::execution::Execution) -> Vec<String> {
+        execution
+            .events()
+            .iter()
+            .map(|envelope| envelope.event.name().to_owned())
+            .collect()
+    }
+
+    /// The gap the guide called *"a decision is in the run's record, not yet in the engine's"*,
+    /// closed: the engine refuses the call **and** the refusal is in the execution's own events.
+    ///
+    /// The fixture reaches the state where the rule is load-bearing before asserting the outcome —
+    /// the policy layer is asserted to *allow* this call first, because a test where both layers
+    /// refuse would pass whether or not the engine was ever asked.
+    #[test]
+    fn a_call_the_engine_refuses_is_denied_and_the_refusal_is_in_the_executions_event_record() {
+        let (engine, mut execution) = authorizing_execution();
+        let state: StateId = "implement".parse().expect("a state id");
+        let writing = config(&[Capability::RepositoryRead, Capability::RepositoryWrite]);
+        let context = policy_context(&state, &writing);
+        let input = serde_json::json!({
+            "file_path": "/repo/src/lib.rs",
+            "old_string": "a",
+            "new_string": "b",
+        });
+        assert!(
+            decide_tool(&context, "Edit", &input).is_ok(),
+            "the policy layer admits this call, so the engine is the layer under test"
+        );
+
+        let command = decide_through_the_seam(&context, &engine, &mut execution, "Edit", &input);
+
+        assert_eq!(command["command"], "tool.decide");
+        assert_eq!(command["call_id"], "call-1");
+        assert_eq!(command["decision"]["decision"], "deny");
+        let reason = command["decision"]["reason"]
+            .as_str()
+            .expect("a denial says why");
+        assert!(
+            reason.contains("the engine refuses this call"),
+            "the reason names the layer that refused: {reason}"
+        );
+        assert!(
+            reason.contains("repository.write") && reason.contains("not_granted"),
+            "and carries the engine's own words: {reason}"
+        );
+
+        let denied = execution
+            .events()
+            .iter()
+            .find(|envelope| envelope.event.name() == "action_denied")
+            .expect(
+                "the refusal is in the execution's event record, which is what authorize is for",
+            );
+        let json = serde_json::to_value(&denied.event).expect("the event serialises");
+        assert_eq!(json["capability"], "repository.write");
+        assert_eq!(json["decision"], "not_granted");
+        assert!(
+            event_names(&execution).contains(&"action_requested".to_owned()),
+            "the request is recorded beside the refusal: {:?}",
+            event_names(&execution)
+        );
+    }
+
+    /// Policy first, and a call it refuses never reaches the engine.
+    ///
+    /// The order matters in both directions: the argument-level rules are the only layer that can
+    /// tell `protocol artifact list` from `cargo test`, and an engine asked about a call the driver
+    /// already refused would record an action nobody was allowed to attempt.
+    #[test]
+    fn a_call_the_policy_refuses_is_attributed_to_the_policy_and_never_reaches_the_engine() {
+        let (engine, mut execution) = authorizing_execution();
+        let state: StateId = "implement".parse().expect("a state id");
+        let shell = config(&[Capability::CommandExecution]);
+        let context = policy_context(&state, &shell);
+        let input = serde_json::json!({ "command": "cargo test" });
+
+        let command = decide_through_the_seam(&context, &engine, &mut execution, "Bash", &input);
+
+        assert_eq!(command["decision"]["decision"], "deny");
+        let reason = command["decision"]["reason"]
+            .as_str()
+            .expect("a denial says why");
+        assert!(
+            reason.contains("the driver's per-call policy refuses"),
+            "the reason names the layer that refused: {reason}"
+        );
+        assert!(
+            !event_names(&execution).contains(&"action_requested".to_owned()),
+            "a call the policy refused is not an action the engine was asked about: {:?}",
+            event_names(&execution)
+        );
+    }
+
+    /// The `None` arm of the table, exercised: a `Skill` load is admitted by the policy and the
+    /// engine is not consulted, because no `ActionRequest` describes loading instructions.
+    #[test]
+    fn a_skill_load_is_admitted_without_the_engine_being_asked_to_invent_an_action() {
+        let (engine, mut execution) = authorizing_execution();
+        let state: StateId = "implement".parse().expect("a state id");
+        let reading = config(&[Capability::RepositoryRead]);
+        let context = policy_context(&state, &reading);
+        let input = serde_json::json!({ "skill": "planning" });
+
+        let command = decide_through_the_seam(&context, &engine, &mut execution, "Skill", &input);
+
+        assert_eq!(command["decision"]["decision"], "allow");
+        assert!(
+            !event_names(&execution).contains(&"action_requested".to_owned()),
+            "loading instructions is not an action, and the record must not claim one: {:?}",
+            event_names(&execution)
+        );
+    }
+
+    /// The table itself: which tool is which action, and what each therefore needs.
+    ///
+    /// Asserted as capabilities rather than as variants, because the capability is the only thing
+    /// the engine decides on — and asserted on the *payload* too, so a request that reached the
+    /// record naming the wrong file would fail here rather than mislead an audit.
+    #[test]
+    fn each_offered_tool_renders_as_the_action_it_is_and_two_render_as_none() {
+        let needs = |tool: &str, input: serde_json::Value| {
+            action_for(tool, &input).map(|request| request.required_capability().to_string())
+        };
+        let read = serde_json::json!({ "file_path": "/repo/src/lib.rs" });
+        assert_eq!(needs("Read", read.clone()), Some("repository.read".into()));
+        assert_eq!(
+            needs("Grep", serde_json::json!({ "pattern": "fn main" })),
+            Some("repository.read".into()),
+            "a search with no path is a search of the working directory"
+        );
+        assert_eq!(needs("Edit", read.clone()), Some("repository.write".into()));
+        assert_eq!(needs("Write", read), Some("repository.write".into()));
+        assert_eq!(
+            needs(
+                "NotebookEdit",
+                serde_json::json!({ "notebook_path": "/n.ipynb" })
+            ),
+            Some("repository.write".into())
+        );
+        assert_eq!(
+            needs(
+                "Bash",
+                serde_json::json!({ "command": "protocol artifact list" })
+            ),
+            Some("command.execute".into())
+        );
+        assert_eq!(
+            needs(
+                "WebFetch",
+                serde_json::json!({ "url": "https://example.test/" })
+            ),
+            Some("network.read".into())
+        );
+
+        assert!(
+            action_for("Skill", &serde_json::json!({ "skill": "planning" })).is_none(),
+            "loading instructions takes no action"
+        );
+        assert!(
+            action_for("WebSearch", &serde_json::json!({ "query": "aep" })).is_none(),
+            "a search names no URL, and a request stating one nobody asked for is a fiction"
+        );
+
+        let request = action_for(
+            "Bash",
+            &serde_json::json!({ "command": "protocol artifact list --kind story" }),
+        )
+        .expect("a shell call renders");
+        assert_eq!(
+            request.action.summary(),
+            "run `protocol artifact list --kind story`",
+            "what the engine records is the call that was made"
+        );
+        let request = action_for("Read", &serde_json::json!({ "file_path": "/repo/x.rs" }))
+            .expect("a read renders");
+        assert_eq!(request.action.summary(), "read /repo/x.rs");
+    }
+
+    /// The launch-time refusal, and the one case it must not fire in.
+    ///
+    /// A map of `command` steps drives on a machine with no metaharness and no vendor, so the check
+    /// is scoped to maps that would spawn one. `PATH` is not manipulated here — the assertion is
+    /// about what is checked, and the refusal's text is what an operator has to act on.
+    #[test]
+    fn a_map_with_an_llm_step_is_refused_at_launch_when_the_seams_binary_is_missing() {
+        let commands_only = aep_schema::parse::step_map(
+            "format: aep.driver-steps/1\nid: test/commands\nworkflow: test/linear/1\n\
+             states:\n  implement:\n    steps:\n      - kind: command\n        run: [\"true\"]\n",
+            None,
+        )
+        .expect("the map validates");
+        assert!(
+            metaharness_preflight(&commands_only).is_none(),
+            "a map that spawns no session needs no seam binary, whatever is on PATH"
+        );
+
+        let with_llm = aep_schema::parse::step_map(
+            "format: aep.driver-steps/1\nid: test/llm\nworkflow: test/linear/1\n\
+             states:\n  implement:\n    steps:\n      - kind: llm\n        prompt: do the thing\n",
+            None,
+        )
+        .expect("the map validates");
+        match metaharness_preflight(&with_llm) {
+            None => assert!(
+                on_path(METAHARNESS_BINARY),
+                "the only reason to allow an `llm` map is that the binary is installed"
+            ),
+            Some(refusal) => {
+                assert!(
+                    refusal.contains("cargo install --path crates/metaharness-cli"),
+                    "a refusal answers the question it creates: {refusal}"
+                );
+                assert!(
+                    refusal.contains("not on PATH"),
+                    "and says what it found: {refusal}"
+                );
+            }
+        }
     }
 
     #[test]

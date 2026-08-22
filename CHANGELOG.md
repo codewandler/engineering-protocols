@@ -11,6 +11,14 @@ belongs in the commit message or in `docs/design/`.
 
 ### Changed
 
+- **`protocol drive run` and `protocol drive resume` refuse at launch when `metaharness` is not
+  installed, instead of finding out at the first model step.** A map with an `llm` step needs the
+  binary — that is how a session is spawned — and without it the run used to allocate a directory,
+  take the store lock and then report *no verdict* for a step that never ran. The refusal names the
+  one command that fixes it (`cargo install --path crates/metaharness-cli` from a metaharness
+  checkout) and happens before anything is allocated. A map whose steps are all `command` and
+  `operator` steps drives exactly as before, on a machine with no harness at all.
+
 - **Everything harness-shaped left this repository for metaharness**
   (`epic:metaharness-migration`, waves 1–4 delivered). Every `llm` step now streams through
   `metaharness run claude --decisions ask`, and the driver's own `decide_tool` answers each
@@ -51,6 +59,20 @@ belongs in the commit message or in `docs/design/`.
   guard. Both shipped maps currently report a gap: `verification` and `specification`, plus
   `contract_result` and `property_test_result` for a task that declares no `change.code`.
   Acceptance: `story:plan-map-coverage`.
+
+- **A driven step's tool calls are decided by the engine too, and the execution's own record says
+  so.** Until now a decision existed only in the run's event stream: the driver's per-call policy
+  answered, and `Engine::authorize` — the call that writes a decision into the execution — was
+  never made while a step ran. It is now. Every call the policy admits is rendered as the
+  `ActionRequest` it is (a `Read` is a repository read of that file, a `Bash` is a command
+  execution of that program, a `WebFetch` is a reading network request to that URL) and put to the
+  engine, so `action_requested` plus `action_allowed` or `action_denied` land in the execution and
+  survive into `snapshot.json`. What changes for a driven run: **the engine's refusal now wins over
+  the driver's allow** — a state whose rendered tool set is wider than the capabilities the plan
+  grants will see those calls denied, naming the capability and what is missing — and a `tool.decided`
+  reason now says which layer refused. The order is policy first, because it is the only layer that
+  sees a call's arguments. Two offered tools are never put to the engine, deliberately: a skill load
+  takes no action, and a web *search* names no URL a request could honestly carry.
 
 - **`harness: metaharness` — a second executor on the seam that was waiting for one.** An `llm`
   step naming it is spawned through `metaharness run claude` instead of a bare `claude` argv: the

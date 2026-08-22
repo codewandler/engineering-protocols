@@ -154,6 +154,10 @@ passing one.
   `metaharness run claude` in ask mode, and `decide_tool` in `crates/protocol-cli/src/drive.rs`
   (the retired `store-integrity`/`driven-surface` hooks, ported, plus the per-state allowlist)
   answers each call with the decision recorded as a `tool.decided` event in the run's own stream.
+  **The engine is asked as well, since 2026-08-22**: the loop lends the `llm` step an authorizer
+  over the live execution, every admitted call is rendered as an `ActionRequest` and put to
+  `Engine::authorize`, and the engine's deny wins over the policy's allow — so the execution's own
+  event record, not only the run's, holds what was refused and what was done.
   The eval machinery and its results migrated to the metaharness repository
   (`evals/engineering-protocols/`). Record:
   `docs/plan/harness-wave-2-driver-decision.md`; design

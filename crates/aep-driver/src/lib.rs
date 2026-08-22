@@ -62,8 +62,8 @@ pub mod tool;
 pub use approval::{reachable_approvals, ReachableApproval};
 pub use coverage::{evidence_coverage, CoverageReport, MissingProducer};
 pub use executor::{
-    CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepContext, StepExecutors,
-    StepOutcome,
+    CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepAuthorizer, StepContext,
+    StepExecutors, StepOutcome,
 };
 pub use lock::{Liveness, LockState};
 pub use route::{next_step, steps_remaining, NextStep};

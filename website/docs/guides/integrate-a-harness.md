@@ -242,7 +242,7 @@ fail differently:
 | a pre-tool hook | the call's **arguments** | nothing about workflow state, unless you hand it some |
 
 The reference driver runs both. It derives the tool set per state, not per run, from
-`tool_config(&effective_policy(execution))` (`crates/aep-driver/src/run.rs:683`), and passes the
+`tool_config(&effective_policy(execution))` (`crates/aep-driver/src/run.rs:690`), and passes the
 plugin directory into every model session with `--plugin-dir` (or `AEP_DRIVE_PLUGIN_DIR`), because a
 session that never loaded the plugin never loaded the hooks. Every session also carries
 `--strict-mcp-config`, so a session's MCP surface is what that line gave it, which is nothing: an
@@ -291,11 +291,17 @@ Three limits worth knowing before you copy the shape:
   express it — scoping exists for one thing, an environment on `deployment.create` and
   `deployment.rollback`. So the pattern is a capability grant plus a per-call constraint, and the
   constraint is pattern-based and best-effort rather than a function of the capability.
-* **A decision is in the run's record, not yet in the engine's.** The policy runs in the driver's
-  process, so the old inter-process excuse is gone, but `Engine::authorize` — which mutates the
-  in-memory execution — is still not called at decision time. Every decision so far is a refusal,
-  and a refusal changes no engine state; the wiring lands with the first case where a decision
-  would.
+* **A decision is in both records, and the two layers can disagree.** Since 2026-08-22 the driver
+  calls `Engine::authorize` at decision time as well: the loop lends the `llm` step an authorizer
+  over the live execution, a table beside the tool-name renderer turns one call into the
+  `ActionRequest` it is, and every call reaching the engine lands in the execution's own event
+  stream as `action_requested` plus `action_allowed` or `action_denied`. The order is **policy
+  first** — it is the only layer that sees arguments, and no `ActionRequest` tells
+  `protocol artifact list` from `protocol artifact list | tee out` — and the **engine's deny wins**
+  over the policy's allow. Two offered tools reach the engine as nothing at all: a skill loader
+  takes no action, and a web *search* names no URL, so inventing a request for either would record
+  an act nobody performed. What the engine still cannot see is a call the driver's own policy
+  already refused, which is deliberate: a refusal belongs to the layer that took it.
 * **The launched tool set is not audited from the transcript.** A Claude Code `SessionStart` event
   lists the harness's tool *inventory*, not the session's allow rules. The committed fixture
   `crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl` lists **thirty-two** tools in its init

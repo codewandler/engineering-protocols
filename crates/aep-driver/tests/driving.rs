@@ -20,6 +20,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use aep_backend_markdown::MarkdownStore;
+use aep_domain::action::{Action, ActionRequest, RepositoryWrite, SecretRead};
 use aep_domain::artifact::ArtifactGraph;
 use aep_domain::evidence::{ChangeSet, Evidence, Producer, TestResult, TestSuite};
 use aep_domain::facts::{FactPath, FactSource, FactValue};
@@ -27,7 +28,8 @@ use aep_domain::task::Task;
 use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::Verifier;
 use aep_driver::executor::{
-    CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepContext, StepOutcome,
+    CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepAuthorizer, StepContext,
+    StepOutcome,
 };
 use aep_driver::run::{drive, resume, DriveError, DriverOptions, RunDirectory};
 use aep_driver_spec::cursor::RunStatus;
@@ -220,6 +222,8 @@ struct Asked {
 struct Fake {
     script: VecDeque<Act>,
     asked: Vec<Asked>,
+    /// What the engine said about each call this harness put to it, in order.
+    decided: Vec<(String, bool)>,
 }
 
 impl Fake {
@@ -227,6 +231,7 @@ impl Fake {
         Self {
             script: script.iter().copied().collect(),
             asked: Vec::new(),
+            decided: Vec::new(),
         }
     }
 
@@ -277,7 +282,30 @@ impl Fake {
 }
 
 impl LlmStepExecutor for Fake {
-    fn run_llm(&mut self, _: &LlmStep, context: &StepContext<'_>) -> StepOutcome {
+    fn run_llm(
+        &mut self,
+        _: &LlmStep,
+        context: &StepContext<'_>,
+        authorize: StepAuthorizer<'_>,
+    ) -> StepOutcome {
+        // The second half of the seam, exercised rather than described: a harness that adjudicates
+        // its own tool calls asks the engine about each one, and the engine writes the answer into
+        // the execution. Two requests, one the profile grants and one it does not, so a run proves
+        // both directions — and the refusal has to survive into the persisted snapshot, which is
+        // what `an_llm_steps_refused_call_is_in_the_engines_own_record` reads back.
+        for action in [
+            Action::RepositoryWrite(RepositoryWrite {
+                paths: vec!["src/lib.rs".to_owned()],
+                intent: None,
+            }),
+            Action::SecretRead(SecretRead {
+                secret: "database-password".to_owned(),
+            }),
+        ] {
+            let decision = authorize(&ActionRequest::new(action));
+            self.decided
+                .push((decision.capability.to_string(), decision.allowed));
+        }
         self.act(context)
     }
 }
@@ -588,6 +616,69 @@ fn a_run_over_two_states_advances_and_the_report_names_both_moves() {
         ],
         "every way out is named, back-edge included, and what the *target* state requires on entry \
          comes with it: the suite has not run at this point, so neither guard holds"
+    );
+}
+
+/// The seam that was missing until 2026-08-22: a decision taken while a step runs is the engine's
+/// too, not only the harness's.
+///
+/// The loop lends `Engine::authorize` to the `llm` step and nothing else, so this asserts the whole
+/// path in one run: the harness gets an answer, the answer is the profile's (`repository.write` is
+/// granted, `secret.read` is not), and both the request and the refusal are in the **execution's**
+/// event record — read back off the persisted snapshot rather than out of the harness's memory,
+/// because the record surviving the process is the property that makes it an audit trail.
+#[test]
+fn an_llm_steps_refused_call_is_in_the_engines_own_record() {
+    let root = scratch("authorized");
+    let engine = engine();
+    let store = MarkdownStore::open(root.join("planning"));
+    let map = map(MAP);
+    let run = run_directory(&root);
+    let mut fake = Fake::new(&[Act::Done, Act::Diff, Act::Tests { failed: 0 }]);
+
+    let report = drive(
+        &engine,
+        &task(),
+        &store,
+        &map,
+        &run,
+        &mut fake,
+        &DriverOptions::default(),
+    )
+    .expect("the run finishes");
+    assert_eq!(report.status(), RunStatus::Completed);
+
+    assert_eq!(
+        fake.decided,
+        vec![
+            ("repository.write".to_owned(), true),
+            ("secret.read".to_owned(), false),
+        ],
+        "the harness is told what the profile says, not what it asked for"
+    );
+
+    let snapshot = run.read_snapshot().expect("the run persisted a snapshot");
+    let named = |name: &str| {
+        snapshot
+            .events
+            .iter()
+            .filter(|envelope| envelope.event.name() == name)
+            .map(|envelope| serde_json::to_value(&envelope.event).expect("an event serialises"))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        named("action_requested").len(),
+        2,
+        "every call put to the engine is in the record, allowed or not"
+    );
+    let denied = named("action_denied");
+    assert_eq!(denied.len(), 1, "one of the two was refused: {denied:?}");
+    assert_eq!(denied[0]["capability"], "secret.read");
+    assert_eq!(denied[0]["decision"], "not_granted");
+    assert_eq!(
+        named("action_allowed")[0]["capability"],
+        "repository.write",
+        "and the allowed one is recorded too, so the trail shows what was done"
     );
 }
 

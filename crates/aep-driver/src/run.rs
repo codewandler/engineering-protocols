@@ -9,6 +9,12 @@
 //! 4. **route** — [`crate::route::next_step`] says run a step, transition, or stop;
 //! 5. **persist** — the snapshot and the cursor, after every step.
 //!
+//! There is one thing the loop does with the engine that it does not *call*: it **lends** it. An
+//! `llm` step is handed `Engine::authorize` over the live execution — a
+//! [`StepAuthorizer`](crate::executor::StepAuthorizer) — because a model's tool call is decided
+//! while the step runs, and the engine's record of that decision has to be written then rather
+//! than reconstructed from a log afterwards.
+//!
 //! # D2: the graph is rebuilt every iteration, and nothing is cached
 //!
 //! The rebuild **is** the store's integrity check, which is what buys the cost: a full read and
@@ -49,6 +55,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use aep_backend_markdown::MarkdownStore;
+use aep_domain::action::ActionRequest;
 use aep_domain::artifact::ArtifactGraph;
 use aep_domain::error::ValidationErrors;
 use aep_domain::ids::{StateId, TaskId};
@@ -666,10 +673,15 @@ impl<C: Clock> Session<'_, C> {
     }
 
     /// Builds the step's context and hands it to the executor for its kind.
+    ///
+    /// The execution is borrowed mutably for one reason: an `llm` step's tool calls are decided
+    /// while the step runs, and `Engine::authorize` writes each decision into the execution's own
+    /// event record. The loop is the only holder of both the engine and the live execution, so the
+    /// authorizer is lent from here and lives no longer than the step.
     fn execute<X: StepExecutors>(
         &self,
         executors: &mut X,
-        execution: &Execution,
+        execution: &mut Execution,
         state: &StateId,
         index: usize,
         evaluation: &Evaluation,
@@ -733,7 +745,15 @@ impl<C: Clock> Session<'_, C> {
         };
         match &steps[index] {
             Step::Command(command) => executors.run_command(command, &context),
-            Step::Llm(llm) => executors.run_llm(llm, &context),
+            // Only the `llm` step is lent the engine, and the asymmetry is the point: a `command`
+            // step is the driver's own invocation of a program the map names, decided before the
+            // run started by the pre-flight scan, while an `llm` step's calls are a model's and are
+            // decided one at a time while it runs.
+            Step::Llm(llm) => {
+                let mut authorize =
+                    |request: &ActionRequest| self.engine.authorize(execution, request);
+                executors.run_llm(llm, &context, &mut authorize)
+            }
             Step::Operator(operator) => executors.run_operator(operator, &context),
         }
     }

@@ -36,9 +36,15 @@ logic, recorded transcripts, contracts, results and metrics alike.
 1. **Ask mode** — **delivered 2026-08-22.** Every `llm` step streams through
    `metaharness run claude --decisions ask`; `decide_tool` in `drive.rs` answers each
    `tool.requested` at decision time — the two shell hooks ported case for case, plus the
-   per-state allowlist that used to ride on `--allowedTools`. Not yet wired:
-   `Engine::authorize` at decision time (every decision so far is a refusal, and a refusal
-   changes no engine state); the wiring lands with the first case where a decision would.
+   per-state allowlist that used to ride on `--allowedTools`. **`Engine::authorize` at decision
+   time: delivered 2026-08-22.** The loop lends the `llm` step an authorizer over the live
+   execution (`StepAuthorizer`, `crates/aep-driver/src/executor.rs`), `action_for` renders the
+   call as an `ActionRequest`, and the engine's verdict is folded in — policy first, because it
+   is the only layer that sees arguments, and the engine's deny wins over the policy's allow.
+   Every call the policy admits is now in the **execution's** event record as
+   `action_requested` plus `action_allowed` or `action_denied`, which is what the run's own
+   stream could never be: a refusal that changes no engine state is still a decision the audit
+   trail is entitled to.
 2. **The eval moves — into metaharness** — **delivered 2026-08-22.** The whole of
    `integrations/claude-code/eval/` lives at metaharness `evals/engineering-protocols/`:
    `run-driven.sh` reads the census from `tool.decided` events, `run.sh` is retired with its
@@ -77,7 +83,8 @@ logic, recorded transcripts, contracts, results and metrics alike.
 
 ## Open Questions
 
-- Where the ask-mode tool-name → `ActionRequest` translation lives (carried from
-  `story:metaharness-executor`). Decides: whoever builds wave 1.
+- ~~Where the ask-mode tool-name → `ActionRequest` translation lives (carried from
+  `story:metaharness-executor`).~~ **Answered 2026-08-22: `action_for`, beside `allowed_tools` in
+  `drive.rs`** — the same table read in the other direction. The answer is recorded in that story.
 - Whether a paid parity run (one driven step, both executors, same map) is required before wave 3
   deletes the hooks, or the free tiers suffice. Decides: operator, at wave 3's acceptance.

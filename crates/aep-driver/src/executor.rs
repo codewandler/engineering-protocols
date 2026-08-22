@@ -34,9 +34,11 @@
 
 use std::path::Path;
 
+use aep_domain::action::ActionRequest;
 use aep_domain::ids::StateId;
 use aep_driver_spec::map::{CommandStep, LlmStep, OperatorStep};
 use aep_driver_spec::tool::ToolConfig;
+use aep_engine::policy::Decision;
 use aep_engine::EvidenceSubmission;
 
 /// Which attempt of which step ran, so a harness can find what that step wrote.
@@ -147,13 +149,39 @@ impl StepOutcome {
     }
 }
 
+/// The engine, lent to an `llm` step for the length of that step.
+///
+/// A session's tool calls are the only decisions taken while a step runs, and the loop is the only
+/// thing holding both the [`aep_engine::Engine`] and the live `Execution` — so an executor that has
+/// to answer a call at decision time is handed this and nothing else. It borrows both for the
+/// duration of the call: `Engine::authorize` takes `&mut Execution` because a decision is an event
+/// in the execution's own record, and a record the engine never saw is the gap this closes.
+///
+/// **A borrowed `FnMut` rather than a trait, deliberately** (§ 4.9's rule about the seam): there is
+/// one implementation — the loop's closure over `engine.authorize(execution, …)` — and a trait
+/// designed before a second one exists is designed against nothing. A closure also keeps the
+/// executor free of the engine's `Clock` type parameter, which is the practical reason a concrete
+/// struct would not do.
+pub type StepAuthorizer<'a> = &'a mut dyn FnMut(&ActionRequest) -> Decision;
+
 /// Runs an `llm` step.
 ///
 /// One model session per step (D4): the prompt, the named skills and a tool set derived from the
 /// state's capabilities go in, and the process exits when the step does.
 pub trait LlmStepExecutor {
     /// Runs `step`, returning what was observed — which for an `llm` step is never evidence.
-    fn run_llm(&mut self, step: &LlmStep, context: &StepContext<'_>) -> StepOutcome;
+    ///
+    /// `authorize` is the engine at decision time. An executor that adjudicates the session's tool
+    /// calls itself — the metaharness seam in ask mode does — asks it about every call its own
+    /// policy admits, and folds a refusal in: the engine's `Deny` wins over the policy's `Allow`,
+    /// and asking is what puts the call in the execution's event record at all. An executor that
+    /// adjudicates nothing ignores it.
+    fn run_llm(
+        &mut self,
+        step: &LlmStep,
+        context: &StepContext<'_>,
+        authorize: StepAuthorizer<'_>,
+    ) -> StepOutcome;
 }
 
 /// Runs a `command` step.

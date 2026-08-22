@@ -51,6 +51,12 @@ the working directory travels as the a6 `--cwd` declaration. metaharness commits
 
 ## Open Questions
 
-- When the executor moves to `ask` mode, where does the tool-name → `ActionRequest` translation
-  live — the executor, or a table beside `allowed_tools`? Decides: whoever builds the ask-mode
-  step, recorded in that story.
+- ~~When the executor moves to `ask` mode, where does the tool-name → `ActionRequest` translation
+  live — the executor, or a table beside `allowed_tools`?~~ **Answered 2026-08-22: a table beside
+  `allowed_tools`.** `action_for` in `crates/protocol-cli/src/drive.rs` renders one call as the
+  action it is, immediately below the function that renders a capability set as tool names — the
+  two are the same seam read in opposite directions, and splitting them would put half of adapter
+  point 2 in the executor. It decides nothing: which capability an action needs stays
+  `Action::required_capability`'s. Two offered tools render to nothing on purpose — `Skill`, which
+  takes no action, and `WebSearch`, which names no URL a `NetworkRequest` could honestly carry —
+  and for those the engine is not consulted.

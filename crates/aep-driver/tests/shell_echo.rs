@@ -43,7 +43,8 @@ use aep_domain::task::Task;
 use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::{VerificationStatus, Verifier};
 use aep_driver::executor::{
-    CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepContext, StepOutcome,
+    CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepAuthorizer, StepContext,
+    StepOutcome,
 };
 use aep_driver::run::{drive, DriverOptions, RunDirectory};
 use aep_driver::tool::{tool_config, TOOL_CANDIDATES};
@@ -371,7 +372,15 @@ impl ShellEcho {
 }
 
 impl LlmStepExecutor for ShellEcho {
-    fn run_llm(&mut self, step: &LlmStep, context: &StepContext<'_>) -> StepOutcome {
+    // The authorizer goes unused here on purpose: this harness adjudicates nothing. Its script's
+    // tool set is fixed at launch, so there is no per-call decision for the engine to take, and a
+    // harness that asked about calls it never makes would put invented actions in the record.
+    fn run_llm(
+        &mut self,
+        step: &LlmStep,
+        context: &StepContext<'_>,
+        _authorize: StepAuthorizer<'_>,
+    ) -> StepOutcome {
         assert_eq!(
             step.harness, "shell-echo",
             "the map selected this harness by name, which is point 3's selection seam"
