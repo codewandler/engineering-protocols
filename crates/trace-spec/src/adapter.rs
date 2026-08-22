@@ -78,9 +78,12 @@ use serde_json::Value;
 use trace_domain::code::{TraceCode, ValidationErrors};
 use trace_domain::digest::digest_of_bytes;
 use trace_domain::ir::{
-    AdapterRef, AssistantRequest, EventKind, LoadedPlugin, McpServer, ModelUsage, OpaqueEvent,
-    RateLimitState, Recorded, RunOutcome, RunUsage, SessionStart, ToolCall, ToolResult, TraceEvent,
-    TraceIr,
+    AdapterRef, AssistantRequest, EventKind, ModelUsage, OpaqueEvent, RateLimitState, Recorded,
+    RunOutcome, RunUsage, SessionStart, ToolCall, ToolResult, TraceEvent, TraceIr,
+};
+
+use crate::json::{
+    compact, count_at, i64_at, mcp_servers_at, names_at, plugins_at, str_at, text_at, u64_at,
 };
 
 /// This adapter, and the harness versions it was written against.
@@ -547,94 +550,6 @@ fn opaque(event_type: Option<&str>, subtype: Option<&str>, line: &str) -> EventK
         subtype: subtype.map(ToOwned::to_owned),
         digest: digest_of_bytes(line.as_bytes()),
     }))
-}
-
-/// A borrowed string field, where the object records one as a string.
-fn str_at<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key)?.as_str()
-}
-
-/// An owned string field. A recorded `null` is absence, which is what `unk` is made of.
-fn text_at(value: &Value, key: &str) -> Option<String> {
-    str_at(value, key).map(ToOwned::to_owned)
-}
-
-/// An unsigned integer field.
-fn u64_at(value: &Value, key: &str) -> Option<u64> {
-    value.get(key)?.as_u64()
-}
-
-/// A signed integer field. Deltas move both ways.
-fn i64_at(value: &Value, key: &str) -> Option<i64> {
-    value.get(key)?.as_i64()
-}
-
-/// The length of a recorded list, where the list is there at all.
-fn count_at(value: &Value, key: &str) -> Option<u64> {
-    let entries = value.get(key)?.as_array()?;
-    u64::try_from(entries.len()).ok()
-}
-
-/// A list of names, where each entry may be a bare name or an object carrying one.
-///
-/// The harness observed at `2.1.238` writes `tools`, `skills` and `agents` as arrays of strings,
-/// and `plugins` as an array of objects. Both are read, because the difference between them is one
-/// release: an entry that is neither keeps its compact JSON as its name rather than disappearing,
-/// so a list whose *length* somebody asserts on cannot silently shrink.
-fn names_at(value: &Value, key: &str) -> Option<Vec<String>> {
-    let entries = value.get(key)?.as_array()?;
-    Some(entries.iter().map(name_of).collect())
-}
-
-/// One entry's name, by the rule [`names_at`] documents.
-fn name_of(entry: &Value) -> String {
-    if let Some(name) = entry.as_str() {
-        return name.to_owned();
-    }
-    if let Some(name) = entry.get("name").and_then(Value::as_str) {
-        return name.to_owned();
-    }
-    compact(entry)
-}
-
-/// The plugins the harness loaded, each with whatever it recorded about it.
-fn plugins_at(value: &Value) -> Option<Vec<LoadedPlugin>> {
-    let entries = value.get("plugins")?.as_array()?;
-    Some(
-        entries
-            .iter()
-            .map(|entry| LoadedPlugin {
-                name: name_of(entry),
-                version: text_at(entry, "version"),
-                source: text_at(entry, "source"),
-                path: text_at(entry, "path"),
-            })
-            .collect(),
-    )
-}
-
-/// The MCP servers the session was given, each with the status the harness reported.
-///
-/// Absent and empty stay different all the way down: no `mcp_servers` key yields [`None`] and an
-/// empty array yields `Some(vec![])`, because `env.mcp_servers` reads the first as *undecidable*
-/// and the second as *hermetic*. An entry that is a bare string keeps its name and answers
-/// nothing about status, which is [`name_of`]'s rule applied one level out.
-fn mcp_servers_at(value: &Value) -> Option<Vec<McpServer>> {
-    let entries = value.get("mcp_servers")?.as_array()?;
-    Some(
-        entries
-            .iter()
-            .map(|entry| McpServer {
-                name: name_of(entry),
-                status: text_at(entry, "status"),
-            })
-            .collect(),
-    )
-}
-
-/// Compact JSON of a value, which is what both byte measures are taken over.
-fn compact(value: &Value) -> String {
-    serde_json::to_string(value).unwrap_or_default()
 }
 
 #[cfg(test)]

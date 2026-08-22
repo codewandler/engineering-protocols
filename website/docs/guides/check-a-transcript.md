@@ -20,6 +20,20 @@ predicates over it, which is what makes a verdict reproducible on any machine on
 The commands below run against a real committed transcript — a Claude Code `stream-json` session
 from the planning-plugin eval — so every output shown here is reproducible from a checkout.
 
+**Two transcript formats, one set of arguments.** A recorded vendor session is `stream-json`; a
+transcript written by `protocol drive` is a `metaharness.event/1` event stream. Every verb here
+takes either, and picks the reader from the file's own first line — there is no `--format` to get
+wrong. The report's footer names the adapter that judged the run
+(`adapter claude-code/stream-json` or `adapter metaharness/event-stream`), so a verdict that
+changed because the *reader* changed is visible as that rather than as a change in the agent's
+behaviour. Try it on the committed driven step:
+
+```bash
+target/debug/protocol trace check \
+  --spec conformance/trace/expectations.driven-step.trace.yaml \
+  --transcript crates/trace-spec/tests/fixtures/metaharness-driven-honest-step.jsonl
+```
+
 ## See what the transcript contains
 
 ```bash

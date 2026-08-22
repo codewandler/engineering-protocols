@@ -131,8 +131,18 @@ passing one.
   fiftieth, built first in harness wave 3 because the hooks lean on it; `env.mcp_servers` the
   fifty-first, because a scratch config home isolates a directory and an account's MCP servers
   arrive with the login — raw→validated with ten `TRACE-*`
-  refusal codes) and `trace-spec` (the Claude Code `stream-json` adapter and the checker, whose
-  `ok`/`gap`/`unk` verdicts each cite the event indices that produced them). `protocol trace
+  refusal codes) and `trace-spec` (**two adapters** and the checker, whose
+  `ok`/`gap`/`unk` verdicts each cite the event indices that produced them). The adapters are the
+  Claude Code `stream-json` reader, which the recorded fixtures are in, and the
+  `metaharness.event/1` event-stream reader, which is what a **driven** run's transcript has been
+  since `epic:metaharness-migration` — one reader for every harness metaharness ever drives,
+  because it reads the seam rather than a vendor. Which one runs is decided from the transcript's
+  own first line, so both take the same arguments, and the report names the adapter that judged
+  the run. A seam denial (`tool.decided`) is what `permission.denied` counts on that wire, joined
+  by call id with the vendor's own list so that one refused call is one denial however many layers
+  wrote it down. What that wire does not carry is named where it is read and reads `unk`, never a
+  pass: the vendor's per-tool result fields (so `skill.completed`), `tokens.thinking`,
+  `iterations`, `speed` and per-model cost. `protocol trace
   check|inspect|evidence` is the surface, with `ess conform`'s exit codes — `0` conformant, `1`
   contradicted, `3` nobody found out. `evidence` runs the check and writes the AEP record it
   produced, so a verdict about a run enters the engine as a fact rather than as a claim. Nothing

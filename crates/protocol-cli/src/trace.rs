@@ -41,8 +41,8 @@ use anyhow::{bail, Context, Result};
 use clap::{Args, Subcommand, ValueEnum};
 use trace_domain::ir::TraceIr;
 use trace_domain::spec::TraceSpec;
-use trace_spec::adapter::read_transcript;
 use trace_spec::check::check;
+use trace_spec::reader::{detect, read_any};
 use trace_spec::render::{census_to_text, report_to_text, verdict_sentence};
 use trace_spec::report::CheckReport;
 
@@ -78,7 +78,11 @@ pub(crate) enum TraceCommand {
     /// verb: it states quantities, and [`TraceCommand::Check`] is where an opinion about one
     /// belongs.
     Inspect {
-        /// The transcript the harness wrote, in `stream-json` lines.
+        /// The run's record: a Claude Code `stream-json` transcript, or the
+        /// `metaharness.event/1` event stream a driven `llm` step writes.
+        ///
+        /// Which reader it gets is decided from the first line's `format` tag, so both take the
+        /// same arguments.
         #[arg(long)]
         transcript: PathBuf,
         /// How to render the census.
@@ -110,7 +114,11 @@ pub(crate) struct CheckArgs {
     /// The specification the run is judged against.
     #[arg(long)]
     spec: PathBuf,
-    /// The transcript the harness wrote, in `stream-json` lines.
+    /// The run's record: a Claude Code `stream-json` transcript, or the `metaharness.event/1`
+    /// event stream a driven `llm` step writes.
+    ///
+    /// Which reader it gets is decided from the first line's `format` tag, so both take the same
+    /// arguments.
     #[arg(long)]
     transcript: PathBuf,
     /// How to render the report.
@@ -152,7 +160,11 @@ pub(crate) struct EvidenceArgs {
     /// The specification the run is judged against.
     #[arg(long)]
     spec: PathBuf,
-    /// The transcript the harness wrote, in `stream-json` lines.
+    /// The run's record: a Claude Code `stream-json` transcript, or the `metaharness.event/1`
+    /// event stream a driven `llm` step writes.
+    ///
+    /// Which reader it gets is decided from the first line's `format` tag, so both take the same
+    /// arguments.
     #[arg(long)]
     transcript: PathBuf,
     /// Where to write the record. Without it the document goes to standard output.
@@ -204,14 +216,22 @@ fn load_spec(path: &Path) -> Result<TraceSpec> {
     })
 }
 
-/// Reads a transcript through the Claude Code adapter.
+/// Reads a transcript through whichever of the two adapters its first line calls for.
+///
+/// The detection is [`trace_spec::reader::read_any`]'s and deliberately not a flag: a driven run's
+/// transcript is a `metaharness.event/1` event stream and a recorded fixture is Claude Code
+/// `stream-json`, and a caller checking both against the same specification should pass the same
+/// arguments for both. A `--format` argument would be wrong exactly when somebody is in a hurry.
+/// The report names the adapter that read the run, so which one it was stays visible.
 fn load_transcript(path: &Path) -> Result<TraceIr> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("reading the transcript at {}", path.display()))?;
-    read_transcript(&bytes).map_err(|errors| {
+    let format = detect(&bytes);
+    read_any(&bytes).map_err(|errors| {
         anyhow::anyhow!(
-            "{} is not a transcript this build can read — {} refusal(s):\n{errors}",
+            "{} is not a transcript this build can read as {} — {} refusal(s):\n{errors}",
             path.display(),
+            format.as_str(),
             errors.len()
         )
     })

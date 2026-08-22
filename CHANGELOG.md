@@ -30,9 +30,10 @@ belongs in the commit message or in `docs/design/`.
   is skills and agents. The eval — logic, recorded transcripts, contracts and results — migrated
   whole to metaharness `evals/engineering-protocols/` (with `run.sh` retired alongside its
   subject). The three trace expectation documents
-  moved to `conformance/trace/` as domain specifications. Suspended by name: the trace-spec join
-  over fresh transcripts, until `story:event-stream-trace-adapter` gives the event stream a
-  reader.
+  moved to `conformance/trace/` as domain specifications. Suspended by name at the time: the
+  trace-spec join over fresh transcripts. The reader it was waiting for landed in this same
+  release (see *Added*, below); switching the migrated eval's § 3.4 back on is a change in the
+  metaharness repository, not here.
 
 ### Fixed
 
@@ -73,6 +74,20 @@ belongs in the commit message or in `docs/design/`.
   reason now says which layer refused. The order is policy first, because it is the only layer that
   sees a call's arguments. Two offered tools are never put to the engine, deliberately: a skill load
   takes no action, and a web *search* names no URL a request could honestly carry.
+
+- **`protocol trace check|inspect|evidence` reads a driven run's transcript.** A `metaharness.event/1`
+  event stream — what every `llm` step writes since the migration — is lifted into `trace-ir/1` and
+  judged by the same `trace-spec/1` documents as a recorded Claude Code transcript, with the same
+  arguments: which reader runs is decided from the file's own first line, and the report names it
+  (`adapter metaharness/event-stream`). The stream-json reader is unchanged and still reads the
+  recorded fixtures. What a driven run gains: **a denial the seam took is counted**, so
+  `permission.denied` means something in a run where the vendor's own array is empty because
+  enforcement worked first — one refused call is one denial however many layers wrote it down.
+  What a driven run cannot answer, because the seam's wire does not carry it: `skill.completed`
+  (the vendor's per-tool result fields), `tokens.thinking`, `iterations`, `speed`, and a
+  `cost.total` scoped to one model. Each reads `unk`, never a pass. Acceptance:
+  `story:event-stream-trace-adapter`.
+
 
 - **`harness: metaharness` — a second executor on the seam that was waiting for one.** An `llm`
   step naming it is spawned through `metaharness run claude` instead of a bare `claude` argv: the

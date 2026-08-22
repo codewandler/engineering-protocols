@@ -8,10 +8,22 @@
 //! | module | contents |
 //! |---|---|
 //! | [`adapter`] | the Claude Code `stream-json` adapter: JSONL to [`TraceIr`](trace_domain::ir::TraceIr) |
+//! | [`event_stream`] | the metaharness `metaharness.event/1` adapter: what a driven `llm` step writes |
+//! | [`reader`] | which of the two a file needs, decided from its first line |
+//! | `json` (private) | the JSON shapes both adapters read, so they cannot disagree about one |
 //! | [`check`] | evaluation: a specification against an IR, three-valued, every verdict citing its events |
 //! | [`report`] | [`CheckReport`](report::CheckReport) — the serializable answer, and what a later evidence builder consumes |
 //! | [`render`] | the text rendering, and the redacted one |
 //! | [`evidence`] | the handoff: a [`CheckReport`](report::CheckReport) becomes the AEP evidence record the protocol decides on |
+//!
+//! # Two adapters, one IR
+//!
+//! A harness is a reader, never a second specification language: the expectation vocabulary is
+//! phrased against `trace-ir/1` and nothing in it names a wire. The `stream-json` reader stays
+//! because the recorded fixtures are in that format and a recorded run is the only thing an
+//! adapter can be checked against; the event-stream reader exists because a driven run's
+//! transcript is the seam's stream now, and one reader of that seam covers every harness
+//! metaharness ever drives.
 //!
 //! # Two crates, and where the line runs
 //!
@@ -37,6 +49,9 @@
 
 pub mod adapter;
 pub mod check;
+pub mod event_stream;
 pub mod evidence;
+mod json;
+pub mod reader;
 pub mod render;
 pub mod report;

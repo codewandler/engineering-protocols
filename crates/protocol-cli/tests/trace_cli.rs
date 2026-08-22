@@ -63,6 +63,12 @@ const SPEC: &str = "conformance/trace/expectations.trace.yaml";
 /// A committed real run of the planning plugin.
 const TRANSCRIPT: &str = "crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl";
 
+/// A driven `llm` step's record: a `metaharness.event/1` event stream, not `stream-json`.
+const EVENT_STREAM: &str = "crates/trace-spec/tests/fixtures/metaharness-driven-honest-step.jsonl";
+
+/// The specification written for a driven step, which the event stream is checked against.
+const DRIVEN_SPEC: &str = "conformance/trace/expectations.driven-step.trace.yaml";
+
 /// A development task, so the protocol in force is the one that declares `trace_conformance`.
 const TASK: &str = "examples/billing-conformance/task.yaml";
 
@@ -237,6 +243,80 @@ fn a_run_that_gapped_is_written_down_rather_than_exited_on() {
     assert!(
         document.contains("nothing-shelled-out"),
         "and it names the expectation that gapped, so the failure is actionable: {document}"
+    );
+}
+
+#[test]
+fn a_driven_event_stream_is_checked_with_the_same_arguments_as_a_recorded_transcript() {
+    // The caller-visible half of the event-stream adapter: no `--format`, no second verb, no flag
+    // to get wrong. Which reader runs is decided from the file's own first line, and the report
+    // says which one it was — so a verdict that changed because the *reader* changed stays visible
+    // as that rather than as a change in the agent's behaviour.
+    let checked = protocol(&[
+        "trace",
+        "check",
+        "--spec",
+        DRIVEN_SPEC,
+        "--transcript",
+        EVENT_STREAM,
+    ]);
+    assert_eq!(
+        code(&checked),
+        0,
+        "{}\n{}",
+        stdout(&checked),
+        stderr(&checked)
+    );
+    assert!(
+        stdout(&checked).contains("adapter metaharness/event-stream"),
+        "the report names the reader that judged the run: {}",
+        stdout(&checked)
+    );
+
+    // And the record it mints is the same kind of record, from the same loop.
+    let out = scratch("aep-trace-evidence-event-stream").join("trace.yaml");
+    let minted = protocol(&[
+        "trace",
+        "evidence",
+        "--spec",
+        DRIVEN_SPEC,
+        "--transcript",
+        EVENT_STREAM,
+        "--out",
+        printable(&out),
+    ]);
+    assert_eq!(code(&minted), 0, "{}", stderr(&minted));
+    let document = std::fs::read_to_string(&out).expect("the record was written");
+    assert!(
+        document.starts_with("- kind: trace_conformance\n"),
+        "{document}"
+    );
+    assert!(
+        document.contains("transcript_digest:"),
+        "the record names the driven run it judged: {document}"
+    );
+}
+
+#[test]
+fn a_file_that_is_neither_wire_is_refused_with_the_format_it_was_read_as() {
+    // A caller who passed the wrong path gets told which reader was chosen for it, because
+    // "this is not a transcript" and "this is not the transcript you meant" are different
+    // mistakes and only one of them is fixed by looking at the file.
+    let stray = scratch("aep-trace-not-a-transcript").join("notes.md");
+    std::fs::write(&stray, "# notes\n\nnothing here is a transcript\n").expect("the scratch tree");
+    let refused = protocol(&[
+        "trace",
+        "check",
+        "--spec",
+        DRIVEN_SPEC,
+        "--transcript",
+        printable(&stray),
+    ]);
+    assert_eq!(code(&refused), 1, "{}", stdout(&refused));
+    assert!(
+        stderr(&refused).contains("claude-code/stream-json"),
+        "the refusal names the wire it fell back to: {}",
+        stderr(&refused)
     );
 }
 
