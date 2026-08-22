@@ -474,6 +474,8 @@ fn start(args: &RunArgs) -> Result<ExitCode> {
         inputs.project.clone(),
         directory.path().to_path_buf(),
         inputs.plugin_dirs.clone(),
+        inputs.map.workflow.id().to_string(),
+        inputs.map.workflow.major().to_string(),
     );
     let report = aep_driver::run::drive(
         &engine,
@@ -526,6 +528,8 @@ fn resume(args: &ResumeArgs) -> Result<ExitCode> {
         inputs.project.clone(),
         directory.path().to_path_buf(),
         inputs.plugin_dirs.clone(),
+        inputs.map.workflow.id().to_string(),
+        inputs.map.workflow.major().to_string(),
     );
     let report = aep_driver::run::resume(
         &engine,
@@ -928,15 +932,27 @@ struct CliExecutors {
     run_directory: PathBuf,
     /// The plugins every `llm` step's session loads — and with them, the hooks.
     plugin_dirs: Vec<PathBuf>,
+    /// The workflow the run resolved to, for the frame the `metaharness` executor writes.
+    workflow_id: String,
+    /// Its pinned major version, as the step map states it.
+    workflow_version: String,
 }
 
 impl CliExecutors {
     /// Builds the executors for one run.
-    fn new(working_directory: PathBuf, run_directory: PathBuf, plugin_dirs: Vec<PathBuf>) -> Self {
+    fn new(
+        working_directory: PathBuf,
+        run_directory: PathBuf,
+        plugin_dirs: Vec<PathBuf>,
+        workflow_id: String,
+        workflow_version: String,
+    ) -> Self {
         Self {
             working_directory,
             run_directory,
             plugin_dirs,
+            workflow_id,
+            workflow_version,
         }
     }
 
@@ -973,6 +989,103 @@ impl CliExecutors {
         fs::write(&path, format!("{text}\n"))
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
         Ok(path)
+    }
+
+    /// The `metaharness` executor: the same session, held by a frame instead of by hooks.
+    ///
+    /// The step's surface travels as a sealed `metaharness.frame/1` document and per-call
+    /// enforcement is metaharness's frame mode at the vendor's own `PreToolUse` seam — so the
+    /// denials arrive as `tool.decided` events in the event stream this executor writes as the
+    /// transcript, not in a side-channel log that a forgotten flag silences. Run `W4-2` lost all
+    /// eight of its post-fix sessions to exactly that flag: `--plugin-dir` was not re-passed on
+    /// resume, and every session ran unenforced while looking clean.
+    ///
+    /// What this executor does not yet carry, by name: the hooks' per-argument narrowing (one
+    /// program, two verbs, no pipes). Frame mode admits or refuses whole operations; the
+    /// narrowing returns when this moves to `--decisions ask` and answers per call from the
+    /// engine, which is the § 10.1 shape and a separate step.
+    fn run_llm_metaharness(&mut self, step: &LlmStep, context: &StepContext<'_>) -> StepOutcome {
+        let transcripts = self.run_directory.join(TRANSCRIPTS);
+        if let Err(error) = fs::create_dir_all(&transcripts) {
+            return StepOutcome::NoVerdict {
+                reason: format!(
+                    "cannot write transcripts to {}: {error}",
+                    transcripts.display()
+                ),
+            };
+        }
+        let transcript = transcript_path(
+            self.run_directory.as_path(),
+            context.state,
+            context.index,
+            context.attempt,
+        );
+
+        let frame = metaharness_frame(context, &self.workflow_id, &self.workflow_version);
+        let frame_file = transcripts.join(format!(
+            "{}-{}-{}.frame.json",
+            context.state, context.index, context.attempt
+        ));
+        let document = match serde_json::to_string_pretty(&frame) {
+            Ok(text) => format!("{text}\n"),
+            Err(error) => {
+                return StepOutcome::NoVerdict {
+                    reason: format!("the frame would not serialise: {error}"),
+                }
+            }
+        };
+        if let Err(error) = fs::write(&frame_file, document) {
+            return StepOutcome::NoVerdict {
+                reason: format!("cannot write {}: {error}", frame_file.display()),
+            };
+        }
+
+        let argv = metaharness_argv(
+            &frame_file,
+            &self.working_directory,
+            &self.plugin_dirs,
+            &prompt_for(step, context),
+        );
+        // No `current_dir` and no step-context env: the working directory travels as `--cwd`
+        // and metaharness spawns the vendor there itself, and its constructed child environment
+        // would drop the context variable anyway — the plugin's hooks no-op outside a driven
+        // `claude-code` session rather than enforcing a second copy of this policy.
+        let outcome = Process::new(&argv[0])
+            .args(&argv[1..])
+            .stdin(Stdio::null())
+            .output();
+
+        let output = match outcome {
+            Ok(output) => output,
+            Err(error) => {
+                return StepOutcome::NoVerdict {
+                    reason: format!("`{}` could not be run: {error}", argv.join(" ")),
+                }
+            }
+        };
+        let _ = fs::write(&transcript, &output.stdout);
+
+        if output.status.success() {
+            StepOutcome::Nothing
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let tail: String = stderr.lines().rev().take(3).collect::<Vec<_>>().join(" | ");
+            StepOutcome::NoVerdict {
+                reason: format!(
+                    "metaharness exited {}; {}the event stream is at {}",
+                    output
+                        .status
+                        .code()
+                        .map_or_else(|| "on a signal".to_owned(), |code| code.to_string()),
+                    if tail.is_empty() {
+                        String::new()
+                    } else {
+                        format!("it said: {tail}; ")
+                    },
+                    transcript.display()
+                ),
+            }
+        }
     }
 }
 
@@ -1115,15 +1228,19 @@ impl OperatorStepExecutor for CliExecutors {
 impl LlmStepExecutor for CliExecutors {
     fn run_llm(&mut self, step: &LlmStep, context: &StepContext<'_>) -> StepOutcome {
         // The seam § 4.9 point 3 names, and the reason it is a name rather than a trait: a second
-        // harness is a second executor selected by this string, chosen when there is a second
-        // implementation to design the selection against. W3.5's shell-echo harness is the first
-        // one that will use it.
+        // harness is a second executor selected by this string. `metaharness` is that second
+        // implementation — the same vendor binary, driven through the metaharness seam instead of
+        // a bare argv.
+        if step.harness == METAHARNESS_HARNESS {
+            return self.run_llm_metaharness(step, context);
+        }
         if step.harness != LlmStep::DEFAULT_HARNESS {
             return StepOutcome::NoVerdict {
                 reason: format!(
-                    "the step names harness `{}`, and this build only invokes `{}`",
+                    "the step names harness `{}`, and this build only invokes `{}` and `{}`",
                     step.harness,
-                    LlmStep::DEFAULT_HARNESS
+                    LlmStep::DEFAULT_HARNESS,
+                    METAHARNESS_HARNESS
                 ),
             };
         }
@@ -1337,6 +1454,120 @@ fn allowed_tools(config: &ToolConfig) -> Vec<String> {
     tools.sort();
     tools.dedup();
     tools
+}
+
+/// The harness name that selects the metaharness executor.
+const METAHARNESS_HARNESS: &str = "metaharness";
+
+/// The format tag the frame document carries, as the metaharness design § 5.5 spells it.
+const METAHARNESS_FRAME_FORMAT: &str = "metaharness.frame/1";
+
+/// The metaharness operations for an admitted capability set.
+///
+/// The same decisions as [`allowed_tools`], spelled in metaharness's § 5.2 vocabulary instead of
+/// the vendor's: the protocol decides what a capability admits, both tables only render it, and
+/// `subagent.spawn` is never offered for the same reason `Task` never is.
+fn metaharness_operations(config: &ToolConfig) -> Vec<&'static str> {
+    let mut operations: Vec<&'static str> = Vec::new();
+    if config.admits(&Capability::RepositoryRead) || config.admits(&Capability::ArtifactRead) {
+        operations.extend(["file.read", "dir.list", "search"]);
+    }
+    if config.admits(&Capability::RepositoryWrite) {
+        operations.extend(["file.write", "file.edit"]);
+    }
+    if config.admits(&Capability::NetworkRead) {
+        operations.push("web.read");
+    }
+    if config.shell_offered() {
+        operations.push("shell");
+    }
+    if config.skills_offered() {
+        operations.push("skill.load");
+    }
+    operations.sort_unstable();
+    operations.dedup();
+    operations
+}
+
+/// The step as a sealed `metaharness.frame/1` document.
+///
+/// Built as plain JSON and sealed by the document's own rule — SHA-256, hex, over the compact
+/// serialization with keys sorted at every level (`serde_json`'s default map order) and the
+/// `digest` and `format` fields absent — so this binary produces byte-for-byte what metaharness
+/// verifies, without linking its crates. The obligations and reaching lines are the engine's own
+/// words, verbatim, on the same rule as the prompt: a summary here would be the only place the
+/// summary existed.
+fn metaharness_frame(
+    context: &StepContext<'_>,
+    workflow_id: &str,
+    workflow_version: &str,
+) -> serde_json::Value {
+    let line = |text: &String| serde_json::json!({ "text": text, "asked_by": null });
+    let mut frame = serde_json::json!({
+        "workflow": { "id": workflow_id, "version": workflow_version },
+        "node": { "id": context.state.to_string() },
+        "step": {
+            "workflow": workflow_id,
+            "state": context.state.to_string(),
+            "index": context.index,
+            "attempt": context.attempt,
+        },
+        "prior": [],
+        "obligations": context.requirements.iter().map(line).collect::<Vec<_>>(),
+        "reaching": context.reaching.iter().map(line).collect::<Vec<_>>(),
+        "next": [],
+        "handoff": { "handoff": "none" },
+        "operations": metaharness_operations(context.tools)
+            .iter()
+            .map(|operation| serde_json::json!({ "op": operation }))
+            .collect::<Vec<_>>(),
+        "entities": null,
+    });
+    let digest = {
+        use sha2::{Digest as _, Sha256};
+        let bytes = serde_json::to_vec(&frame).expect("a frame value serialises");
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        format!("{:x}", hasher.finalize())
+    };
+    let object = frame.as_object_mut().expect("a frame is an object");
+    object.insert("digest".into(), digest.into());
+    object.insert("format".into(), METAHARNESS_FRAME_FORMAT.into());
+    frame
+}
+
+/// The `metaharness run claude` invocation for one step.
+///
+/// `--cwd` is the metaharness a6 declaration: the session works in the governed tree, and
+/// metaharness attests the two hermetic rows that costs instead of claiming them. `--decisions
+/// frame` makes metaharness the per-call decider from the frame's admitted set. The plugins
+/// still travel for their skills; their hooks read a step context this launch does not carry and
+/// no-op, which is the intended shape — one policy, one enforcer.
+fn metaharness_argv(
+    frame: &Path,
+    working_directory: &Path,
+    plugin_dirs: &[PathBuf],
+    prompt: &str,
+) -> Vec<String> {
+    let mut argv = vec![
+        "metaharness".to_owned(),
+        "run".to_owned(),
+        "claude".to_owned(),
+        "--hermetic".to_owned(),
+        "--cwd".to_owned(),
+        working_directory.display().to_string(),
+        "--frame".to_owned(),
+        frame.display().to_string(),
+        "--decisions".to_owned(),
+        "frame".to_owned(),
+        "-p".to_owned(),
+        prompt.to_owned(),
+    ];
+    for directory in plugin_dirs {
+        argv.push("--plugin-dir".to_owned());
+        argv.push(directory.display().to_string());
+    }
+    argv
 }
 
 /// The instant the driver just observed something, from the wall clock.
@@ -1832,6 +2063,142 @@ mod tests {
             prompt.contains("Load the `planning` skill"),
             "the step's skill has to be asked for somewhere: {prompt}"
         );
+    }
+
+    // ------------------------------------------------------------ the metaharness executor
+
+    /// One `StepContext` for the frame tests, with the engine's lines present.
+    fn metaharness_context<'a>(
+        state: &'a StateId,
+        tools: &'a ToolConfig,
+        requirements: &'a [String],
+        reaching: &'a [String],
+    ) -> StepContext<'a> {
+        StepContext {
+            state,
+            index: 2,
+            attempt: 3,
+            tools,
+            run_directory: Path::new("/runs/T-1/1"),
+            requirements,
+            reaching,
+            preceding_llm: None,
+        }
+    }
+
+    #[test]
+    fn the_metaharness_operations_mirror_the_allowed_tools_decisions() {
+        let reading = config(&[Capability::RepositoryRead]);
+        assert_eq!(
+            metaharness_operations(&reading),
+            ["dir.list", "file.read", "search", "skill.load"]
+        );
+        assert!(!metaharness_operations(&reading).contains(&"shell"));
+
+        let shell = config(&[Capability::CommandExecution]);
+        assert!(metaharness_operations(&shell).contains(&"shell"));
+
+        let everything = config(&[
+            Capability::RepositoryRead,
+            Capability::RepositoryWrite,
+            Capability::CommandExecution,
+            Capability::NetworkRead,
+        ]);
+        assert!(
+            !metaharness_operations(&everything).contains(&"subagent.spawn"),
+            "a subagent's tool set is derived by nothing in these decisions"
+        );
+    }
+
+    /// The seal is the metaharness § 5.5 rule, reproduced here without its crates: SHA-256 over
+    /// the compact key-sorted serialization with `digest` and `format` absent. A document this
+    /// test passes is a document metaharness's parser accepts byte-for-byte; one it fails is a
+    /// run refused before a cent is spent.
+    #[test]
+    fn the_frame_document_is_sealed_by_the_rule_metaharness_verifies() {
+        let tools = config(&[Capability::RepositoryRead, Capability::CommandExecution]);
+        let state: StateId = "implement".parse().expect("a state id");
+        let requirements = vec!["the suite is red before the implementation".to_owned()];
+        let reaching = vec!["to verify: the suite is green".to_owned()];
+        let context = metaharness_context(&state, &tools, &requirements, &reaching);
+
+        let frame = metaharness_frame(&context, "development/default", "1");
+        assert_eq!(frame["format"], METAHARNESS_FRAME_FORMAT);
+
+        let mut unsealed = frame.clone();
+        let object = unsealed.as_object_mut().expect("an object");
+        let stated = object.remove("digest").expect("a digest");
+        object.remove("format");
+        let recomputed = {
+            use sha2::{Digest as _, Sha256};
+            let bytes = serde_json::to_vec(&unsealed).expect("serialises");
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            format!("{:x}", hasher.finalize())
+        };
+        assert_eq!(stated, serde_json::Value::String(recomputed));
+    }
+
+    /// The engine's lines travel verbatim, on the same rule as the prompt: the frame is the only
+    /// place they exist for the seam, and a summary here would be the only summary.
+    #[test]
+    fn the_frame_carries_the_engines_lines_and_the_steps_coordinates() {
+        let tools = config(&[Capability::RepositoryRead]);
+        let state: StateId = "specify".parse().expect("a state id");
+        let requirements = vec!["an approved specification exists".to_owned()];
+        let reaching = vec!["to implement: the suite is red".to_owned()];
+        let context = metaharness_context(&state, &tools, &requirements, &reaching);
+
+        let frame = metaharness_frame(&context, "development/default", "1");
+        assert_eq!(frame["node"]["id"], "specify");
+        assert_eq!(frame["step"]["index"], 2);
+        assert_eq!(frame["step"]["attempt"], 3);
+        assert_eq!(frame["workflow"]["version"], "1");
+        assert_eq!(
+            frame["obligations"][0]["text"],
+            "an approved specification exists"
+        );
+        assert_eq!(
+            frame["reaching"][0]["text"],
+            "to implement: the suite is red"
+        );
+        assert_eq!(frame["handoff"]["handoff"], "none");
+        let operations: Vec<&str> = frame["operations"]
+            .as_array()
+            .expect("a list")
+            .iter()
+            .map(|entry| entry["op"].as_str().expect("a name"))
+            .collect();
+        assert_eq!(
+            operations,
+            ["dir.list", "file.read", "search", "skill.load"]
+        );
+    }
+
+    #[test]
+    fn the_metaharness_argv_drives_the_seam_with_the_declared_directory_and_frame() {
+        let argv = metaharness_argv(
+            Path::new("/runs/T-1/1/transcripts/implement-2-3.frame.json"),
+            Path::new("/operator/repo"),
+            &[PathBuf::from("/plugins/claude-code")],
+            "do the thing",
+        );
+        assert_eq!(argv[0], "metaharness");
+        assert_eq!(argv[1], "run");
+        assert_eq!(argv[2], "claude");
+        let has = |flag: &str, value: &str| {
+            argv.windows(2)
+                .any(|pair| pair[0] == flag && pair[1] == value)
+        };
+        assert!(has("--cwd", "/operator/repo"));
+        assert!(has(
+            "--frame",
+            "/runs/T-1/1/transcripts/implement-2-3.frame.json"
+        ));
+        assert!(has("--decisions", "frame"));
+        assert!(has("-p", "do the thing"));
+        assert!(has("--plugin-dir", "/plugins/claude-code"));
+        assert!(argv.contains(&"--hermetic".to_owned()));
     }
 
     #[test]

@@ -93,6 +93,9 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
+# Seals the frame document the metaharness executor writes: SHA-256 over the compact key-sorted
+# serialization, the same rule and the same crate version the metaharness workspace verifies with.
+sha2 = "0.10"
 
 [lints]
 workspace = true

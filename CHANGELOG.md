@@ -11,6 +11,19 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`harness: metaharness` — a second executor on the seam that was waiting for one.** An `llm`
+  step naming it is spawned through `metaharness run claude` instead of a bare `claude` argv: the
+  step's per-state surface travels as a sealed `metaharness.frame/1` document (digest-verified by
+  the binary, cross-checked byte-for-byte against it with no crate link between the
+  repositories), the governed tree travels as the `--cwd` declaration, and per-call denials are
+  `tool.decided` events in the event stream the executor writes as the transcript — not a
+  side-channel log a forgotten `--plugin-dir` can silence, which is how all eight post-fix
+  sessions of run `W4-2` ran unenforced while looking clean. Operation rendering mirrors
+  `allowed_tools` decision-for-decision; `subagent.spawn` is never offered. The default
+  `claude-code` executor is unchanged. What frame mode does not carry — the hooks' per-argument
+  narrowing — is stated in the executor's doc comment and waits for `--decisions ask`.
+  Acceptance: `story:metaharness-executor`.
+
 - **`env.mcp_servers` — the fifty-first expectation kind, and the first thing that can say a
   session was hermetic.** A scratch `CLAUDE_CONFIG_DIR` isolates a directory: it keeps the
   operator's plugins, skills and output style out, and it does not keep out account-level MCP
