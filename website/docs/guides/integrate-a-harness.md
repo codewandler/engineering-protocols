@@ -18,13 +18,16 @@ executes the three kinds of step a step map declares — a program, a model, a p
 what it did:
 
 ```console
-$ protocol drive run --project . --plugin-dir integrations/claude-code --pause-on-approval
+$ protocol drive run --project . --map development/default \
+    --plugin-dir integrations/claude-code --pause-on-approval
 $ protocol drive status
 $ protocol drive resume AUTH-142/3      # the run id `drive run` allocated
 ```
 
 `drive run` needs a model and costs money. `drive status` reads the run directory and needs
-nothing.
+nothing. `--map` is not optional in this tree: two step maps are written against `adp/default/1`, so
+a `drive run` given neither is refused, naming both ids rather than picking the first
+(`crates/protocol-cli/src/drive.rs:401-411`).
 
 It evaluates no gate itself. A driver that could evaluate a gate would be a second protocol
 implementation with none of the conformance suites behind it, and the first time the two disagreed
@@ -36,11 +39,13 @@ Two things the driver does not do, both of which land on you if you build one:
 * **It only knows the harness it was written against.** The `llm` step launches Claude Code. A
   second harness needs an adapter, and the harness-neutrality claim has never met one — see
   [Limitations](../status/limitations.md).
-* **It reads a step map, and the shipped map names `cargo`.** `drivers/development/default.yaml`
-  names `cargo` in every state that names a verifier, so a repository whose tests are not Rust tests
-  cannot satisfy `test-driven` under it. What closes that is a decision about the map — whether it
-  is a Rust map that should say so and be joined by a second, or a general one whose verifier list
-  is wrong. The row is in the repository's gap register, `docs/plan/gap-register.md`.
+* **It reads a step map, and the two shipped maps verify the two shapes of work this repository
+  has.** `drivers/development/default.yaml` (`development/default`) names `cargo` in every state
+  that names a verifier, so a repository whose tests are not Rust tests cannot satisfy `test-driven`
+  under it. `drivers/development/checks.yaml` (`development/checks`) names no compiler and runs one
+  command, `bash .engineering/checks/run.sh`, so a story whose acceptance is checks somebody can run
+  drives under that one. A repository that is neither writes its own map: the workflow is unchanged,
+  and only the steps under it are yours.
 
 ## The seven calls
 
@@ -237,11 +242,13 @@ fail differently:
 | a pre-tool hook | the call's **arguments** | nothing about workflow state, unless you hand it some |
 
 The reference driver runs both. It derives the tool set per state, not per run, from
-`tool_config(&effective_policy(execution))` (`crates/aep-driver/src/run.rs:671`), and passes the
+`tool_config(&effective_policy(execution))` (`crates/aep-driver/src/run.rs:683`), and passes the
 plugin directory into every model session with `--plugin-dir` (or `AEP_DRIVE_PLUGIN_DIR`), because a
-session that never loaded the plugin never loaded the hooks. It also writes `step-context.json` into
-the run directory, which is how a hook — a separate process, holding no execution — learns which
-state it is in:
+session that never loaded the plugin never loaded the hooks. Every session also carries
+`--strict-mcp-config`, so a session's MCP surface is what that line gave it, which is nothing: an
+account's MCP servers arrive with the login rather than out of a file, and a scratch config
+directory cannot exclude them. It also writes `step-context.json` into the run directory, which is
+how a hook — a separate process, holding no execution — learns which state it is in:
 
 ```json
 {
@@ -252,12 +259,22 @@ state it is in:
   "shell_offered": true,
   "capabilities": ["repository.read", "repository.write", "tests.execute", "command.execute",
                    "artifact.read", "artifact.write", "review.request", "approval.request"],
-  "tools": ["Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Skill", "Write"]
+  "tools": ["Bash", "Edit", "Glob", "Grep", "NotebookEdit", "Read", "Skill", "Write"],
+  "reaching": [
+    "-> implement: guard: test.exists",
+    "-> implement: ? test.exists — unobserved: test.exists [principle test-driven]",
+    "-> implement: ? test.first_result == failed — unobserved: test.first_result [principle test-driven]"
+  ]
 }
 ```
 
-(Two absolute paths — the run directory and the store — are dropped, and the two arrays are wrapped
-to fit the page; the keys and values are the file's.)
+(Two absolute paths — the run directory and the store — are dropped, and the arrays are broken
+across lines to fit the page; the rest is the file's, except the `reaching` lines, which are what
+`protocol evaluate --advance` prints under `transitions` for that transition — the driver and the
+CLI both read `TransitionEvaluation::unmet()`.) `reaching` is one line per requirement that does not
+hold yet on a way *out* of the state, each prefixed with where that transition goes. What must hold
+*while in* it is a different list and is passed separately, because a step given only the second can
+satisfy every line it was handed and still be refused on the way out.
 
 Every adjudicated call, allow and deny alike, is appended to `hook-decisions.jsonl` in the same
 directory. On this repository's first governed run: 80 decisions, 69 allow and 11 deny. A guard that

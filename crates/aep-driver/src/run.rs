@@ -63,7 +63,7 @@ use aep_engine::{
     Clock, CompletionExplanation, Engine, ProtocolEngine, ProtocolError, Snapshot, TransitionResult,
 };
 
-use crate::executor::{StepContext, StepExecutors, StepOutcome};
+use crate::executor::{StepAttempt, StepContext, StepExecutors, StepOutcome};
 use crate::route::{next_step, NextStep};
 use crate::tool::tool_config;
 
@@ -598,7 +598,7 @@ impl<C: Clock> Session<'_, C> {
         }
 
         let attempt = cursor.record_attempt(&state, index);
-        let outcome = self.execute(executors, execution, &state, index, evaluation, attempt);
+        let outcome = self.execute(executors, execution, &state, index, evaluation, cursor);
         tally.progress.steps_run += 1;
 
         match outcome {
@@ -642,6 +642,15 @@ impl<C: Clock> Session<'_, C> {
                 tally.progress.notes.push(format!(
                     "step {index} of `{state}` ({label}) is waiting for a person: {reason}"
                 ));
+                // The pause **is** this step's completion, so the cursor moves past it. The design
+                // says a paused run "resumes" (§ 4.6), and a cursor left pointing at the step that
+                // paused does not resume: it re-presents the same question to the same person on
+                // every resume, and no map with an `operator` step before its last state could ever
+                // move past one. What the person was asked for is decided by the guard on the way
+                // out, not by asking again — a person who did nothing meets a `TransitionBlocked`
+                // naming exactly what is still owed. A back-edge re-entry sets `step` to 0, so
+                // re-entering the state asks again, which is the case where asking twice is right.
+                cursor.step += 1;
                 let progress = std::mem::take(&mut tally.progress);
                 return self
                     .finish(
@@ -664,8 +673,12 @@ impl<C: Clock> Session<'_, C> {
         state: &StateId,
         index: usize,
         evaluation: &Evaluation,
-        attempt: u32,
+        cursor: &DriverCursor,
     ) -> StepOutcome {
+        // Read back rather than passed in: `record_attempt` has already counted this attempt, so
+        // the cursor is the one place that knows which attempt every step of this state is on —
+        // this one and the `llm` step below it.
+        let attempt = cursor.attempts_at(state, index);
         // Per state, not per run: `effective_policy` grants the state's capabilities on top of the
         // plan's, so the tools that exist in `implement` are not the tools that exist in `review`.
         let tools = tool_config(&effective_policy(execution));
@@ -674,6 +687,40 @@ impl<C: Clock> Session<'_, C> {
             .iter()
             .map(Requirement::line)
             .collect();
+        // What guards the way *out*, which is a different question from what must hold here and
+        // was never asked before: `Evaluation::requirements` is the in-state list, and the outgoing
+        // guard lives on `Evaluation::transitions`. Unmet lines only — `unmet()` is empty for a
+        // permitted transition — and lines the in-state list already carries are dropped, because
+        // an obligation owed here is evaluated against every outgoing transition as well.
+        let reaching: Vec<String> = evaluation
+            .transitions
+            .iter()
+            .flat_map(|transition| {
+                let to = transition.to.clone();
+                transition
+                    .unmet()
+                    .into_iter()
+                    .map(move |line| (to.clone(), line))
+            })
+            .filter(|(_, line)| !requirements.contains(line))
+            .map(|(to, line)| format!("-> {to}: {line}"))
+            .collect();
+        // The `llm` step this one follows, so a command step can be about the session before it.
+        // The nearest one and not the first: a state may run two, and a checker pointed at the
+        // wrong transcript reports on a session that was asked for something else.
+        let steps = self.map.steps_for(state);
+        let preceding_llm = steps[..index]
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, step)| matches!(step, Step::Llm(_)))
+            .map(|(index, _)| StepAttempt {
+                index,
+                attempt: cursor.attempts_at(state, index),
+            })
+            // Zero attempts means the step was never run in this run or any it resumed from, so
+            // there is nothing it wrote to be about.
+            .filter(|preceding| preceding.attempt > 0);
         let context = StepContext {
             state,
             index,
@@ -681,8 +728,10 @@ impl<C: Clock> Session<'_, C> {
             tools: &tools,
             run_directory: self.directory.path(),
             requirements: &requirements,
+            reaching: &reaching,
+            preceding_llm,
         };
-        match &self.map.steps_for(state)[index] {
+        match &steps[index] {
             Step::Command(command) => executors.run_command(command, &context),
             Step::Llm(llm) => executors.run_llm(llm, &context),
             Step::Operator(operator) => executors.run_operator(operator, &context),

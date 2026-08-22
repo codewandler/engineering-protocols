@@ -39,6 +39,19 @@ use aep_driver_spec::map::{CommandStep, LlmStep, OperatorStep};
 use aep_driver_spec::tool::ToolConfig;
 use aep_engine::EvidenceSubmission;
 
+/// Which attempt of which step ran, so a harness can find what that step wrote.
+///
+/// A pair rather than a path: what an `llm` step leaves behind is named by whoever writes it —
+/// `protocol-cli` puts a transcript at `<run>/transcripts/<state>-<index>-<attempt>.jsonl` — and a
+/// second harness names its own. This crate says *which* step, and never where its output went.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StepAttempt {
+    /// Which step of the state's list it is.
+    pub index: usize,
+    /// Which attempt at it ran, counting from `1`.
+    pub attempt: u32,
+}
+
 /// What an executor is told about the step it is being asked to run.
 ///
 /// Everything here is a function of persisted state, which is what makes D4's per-step session
@@ -67,6 +80,31 @@ pub struct StepContext<'a> {
     /// rather than a summary, and a driver that summarised here would be the only place the
     /// summary existed.
     pub requirements: &'a [String],
+    /// One line per requirement that does **not** hold yet on a way *out* of this state, each
+    /// prefixed with where that transition goes.
+    ///
+    /// [`Self::requirements`] is what must hold *while here* ("what must hold while in this
+    /// state", `aep_engine::evaluate::Evaluation::requirements`); this is what the state is trying
+    /// to reach. The outgoing guard lives on the transition, and a step told only the first can
+    /// satisfy every line it was given and still be refused — which is what run `W4-1/1` did on
+    /// 2026-08-21: the model was never told that `implement` wanted a red suite and an approved
+    /// specification, so it wrote neither, and the guard refused work that had already been paid
+    /// for.
+    ///
+    /// Unmet lines only, because a permitted transition has none: it is not a rule sheet for the
+    /// state graph, it is what is outstanding on the way out. A line already carried by
+    /// [`Self::requirements`] is left out — an obligation owed in this state is evaluated again
+    /// against every outgoing transition, and printing it twice would suggest two rules where the
+    /// documents state one.
+    pub reaching: &'a [String],
+    /// The `llm` step this one follows in the same state, and the attempt of it that ran.
+    ///
+    /// `None` for the first step of a state, for a state with no `llm` step before this one, and
+    /// for an `llm` step itself. It exists so that a `command` step can be *about* the session
+    /// before it — running `protocol trace check` over the transcript that session wrote is the
+    /// case it was added for — without a step map having to name a path that does not exist until
+    /// the run is allocated.
+    pub preceding_llm: Option<StepAttempt>,
 }
 
 /// What running a step produced.

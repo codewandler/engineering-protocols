@@ -126,8 +126,10 @@ passing one.
 * **Trace — an agent run as a third observation domain.** Two crates: `trace-domain` (the
   harness-neutral event IR `trace-ir/1`, content-addressed by a digest over the transcript's raw
   bytes, with an event the adapter cannot read kept opaque rather than dropped; and the
-  `trace-spec/1` expectation vocabulary, **fifty kinds** — `env.tool_available` was the fiftieth,
-  built first in harness wave 3 because the hooks lean on it — raw→validated with ten `TRACE-*`
+  `trace-spec/1` expectation vocabulary, **fifty-one kinds** — `env.tool_available` was the
+  fiftieth, built first in harness wave 3 because the hooks lean on it; `env.mcp_servers` the
+  fifty-first, because a scratch config home isolates a directory and an account's MCP servers
+  arrive with the login — raw→validated with ten `TRACE-*`
   refusal codes) and `trace-spec` (the Claude Code `stream-json` adapter and the checker, whose
   `ok`/`gap`/`unk` verdicts each cite the event indices that produced them). `protocol trace
   check|inspect|evidence` is the surface, with `ess conform`'s exit codes — `0` conformant, `1`

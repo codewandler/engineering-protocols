@@ -14,6 +14,22 @@
 #     makes `independent: true` honestly satisfiable in `adversarial_verify`.
 #   * an `llm` step has no `evidence:` key and cannot be given one. Anything a model is supposed to
 #     have achieved that is *checkable* is observed by the command step after it.
+#
+# **This map's verifier is cargo, and it can drive nothing else.** Every state here that names a
+# verifier names `cargo`: the suite is `cargo test --workspace`, the contract suite is
+# `cargo test -p aep-conformance`, and static analysis is `cargo clippy`. A story whose acceptance
+# is written in shell checks cannot be driven under it — not because the checks are refused, but
+# because the suite the driver runs is a different suite: run `W4-1/1` wrote nine deliberately red
+# shell checks in `establish_verifiers` and then `cargo test --workspace` recorded 138 suites `ok`,
+# which is `test.first_result = passed`, which never changes
+# (`crates/aep-engine/src/execution.rs:366-378`). That run could not move afterwards by any route.
+# Its sibling **[`checks.yaml`](checks.yaml)** — `development/checks` — is the map for that work: it
+# verifies by running the checks the story itself carries, and names no compiler anywhere.
+#
+# **Two maps now fit `adp/default/1`, so `protocol drive run` refuses to choose between them** and
+# `--map` says which one. That refusal names both ids (`crates/protocol-cli/src/drive.rs:376-388`)
+# and is the same position `protocol artifact move` takes on an illegal transition: the driver does
+# not guess which document the run is under.
 format: aep.driver-steps/1
 id: development/default
 # Pinned, and the pin is mandatory. A step map names states and orders steps inside them, so an

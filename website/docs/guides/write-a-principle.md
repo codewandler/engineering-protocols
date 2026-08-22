@@ -119,7 +119,7 @@ rule — both better outcomes than an agent quietly writing the migration.
 
 ```console
 $ $B validate --root .
-46 file(s): 3 protocol(s), 23 principle(s), 4 workflow(s), 7 profile(s), 8 lifecycle(s), 1 step map(s)
+47 file(s): 3 protocol(s), 23 principle(s), 4 workflow(s), 7 profile(s), 8 lifecycle(s), 2 step map(s)
 1 problem(s):
   - [unobservable_fact] principle migration-has-a-way-back.obligations.migration-has-a-way-back/before-completion: `migration.rollback_tested` is not declared observable by protocol adp/1 (hint: declared families: ess_conformance.**, trace_conformance.**, mutation.**, differential.**, invariant.**, clean_room.**, build.**, types.**, task.**, change.**, risk, severity, state.**, workflow.**, principle.**, evidence.**, required_evidence.**, tests.**, test.**, unit_tests.**, contract_tests.**, regression_suite.**, static_analysis.**, contracts.**, property_test.**, coverage.**, specification.**, diff.**, source_diff.**, artifact.**, review.**, verification.**, approval.**, approvals.**, deployment.**, metric.**, service.**)
 $ echo $?
@@ -135,7 +135,7 @@ becomes true:
 
 ```console
 $ $B validate --root .
-46 file(s): 3 protocol(s), 23 principle(s), 4 workflow(s), 7 profile(s), 8 lifecycle(s), 1 step map(s)
+47 file(s): 3 protocol(s), 23 principle(s), 4 workflow(s), 7 profile(s), 8 lifecycle(s), 2 step map(s)
 valid
 $ $B evaluate --root . --task task.yaml | grep passsed
   ? verification.recovery.passsed                                 [principle migration-has-a-way-back]

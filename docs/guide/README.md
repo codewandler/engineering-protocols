@@ -39,7 +39,7 @@ Build the CLI, check the documents, watch a refusal.
 $ cargo build -p protocol-cli
 $ B=target/debug/protocol
 $ $B validate
-44 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 8 lifecycle(s), 1 step map(s)
+45 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 8 lifecycle(s), 2 step map(s)
 valid
 ```
 

@@ -1,0 +1,250 @@
+# The step map for `adp/default` when a story's acceptance is written in **checks** rather than in
+# Rust tests.
+#
+# Its sibling [`default.yaml`](default.yaml) is this repository's cargo map, and it says so in its
+# own header. This one names no compiler and no language: the verifier is the story's own checks,
+# run as one command, and the record the driver keeps is that command's exit status observed by the
+# driver rather than a model's account of it. Roughly a third of this repository's backlog is
+# documents, prompts and plugin shell — work whose acceptance is a check somebody can run and not a
+# `#[test]` — and until this document existed none of it could be driven at all.
+#
+# **Two maps now fit `adp/default/1`, so `protocol drive run` refuses to choose** and `--map` is how
+# a run says which. The refusal names both ids rather than picking the first, which is the same
+# position `protocol artifact move` takes on an illegal transition.
+#
+# ## What a story must carry to be driven under this map
+#
+# One command: **`bash .engineering/checks/run.sh`**, exit 0 when every check passed. That path is
+# the declaration — a planning artifact has no field for a command today, so the convention is
+# where a story says *these are my checks*, and a story whose checks live elsewhere makes that file
+# run them. The model to write one against is
+# [`integrations/claude-code/eval/checks/run-checks.sh`](../../integrations/claude-code/eval/checks/run-checks.sh):
+# nine checks, one row each, an honest exit code, and a table a person can read when it is red.
+#
+# Three programs have to be on `PATH` for a run under this map: `bash`, `git` and `protocol` — the
+# last one because two of the three `verify` steps are this repository's own verbs.
+# `integrations/claude-code/eval/run-driven.sh:65-66` is how a driven run gets it: build
+# `protocol-cli`, then put `target/debug` on `PATH`. A missing program is D5's `Unknown` and submits
+# nothing, so the run stops rather than recording a suite that never ran.
+#
+# The runner's **absence is a red result and not an error**, deliberately. `bash` exits 127 on a
+# script that is not there, and a state whose product is checks that produced none has not
+# established any verifiers — recording that as a failing suite says exactly what happened.
+#
+# ## Red before there is anything to be green about
+#
+# `test.first_result` is the **first** test result ever recorded in a run and it never changes
+# (`crates/aep-engine/src/execution.rs:366-378`), and `establish_verifiers → implement` is guarded
+# on `test.first_result == failed` by `test-driven`. So the checks are run **in
+# `establish_verifiers`, before any implementation exists**, and the run's first recorded suite is
+# the red one. Run `W4-1/1` is what this is written against: it wrote nine red shell checks and then
+# the map's next step ran `cargo test --workspace`, which was green, and the run could not move
+# afterwards by any route.
+#
+# ## The two steps this map has that its sibling does not
+#
+#   * **an `operator` step that approves the specification.** `spec-driven.before_implementation`
+#     wants an `approved` specification and `protocol artifact new` leaves `draft`; the lifecycle is
+#     `draft → in_review → approved`, and no prompt in the sibling map asks for either move. It is
+#     an `operator` step and not an `llm` one because approving a specification is a person's act:
+#     a run that approved its own specification would satisfy the principle by writing to the
+#     document the principle is about. It sits last in `establish_verifiers` — the state whose way
+#     out is the transition that principle guards — so the person is asked once, with the checks
+#     already red and the rest of the state's work done.
+#   * **a `trace` step**, which is a `command` step running `protocol trace evidence`. The driver
+#     mints nothing from it: the checker writes the record in the process that ran the check, and
+#     the driver reads that document and submits what it says (`evidence.record:`). Without it a
+#     driven run mints no `trace_conformance` at all and the only checked transcript is one a person
+#     checked by hand afterwards.
+#
+# The specification it judges against is the plugin eval's driven-step document, which is where the
+# trace documents in this repository live today. That coupling is worth seeing: the map depends on a
+# path under `integrations/claude-code/eval/`, and a rename there stops this step producing a record
+# — it does not block the run, because nothing gates on `trace_conformance` yet.
+format: aep.driver-steps/1
+id: development/checks
+# Pinned like its sibling, and for the same reason: a map names states and orders steps inside them,
+# so an unpinned one is an instruction sheet for whatever happens to be in the tree.
+workflow: adp/default/1
+title: Driving adp/default for work whose acceptance is written in checks
+
+states:
+  # `receive → specify` is unguarded: intake is done when there is something to specify.
+  receive:
+    steps:
+      - kind: llm
+        description: Read the task and record what is being asked for, unedited.
+        skills: [planning]
+        prompt: >-
+          Read the task under `.engineering/` and the artifacts it references. Record what is being
+          asked for in the planning store, in the requester's own terms. Do not design, do not
+          decompose, and do not create anything the request does not name.
+
+  specify:
+    steps:
+      - kind: llm
+        description: State the required behaviour as a specification artifact.
+        skills: [planning]
+        prompt: >-
+          Write the specification for this task as a planning artifact of kind `specification`,
+          through `protocol artifact new`. State the required behaviour so that a verifier could
+          disagree with it: anything left only in the prompt cannot be checked later. Write it so
+          that each statement could become a check somebody can run, because that is what the state
+          after next will turn it into. The transition out of this state is guarded on
+          `artifact.specification.exists`, so the artifact is what moves the run, not a description
+          of one.
+
+  decompose:
+    steps:
+      - kind: llm
+        description: Break the specification into units that can each be verified alone.
+        skills: [planning]
+        prompt: >-
+          Break the specification into tasks that can each be implemented and verified on their own,
+          through `protocol artifact new` and `protocol artifact relate`. Every task states its own
+          acceptance as something a check can decide. A unit nobody can verify separately is a unit
+          that will be declared done by assertion.
+
+  establish_verifiers:
+    steps:
+      - kind: llm
+        description: Write the checks before there is an implementation to shape them around.
+        skills: [planning]
+        prompt: >-
+          Write the checks that will decide whether each decomposed unit is done — one check per
+          unit, each naming the unit it decides — and make `bash .engineering/checks/run.sh` run all
+          of them and exit non-zero while any of them fails. Write no implementation in this state.
+          They are red now, and red is the product: a check that passes before the thing it checks
+          exists is a check of nothing. The model to write against is
+          `integrations/claude-code/eval/checks/run-checks.sh`.
+      # Expected red, and the guard on the way out reads exactly this: `test.first_result == failed`
+      # is the first result ever recorded and never changes, so this is the run's one chance to
+      # record a red suite. It runs before the operator step below so the person is asked once, with
+      # the state's mechanical work already done.
+      - kind: command
+        description: Run the story's checks so that a result exists, whatever it says.
+        run: [bash, .engineering/checks/run.sh]
+        evidence:
+          kind: test_result
+          suite: unit
+          verifier: test-runner
+      # A person, because `spec-driven.before_implementation` asks for an approved specification and
+      # an approval is not a thing a run can obtain for itself. The pause is this step's completion:
+      # the run persists, releases its lock and exits 0, and `protocol drive resume` carries on from
+      # the step after it — whether the person actually approved anything is decided by the guard on
+      # the way out, which refuses with one line per unmet requirement if they did not.
+      - kind: operator
+        description: Approve the specification, or say what is wrong with it.
+        prompt: >-
+          Read the specification this run wrote and the checks it just ran red. If it states the
+          required behaviour well enough for those checks to decide it, move it to `approved` —
+          `protocol artifact move <id> in_review` then `protocol artifact move <id> approved`. If it
+          does not, leave it in `draft` and say so: the transition into `implement` is guarded on an
+          approved specification, so the run stops here either way and nothing is implemented
+          against a specification nobody agreed to.
+
+  implement:
+    steps:
+      - kind: llm
+        description: Make the smallest change that satisfies the unit and its checks.
+        skills: [planning]
+        prompt: >-
+          Make the smallest change that satisfies the decomposed unit and the checks written for it.
+          Do not weaken a check to make it pass; the workflow has an explicit route back here from
+          `verify`, and taking it is cheaper than a suite nobody trusts.
+      # The trace step. `{transcript}` is the transcript of the `llm` step above — the driver fills
+      # it in, because a run directory is allocated when the run starts and a document in the
+      # repository cannot name one. The record is written by the checker and read by the driver:
+      # `trace_conformance` carries the specification's digest, the transcript's digest and three
+      # counts, none of which an exit status has, so this is the one kind a driver must never mint
+      # for itself. `protocol trace evidence` exits 0 on a run that gapped, and that is correct —
+      # the verdict is in the document.
+      - kind: command
+        description: Check the session's own transcript and record what the checker found.
+        run:
+          - protocol
+          - trace
+          - evidence
+          - --spec
+          - integrations/claude-code/eval/expectations.driven-step.trace.yaml
+          - --transcript
+          - "{transcript}"
+          - --out
+          - "{run_directory}/trace-implement.yaml"
+        evidence:
+          kind: trace_conformance
+          verifier: trace-checker
+          record: "{run_directory}/trace-implement.yaml"
+      # `verifier: git` is an external tool, exercised here rather than only in a test.
+      - kind: command
+        description: Observe that the working tree actually changed.
+        run: [git, --no-pager, diff, --stat, HEAD]
+        evidence:
+          kind: diff
+          verifier: git
+
+  verify:
+    steps:
+      - kind: command
+        description: The story's checks, against the change.
+        run: [bash, .engineering/checks/run.sh]
+        evidence:
+          kind: test_result
+          suite: unit
+          verifier: test-runner
+      # Contracts are in the transition guard because a change that passes its own checks can still
+      # break a consumer. For a change made of documents, prompts and shell, the consumers are the
+      # documents that reference it and the tree that loads them: `protocol validate` reads every
+      # protocol, workflow, profile, lifecycle and step map and cross-validates them against each
+      # other. It is declared as the contract suite because `tests.contract.failed` is what the
+      # workflow's guard reads, and this is the suite that answers it here.
+      - kind: command
+        description: The document tree still loads and still cross-validates.
+        run: [protocol, validate, --root, .]
+        evidence:
+          kind: test_result
+          suite: contract
+          verifier: protocol
+      # Static analysis without a compiler: every artifact parses, every edge resolves, every status
+      # is one its kind's lifecycle has. That is the analysis this repository can run over a change
+      # whose product is documents, and `static_analysis.errors == 0` is what the guard reads.
+      - kind: command
+        description: The planning store is internally consistent.
+        run: [protocol, artifact, validate]
+        evidence:
+          kind: static_analysis
+          verifier: protocol
+
+  adversarial_verify:
+    steps:
+      - kind: llm
+        description: Try to break what the previous state just declared working.
+        skills: [planning]
+        prompt: >-
+          Try to break what `verify` just declared working: an input the checks do not cover, a
+          claim in the specification no check decides, a check that would pass with the
+          implementation deleted. Add the checks that fail. You are not the author here even when
+          you wrote the change, and a state that only re-ran the author's own checks would make the
+          author and the adversary one actor.
+      - kind: command
+        description: Run the checks again, with whatever the adversary added.
+        run: [bash, .engineering/checks/run.sh]
+        evidence:
+          kind: test_result
+          suite: unit
+          verifier: test-runner
+
+  # A person, and there is no route around them. `review → complete` is guarded on
+  # `review.approved`, which is a record a human review produces: the driver constructs no approval
+  # and stamps no `producer: human`.
+  review:
+    steps:
+      - kind: operator
+        description: Judge the change as a whole — intent, fit and risk, not just green checks.
+        prompt: >-
+          Review this change as a whole. The run has stopped and released its lock; record your
+          review as evidence and resume it. Nothing the driver can do satisfies this state.
+
+  # Terminal. No steps, and none would run: the engine reports `Completed` on arrival.
+  complete:
+    steps: []

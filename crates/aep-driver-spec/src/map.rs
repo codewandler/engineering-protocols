@@ -293,6 +293,9 @@ pub struct RawEvidenceMapping {
     /// The tool that produced it, for provenance.
     #[serde(default)]
     pub tool: Option<ToolRef>,
+    /// Where the program writes the evidence record, when it writes one itself.
+    #[serde(default)]
+    pub record: Option<String>,
 }
 
 /// Which sort of step this is.
@@ -394,6 +397,19 @@ pub struct CommandStep {
 }
 
 impl CommandStep {
+    /// The names a `{placeholder}` in [`Self::run`] or in `evidence.record` may have.
+    ///
+    /// Two, and both are things only the run knows: where its directory is, and which transcript
+    /// the `llm` step before this one wrote. A map is a document in the repository and a run
+    /// directory is allocated when the run starts, so a step that has to name one has no way to
+    /// write it down — which is why `protocol trace check` could not be a step of a map before
+    /// these existed.
+    ///
+    /// The list is closed and an unknown name is refused at load, because the alternative is a
+    /// command line containing the literal characters `{transcirpt}` and a checker reporting that
+    /// it cannot read that file, halfway through a run.
+    pub const PLACEHOLDERS: &'static [&'static str] = &["run_directory", "transcript"];
+
     /// The program, which a validated step always has.
     pub fn program(&self) -> &str {
         self.run.first().map_or("", String::as_str)
@@ -403,6 +419,39 @@ impl CommandStep {
     pub fn arguments(&self) -> &[String] {
         self.run.get(1..).unwrap_or_default()
     }
+
+    /// Every word of this step that a placeholder may appear in.
+    pub fn expandable(&self) -> impl Iterator<Item = &str> {
+        self.run.iter().map(String::as_str).chain(
+            self.evidence
+                .as_ref()
+                .and_then(|mapping| mapping.record.as_deref()),
+        )
+    }
+}
+
+/// Every `{placeholder}` in `word`, in the order they appear.
+///
+/// A placeholder is `{` then one or more of `a-z` and `_` then `}` — deliberately narrow, so that
+/// the argument `{}` that `find -exec` takes, and a jq program's `{a: .b}`, are ordinary text
+/// rather than a refusal. Anything that *does* match the shape is checked against
+/// [`CommandStep::PLACEHOLDERS`], so a misspelling is refused rather than passed to a program as
+/// literal braces.
+pub fn placeholders_in(word: &str) -> Vec<&str> {
+    let mut found = Vec::new();
+    let mut rest = word;
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else {
+            break;
+        };
+        let name = &after[..close];
+        if !name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+            found.push(name);
+        }
+        rest = &after[close + 1..];
+    }
+    found
 }
 
 /// A validated `llm` step.
@@ -455,6 +504,20 @@ pub struct EvidenceMapping {
     /// The tool that produced it, for provenance.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<ToolRef>,
+    /// Where the program writes the evidence record, when it writes one itself.
+    ///
+    /// Without it a `command` step's evidence is minted from the exit status, which is why
+    /// [`Self::MINTABLE`] is short: an exit status carries *did it produce a verdict, and was it
+    /// yes or no*, and a kind whose record holds digests and counts cannot be built from that
+    /// without inventing them. With it the driver mints nothing — it reads the document the
+    /// verifier wrote, exactly as `protocol evaluate --evidence` reads one, and submits what the
+    /// document says. `protocol trace evidence` is the case it was added for: the record carries
+    /// the specification's digest, the transcript's digest and three counts, all of which are
+    /// facts about a check this process did not run.
+    ///
+    /// The path admits the same placeholders [`CommandStep::run`] does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub record: Option<String>,
 }
 
 impl EvidenceMapping {
@@ -744,6 +807,41 @@ impl TryFrom<RawStepMap> for StepMap {
                     steps.push(step);
                 }
             }
+            // `{transcript}` is the transcript of the `llm` step this step follows, so a state
+            // with no `llm` step before the one that names it has nothing to expand. Decidable
+            // here, from the document alone, which is where a step map's mistakes belong: the
+            // alternative is a run that has already paid for a model session discovering that the
+            // step after it cannot name what to check.
+            let mut preceded_by_llm = false;
+            for (index, step) in steps.iter().enumerate() {
+                match step {
+                    Step::Llm(_) => preceded_by_llm = true,
+                    Step::Command(command)
+                        if !preceded_by_llm
+                            && command
+                                .expandable()
+                                .any(|word| placeholders_in(word).contains(&"transcript")) =>
+                    {
+                        errors.push(
+                            ValidationError::new(
+                                ValidationCode::MissingDeclaration,
+                                format!("{location}.steps[{index}].run"),
+                                format!(
+                                    "`{{transcript}}` is the transcript of the `llm` step this \
+                                         one follows, and no step of `{state}` before it is one"
+                                ),
+                            )
+                            .with_hint(
+                                "put the step after the `llm` step whose transcript it reads, \
+                                 in the same state: a transcript from another state belongs to \
+                                 another session and another prompt",
+                            ),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+
             states.insert(
                 state,
                 StateSteps {
@@ -784,14 +882,36 @@ fn validate_step(raw: RawStep, location: &str, errors: &mut ValidationErrors) ->
                 usable &= validated.is_some();
                 validated
             });
-            usable.then(|| {
-                Step::Command(CommandStep {
-                    run: command.run,
-                    description: command.description,
-                    evidence,
-                    retries: command.retries.unwrap_or(DEFAULT_COMMAND_RETRIES),
-                })
-            })
+            let step = CommandStep {
+                run: command.run,
+                description: command.description,
+                evidence,
+                retries: command.retries.unwrap_or(DEFAULT_COMMAND_RETRIES),
+            };
+            for word in step.expandable() {
+                for name in placeholders_in(word) {
+                    if CommandStep::PLACEHOLDERS.contains(&name) {
+                        continue;
+                    }
+                    errors.push(
+                        ValidationError::new(
+                            ValidationCode::UndeclaredReference,
+                            format!("{location}.run"),
+                            format!("nothing in a run expands `{{{name}}}`"),
+                        )
+                        .with_hint(format!(
+                            "a step may name: {}",
+                            CommandStep::PLACEHOLDERS
+                                .iter()
+                                .map(|name| format!("{{{name}}}"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )),
+                    );
+                    usable = false;
+                }
+            }
+            usable.then_some(Step::Command(step))
         }
         RawStep::Llm(step) => {
             if step.prompt.trim().is_empty() {
@@ -829,13 +949,31 @@ fn validate_step(raw: RawStep, location: &str, errors: &mut ValidationErrors) ->
 }
 
 /// Validates an evidence mapping against what a driver can mint from an exit status.
+///
+/// `record:` changes which question is being asked. Without it the driver builds the record from
+/// the exit status, so the kind has to be one an exit status can carry; with it the verifier wrote
+/// the record and the driver only reads it, so every kind the protocol declares is admissible and
+/// the suite comes out of the document rather than out of this file.
 fn validate_mapping(
     raw: RawEvidenceMapping,
     location: &str,
     errors: &mut ValidationErrors,
 ) -> Option<EvidenceMapping> {
     let mut usable = true;
-    if !EvidenceMapping::MINTABLE.contains(&raw.kind) {
+    let record = match raw.record {
+        Some(path) if path.trim().is_empty() => {
+            errors.push(ValidationError::new(
+                ValidationCode::EmptyDeclaration,
+                format!("{location}.evidence.record"),
+                "a record path with nothing in it names no document for the driver to read",
+            ));
+            usable = false;
+            None
+        }
+        other => other,
+    };
+    let written = record.is_some();
+    if !written && !EvidenceMapping::MINTABLE.contains(&raw.kind) {
         errors.push(
             ValidationError::new(
                 ValidationCode::UnsupportedConstruct,
@@ -846,7 +984,9 @@ fn validate_mapping(
                 ),
             )
             .with_hint(format!(
-                "a command step can mint: {}",
+                "a command step can mint: {}. A verifier that writes the record itself declares \
+                 `record:` beside `kind:`, and then the driver reads the document instead of \
+                 minting anything",
                 EvidenceMapping::MINTABLE
                     .iter()
                     .map(|kind| kind.as_str())
@@ -856,7 +996,7 @@ fn validate_mapping(
         );
         usable = false;
     }
-    if raw.kind == EvidenceKind::TestResult && raw.suite.is_none() {
+    if !written && raw.kind == EvidenceKind::TestResult && raw.suite.is_none() {
         errors.push(
             ValidationError::new(
                 ValidationCode::MissingDeclaration,
@@ -873,6 +1013,7 @@ fn validate_mapping(
         suite: raw.suite,
         subject: raw.subject,
         tool: raw.tool,
+        record,
     })
 }
 
@@ -943,6 +1084,77 @@ mod tests {
             errors.len(),
             4,
             "one error per broken step, not one for the document: {errors}"
+        );
+    }
+
+    /// A kind an exit status cannot carry loads when the verifier writes the record itself.
+    ///
+    /// `trace_conformance` is the case: its record holds two digests and three counts, which is
+    /// why it is not in `MINTABLE` and why it was unreachable from a step map until `record:`
+    /// existed. The suite rule relaxes with it — a `test_result` a verifier wrote names its own
+    /// suite in the document, and requiring the map to name it too would let the two disagree.
+    #[test]
+    fn a_kind_no_exit_status_can_carry_loads_when_the_verifier_writes_the_record() {
+        let states = r#"{"implement":{"steps":[
+            {"kind":"llm","prompt":"do the work"},
+            {"kind":"command","run":["protocol","trace","evidence","--transcript","{transcript}"],
+             "evidence":{"kind":"trace_conformance","verifier":"trace-checker",
+                         "record":"{run_directory}/trace.yaml"}}]}}"#;
+        let map = read(&map_json("adp/default/1", states)).expect("valid");
+        let steps = map.steps_for(&StateId::new("implement").unwrap());
+        let Step::Command(command) = &steps[1] else {
+            panic!("the second step is the command");
+        };
+        assert_eq!(
+            command
+                .evidence
+                .as_ref()
+                .and_then(|mapping| mapping.record.clone())
+                .as_deref(),
+            Some("{run_directory}/trace.yaml")
+        );
+
+        // And without `record:` the same step is refused, because then the driver would have to
+        // invent the digests.
+        let minted = r#"{"implement":{"steps":[
+            {"kind":"command","run":["protocol","trace","check"],
+             "evidence":{"kind":"trace_conformance","verifier":"trace-checker"}}]}}"#;
+        let errors = read(&map_json("adp/default/1", minted)).expect_err("refused");
+        assert!(
+            errors.contains(ValidationCode::UnsupportedConstruct),
+            "{errors}"
+        );
+    }
+
+    /// A misspelled placeholder is refused at load, where it costs nothing to fix.
+    #[test]
+    fn a_placeholder_nothing_expands_is_refused_and_a_brace_that_is_not_one_is_left_alone() {
+        let states = r#"{"implement":{"steps":[
+            {"kind":"command","run":["check","--at","{transcirpt}"]}]}}"#;
+        let errors = read(&map_json("adp/default/1", states)).expect_err("refused");
+        assert!(
+            errors.contains(ValidationCode::UndeclaredReference),
+            "{errors}"
+        );
+
+        // `{}` is `find -exec`'s argument and `{a: .b}` is a jq program: neither is a placeholder,
+        // and a validator that refused them would refuse ordinary command lines.
+        let literal = r#"{"implement":{"steps":[
+            {"kind":"command","run":["find",".","-exec","rm","{}",";"]},
+            {"kind":"command","run":["jq","{a: .b}"]}]}}"#;
+        read(&map_json("adp/default/1", literal)).expect("braces that name nothing are text");
+    }
+
+    /// `{transcript}` in a state with no `llm` step before it names a session that never happened.
+    #[test]
+    fn a_transcript_placeholder_with_no_session_before_it_is_refused() {
+        let states = r#"{"implement":{"steps":[
+            {"kind":"command","run":["protocol","trace","check","--transcript","{transcript}"]},
+            {"kind":"llm","prompt":"too late to help the step above"}]}}"#;
+        let errors = read(&map_json("adp/default/1", states)).expect_err("refused");
+        assert!(
+            errors.contains(ValidationCode::MissingDeclaration),
+            "{errors}"
         );
     }
 

@@ -96,6 +96,14 @@
             }
           ]
         },
+        "record": {
+          "description": "Where the program writes the evidence record, when it writes one itself.",
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "subject": {
           "description": "What the evidence is about.",
           "default": null,

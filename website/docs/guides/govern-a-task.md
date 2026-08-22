@@ -96,7 +96,7 @@ Loading this repository's own tree:
 
 ```console
 $ $B validate --root .
-44 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 8 lifecycle(s), 1 step map(s)
+45 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 8 lifecycle(s), 2 step map(s)
 valid
 ```
 
@@ -279,7 +279,8 @@ itself, which is the point: a driver that could evaluate a gate would be a secon
 implementation with none of the conformance suites behind it.
 
 ```console
-$ $B drive run --project . --plugin-dir integrations/claude-code --pause-on-approval
+$ $B drive run --project . --plugin-dir integrations/claude-code --map development/default \
+    --pause-on-approval
 $ $B drive status
 $ $B drive resume W4-1/1
 ```
@@ -313,11 +314,13 @@ spend and its MCP inventory, which a public tree should not carry.
 The run itself is the honest part: it stopped four states short of the person it was meant to stop
 at, for two reasons the engine printed. Neither is a defect in the engine, and both are about the
 step map — `drivers/development/default.yaml` names `cargo` in every state that names a verifier, so
-a story whose acceptance is written in shell cannot satisfy `test-driven` at all. What closes it is
-a decision on the map rather than a patch to make one run pass: whether that file is a Rust map that
-should say so and be joined by a second, or a general one whose verifier list is wrong. The row
-lives in the repository's gap register, `docs/plan/gap-register.md`, which is where every open
-question in this project is written down beside what closes it.
+a story whose acceptance is written in shell cannot satisfy `test-driven` at all. The decision that
+closed it was the first of the two the row offered: that file is a Rust map, it says so in its
+header, and `drivers/development/checks.yaml` is the map for work whose acceptance is a check
+somebody can run. Two maps now fit `adp/default/1`, which is why the command above names one —
+without `--map` the driver refuses to choose and lists both. The row lives in the repository's gap
+register, `docs/plan/gap-register.md`, which is where every open question in this project is written
+down beside what closes it.
 
 [Integrate an agent harness](./integrate-a-harness.md) covers what the driver enforces, what it
 delegates to hooks, and what to do instead if you are writing your own.

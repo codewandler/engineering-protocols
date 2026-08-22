@@ -69,7 +69,7 @@ and nine principles, a workflow and twelve capability decisions are derived from
   produced and why it stopped, as SVG, HTML, PNG or a live terminal frame. The reasons are the
   engine's own sentences, verbatim.
 * **`protocol trace check` reads the run back.** An agent's transcript is judged against a typed
-  specification — fifty expectation kinds — so *the agent followed the rules* is a verdict a program
+  specification — fifty-one expectation kinds — so *the agent followed the rules* is a verdict a program
   reached from the record, not a claim the agent made about itself. Its exit codes distinguish
   contradicted from nobody-found-out.
 
@@ -131,6 +131,7 @@ The gate is the measurement — run `task check` rather than trusting a number w
 | [`crates/`](crates/) | the workspace: the protocol, the ESS toolchain, the infrastructure and trace domains, the driver and the CLI |
 | [`protocols/`](protocols/), [`principles/`](principles/), [`workflows/`](workflows/), [`profiles/`](profiles/), [`drivers/`](drivers/) | the document tree — the rules themselves, and the step maps that say how a harness obtains what a workflow asks for |
 | [`integrations/claude-code/`](integrations/claude-code/) | the plugin: the planning skill, two agents, and the driver's two enforcement hooks |
+| [`integrations/codex/`](integrations/codex/) | the same instructions in the form Codex reads them — a skill and an `AGENTS.md` fragment. The instruction surface only: no hooks, no adapter, no live eval, and its README says why for each |
 | `.engineering/` | this repository's own project: the planning store it plans itself in, the task under work, and the driver's run records |
 | [`examples/`](examples/) | the worked example, the normative specification, the two synthesised applications, and the evidence-horizon corpus a first adopter contributed |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |

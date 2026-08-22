@@ -20,7 +20,7 @@ document types and the resolution and evaluation model. For syntax, see the
 | **Workflow** | a state machine whose transitions are guarded by predicates over evidence | `adp/default` |
 | **Profile** | a bundle: protocol + workflow + principles + capability policy + completion condition | `development.standard` |
 | **Artifact lifecycle** | which statuses an artifact kind may hold and how they may change | `architecture-decision-record` |
-| **Step map** | which program, model or person runs in each workflow state | `development/default` |
+| **Step map** | which program, model or person runs in each workflow state | `development/default`, `development/checks` |
 | **Task** | the unit of work: objective, kind, profile, declared context facts, artifact manifest | `AUTH-142` |
 | **Artifact manifest** | where the specs, designs and reviews live — references, not copies | `artifacts.yaml` |
 
@@ -91,6 +91,12 @@ A **step map** does: for each state, a list of steps, each of one of three kinds
 | `llm` | a model, in a headless session |
 | `operator` | a person; the run stops and waits |
 
+Two ship, one per shape of work this repository has. `drivers/development/default.yaml`
+(`development/default`) verifies with `cargo`; `drivers/development/checks.yaml`
+(`development/checks`) names no compiler and runs the checks a story carries, as one command. Both
+are written against `adp/default/1`, so a `protocol drive run` with no `--map` is refused, naming
+both rather than picking one.
+
 `protocol drive run` walks the map, makes the engine's calls in order, and records what it did. It
 evaluates **no gate itself**. That restraint is the design: a driver that could decide whether a
 transition is permitted would be a second implementation of the protocol with none of the
@@ -138,6 +144,7 @@ date, and an old fact is not a wrong one.
 ---
 
 **Sources.** `docs/guide/adopting.md`; `docs/guide/harness.md`;
-`docs/plan/document-authoring-brief.md`; `drivers/development/default.yaml` and
-`crates/aep-driver-spec/src/map.rs` (the three step kinds); `profiles/development-driven.yaml`;
-`AGENTS.md` § *Invariants* 6, 10, 14–16; `protocols/aep/1.yaml` (`approval_floor`).
+`docs/plan/document-authoring-brief.md`; `drivers/development/default.yaml`,
+`drivers/development/checks.yaml` and `crates/aep-driver-spec/src/map.rs` (the three step kinds);
+`profiles/development-driven.yaml`; `AGENTS.md` § *Invariants* 6, 10, 14–16;
+`protocols/aep/1.yaml` (`approval_floor`).

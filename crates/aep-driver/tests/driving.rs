@@ -212,6 +212,7 @@ struct Asked {
     attempt: u32,
     tools: usize,
     requirements: usize,
+    reaching: Vec<String>,
 }
 
 /// A harness that runs a script instead of a model, a program or a person.
@@ -236,6 +237,7 @@ impl Fake {
             attempt: context.attempt,
             tools: context.tools.capabilities().len(),
             requirements: context.requirements.len(),
+            reaching: context.reaching.to_vec(),
         });
         let act = self.script.pop_front().expect(
             "the script has an act for every step the driver runs; an empty script means the \
@@ -569,6 +571,24 @@ fn a_run_over_two_states_advances_and_the_report_names_both_moves() {
         fake.asked[0].tools, 3,
         "the tool set is `tool_config` over the effective policy: the three the profile allows"
     );
+    assert_eq!(
+        fake.asked[0].reaching,
+        vec!["-> verify: guard: diff.exists".to_owned()],
+        "the guard on the way out travels with the step, labelled by where it goes: the step is in \
+         `implement`, `diff.exists` does not hold yet, and nothing in `requirements` says so"
+    );
+    assert_eq!(
+        fake.asked[2].reaching,
+        vec![
+            "-> complete: guard: tests.unit.failed == 0".to_owned(),
+            "-> implement: guard: tests.unit.failed > 0".to_owned(),
+            "-> implement: ? artifact.story.exists — unobserved: artifact.story.exists \
+             [state implement]"
+                .to_owned(),
+        ],
+        "every way out is named, back-edge included, and what the *target* state requires on entry \
+         comes with it: the suite has not run at this point, so neither guard holds"
+    );
 }
 
 #[test]
@@ -736,6 +756,74 @@ fn a_resume_refuses_every_moved_pin_on_a_snapshot_the_engine_would_have_accepted
                 panic!("the {what} check is only load-bearing if `restore` accepts this: {error}")
             });
     }
+}
+
+/// A resumed run does not ask the person again, and that is what makes a pause a pause.
+///
+/// The design says a paused run "resumes" (§ 4.6, wave 3's test list), and the shipped map's review
+/// step tells the person to "record your review as evidence and resume it". A cursor left pointing
+/// at the step that paused re-presents the same question on every resume, so the run would stop at
+/// the same person forever and no `operator` step before the last state could ever be passed — the
+/// approval of a specification, in particular, would wedge the run three states before the one it
+/// gates. Whether the person actually did what was asked is decided by the guard on the way out,
+/// which is the only thing that can decide it.
+#[test]
+fn a_resumed_run_does_not_ask_the_person_again_and_carries_on_from_the_step_after() {
+    let with_a_person = r"
+format: aep.driver-steps/1
+id: test/asked-once
+workflow: test/linear/1
+states:
+  implement:
+    steps:
+      - kind: operator
+        prompt: approve the specification before implementation begins
+      - kind: command
+        run: [git, diff]
+        evidence:
+          kind: diff
+          verifier: compiler
+";
+    let root = scratch("asked-once");
+    let engine = engine();
+    let store = MarkdownStore::open(root.join("planning"));
+    let map = map(with_a_person);
+    let run = RunDirectory::at(root.join("runs").join("T-1").join("1"));
+    let options = DriverOptions {
+        pause_on_approval: true,
+        ..DriverOptions::default()
+    };
+
+    let mut fake = Fake::new(&[Act::Pause("a specification is owed an approval")]);
+    let paused = drive(&engine, &task(), &store, &map, &run, &mut fake, &options)
+        .expect("a pause is a report");
+    assert_eq!(paused.status(), RunStatus::AwaitingOperator);
+    assert_eq!(
+        paused.cursor.step, 1,
+        "the pause is the step's completion, so the cursor is past it and the resume has \
+         somewhere to go"
+    );
+
+    let mut fake = Fake::new(&[Act::Diff]);
+    let resumed =
+        resume(&engine, &task(), &store, &map, &run, &mut fake, &options).expect("the run resumes");
+    assert_eq!(
+        fake.asked
+            .iter()
+            .map(|asked| asked.index)
+            .collect::<Vec<_>>(),
+        vec![1],
+        "the resumed run ran the step *after* the pause and asked nobody anything a second time"
+    );
+    assert_eq!(
+        resumed
+            .transitions
+            .iter()
+            .map(|(from, to)| (from.to_string(), to.to_string()))
+            .collect::<Vec<_>>(),
+        vec![("implement".to_owned(), "verify".to_owned())],
+        "and the evidence the step after the pause produced is what moved the run"
+    );
 }
 
 #[test]

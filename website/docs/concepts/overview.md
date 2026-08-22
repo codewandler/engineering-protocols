@@ -56,7 +56,7 @@ outputs     plans, decisions, refusals,          docs, JSON Schema, OpenAPI, Asy
 | `protocol-cli` | the reference CLI over all of it — seventeen top-level verbs |
 
 The document tree (`protocols/`, `principles/`, `workflows/`, `profiles/`, `artifacts/lifecycles/`
-and `drivers/` — 44 files in this repository) is data, not code. Teams vendor it and add their own
+and `drivers/` — 45 files in this repository) is data, not code. Teams vendor it and add their own
 documents beside it; see [Govern a task](../guides/govern-a-task.md).
 
 ### ESS: the specification side

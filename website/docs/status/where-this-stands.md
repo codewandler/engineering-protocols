@@ -36,10 +36,13 @@ blocked because:
 ```
 
 Both are correct refusals. The model wrote its failing checks as shell scripts — the idiom the
-story's own acceptance is written in — and the shipped step map can only run `cargo`, so the
-verifier the driver ran came back green and `test-driven` refused to advance. Nothing was changed to
-make the run go through; the run is the finding, and the two reasons are now rows on the gap
-register.
+story's own acceptance is written in — and the map it was driving under, `development/default`, runs
+`cargo` in every state that names a verifier, so the suite the driver ran came back green and
+`test-driven` refused to advance. Nothing was changed to make the run go through; the run is the
+finding, and both reasons became rows on the gap register. Both rows are now closed by code:
+`development/default` says in its own header that its verifier is cargo, `development/checks` runs
+the checks a story carries instead, and an `llm` step is handed the requirements on the way out of
+its state as well as the ones in force inside it.
 
 What the same run shows working, read out of its own records rather than from a summary:
 
@@ -69,8 +72,8 @@ The v0.2 scope is complete.
 | a reference driver | implemented — `protocol drive run\|status\|resume`, with `command`, `llm` and `operator` steps |
 | running on a real project | **once**, and it blocked; see above |
 
-The document tree is 44 files — 3 protocols, 22 principles, 4 workflows, 6 profiles, 8 artifact
-lifecycles and 1 step map — validated against the protocol vocabulary in CI, plus 15 generated JSON
+The document tree is 45 files — 3 protocols, 22 principles, 4 workflows, 6 profiles, 8 artifact
+lifecycles and 2 step maps — validated against the protocol vocabulary in CI, plus 15 generated JSON
 Schemas that CI fails on if they drift from the Rust types.
 
 ### Evidence gained a time
@@ -159,7 +162,8 @@ The compact list; [Limitations](./limitations.md) carries the consequences of ea
 * No attested evidence — `independent: true` is structural, not cryptographic.
 * No federated artifact graphs across repositories.
 * Obligations are plan entries, not yet artifacts a task can own (deferred by decision).
-* The shipped step map can only verify Rust, which is what stopped the first governed run.
+* Nothing gates on `trace_conformance`, so a driven run's own transcript check is provenance in the
+  audit trail rather than a gate that can stop it.
 * A second harness has never been driven, so the harness-neutrality claim is still untested.
 
 ---

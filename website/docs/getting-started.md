@@ -34,7 +34,7 @@ The rest of this page uses `$B` for the binary.
 
 ```console
 $ $B validate
-44 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 8 lifecycle(s), 1 step map(s)
+45 file(s): 3 protocol(s), 22 principle(s), 4 workflow(s), 6 profile(s), 8 lifecycle(s), 2 step map(s)
 valid
 ```
 

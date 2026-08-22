@@ -60,7 +60,9 @@ use aep_driver::executor::{
 use aep_driver::lock::{Liveness, LockState};
 use aep_driver::run::{DriveError, DriverOptions, RunDirectory, RunReport};
 use aep_driver_spec::cursor::{DriverCursor, RunId, RunStatus, StolenLock};
-use aep_driver_spec::map::{CommandStep, EvidenceMapping, LlmStep, OperatorStep, Step, StepMap};
+use aep_driver_spec::map::{
+    placeholders_in, CommandStep, EvidenceMapping, LlmStep, OperatorStep, Step, StepMap,
+};
 use aep_driver_spec::tool::ToolConfig;
 use aep_engine::engine::EvidenceSubmission;
 use aep_engine::project::project_directory;
@@ -85,6 +87,52 @@ const CURRENT_FILE: &str = "current";
 
 /// The transcript directory inside a run.
 const TRANSCRIPTS: &str = "transcripts";
+
+/// Where one attempt at one `llm` step leaves its transcript.
+///
+/// One function rather than two spellings of the same format string: the step that *writes* the
+/// transcript and the step that *checks* it are different steps of a map, and a checker pointed at
+/// a path the writer never used would report that a session did nothing.
+fn transcript_path(run_directory: &Path, state: &StateId, index: usize, attempt: u32) -> PathBuf {
+    run_directory
+        .join(TRANSCRIPTS)
+        .join(format!("{state}-{index}-{attempt}.jsonl"))
+}
+
+/// Expands the placeholders a step map admits, or says which one it could not.
+///
+/// The vocabulary is `aep_driver_spec::map::CommandStep::PLACEHOLDERS` and an unknown name is
+/// refused at load, so the only failure reachable here is a `{transcript}` in a run where the
+/// `llm` step before it has not run — which is a fact about the run and cannot be decided from the
+/// document.
+fn expand(word: &str, context: &StepContext<'_>) -> Result<String, String> {
+    let mut expanded = word.to_owned();
+    for name in placeholders_in(word) {
+        let value = match name {
+            "run_directory" => context.run_directory.display().to_string(),
+            "transcript" => {
+                let Some(step) = context.preceding_llm else {
+                    return Err(format!(
+                        "`{{transcript}}` is the transcript of the `llm` step this one follows, \
+                         and no `llm` step of `{}` has run in this run",
+                        context.state
+                    ));
+                };
+                transcript_path(
+                    context.run_directory,
+                    context.state,
+                    step.index,
+                    step.attempt,
+                )
+                .display()
+                .to_string()
+            }
+            other => return Err(format!("nothing expands `{{{other}}}`")),
+        };
+        expanded = expanded.replace(&format!("{{{name}}}"), &value);
+    }
+    Ok(expanded)
+}
 
 /// The per-step context the plugin's hooks read, written into the run directory.
 ///
@@ -918,6 +966,7 @@ impl CliExecutors {
                 .map(ToString::to_string)
                 .collect(),
             tools: allowed_tools(context.tools),
+            reaching: context.reaching.to_vec(),
         };
         let text = serde_json::to_string_pretty(&document)
             .map_err(|error| format!("the step context would not serialise: {error}"))?;
@@ -956,13 +1005,27 @@ struct StepContextFile {
     capabilities: Vec<String>,
     /// The harness's own names for them, as passed to `--allowedTools`.
     tools: Vec<String>,
+    /// What is still outstanding on a way out of this state, one line per unmet requirement.
+    ///
+    /// A fact about the state like every other field here, and not a rule: it is what the engine
+    /// has already evaluated to be missing, in the engine's own words. Added to
+    /// `aep.drive-step-context/1` additively — a reader that does not know the key does not read
+    /// it, and the hooks in `integrations/claude-code/hooks/` take named scalar fields by path.
+    reaching: Vec<String>,
 }
 
 impl CommandStepExecutor for CliExecutors {
     fn run_command(&mut self, step: &CommandStep, context: &StepContext<'_>) -> StepOutcome {
-        let rendered = step.run.join(" ");
-        let outcome = Process::new(step.program())
-            .args(step.arguments())
+        // Expanded before anything is spawned, and a placeholder that cannot be filled is D5's
+        // `Unknown`: a command line carrying the literal characters `{transcript}` would run, fail
+        // to open that file and be recorded as a verdict about the subject.
+        let words: Vec<String> = match step.run.iter().map(|word| expand(word, context)).collect() {
+            Ok(words) => words,
+            Err(reason) => return StepOutcome::NoVerdict { reason },
+        };
+        let rendered = words.join(" ");
+        let outcome = Process::new(&words[0])
+            .args(&words[1..])
             .current_dir(&self.working_directory)
             .stdin(Stdio::null())
             .output();
@@ -994,6 +1057,15 @@ impl CommandStepExecutor for CliExecutors {
                 reason: format!("`{rendered}` was killed before it produced a verdict"),
             };
         };
+
+        // A verifier that wrote its own record: read what it wrote. The exit status is not
+        // consulted at all — `protocol trace evidence` exits 0 on a run that gapped, because the
+        // verdict is in the document and the engine is what decides on it.
+        if let Some(mapping) = &step.evidence {
+            if let Some(record) = &mapping.record {
+                return read_record(record, mapping, &rendered, context);
+            }
+        }
 
         let Some(mapping) = &step.evidence else {
             return if code == 0 {
@@ -1069,10 +1141,12 @@ impl LlmStepExecutor for CliExecutors {
         if !settings.exists() {
             let _ = fs::write(&settings, "{}\n");
         }
-        let transcript = transcripts.join(format!(
-            "{}-{}-{}.jsonl",
-            context.state, context.index, context.attempt
-        ));
+        let transcript = transcript_path(
+            self.run_directory.as_path(),
+            context.state,
+            context.index,
+            context.attempt,
+        );
 
         // Before the session, never during it: a hook fires inside a process the driver has already
         // launched, so a context written late is a context the first tool call never saw.
@@ -1164,6 +1238,21 @@ fn prompt_for(step: &LlmStep, context: &StepContext<'_>) -> String {
             prompt.push('\n');
         }
     }
+    // The other half of the same question, and the half no step was ever told: what the state is
+    // trying to *reach*. Under its own heading rather than merged into the list above, because the
+    // two are different obligations — one is owed while here, the other is owed before the run may
+    // leave — and a step that cannot tell them apart cannot tell which one it is being refused on.
+    if !context.reaching.is_empty() {
+        prompt.push_str(
+            "\nWhat this state is trying to reach, one line per requirement that does not hold yet \
+             on the way out:\n",
+        );
+        for line in context.reaching {
+            prompt.push_str("  ");
+            prompt.push_str(line);
+            prompt.push('\n');
+        }
+    }
     prompt.push_str(
         "\nYou cannot submit evidence, and nothing you say is evidence. What you achieve is \
          observed by the verifier the driver runs after this step.\n",
@@ -1173,9 +1262,11 @@ fn prompt_for(step: &LlmStep, context: &StepContext<'_>) -> String {
 
 /// The command line one `llm` step is invoked with.
 ///
-/// Two rules are asserted over this value rather than left as notes, because both failures would be
-/// silent: it **never** contains `--bare`, which skips hooks and would delete the driver's own
-/// enforcement arm, and it **always** carries `--settings`. Review finding **F15**.
+/// Three rules are asserted over this value rather than left as notes, because every one of the
+/// failures would be silent: it **never** contains `--bare`, which skips hooks and would delete the
+/// driver's own enforcement arm; it **always** carries `--settings` (review finding **F15**); and it
+/// **always** carries `--strict-mcp-config`, which is what keeps a session's MCP surface to what
+/// this line gave it — nothing.
 fn claude_argv(
     step: &LlmStep,
     context: &StepContext<'_>,
@@ -1192,6 +1283,13 @@ fn claude_argv(
         "--verbose".to_owned(),
         "--settings".to_owned(),
         settings.display().to_string(),
+        // Every MCP configuration this line did not give the session is ignored — and it gives
+        // none. A scratch `CLAUDE_CONFIG_DIR` isolates a *directory*, and an account's MCP servers
+        // arrive with the login over the network: two of the four sessions in run `W4-1/1` listed
+        // three the tree had never heard of. `env.mcp_servers` gates at zero in the driven trace
+        // specifications, so without this flag a driven run on an account with servers attached
+        // fails its own transcript check for a reason nobody in the repository can fix.
+        "--strict-mcp-config".to_owned(),
     ];
     let tools = allowed_tools(context.tools);
     if !tools.is_empty() {
@@ -1254,6 +1352,79 @@ fn observed_now() -> ObservedAt {
             u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
         });
     ObservedAt::new(Timestamp::from_epoch_millis(millis))
+}
+
+/// Reads the record a verifier wrote for itself, and submits what the document says.
+///
+/// The other half of `mint`, and the reason both exist. `mint` builds a record from an exit status,
+/// which is honest for a suite and impossible for a check whose record carries digests and counts:
+/// a `trace_conformance` minted from `exit 0` would state a specification digest nobody computed.
+/// So a verifier that can write its own record does, and the driver's whole job here is to read it
+/// — which is the same thing `protocol evaluate --evidence` does with a file a person points at.
+///
+/// Three refusals, each of them D5's `Unknown` rather than a failing verdict:
+///
+/// * **no document** — the program was to write one and did not, so nothing was observed;
+/// * **more than one record** — a step establishes one thing, and picking one of several would be
+///   the driver choosing what the run is about;
+/// * **an approval, or anything a person is recorded as having produced** — invariant 7 at this
+///   layer. A run's own step must not be able to hand the engine a human's approval read out of a
+///   file; that record enters through a person and `protocol evaluate --evidence`, never here.
+fn read_record(
+    declared: &str,
+    mapping: &EvidenceMapping,
+    command: &str,
+    context: &StepContext<'_>,
+) -> StepOutcome {
+    let path = match expand(declared, context) {
+        Ok(path) => PathBuf::from(path),
+        Err(reason) => return StepOutcome::NoVerdict { reason },
+    };
+    let no_verdict = |reason: String| StepOutcome::NoVerdict { reason };
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) => {
+            return no_verdict(format!(
+                "`{command}` was to write a `{}` record at {} and {error}, so nothing was observed",
+                mapping.kind.as_str(),
+                path.display()
+            ))
+        }
+    };
+    let origin = path.display().to_string();
+    let inputs = match aep_schema::parse::evidence_list(&text, Some(&origin)) {
+        Ok(inputs) => inputs,
+        Err(error) => {
+            return no_verdict(format!(
+                "the record `{command}` wrote does not read: {error}"
+            ))
+        }
+    };
+    let held = inputs.len();
+    let Some(input) = inputs.into_iter().next().filter(|_| held == 1) else {
+        return no_verdict(format!(
+            "a step establishes one thing, and the record `{command}` wrote at {} holds {held}",
+            path.display()
+        ));
+    };
+    if input.evidence.kind() != mapping.kind {
+        return no_verdict(format!(
+            "the step declares `{}` and the record `{command}` wrote is a `{}`",
+            mapping.kind.as_str(),
+            input.evidence.kind().as_str()
+        ));
+    }
+    if matches!(input.evidence, Evidence::Approval(_))
+        || matches!(input.producer, Producer::Human { .. })
+    {
+        return no_verdict(format!(
+            "the record at {} is an approval or is recorded as a person's, and a driven step \
+             cannot submit one: an approval reaches an execution through a person running \
+             `protocol evaluate --evidence`",
+            path.display()
+        ));
+    }
+    StepOutcome::Observed(Box::new(crate::submission(input)))
 }
 
 /// Turns a verdict into the evidence the map said it establishes.
@@ -1338,6 +1509,7 @@ mod tests {
     use super::*;
     use aep_domain::capability::Environment;
     use aep_domain::ids::StateId;
+    use aep_driver::executor::StepAttempt;
 
     fn config(capabilities: &[Capability]) -> ToolConfig {
         ToolConfig::new(capabilities.iter().cloned().collect())
@@ -1354,6 +1526,7 @@ mod tests {
         let tools = config(&[Capability::RepositoryRead, Capability::CommandExecution]);
         let state: StateId = "specify".parse().expect("a state id");
         let requirements: Vec<String> = Vec::new();
+        let reaching: Vec<String> = Vec::new();
         let context = StepContext {
             state: &state,
             index: 0,
@@ -1361,6 +1534,8 @@ mod tests {
             tools: &tools,
             run_directory: Path::new("/runs/T-1/1"),
             requirements: &requirements,
+            reaching: &reaching,
+            preceding_llm: None,
         };
         let plugin_dirs: Vec<PathBuf> = plugins.iter().map(PathBuf::from).collect();
         let prompt = prompt_for(&step, &context);
@@ -1371,6 +1546,219 @@ mod tests {
             &plugin_dirs,
             &prompt,
         )
+    }
+
+    /// What the step is trying to reach reaches the step, under a heading of its own.
+    ///
+    /// Run `W4-1/1` spent $8.36 in `establish_verifiers` writing checks the guard out of that state
+    /// then refused, because the prompt carried `Evaluation::requirements` — what must hold *while
+    /// in* the state — and never `Evaluation::transitions[].requirements`, which is what the state
+    /// is trying to reach. The two lines are asserted apart rather than together: a prompt that
+    /// merged them would tell a step that its outgoing guard is already in force here, which is a
+    /// different instruction.
+    #[test]
+    fn an_unmet_outgoing_guard_is_named_in_the_prompt_under_the_reaching_heading() {
+        let step = LlmStep {
+            description: None,
+            harness: LlmStep::DEFAULT_HARNESS.to_owned(),
+            skills: Vec::new(),
+            prompt: "write the checks".to_owned(),
+        };
+        let tools = config(&[Capability::RepositoryRead]);
+        let state: StateId = "establish_verifiers".parse().expect("a state id");
+        let requirements = vec!["✓ artifact story (any) [state establish_verifiers]".to_owned()];
+        let reaching = vec![
+            "-> implement: guard: test.exists".to_owned(),
+            "-> implement: ✗ test.first_result == failed [principle test-driven]".to_owned(),
+        ];
+        let context = StepContext {
+            state: &state,
+            index: 0,
+            attempt: 1,
+            tools: &tools,
+            run_directory: Path::new("/runs/W4-1/1"),
+            requirements: &requirements,
+            reaching: &reaching,
+            preceding_llm: None,
+        };
+
+        let prompt = prompt_for(&step, &context);
+        let (held, reached) = prompt
+            .split_once("What this state is trying to reach")
+            .expect("the reaching lines are under their own heading");
+        assert!(
+            held.contains("artifact story (any)"),
+            "what must hold here stays under its own heading: {prompt}"
+        );
+        for line in &reaching {
+            assert!(
+                reached.contains(line.as_str()),
+                "`{line}` is what the state is trying to reach and belongs in the prompt: {prompt}"
+            );
+            assert!(
+                !held.contains(line.as_str()),
+                "`{line}` guards the way out and must not read as a rule in force here: {prompt}"
+            );
+        }
+    }
+
+    /// A scratch directory under this crate's target directory, named for the test that asked.
+    fn scratch(name: &str) -> PathBuf {
+        let directory = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../target/drive-records")
+            .join(name);
+        std::fs::remove_dir_all(&directory).ok();
+        std::fs::create_dir_all(&directory).expect("the scratch directory is writable");
+        directory
+    }
+
+    /// A `trace_conformance` document of the shape `protocol trace evidence` writes.
+    const TRACE_RECORD: &str = "\
+- kind: trace_conformance
+  specification: driven-eval/honest-step
+  spec_digest: c2114acdc5782176f7149da41bf1baab6266305ce77d31f813da9de8f93e7aeb
+  transcript_digest: 6522e1ebe318da1e0a604e595ecc9afed1d1041c6e418a1382e4f1600a17640b
+  status: passed
+  expectations_total: 12
+  expectations_gapped: 0
+  expectations_unknown: 0
+  observed_at: 1787355862391
+  producer:
+    producer: verifier
+    verifier: trace-checker
+";
+
+    /// The record a verifier wrote is submitted as the verifier's, with nothing minted here.
+    ///
+    /// `trace_conformance` is not in `EvidenceMapping::MINTABLE` and must never be: its record
+    /// carries a specification digest, a transcript digest and three counts, and an exit status
+    /// carries none of them. So the check writes the document and the driver reads it — and the
+    /// producer that arrives at the engine is the checker's, not this binary's, which is what makes
+    /// the record admissible at all.
+    #[test]
+    fn a_record_a_verifier_wrote_is_submitted_as_that_verifiers_and_never_minted_here() {
+        let directory = scratch("trace");
+        let record = directory.join("trace-implement.yaml");
+        std::fs::write(&record, TRACE_RECORD).expect("the record is writable");
+        let mapping = EvidenceMapping {
+            kind: EvidenceKind::TraceConformance,
+            verifier: Verifier::TraceChecker,
+            suite: None,
+            subject: None,
+            tool: None,
+            record: Some("{run_directory}/trace-implement.yaml".to_owned()),
+        };
+        let tools = config(&[Capability::RepositoryRead]);
+        let state: StateId = "implement".parse().expect("a state id");
+        let requirements: Vec<String> = Vec::new();
+        let reaching: Vec<String> = Vec::new();
+        let context = StepContext {
+            state: &state,
+            index: 1,
+            attempt: 1,
+            tools: &tools,
+            run_directory: &directory,
+            requirements: &requirements,
+            reaching: &reaching,
+            preceding_llm: Some(StepAttempt {
+                index: 0,
+                attempt: 1,
+            }),
+        };
+
+        let outcome = read_record(
+            mapping.record.as_deref().expect("a declared record"),
+            &mapping,
+            "protocol trace evidence",
+            &context,
+        );
+        let StepOutcome::Observed(submission) = outcome else {
+            panic!("a record that reads is a verdict: {outcome:?}");
+        };
+        assert_eq!(
+            submission.evidence.kind(),
+            EvidenceKind::TraceConformance,
+            "what the document says it is, is what is submitted"
+        );
+        assert!(
+            matches!(
+                submission.producer,
+                Producer::Verifier {
+                    verifier: Verifier::TraceChecker
+                }
+            ),
+            "the producer is the checker's own: {:?}",
+            submission.producer
+        );
+
+        // `{transcript}` is a run-time fact, so a step that names one in a run where no `llm` step
+        // has run is D5's `Unknown` rather than a verdict about a file that is not there.
+        let empty: Vec<String> = Vec::new();
+        let unrun = StepContext {
+            state: &state,
+            index: 1,
+            attempt: 1,
+            tools: &tools,
+            run_directory: &directory,
+            requirements: &empty,
+            reaching: &empty,
+            preceding_llm: None,
+        };
+        let outcome = expand("{transcript}", &unrun).expect_err("there is no transcript to name");
+        assert!(outcome.contains("transcript"), "{outcome}");
+    }
+
+    /// Invariant 7 at the layer a `record:` path opens: a run cannot submit a person's approval.
+    ///
+    /// The path a step writes to is a path a step can also write *to*, and an approval read out of
+    /// a file would unlock a capability gate with a document the run itself could have authored.
+    /// The engine's capability check matches on the decision and not on who granted it, so the
+    /// refusal has to be here.
+    #[test]
+    fn an_approval_read_out_of_a_file_is_refused_however_well_formed_it_is() {
+        let directory = scratch("approval");
+        let record = directory.join("approval.yaml");
+        std::fs::write(
+            &record,
+            "- kind: approval\n  approval: release\n  decision: granted\n  \
+             observed_at: 1787355862391\n  producer:\n    producer: human\n    id: a-person\n",
+        )
+        .expect("the record is writable");
+        let mapping = EvidenceMapping {
+            kind: EvidenceKind::Approval,
+            verifier: Verifier::HumanApproval,
+            suite: None,
+            subject: None,
+            tool: None,
+            record: Some("{run_directory}/approval.yaml".to_owned()),
+        };
+        let tools = config(&[Capability::RepositoryRead]);
+        let state: StateId = "review".parse().expect("a state id");
+        let empty: Vec<String> = Vec::new();
+        let context = StepContext {
+            state: &state,
+            index: 0,
+            attempt: 1,
+            tools: &tools,
+            run_directory: &directory,
+            requirements: &empty,
+            reaching: &empty,
+            preceding_llm: None,
+        };
+
+        let outcome = read_record(
+            mapping.record.as_deref().expect("a declared record"),
+            &mapping,
+            "cat approval.yaml",
+            &context,
+        );
+        let StepOutcome::NoVerdict { reason } = outcome else {
+            panic!("an approval read out of a file is refused: {outcome:?}");
+        };
+        assert!(
+            reason.contains("approval"),
+            "the refusal says what it refused: {reason}"
+        );
     }
 
     /// Review finding **F15**, as a test rather than a note, because both failures are silent.
@@ -1392,6 +1780,27 @@ mod tests {
             .position(|word| word == "--settings")
             .expect("the settings flag is always present");
         assert_eq!(argv[settings + 1], "/runs/T-1/1/settings.json");
+    }
+
+    /// A session's MCP surface is what the launch line gave it, and the launch line gives none.
+    ///
+    /// The gap the register row called impossible to close from here: a scratch `CLAUDE_CONFIG_DIR`
+    /// cannot exclude an account's servers, because they arrive with the login rather than out of a
+    /// file. `--strict-mcp-config` can, and the eval runner already passes it — a driver that did
+    /// not would launch sessions the eval's own specifications would then fail, on an account
+    /// property no document in this repository controls.
+    #[test]
+    fn a_session_is_launched_with_no_mcp_configuration_it_was_not_given() {
+        let argv = argv_for(&[], &[]);
+        assert!(
+            argv.iter().any(|word| word == "--strict-mcp-config"),
+            "an account's MCP servers arrive with the login, and this flag is what excludes \
+             them: {argv:?}"
+        );
+        assert!(
+            !argv.iter().any(|word| word == "--mcp-config"),
+            "and nothing hands one back: {argv:?}"
+        );
     }
 
     #[test]
@@ -1459,6 +1868,7 @@ mod tests {
             suite: Some(TestSuite::Unit),
             subject: None,
             tool: None,
+            record: None,
         };
         let failed = mint(&mapping, false, "cargo test", observed_now()).expect("a verdict");
         match &failed.evidence {
@@ -1478,6 +1888,7 @@ mod tests {
             suite: None,
             subject: None,
             tool: None,
+            record: None,
         };
         assert!(
             mint(&diff, false, "git diff", observed_now()).is_none(),

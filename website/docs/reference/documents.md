@@ -300,6 +300,21 @@ Only a `command` step may carry `evidence:`. An `llm` step cannot be given one, 
 is supposed to have achieved that is *checkable* is observed by the command step after it — which is
 what keeps `independent: true` honestly satisfiable.
 
+Without `record:`, the driver mints the record from the program's exit status, so the kind has to be
+one an exit status can carry: `test_result`, `static_analysis`, `contract_result` or `diff`
+(`EvidenceMapping::MINTABLE`, `crates/aep-driver-spec/src/map.rs:531-536`). `record: <path>` says
+the program writes the record itself, and then the driver reads that document and submits what it
+says rather than minting anything. That is what makes `trace_conformance` reachable from a map at
+all: its record carries a specification digest, a transcript digest and three counts, and an exit
+status carries none of them.
+
+Two placeholders are expanded in a `command` step's `run` words and in its `record:` path:
+`{run_directory}`, and `{transcript}`, the transcript of the `llm` step this one follows in the
+same state, at the attempt that ran. The list is closed, so a misspelling is refused at load rather
+than handed to a program as literal braces, and so is a `{transcript}` in a state with no `llm` step
+before it. `{}` and `{a: .b}` match nothing and stay ordinary text, because `find -exec` and `jq`
+write them.
+
 ## Task and artifact manifest
 
 See [Govern a task](../guides/govern-a-task.md) for complete examples. A task requires `id`,

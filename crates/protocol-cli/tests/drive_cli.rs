@@ -389,8 +389,9 @@ fn the_committed_step_map_loads_and_is_refused_when_a_state_is_renamed() {
     let output = protocol(&["validate", "--root", "."]);
     assert_eq!(code(&output), 0, "{}", stderr(&output));
     assert!(
-        stdout(&output).contains("1 step map(s)"),
-        "{}",
+        stdout(&output).contains("2 step map(s)"),
+        "both shipped maps load and cross-validate: `development/default` is the cargo one and \
+         `development/checks` runs the checks a story carries\n{}",
         stdout(&output)
     );
 
@@ -432,4 +433,104 @@ fn the_committed_step_map_loads_and_is_refused_when_a_state_is_renamed() {
         text.contains("implement"),
         "the refusal lists the states the workflow does declare:\n{text}"
     );
+}
+
+/// Two maps fit `adp/default/1`, and the driver refuses to pick one on the caller's behalf.
+///
+/// This changed when `development/checks` shipped: before it, a run with no `--map` was given the
+/// only map that fitted, and the wave-4 run `W4-1/1` was started that way. The refusal is the
+/// wanted outcome rather than a regression — which map a run is under decides how its evidence is
+/// obtained, and guessing that is the one thing the driver does not do — but it is a change to what
+/// a bare `protocol drive run` does, so it is asserted rather than left to be discovered.
+#[test]
+fn two_maps_fit_the_workflow_so_the_driver_refuses_to_choose_and_names_both() {
+    let fixture = Fixture::new("two-maps", false);
+    let output = protocol(&[
+        "drive",
+        "run",
+        "--project",
+        printable(&fixture.directory),
+        "--root",
+        printable(&root()),
+        "--task",
+        printable(&fixture.directory.join("task.yaml")),
+    ]);
+    let said = format!("{}{}", stdout(&output), stderr(&output));
+    assert_eq!(code(&output), 1, "{said}");
+    for named in ["development/default", "development/checks", "--map"] {
+        assert!(
+            said.contains(named),
+            "the refusal names both maps and the flag that chooses one; `{named}` is missing:\n{said}"
+        );
+    }
+    assert!(
+        !fixture.runs().join("lock.json").exists(),
+        "a refused start left a lock behind"
+    );
+}
+
+/// The checks map plans against this repository's own task, which is the check `drive run` makes
+/// before it executes anything.
+///
+/// Planning-level on purpose: running it would run nine shell checks, a model session and this
+/// repository's own document validation. `check_run` is phase two of the map's cross-validation —
+/// every evidence kind against the protocol the **task** resolves to, and the workflow pin against
+/// the workflow in the tree — and it is what stands between a map that loads and a map that fails
+/// halfway through a run that has already spent a budget.
+#[test]
+fn the_checks_map_plans_against_the_repositorys_own_task() {
+    let registry = aep_engine::load::load_tree(&root()).expect("the document tree loads");
+    let text = std::fs::read_to_string(root().join(".engineering/task.yaml"))
+        .expect("the repository's own task document is readable");
+    let task = aep_schema::parse::task(&text, Some(".engineering/task.yaml")).expect("it parses");
+    let plan = aep_engine::resolve(&task, &registry).expect("it resolves");
+    let id = "development/checks".parse().expect("a step map id");
+    let map = registry
+        .step_map(&id)
+        .expect("the checks map is in the tree");
+
+    let refusals = map.check_run(&plan.protocol, &plan.workflow);
+    assert!(
+        refusals.is_empty(),
+        "the map is not runnable against the task the repository drives: {refusals}"
+    );
+
+    // The property the whole map exists for: the first suite a run records is the story's own
+    // checks, red, in the state before implementation. `test.first_result` is the first result ever
+    // recorded and never changes, so a map that ran anything else first would wedge exactly as
+    // `W4-1/1` did.
+    let establish = "establish_verifiers".parse().expect("a state id");
+    let first_suite = map
+        .steps_for(&establish)
+        .iter()
+        .find_map(|step| match step {
+            aep_driver_spec::map::Step::Command(command) => command
+                .evidence
+                .as_ref()
+                .filter(|mapping| mapping.kind == aep_domain::evidence::EvidenceKind::TestResult)
+                .map(|_| command.run.clone()),
+            _ => None,
+        })
+        .expect("`establish_verifiers` records a test result");
+    assert_eq!(
+        first_suite,
+        vec!["bash".to_owned(), ".engineering/checks/run.sh".to_owned()],
+        "the first suite a run under this map records is the story's own checks"
+    );
+
+    // And the trace step, which is the other thing this map has that its sibling does not: the
+    // record is read from the document the checker wrote, never minted from an exit status.
+    let implement = "implement".parse().expect("a state id");
+    let record = map
+        .steps_for(&implement)
+        .iter()
+        .find_map(|step| match step {
+            aep_driver_spec::map::Step::Command(command) => command
+                .evidence
+                .as_ref()
+                .and_then(|mapping| mapping.record.clone()),
+            _ => None,
+        })
+        .expect("`implement` reads a record a verifier wrote");
+    assert_eq!(record, "{run_directory}/trace-implement.yaml");
 }

@@ -31,6 +31,32 @@ belongs in the commit message or in `docs/design/`.
   been advisory: a server in the init event no longer reports somebody's account, it reports a
   broken exclusion. The driver's own session launcher gains the same flag with the driver wave.
 
+- **A second step map, `development/checks`, for work whose acceptance is written in checks.**
+  `drivers/development/default.yaml` names `cargo` in every state that names a verifier, which is
+  what wedged governed run `W4-1/1`: the model wrote nine red shell checks and the step after it
+  ran `cargo test --workspace` green, recording `test.first_result = passed`, which never changes.
+  The decision the register row offered is taken: that file is a Rust map and says so in its
+  header, and `drivers/development/checks.yaml` is the map beside it — one verifier command,
+  `bash .engineering/checks/run.sh`, run in `establish_verifiers` before any implementation exists
+  so the first recorded suite is the red one; `protocol validate` and `protocol artifact validate`
+  as contract suite and static analysis, so no compiler is named anywhere. It carries the two
+  steps its sibling lacks: an `operator` step that asks a person to approve the specification,
+  because `spec-driven.before_implementation` wants `approved` and a run that approved its own
+  specification would satisfy the principle by writing to the document the principle is about; and
+  a `command` step running `protocol trace evidence`, so a driven run mints its own
+  `trace_conformance` instead of a person typing the verb afterwards. Two maps now fit
+  `adp/default/1`, so `protocol drive run` refuses to choose and names both — `--map` says which.
+
+- **A step map can name the document a verifier wrote.** `evidence.record: <path>` on a `command`
+  step: the driver reads that document and submits what it says instead of minting a record from
+  the exit status. This is what makes `trace_conformance` reachable from a map at all — its record
+  carries a specification digest, a transcript digest and three counts, and an exit status carries
+  none of them, so minting one would state numbers nobody read. Two placeholders are expanded in a
+  step's `run` words and in `record:` — `{run_directory}` and `{transcript}`, the transcript of
+  the `llm` step this one follows — because a run directory is allocated when the run starts and a
+  document in the repository cannot name one. An unknown placeholder, and a `{transcript}` in a
+  state with no `llm` step before it, are refused at load.
+
 - **A Codex variant of the planning instructions**, at `integrations/codex/`: the same four
   guardrails and the same read-the-vocabulary-from-the-CLI rule, as a Codex skill and an
   `AGENTS.md` fragment, verified against codex-cli 0.145.0. Instruction surface only — no
@@ -50,6 +76,28 @@ belongs in the commit message or in `docs/design/`.
   dated tomorrow is still refused. Found by the docs overhaul re-running every quoted command.
 
 ### Changed
+
+- **An `llm` step is now told what guards the way *out* of its state.** The step context carried
+  `Evaluation.requirements` — what must hold *while in* the state — and never the outgoing
+  transition's, so in `W4-1/1` the model was never told that `implement` needed a red suite and an
+  approved specification, and $8.36 of one state went on work the guard then refused.
+  `StepContext` carries `reaching` beside `requirements`: one line per requirement that does not
+  hold yet on a way out, prefixed with where that transition goes, under its own heading in the
+  prompt and as a `reaching` array in `step-context.json` (additive to
+  `aep.drive-step-context/1`).
+
+- **An `operator` step is a question asked once.** The pause is the step's completion, so the
+  cursor moves past it and `protocol drive resume` carries on from the step after — whether the
+  person did what was asked is decided by the guard on the way out, which refuses with one line
+  per unmet requirement. A cursor left pointing at the step that paused re-presented the same
+  question on every resume, so no map with an `operator` step before its last state could ever
+  move past one.
+
+- **The driver's model sessions launch with `--strict-mcp-config`**, so a session's MCP surface is
+  what the launch line gave it, which is nothing. An account's MCP servers arrive with the login
+  and a scratch `CLAUDE_CONFIG_DIR` cannot exclude them; `env.mcp_servers` gates at zero in the
+  driven specifications, so a driven run without the flag failed its own transcript check on an
+  account property no document here controls.
 
 - **The public docs, the guides and the control documents caught up with the tree.** Four
   parallel review passes over README, AGENTS.md, `docs/guide/`, the plugin READMEs and all

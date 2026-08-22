@@ -71,7 +71,7 @@ it implements the contract by running a suite against itself.
 |---|---:|---:|---|
 | `aep-domain` — core model | 25% | 100% | 27 modules |
 | `aep-engine` — resolution, evaluation, transitions | 15% | 100% | unit and integration tested |
-| Protocol, principle, workflow and profile documents | 10% | 100% | 44 documents, validated in CI |
+| Protocol, principle, workflow and profile documents | 10% | 100% | 45 documents, validated in CI |
 | `protocol-cli` | 7% | 100% | 17 subcommands |
 | `aep-schema` + `xtask` — documents and generated schemas | 6% | 100% | 12 schemas, drift-checked, each validated against every document shipped |
 | `aep-contract` — command/query contract | 12% | 100% | write surface pinned by test |
@@ -128,8 +128,8 @@ production.write denied
 * **An approval names the revision it approved**, so an approval of design version 3 stops satisfying
   a review requirement once the design is at version 7.
 * **Every decision is explainable**, as a `✓ / ✗ / ?` checklist or as a machine-readable refusal.
-* 44 documents — 3 protocols, 22 principles, 4 workflows, 6 profiles, 8 artifact lifecycles, 1 step
-  map — each validated against the protocol vocabulary in CI.
+* 45 documents — 3 protocols, 22 principles, 4 workflows, 6 profiles, 8 artifact lifecycles and 2
+  step maps — each validated against the protocol vocabulary in CI.
 
 * **Every mutation goes through one boundary.** `CommandService` carries actor *and* executor,
   correlation and causation, an idempotency key and an asserted revision — so a retry is recognised, a

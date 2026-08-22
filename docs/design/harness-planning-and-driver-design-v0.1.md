@@ -1596,7 +1596,9 @@ know which run and which state it is adjudicating, and that is a file the driver
 `<run-dir>/step-context.json`, format `aep.drive-step-context/1`
 (`crates/protocol-cli/src/drive.rs:899-926`), carrying the run directory, the store, the state, the
 step index, the attempt, whether a shell is offered at all, the admitted capabilities and the
-harness's names for them. Two properties, both deliberate:
+harness's names for them — and, since 2026-08-22, `reaching`: one line per unmet requirement on a
+way out of the state, added when governed run `W4-1/1` showed a session spending a whole state's
+budget on work the outgoing guard then refused. Additive to `aep.drive-step-context/1`. Two properties, both deliberate:
 
 * **rewritten before every `llm` step, not once per run.** `effective_policy` grants the state's
   capabilities on top of the plan's, so the legal surface in `implement` is not the legal surface in

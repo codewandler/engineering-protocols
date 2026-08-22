@@ -47,14 +47,14 @@ repository covers it. Register rows D-P1 and D-P3.
 
 The reference driver exists and has walked a real story. What it has not yet done is finish one.
 
-* **The shipped step map can only verify Rust.** `drivers/development/default.yaml` names `cargo` in
-  every state that names a verifier, so a story whose acceptance is written in shell is undrivable —
-  which is exactly what stopped the first governed run, in `establish_verifiers`. Closing it is a
-  decision about the map, not a patch.
-* **An `llm` step is told what must hold *in* its state and never what guards the way *out* of it.**
-  The step context is built from the evaluation's requirements; the outgoing transition's
-  requirements are never passed. *Consequence:* a model works on the wrong thing until it runs out
-  of budget. One state of the first run cost $8.36 this way.
+* **A driven run mints a `trace_conformance` record and nothing gates on it.**
+  `drivers/development/checks.yaml` runs `protocol trace evidence` over the session's own transcript
+  and the driver submits the record the checker wrote, so the check is in the audit trail — but no
+  workflow, principle or profile requires the kind, so a transcript that contradicts its
+  specification stops nothing. *Consequence:* the transcript check is provenance, not enforcement.
+* **A story declares its checks by convention rather than in its own document.** The checks map runs
+  `bash .engineering/checks/run.sh`, because a planning artifact has no field for a command. A story
+  whose checks live elsewhere has to make that path run them.
 * **A hook's decision is recorded and is not folded into the audit trail.** Both plugin hooks write
   a decision log and the driver writes the step context, but nothing folds those lines back through
   `Engine::authorize`. *Consequence:* the audit trail is a complete account of what the engine
