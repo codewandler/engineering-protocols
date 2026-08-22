@@ -95,6 +95,85 @@ fn every_profile_resolves_for_a_task_of_its_kind() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+/// The principles a `development.driven` feature resolves to, given these constraint facts.
+fn driven_principles(facts: &str) -> Vec<String> {
+    let registry = load_tree_report(&root())
+        .into_result()
+        .expect("the document tree is valid");
+    let document = format!(
+        "id: T-1\nkind: feature\nobjective: exercise applicability\nprotocol: adp/1\n\
+         profile: development.driven\n{facts}"
+    );
+    resolve(&task(&document), &registry)
+        .expect("development.driven resolves")
+        .principles
+        .iter()
+        .map(|principle| principle.id.to_string())
+        .collect()
+}
+
+#[test]
+fn a_task_that_declares_no_code_change_owes_no_contract_or_property_evidence() {
+    // Run `W4-2/1` is why this exists: a documentation story passed 119 checks and could not leave
+    // `adversarial_verify`, because `contract-testing` wants a `contract_result` from a
+    // `contract-runner` and `property-based-testing` wants a `property_test_result` from a
+    // `property-tester`, both `independent: true`. Neither verifier can observe a document, so the
+    // only ways to satisfy them were to mint the record or to drop the rules from the profile for
+    // every task it governs. The task declares what kind of change it is instead.
+    let in_force = driven_principles("constraints:\n  facts:\n    change.code: false\n");
+
+    for dropped in ["contract-testing", "property-based-testing"] {
+        assert!(
+            !in_force.iter().any(|id| id == dropped),
+            "`change.code: false` must remove `{dropped}`, and the plan still carries {in_force:?}"
+        );
+    }
+    // The other half of the claim, and the reason this is scoping rather than an exemption: seven
+    // rules stay, including static analysis — which a documentation change really can satisfy, and
+    // did, from `protocol artifact validate`.
+    for kept in [
+        "spec-driven",
+        "test-driven",
+        "static-analysis",
+        "least-privilege",
+        "provenance-tracking",
+        "approval-gates",
+        "reversible-changes",
+    ] {
+        assert!(
+            in_force.iter().any(|id| id == kept),
+            "`{kept}` is not about code shape and must survive `change.code: false`: {in_force:?}"
+        );
+    }
+    assert_eq!(
+        in_force.len(),
+        7,
+        "exactly two rules fall away: {in_force:?}"
+    );
+}
+
+#[test]
+fn a_task_that_declares_nothing_still_owes_contract_and_property_evidence() {
+    // The Kleene half, and the one that fails silently if anybody ever "simplifies"
+    // `Principle::applies` to `== Truth::True`. An undeclared fact evaluates `Unknown`, and
+    // unknown applicability leaves a principle in force: silence is not an exemption, only a
+    // written `false` is. Asserted against the same profile as the test above so the two differ in
+    // exactly one thing — whether the task said anything.
+    let silent = driven_principles("");
+    let declared_true = driven_principles("constraints:\n  facts:\n    change.code: true\n");
+
+    for owed in ["contract-testing", "property-based-testing"] {
+        assert!(
+            silent.iter().any(|id| id == owed),
+            "a task that declares no `change.code` must still owe `{owed}`: {silent:?}"
+        );
+    }
+    assert_eq!(
+        silent, declared_true,
+        "saying nothing must resolve exactly as saying `true`; only `false` may remove a rule"
+    );
+}
+
 #[test]
 fn a_development_task_can_be_walked_to_completion_with_evidence() {
     // Proves the documents describe a reachable workflow: with the right evidence, `adp/default`

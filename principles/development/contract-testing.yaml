@@ -6,7 +6,25 @@
 # check off entirely. The person who finds out is whoever's client breaks on the next release.
 #
 # So this applies to all change work, and the contract runner — not the author of the change —
-# decides whether anything published moved.
+# decides whether anything published moved. `change.public_contract` is not read here and never
+# will be.
+#
+# `change.code` is a different question and is read, because the paragraph above answers *"is this
+# diff compatible?"* and says nothing about *"is there a diff to run a contract runner over?"*. A
+# task whose product is a document publishes no interface at all: `contracts.checked > 0` has no
+# honest producer for it, and the requirement below is not strict but unsatisfiable — the run
+# blocks on evidence nobody can make. The two facts differ in who can be wrong about them and how
+# visibly:
+#
+#   * `change.public_contract` is a judgement about a diff's *effect*, made by the party least able
+#     to make it, checkable only by the runner this principle demands;
+#   * `change.code` is a statement about the task's *product*, settled before the diff exists,
+#     written in the task document a reviewer reads, and wrong in a way that reviewer can see.
+#
+# It is still a declaration, so it can still be false. Nothing here enforces it — the mitigation is
+# review, and `docs/design/fact-scoped-applicability-design-v0.1.md` § 5 says so plainly rather
+# than dressing it up. Note what silence does: an *undeclared* `change.code` evaluates Unknown, and
+# Unknown is not False, so a task that says nothing carries this rule in full.
 id: contract-testing
 version: 1
 title: Contract testing
@@ -15,8 +33,13 @@ summary: >-
   task can complete. Without it, a compatible-looking refactor ships as someone else's outage.
 
 applies_when:
-  task.kind:
-    any_of: [feature, bugfix, refactor]
+  all:
+    - task.kind:
+        any_of: [feature, bugfix, refactor]
+    # Kleene conjunction, and it is the whole safety argument: `False` dominates, so a declared
+    # `change.code: false` removes this rule whatever the kind is, and an absent `change.code`
+    # leaves the conjunction Unknown — which `Principle::applies` keeps in force.
+    - change.code
 
 requires:
   before_completion:

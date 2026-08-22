@@ -5,6 +5,28 @@ summary: >-
   Named properties must hold over generated inputs, not just over the examples someone thought of.
   A suite of examples documents the cases its author imagined and says nothing about the rest.
 
+# Scoped to work that changes code, and to nothing narrower.
+#
+# The evidence below pins `property-tester`, and a property tester needs something to call:
+# generated inputs are meaningless without a function to feed them to. For a task whose product is
+# a document, `evidence.count.property_test_result >= 1` is not a demanding requirement, it is an
+# impossible one — the only ways to satisfy it are to mint the record, which `independent: true`
+# exists to forbid, or to drop this principle from the profile, which would also drop it from every
+# code task the profile governs.
+#
+# So the task says which kind of work it is, in `constraints.facts`, in a document under review:
+#
+#   constraints:
+#     facts:
+#       change.code: false
+#
+# What that does *not* do is create an exemption by omission. `change.code` unset evaluates Unknown,
+# `Principle::applies` removes a principle only on an explicit False
+# (`crates/aep-domain/src/principle.rs:688-691`), and so silence keeps this rule in force. Only a
+# deliberate written `false` turns it off, and nothing mechanical checks that the writing was true:
+# `docs/design/fact-scoped-applicability-design-v0.1.md` § 5 is the honest statement of that limit.
+applies_when: change.code
+
 requires:
   before_completion:
     predicates:

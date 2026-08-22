@@ -31,7 +31,7 @@ The store is the second acceptance surface, and it is new: `story:evidence-horiz
 the store is for — a triaged item is a story with a status, not a page somebody has to remember to
 write. A design accepted that way is accepted; check both surfaces before calling one proposed.
 
-Eight further proposals now sit in `docs/design/`. Their acceptance state is:
+Nine further proposals now sit in `docs/design/`. Their acceptance state is:
 
 | proposed design | status |
 |---|---|
@@ -43,6 +43,7 @@ Eight further proposals now sit in `docs/design/`. Their acceptance state is:
 | [`evidence-horizons-design-v0.1.md`](docs/design/evidence-horizons-design-v0.1.md) | **implemented**, 2026-08-21, accepted by `story:evidence-horizons` in `.engineering/planning/` rather than by a plan page. Its own header still reads *proposed* and is stale; the gap register's *Closed by code — evidence horizons* section is the record. Follow-ups it left are open rows there: F26, and decisions D-6 and D-7 |
 | [`story-completion-evidence-design-v0.1.md`](docs/design/story-completion-evidence-design-v0.1.md) | **proposed, not accepted.** Proposed by [`docs/plan/harness-wave-4-governed-dogfood.md`](docs/plan/harness-wave-4-governed-dogfood.md) § W4.3, whose acceptance criterion is a verdict on it — accepted, accepted in part or refused — and not a build. Both shapes it could take are domain changes |
 | [`transcript-conformance-design-v0.1.md`](docs/design/transcript-conformance-design-v0.1.md) | **accepted, in implementation** as trace wave 1 by [`docs/plan/trace-wave-1-transcript-checker.md`](docs/plan/trace-wave-1-transcript-checker.md), which takes up its milestones T1–T3, sequences them and sets their acceptance criteria. Its open decisions D1–D6 are taken at their stated defaults, with one narrowing: the `regex` matcher of § 3.4 is **refused by name** rather than implemented, because the workspace carries no regular-expression engine. What stays proposed is named on the plan page: assertions over the per-request usage *series* (§ 2.7), an expectation kind for the skill's own text entering context (§ 2.8), and a streaming checker (**D5**) |
+| [`fact-scoped-applicability-design-v0.1.md`](docs/design/fact-scoped-applicability-design-v0.1.md) | **accepted in part**, 2026-08-22, by [`docs/plan/harness-wave-4-governed-dogfood.md`](docs/plan/harness-wave-4-governed-dogfood.md) § W4.2. The two `applies_when:` clauses it proposes are shipped: a task declaring `change.code: false` no longer owes a `contract_result` or a `property_test_result`, and a task declaring nothing still owes both. What is **refused** is its first draft's claim that this finishes the governed run — measured, `evidence.missing` goes 4 → 2, not 0. Its § 8 lists the five remaining blockers and its § 9 the six follow-ups, of which **F-W4.2-4**, the step map never being checked against the plan it will drive, is the expensive one |
 
 Do not implement from an unreviewed design, and do not treat one as evidence of what this repository
 is. [`docs/VISION.md`](docs/VISION.md) § *Proposed, not accepted* says what each would add, and

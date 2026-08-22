@@ -354,6 +354,146 @@ has read that line.
 * nothing in this item changes an enforcement mechanism. Where the run shows one is wrong, that is a
   finding recorded here and a decision for a later wave — see the *decisions, taken* row above.
 
+### A fourth item, added 2026-08-22 — **fact-scoped applicability: the rule that had no honest producer**
+
+Not planned in wave 2. It was **found by the run below**, which is what a dogfood wave is for, and it
+is written down here rather than in a later page because the finding and its fix arrived together.
+
+**The finding, in one line.** `development.driven` obliged a *documentation* task to produce a
+`contract_result` from a `contract-runner` and a `property_test_result` from a `property-tester`,
+both `independent: true`. Neither verifier can observe prose. The task had **119 passing checks and
+0 failures** and still could not leave `adversarial_verify`, because the only ways to satisfy those
+two rules were to forge the record — which `independent: true` exists to forbid — or to strip them
+from every task the profile governs, including the ones that do change code.
+
+**The fix, and its exact size.** Two `applies_when:` clauses over one declared fact, `change.code`,
+in `constraints.facts` beside the existing `change.public_contract`. It is
+[`fact-scoped-applicability-design-v0.1.md`](../design/fact-scoped-applicability-design-v0.1.md),
+**proposed, not accepted** — this section is the acceptance surface, and the verdict below is
+*accepted in part*. No engine change, no protocol change, no new grammar and **no new enforcement
+mechanism**, which is what keeps it inside this wave's third *decisions, taken* row: it narrows an
+existing mechanism (`Principle::applies`, `crates/aep-domain/src/principle.rs:688-692`) using
+grammar that `differential-testing.yaml` already uses.
+
+**The Kleene posture is the whole safety argument and is unchanged.** A principle falls away only on
+an explicit `False`; an *undeclared* `change.code` evaluates `Unknown`, and unknown applicability
+leaves a rule in force. Silence is not an exemption — only a written `false` is, and only in a task
+document under review.
+
+**Verdict: accepted in part.** The two clauses ship. What the design proposed and this page refuses
+to record as met is its own § 0 claim in its first draft — that the change would finish the run. It
+does not. Measured, on the live run:
+
+| | `evidence.missing` at `adversarial_verify -> review` |
+|---|---|
+| before | **4** |
+| after | **2** |
+
+An adversarial review of the design (one agent, read-only, 75 tool calls) returned **REFUTED** with
+five blocking findings; four are folded into the document and the fifth — its false provenance
+claim, that a plan page had proposed it — is corrected by this section existing. The two findings
+worth carrying up here are in the table below as **F-W4.2-4** and **F-W4.2-7**.
+
+### The second governed run — `W4-2/1`, 2026-08-21/22: **blocked in `adversarial_verify`, and the block moved but did not lift**
+
+Unlike `W4-1/1`, this one **did** reach a person — at `establish_verifiers`, where the map puts an
+`operator` step to get the specification approved. It stopped one state short of the person it was
+written to stop at.
+
+```text
+$ protocol drive resume W4-2/1 --project <worktree> --map development/checks \
+    --task .engineering/task-w4-2.yaml --max-iterations 60 --pause-on-approval
+run        W4-2/1
+map        step map development/checks
+status     blocked
+state      adversarial_verify
+steps      0 run, 0 submitted
+blocked because:
+  - adversarial_verify -> review: guard: evidence.missing == 0
+      evidence.missing = 2                                                                 # exit 1
+```
+
+**The subject.** `story:open-vocabulary-audit`, chosen because its product is a document and its
+acceptance is checkable without a compiler — exactly the work `development/checks` exists for, and
+exactly the shape `development/default` could never drive. The task is `.engineering/task-w4-2.yaml`,
+`kind: feature`, `profile: development.driven`.
+
+**What ran, per state.**
+
+| state | steps | outcome |
+|---|---|---|
+| `receive` | 1 `llm`, **3 attempts** | two sessions died before a turn (see *credential*, below); the third created `task:w4-2-open-vocabulary-audit`. Moved |
+| `specify` | 1 `llm` | created `specification:open-vocabulary-audit`. Moved on `artifact.specification.exists` |
+| `decompose` | 1 `llm` | created **2 stories and 13 tasks**, related through `protocol artifact relate`. Moved |
+| `establish_verifiers` | 1 `llm` + 1 `command` + **1 `operator`** | wrote **13 check units** under `.engineering/checks/`; the driver ran them **red** — `test_result` `passed: 0, failed: 1`, and the engine recorded `verification_failed`. Then it **paused for a person**, who moved `specification:open-vocabulary-audit` to `approved`; the run was resumed and moved |
+| `implement` | 1 `llm`, **3 attempts** | two sessions died on an expired credential; the third wrote `docs/guide/open-vocabulary.md`, 165 lines, 18 audit rows. `trace_conformance` and `diff` submitted. Moved |
+| `verify` | **3 `command`**, no model | checks green, `protocol validate` green, `protocol artifact validate` green — three records. Moved |
+| `adversarial_verify` | 1 `llm` + 1 `command` | the adversary added checks; the suite ran **119 pass, 0 fail, 0 broken, 0 undeclared** across 13 units. **Blocked** |
+| `review` | — | never entered |
+
+**The numbers, all read out of the run's own records.**
+
+| quantity | value | where it is |
+|---|---|---|
+| model sessions | **10** — 6 `is_error: false`, **4 `is_error: true`** | `.engineering/runs/W4-2/1/transcripts/*.jsonl` |
+| turns / session wall clock / cost | **333 turns, 75.7 min, $31.46** | terminal `result` events |
+| resolved model | `claude-opus-5[1m]` on the eight hermetic sessions; **`claude-opus-5`** on the two that leaked | `init` events |
+| evidence submitted | **7** — 4 `test_result`, 1 `trace_conformance`, 1 `diff`, 1 `static_analysis` | `snapshot.json` |
+| audit trail | **25** events: 6 `transition_performed`, 7 `evidence_produced`, 1 `verification_failed`, **2 `transition_blocked`** (the second is the resume) | `snapshot.json` |
+| hook decisions | **0 — there is no `hook-decisions.jsonl`** | the run directory; `W4-1/1` has one with 80 |
+| store afterwards | 59 → **76** artifacts, `protocol artifact validate` **exit 0** | the verb |
+| the product | `docs/guide/open-vocabulary.md`, 165 lines, 18 rows; 13 check units, 119 checks | the worktree |
+| rate-limit posture at the time | `seven_day`, **0.91 utilization**, `allowed_warning` | `rate_limit_event`, first transcript |
+
+**Five findings. Each is a thing the run did, not a thing the design predicted.**
+
+| # | finding | evidence |
+|---|---|---|
+| **F-W4.2-3** | **A raw launch leaves hermeticity to the caller, and the two things that fix it fight each other.** The first two `receive` sessions loaded **6 plugins — 5 of them the operator's, nothing to do with this run** (`rust-analyzer-lsp`, `gopls-lsp`, `typescript-lsp`, `track`, `flux-agent`), 26 skills instead of 16, and billed against **`apiKeySource: ANTHROPIC_API_KEY`** rather than the intended subscription: both died on *"Credit balance is too low"*. Pointing `CLAUDE_CONFIG_DIR` at a clean home fixed the leak — and removed the **`engineering-protocols` plugin too**, so the eight sessions that then succeeded ran with `plugins: 0` and **no enforcement hooks at all**. `development.driven` grants `command.execute` on the stated understanding that `driven-surface.sh` narrows it; for this entire run that hook was absent | `init` events of all ten transcripts; the missing `hook-decisions.jsonl`; `profiles/development-driven.yaml` header |
+| **F-W4.2-4** | **`resume` re-reads none of its four flags — and there is a fifth.** `--map`, `--task`, `--pause-on-approval` and `--plugin-dir` must all be passed again; none is stored. **`--max-iterations` is cumulative over the life of the run and defaults to 25**, so resuming a run that already spent 25 iterations exhausts the budget *before evaluating anything*: the first resume returned `status budget-exhausted`, `steps 0 run`, having done nothing. The printed resume line — `resume with: protocol drive resume W4-2/1` — carries none of the five, which is the W4.2 operator-UX item above, answered by observation: **the line as printed does not work** | `crates/protocol-cli/src/drive.rs:238-253`; `resume-1` output; cursor `iterations: 26` |
+| **F-W4.2-5** | **A copied OAuth credential expires mid-run and cannot refresh.** Two `implement` sessions returned *"Failed to authenticate: OAuth session expired and could not be refreshed"*. The SDK reported them as `subtype: "success"` with `is_error: true` in the same frame, which is worth knowing before trusting a summary field | `transcripts/implement-0-1.jsonl`, `-0-2.jsonl` |
+| **F-W4.2-6** | **The applicability gap**, above. Closed in part | the design note |
+| **F-W4.2-7** | **A step map is never checked against the plan it will drive, and this is the expensive one.** `StepMap::check_run` validates map → protocol — every evidence kind a step declares is one the protocol declares — and **never the converse** (`crates/aep-driver-spec/src/map.rs:710-750`). `development/checks` submits four kinds; the plan requires `specification` and `verification` as well, and **no step of the map produces either**, for a code task or a documentation one. So the map loads, the run walks six states, and the mismatch surfaces at the guard — **after $31.46 and 76 minutes of model time**. A load-time check had every fact it needed | the map's seven `evidence:` blocks; `evidence.missing = 2` after the fix |
+
+**One interaction worth writing down before someone rediscovers it.** The story's own acceptance
+criterion 7 became check **H3** — *git status lists changed paths only under `docs/` and
+`.engineering/`* — and bringing the two amended principle documents into the run's worktree by file
+copy turns it **red**: 23 changed paths, two of them `principles/**`, and the suite goes 118 / 1.
+That is not a defect in either the check or the change. It is what *uncommitted* looks like: the
+principle edits are the **repository's** work, not the story's product, and once they are committed
+on `main` and the worktree sits on a commit containing them, `git status` lists neither and H3 is
+green again. Recorded because the intermediate state is confusing and looks like a regression.
+
+**Acceptance: not met, and the reason is F-W4.2-7 rather than the applicability gap.** Seven things
+stand between this run and `complete`; the applicability fix closes two of them. The other five are
+listed in the design note's § 8 and three of them are structural: the map cannot produce a
+`specification` or a `verification` record; `contracts.failed == 0` is a **profile completion
+condition**, which a principle falling away does not remove (`profiles/development-standard.yaml:38`,
+`crates/aep-engine/src/evaluate.rs:252-254, 313-345`), and only a `ContractResult` projects it; and
+`review.approved` needs a record **no CLI verb writes**.
+
+**No `W4-2/2` was started, and that is a decision rather than an omission.** A fresh run would walk
+the same six states at the same cost and stop at the same guard, because none of the five remaining
+blockers is a property of the run. The wave records the blocked run as its result, exactly as
+W4.1's acceptance line requires of W4.1 — *"a run that wedges is a recorded result … quietly
+retrying until it works does not"*.
+
+**What the run did prove, and it is not nothing.** Two things.
+
+**The operator pause/resume cycle works.** W4.2's third item said *"Nobody has read that line"*.
+Somebody has now: `establish_verifiers` step 2 paused, the run persisted and released its lock, a
+person moved `specification:open-vocabulary-audit` from `draft` to `approved`, and the resume
+carried on from the step after it and crossed the `artifact.specification.exists` guard. That half
+of the item is met. The other half — *resuming from the printed line alone* — is **refused by
+observation**, F-W4.2-4.
+
+**A resume re-resolves the plan from the current documents.** the same run, resumed after two principle documents changed, reported
+`evidence.missing = 2` where it had reported 4, and dropped both principles from its own
+explanation. The plan is *not* pinned in the snapshot; only the workflow reference, the map id, the
+map digest and the engine version are (`crates/aep-driver-spec/src/cursor.rs:283-315`). Amending a
+principle and resuming is therefore a supported operation, which is the mechanism the next wave will
+need to close F-W4.2-7 without re-running from `receive`.
+
 ## W4.3 — story completion, evidence-gated: a design, and a decision
 
 **The deliverable is a document and a verdict on it, not a build.**
