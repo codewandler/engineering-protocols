@@ -21,10 +21,19 @@ belongs in the commit message or in `docs/design/`.
   file and `claude_argv` no longer exist. `integrations/claude-code/hooks/` is deleted; the plugin
   is skills and agents. The eval — logic, recorded transcripts, contracts and results — migrated
   whole to metaharness `evals/engineering-protocols/` (with `run.sh` retired alongside its
-  subject), and `integrations/codex/` to `evals/codex/`. The three trace expectation documents
+  subject). The three trace expectation documents
   moved to `conformance/trace/` as domain specifications. Suspended by name: the trace-spec join
   over fresh transcripts, until `story:event-stream-trace-adapter` gives the event stream a
   reader.
+
+### Fixed
+
+- **`integrations/codex/` is back.** The migration first moved the whole directory to
+  metaharness, and that overshot: the codex planning plugin — instruction surface, skill and its
+  instruction-surface check — is this repository's product for Codex users, exactly parallel to
+  the claude plugin's skills and agents, which never left. Corrected on the operator's call,
+  2026-08-22: the plugin returns; only harness-driving machinery lives in metaharness, and
+  driving Codex is its `metaharness-codex` adapter.
 
 ### Added
 

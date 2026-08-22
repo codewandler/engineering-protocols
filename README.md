@@ -131,6 +131,7 @@ The gate is the measurement — run `task check` rather than trusting a number w
 | [`crates/`](crates/) | the workspace: the protocol, the ESS toolchain, the infrastructure and trace domains, the driver and the CLI |
 | [`protocols/`](protocols/), [`principles/`](principles/), [`workflows/`](workflows/), [`profiles/`](profiles/), [`drivers/`](drivers/) | the document tree — the rules themselves, and the step maps that say how a harness obtains what a workflow asks for |
 | [`integrations/claude-code/`](integrations/claude-code/) | the plugin: the planning skill and two agents. Its enforcement hooks and eval migrated to the metaharness repository (`epic:metaharness-migration`); enforcement is the driver's own per-call policy through the metaharness seam |
+| [`integrations/codex/`](integrations/codex/) | the same instructions in the form Codex reads them — a skill, an `AGENTS.md` fragment and an instruction-surface check. The product for Codex users; driving Codex is metaharness's `metaharness-codex` adapter |
 | `.engineering/` | this repository's own project: the planning store it plans itself in, the task under work, and the driver's run records |
 | [`examples/`](examples/) | the worked example, the normative specification, the two synthesised applications, and the evidence-horizon corpus a first adopter contributed |
 | [`CHANGELOG.md`](CHANGELOG.md) | what changed, per release |

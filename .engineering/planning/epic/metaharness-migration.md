@@ -54,8 +54,11 @@ logic, recorded transcripts, contracts, results and metrics alike.
 5. **Codex arrives as an adapter** — **delivered 2026-08-22 as CX-M1** (metaharness `abf46c2`):
    `metaharness-codex` reads the session rollout (version-gated, drift preserved as opaque),
    declares its capabilities with every undriven claim labelled, and pins 0.145.0 through
-   `doctor codex`; `conformance codex` runs 4 replay vectors. The codex integration residue and
-   its research record migrated with it (`evals/codex/`, `docs/research/`). Named remainder:
+   `doctor codex`; `conformance codex` runs 4 replay vectors. The research record migrated with
+   it (`docs/research/`). **Corrected 2026-08-22, operator's call:** the codex *plugin*
+   (instruction surface, skill, instruction-surface check) first went to metaharness too and
+   came back — it is this repository's product for Codex users, parallel to the claude plugin's
+   skills and agents, which never left. Named remainder:
    **CX-M2**, the driven spawn — `run codex` refuses by that name, and `tool.decide` stays
    refused until a live run proves the vendor's documented hook contract from metaharness's own
    seam.
