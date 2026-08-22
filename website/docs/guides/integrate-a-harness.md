@@ -276,23 +276,26 @@ hold yet on a way *out* of the state, each prefixed with where that transition g
 *while in* it is a different list and is passed separately, because a step given only the second can
 satisfy every line it was handed and still be refused on the way out.
 
-Every adjudicated call, allow and deny alike, is appended to `hook-decisions.jsonl` in the same
-directory. On this repository's first governed run: 80 decisions, 69 allow and 11 deny. A guard that
-denies everything audits as little as one that denies nothing, so both halves are the point.
+Every adjudicated call, allow and deny alike, is a `tool.decided` event in the run's own event
+stream — the transcript the driver writes. (Until 2026-08-22 this was a separate
+`hook-decisions.jsonl` written by plugin shell hooks; on this repository's first governed run it
+held 80 decisions, 69 allow and 11 deny. The hooks retired under `epic:metaharness-migration`:
+their policy is Rust inside the driver, answering the metaharness seam per call, and the side
+channel no longer exists.) A guard that denies everything audits as little as one that denies
+nothing, so both halves are the point.
 
 Three limits worth knowing before you copy the shape:
 
-* **Hooks deny; they never grant.** The narrow fix for "let the model reach one CLI and no other
-  program" would be a scoped capability, and the grammar cannot express it — scoping exists for one
-  thing, an environment on `deployment.create` and `deployment.rollback`. So the pattern is a
-  capability grant plus a hook constraint, and the constraint is pattern-based and best-effort
-  rather than a function of the capability.
-* **A hook's decision is not in the audit trail.** It is in the log and nowhere else. A `PreToolUse`
-  hook is a separate process and cannot call `authorize`, which mutates an in-memory execution.
-  Folding the log in would add provenance and not enforcement — every decision the log has ever held
-  is a refusal, and a refusal changes no engine state. What closes it is an `authorize` ingestion
-  that keeps the hook as the deciding party, together with the first case where a hook's decision
-  would change what the engine does.
+* **The policy denies; it never grants beyond the capability.** The narrow fix for "let the model
+  reach one CLI and no other program" would be a scoped capability, and the grammar cannot
+  express it — scoping exists for one thing, an environment on `deployment.create` and
+  `deployment.rollback`. So the pattern is a capability grant plus a per-call constraint, and the
+  constraint is pattern-based and best-effort rather than a function of the capability.
+* **A decision is in the run's record, not yet in the engine's.** The policy runs in the driver's
+  process, so the old inter-process excuse is gone, but `Engine::authorize` — which mutates the
+  in-memory execution — is still not called at decision time. Every decision so far is a refusal,
+  and a refusal changes no engine state; the wiring lands with the first case where a decision
+  would.
 * **The launched tool set is not audited from the transcript.** A Claude Code `SessionStart` event
   lists the harness's tool *inventory*, not the session's allow rules. The committed fixture
   `crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl` lists **thirty-two** tools in its init

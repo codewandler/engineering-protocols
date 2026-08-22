@@ -18,12 +18,14 @@
 # the declaration — a planning artifact has no field for a command today, so the convention is
 # where a story says *these are my checks*, and a story whose checks live elsewhere makes that file
 # run them. The model to write one against is
-# [`integrations/claude-code/eval/checks/run-checks.sh`](../../integrations/claude-code/eval/checks/run-checks.sh):
+# the migrated agent-eval runner (`evals/engineering-protocols/checks/run-checks.sh` in the
+# metaharness repository):
 # nine checks, one row each, an honest exit code, and a table a person can read when it is red.
 #
 # Three programs have to be on `PATH` for a run under this map: `bash`, `git` and `protocol` — the
 # last one because two of the three `verify` steps are this repository's own verbs.
-# `integrations/claude-code/eval/run-driven.sh:65-66` is how a driven run gets it: build
+# the migrated driven eval (metaharness `evals/engineering-protocols/run-driven.sh`) is how a
+# driven run gets it: build
 # `protocol-cli`, then put `target/debug` on `PATH`. A missing program is D5's `Unknown` and submits
 # nothing, so the run stops rather than recording a suite that never ran.
 #
@@ -59,7 +61,7 @@
 #
 # The specification it judges against is the plugin eval's driven-step document, which is where the
 # trace documents in this repository live today. That coupling is worth seeing: the map depends on a
-# path under `integrations/claude-code/eval/`, and a rename there stops this step producing a record
+# path under `conformance/trace/`, and a rename there stops this step producing a record
 # — it does not block the run, because nothing gates on `trace_conformance` yet.
 format: aep.driver-steps/1
 id: development/checks
@@ -116,7 +118,8 @@ states:
           of them and exit non-zero while any of them fails. Write no implementation in this state.
           They are red now, and red is the product: a check that passes before the thing it checks
           exists is a check of nothing. The model to write against is
-          `integrations/claude-code/eval/checks/run-checks.sh`.
+          the migrated agent-eval runner in the metaharness repository
+          (`evals/engineering-protocols/checks/run-checks.sh`).
       # Expected red, and the guard on the way out reads exactly this: `test.first_result == failed`
       # is the first result ever recorded and never changes, so this is the run's one chance to
       # record a red suite. It runs before the operator step below so the person is asked once, with
@@ -166,7 +169,7 @@ states:
           - trace
           - evidence
           - --spec
-          - integrations/claude-code/eval/expectations.driven-step.trace.yaml
+          - conformance/trace/expectations.driven-step.trace.yaml
           - --transcript
           - "{transcript}"
           - --out

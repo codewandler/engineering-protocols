@@ -58,7 +58,7 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 /// The eval's own specification, which the repository ships.
-const SPEC: &str = "integrations/claude-code/eval/expectations.trace.yaml";
+const SPEC: &str = "conformance/trace/expectations.trace.yaml";
 
 /// A committed real run of the planning plugin.
 const TRANSCRIPT: &str = "crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl";

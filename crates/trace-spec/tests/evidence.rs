@@ -39,7 +39,7 @@ fn spec(text: &str) -> TraceSpec {
 fn eval_spec() -> TraceSpec {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../integrations/claude-code/eval/expectations.trace.yaml"
+        "/../../conformance/trace/expectations.trace.yaml"
     );
     let text = std::fs::read_to_string(path).expect("the eval's specification is committed");
     spec(&text)

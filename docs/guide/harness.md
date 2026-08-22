@@ -36,13 +36,14 @@ observed by the command step after it, so `producer: verifier` is a fact about w
 rather than the model's opinion of a suite it says it ran. That is a type doing the work a rule
 would otherwise have to.
 
-Enforcement sits at two layers with different failure modes, which is the same enforce-and-verify
-argument this project makes elsewhere, one level down. The per-state tool set is fixed when a
-session launches and decides which tools exist; a `PreToolUse` hook is the only layer that sees a
-call's **arguments**. The shipped pair lives in
-[`integrations/claude-code/hooks/`](../../integrations/claude-code/hooks/). Afterwards
-`protocol trace check` reads the transcript and says whether it held — a verdict a program reached
-from the record, not one the agent reported about itself.
+Enforcement is one policy with one enforcer, since `epic:metaharness-migration` (2026-08-22):
+every `llm` step is spawned through `metaharness run claude` in ask mode, and the driver's own
+per-call policy — `decide_tool` in `crates/protocol-cli/src/drive.rs`, the retired shell hooks
+ported to Rust plus the per-state allowlist — answers each `tool.requested` event before the call
+runs. It is the only layer that sees a call's **arguments**, and its decisions are `tool.decided`
+events in the run's own event stream rather than a side-channel log. Afterwards the record says
+whether it held — a verdict a program reads from the stream, not one the agent reported about
+itself.
 
 `protocol workflow render --run <id>` draws where a run got to, what it produced and why it
 stopped, with the engine's own sentences on the arrows.

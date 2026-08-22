@@ -25,15 +25,16 @@
 # protocol's vocabulary to solve a harness's problem, which is the wrong layer.
 #
 # So this takes the other half of the design's own shape for the same class of rule — **a
-# capability grant plus a hook constraint**:
+# capability grant plus a per-call constraint**:
 #
 #   * this document grants `command.execute`, and says here that the grant exists so that the
 #     `protocol` CLI is reachable and for no other reason;
-#   * `integrations/claude-code/hooks/driven-surface.sh` is the constraint. It reads the driven
-#     run's step context, and denies any `Bash` call that is not one simple invocation of
-#     `protocol artifact …` or `protocol trace …` — no pipes, no redirection, no `&&`, no command
-#     substitution, because a composed command line is a second command wearing the first one's
-#     name.
+#   * the driver's own per-call policy is the constraint (`decide_tool` in protocol-cli's
+#     drive.rs, answering the metaharness seam in ask mode — formerly the plugin's
+#     `driven-surface.sh` hook, retired under `epic:metaharness-migration`). It denies any `Bash`
+#     call that is not one simple invocation of `protocol artifact …` or `protocol trace …` — no
+#     pipes, no redirection, no `&&`, no command substitution, because a composed command line is
+#     a second command wearing the first one's name.
 #
 # The constraint is **pattern-based and best-effort**, and this file says so rather than claiming
 # `command.execute` is fully enforced: granting it grants a superset of the shell's reach, and a

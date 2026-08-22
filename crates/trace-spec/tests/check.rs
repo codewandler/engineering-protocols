@@ -2,7 +2,7 @@
 //!
 //! The per-kind vocabulary — every one of the fifty-one kinds with a negative case beside it —
 //! lives inline in `src/check.rs`, where the evaluator is. This file checks the thing the wave is
-//! actually for: that `integrations/claude-code/eval/expectations.trace.yaml` is a document, that
+//! actually for: that `conformance/trace/expectations.trace.yaml` is a document, that
 //! it holds against two real committed transcripts, and that the ways it can be relaxed on the
 //! command line are visible rather than silent.
 //!
@@ -34,7 +34,7 @@ fn ir(bytes: &[u8]) -> TraceIr {
 fn eval_spec() -> trace_domain::spec::TraceSpec {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../integrations/claude-code/eval/expectations.trace.yaml"
+        "/../../conformance/trace/expectations.trace.yaml"
     );
     let text = std::fs::read_to_string(path).expect("the eval's specification is committed");
     trace_domain::raw::read_spec(&text)

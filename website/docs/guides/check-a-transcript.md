@@ -87,7 +87,7 @@ The report is one row per expectation and this specification declares forty-two,
 below takes the first twelve lines rather than abridging by hand:
 
 ```bash
-$B trace check --spec integrations/claude-code/eval/expectations.trace.yaml \
+$B trace check --spec conformance/trace/expectations.trace.yaml \
     --transcript crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl | head -12
 ```
 
@@ -111,7 +111,7 @@ is evaluated and printed and gates nothing, so a cost bound that drifted with mo
 turn a job red on its own. The last four lines close the report:
 
 ```bash
-$B trace check --spec integrations/claude-code/eval/expectations.trace.yaml \
+$B trace check --spec conformance/trace/expectations.trace.yaml \
     --transcript crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl | tail -4
 ```
 
@@ -135,7 +135,7 @@ it ran. A check report quotes all of that, and a report is a thing people paste 
 requests. **`--redact` replaces every citation with an event index and a digest:**
 
 ```bash
-$B trace check --spec integrations/claude-code/eval/expectations.trace.yaml \
+$B trace check --spec conformance/trace/expectations.trace.yaml \
     --transcript crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl --redact | head -6
 ```
 
@@ -155,7 +155,7 @@ naming what it contains â€” so pasting one somewhere public is a decision rather
 evaluated, still printed, and the report names every id that was downgraded:
 
 ```bash
-$B trace check --spec integrations/claude-code/eval/expectations.trace.yaml \
+$B trace check --spec conformance/trace/expectations.trace.yaml \
     --transcript crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl \
     --advisory billed-to-the-session | grep -E 'billed|downgraded'
 ```
@@ -174,7 +174,7 @@ a requirement the protocol asked for.
 ## Mint the verdict as evidence
 
 ```bash
-$B trace evidence --spec integrations/claude-code/eval/expectations.trace.yaml \
+$B trace evidence --spec conformance/trace/expectations.trace.yaml \
     --transcript crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl \
     --observed-at 2026-08-21 --out evidence.yaml
 ```
@@ -194,9 +194,9 @@ $B trace evidence --spec integrations/claude-code/eval/expectations.trace.yaml \
     producer: verifier
     verifier: trace-checker
   provenance:
-    command: protocol trace evidence --spec integrations/claude-code/eval/expectations.trace.yaml --transcript crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl
+    command: protocol trace evidence --spec conformance/trace/expectations.trace.yaml --transcript crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl
     inputs:
-    - integrations/claude-code/eval/expectations.trace.yaml
+    - conformance/trace/expectations.trace.yaml
     - crates/trace-spec/tests/fixtures/plugin-eval-7hTYjT.jsonl
 ```
 
@@ -249,7 +249,7 @@ what it cost and what broke, is `docs/plan/harness-wave-4-governed-dogfood.md` Â
 
 The checker and IR live in `crates/trace-domain` and `crates/trace-spec`; the specification
 format is published as `schemas/generated/trace-spec.schema.json`; the worked specification is
-`integrations/claude-code/eval/expectations.trace.yaml`, whose forty-two expectations are checked
+`conformance/trace/expectations.trace.yaml`, whose forty-two expectations are checked
 against two committed transcripts by the ordinary test suite. Design and acceptance:
 `docs/design/transcript-conformance-design-v0.1.md`, `docs/plan/trace-wave-1-transcript-checker.md`.
 The driver is `crates/aep-driver` behind `protocol drive`, its enforcement arm is the plugin's

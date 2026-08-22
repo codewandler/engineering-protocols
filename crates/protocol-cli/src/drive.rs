@@ -134,35 +134,8 @@ fn expand(word: &str, context: &StepContext<'_>) -> Result<String, String> {
     Ok(expanded)
 }
 
-/// The per-step context the plugin's hooks read, written into the run directory.
-///
-/// **The hook↔driver channel, in the direction the design left implicit.** § 4.8 decided how a
-/// hook's *decision* reaches the audit trail — an append-only log the driver folds in — and said
-/// nothing about how the hook learns which state it is enforcing. It cannot be told on a command
-/// line: hooks are configured before the session starts and receive only the tool payload. So the
-/// driver writes this document before each `llm` step and points the session at it with
-/// [`STEP_CONTEXT_ENV`]; a hook that cannot find one is outside a driven run and says so by doing
-/// nothing.
-const STEP_CONTEXT_FILE: &str = "step-context.json";
-
-/// The variable naming [`STEP_CONTEXT_FILE`] to the session, and through it to every hook process.
-///
-/// Belt and braces with the store-level `current` pointer the hooks also know how to read:
-/// environment inheritance through the harness into a hook process is the one link in this chain
-/// that no documentation states, so the file route exists as well and neither is trusted alone.
-const STEP_CONTEXT_ENV: &str = "AEP_DRIVE_STEP_CONTEXT";
-
 /// Where the plugin lives, when no `--plugin-dir` said.
 const PLUGIN_DIR_ENV: &str = "AEP_DRIVE_PLUGIN_DIR";
-
-/// The settings file the model invocation is pointed at.
-///
-/// Written even though it configures nothing yet, because the argv is what is asserted: the driver
-/// **never passes `--bare`** — that flag skips hooks, and a future implementer reaching for a clean
-/// reproducible environment would silently delete the driver's own enforcement arm — and it always
-/// passes `--settings`. The hooks that file will carry are W3.4's; the flag's presence is W3.3's,
-/// and it is a test rather than a note (review finding **F15**).
-const SETTINGS_FILE: &str = "settings.json";
 
 /// What can be done with a driven run.
 #[derive(Debug, Subcommand)]
@@ -956,54 +929,34 @@ impl CliExecutors {
         }
     }
 
-    /// Writes the document the session's hooks read, and returns where it went.
-    ///
-    /// Rewritten before **every** `llm` step rather than once per run, because the thing it
-    /// describes changes at every `Moved`: `effective_policy` grants the state's capabilities on
-    /// top of the plan's, so the legal surface in `implement` is not the legal surface in `review`.
-    /// A run-scoped context would be a per-state rule enforced with per-run facts.
-    fn write_step_context(&self, context: &StepContext<'_>) -> Result<PathBuf, String> {
-        let path = self.run_directory.join(STEP_CONTEXT_FILE);
-        let document = StepContextFile {
-            format: STEP_CONTEXT_FORMAT,
-            run_directory: self.run_directory.clone(),
-            store: self
-                .working_directory
-                .join(project_directory())
-                .join("planning"),
-            state: context.state.to_string(),
-            step_index: context.index,
-            attempt: context.attempt,
-            shell_offered: context.tools.shell_offered(),
-            capabilities: context
-                .tools
-                .capabilities()
-                .iter()
-                .map(ToString::to_string)
-                .collect(),
-            tools: allowed_tools(context.tools),
-            reaching: context.reaching.to_vec(),
-        };
-        let text = serde_json::to_string_pretty(&document)
-            .map_err(|error| format!("the step context would not serialise: {error}"))?;
-        fs::write(&path, format!("{text}\n"))
+    /// The step's sealed frame document, written beside the transcript it governs.
+    fn write_frame_document(
+        &self,
+        context: &StepContext<'_>,
+        transcripts: &Path,
+    ) -> Result<PathBuf, String> {
+        let frame = metaharness_frame(context, &self.workflow_id, &self.workflow_version);
+        let path = transcripts.join(format!(
+            "{}-{}-{}.frame.json",
+            context.state, context.index, context.attempt
+        ));
+        let document = serde_json::to_string_pretty(&frame)
+            .map_err(|error| format!("the frame would not serialise: {error}"))?;
+        fs::write(&path, format!("{document}\n"))
             .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
         Ok(path)
     }
 
-    /// The `metaharness` executor: the same session, held by a frame instead of by hooks.
+    /// The one `llm` executor: the vendor is driven through the metaharness seam, in ask mode.
     ///
-    /// The step's surface travels as a sealed `metaharness.frame/1` document and per-call
-    /// enforcement is metaharness's frame mode at the vendor's own `PreToolUse` seam — so the
-    /// denials arrive as `tool.decided` events in the event stream this executor writes as the
-    /// transcript, not in a side-channel log that a forgotten flag silences. Run `W4-2` lost all
-    /// eight of its post-fix sessions to exactly that flag: `--plugin-dir` was not re-passed on
-    /// resume, and every session ran unenforced while looking clean.
-    ///
-    /// What this executor does not yet carry, by name: the hooks' per-argument narrowing (one
-    /// program, two verbs, no pipes). Frame mode admits or refuses whole operations; the
-    /// narrowing returns when this moves to `--decisions ask` and answers per call from the
-    /// engine, which is the § 10.1 shape and a separate step.
+    /// The step's surface travels twice, deliberately (F9's "both halves"): the sealed
+    /// `metaharness.frame/1` document pins what the step *is*, and this process answers every
+    /// `tool.requested` event at decision time through [`decide_tool`] — the two retired shell
+    /// hooks, ported, plus the per-state allowlist that used to ride on `--allowedTools`. The
+    /// decisions and denials arrive as `tool.decided` events in the event stream this executor
+    /// writes as the transcript, never in a side-channel log a forgotten flag can silence: run
+    /// `W4-2` lost all eight of its post-fix sessions to exactly that, a resume that dropped
+    /// `--plugin-dir` and ran unenforced while looking clean.
     fn run_llm_metaharness(&mut self, step: &LlmStep, context: &StepContext<'_>) -> StepOutcome {
         let transcripts = self.run_directory.join(TRANSCRIPTS);
         if let Err(error) = fs::create_dir_all(&transcripts) {
@@ -1021,24 +974,10 @@ impl CliExecutors {
             context.attempt,
         );
 
-        let frame = metaharness_frame(context, &self.workflow_id, &self.workflow_version);
-        let frame_file = transcripts.join(format!(
-            "{}-{}-{}.frame.json",
-            context.state, context.index, context.attempt
-        ));
-        let document = match serde_json::to_string_pretty(&frame) {
-            Ok(text) => format!("{text}\n"),
-            Err(error) => {
-                return StepOutcome::NoVerdict {
-                    reason: format!("the frame would not serialise: {error}"),
-                }
-            }
+        let frame_file = match self.write_frame_document(context, &transcripts) {
+            Ok(path) => path,
+            Err(reason) => return StepOutcome::NoVerdict { reason },
         };
-        if let Err(error) = fs::write(&frame_file, document) {
-            return StepOutcome::NoVerdict {
-                reason: format!("cannot write {}: {error}", frame_file.display()),
-            };
-        }
 
         let argv = metaharness_argv(
             &frame_file,
@@ -1046,85 +985,81 @@ impl CliExecutors {
             &self.plugin_dirs,
             &prompt_for(step, context),
         );
-        // No `current_dir` and no step-context env: the working directory travels as `--cwd`
-        // and metaharness spawns the vendor there itself, and its constructed child environment
-        // would drop the context variable anyway — the plugin's hooks no-op outside a driven
-        // `claude-code` session rather than enforcing a second copy of this policy.
-        let outcome = Process::new(&argv[0])
+        // No `current_dir`: the working directory travels as `--cwd` and metaharness spawns the
+        // vendor there itself, with a constructed environment nothing here needs to reach into.
+        let spawned = Process::new(&argv[0])
             .args(&argv[1..])
-            .stdin(Stdio::null())
-            .output();
-
-        let output = match outcome {
-            Ok(output) => output,
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        let mut child = match spawned {
+            Ok(child) => child,
             Err(error) => {
                 return StepOutcome::NoVerdict {
                     reason: format!("`{}` could not be run: {error}", argv.join(" ")),
                 }
             }
         };
-        let _ = fs::write(&transcript, &output.stdout);
+        let mut commands = child.stdin.take().expect("stdin was piped");
+        let events = child.stdout.take().expect("stdout was piped");
+        let stderr = child.stderr.take().expect("stderr was piped");
+        // Drained on its own thread: a child blocked writing a full stderr pipe while this loop
+        // blocks reading stdout is a deadlock, not a slow run.
+        let stderr_thread = std::thread::spawn(move || {
+            let mut text = String::new();
+            let _ = std::io::Read::read_to_string(&mut std::io::BufReader::new(stderr), &mut text);
+            text
+        });
 
-        if output.status.success() {
-            StepOutcome::Nothing
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let tail: String = stderr.lines().rev().take(3).collect::<Vec<_>>().join(" | ");
-            StepOutcome::NoVerdict {
-                reason: format!(
-                    "metaharness exited {}; {}the event stream is at {}",
-                    output
-                        .status
-                        .code()
-                        .map_or_else(|| "on a signal".to_owned(), |code| code.to_string()),
-                    if tail.is_empty() {
-                        String::new()
-                    } else {
-                        format!("it said: {tail}; ")
-                    },
-                    transcript.display()
-                ),
+        let mut transcript_file = match fs::File::create(&transcript) {
+            Ok(file) => file,
+            Err(error) => {
+                let _ = child.kill();
+                return StepOutcome::NoVerdict {
+                    reason: format!("cannot write {}: {error}", transcript.display()),
+                };
             }
+        };
+        answer_events(context, events, &mut commands, &mut transcript_file);
+        drop(commands);
+        let status = child.wait();
+        let stderr_text = stderr_thread.join().unwrap_or_default();
+
+        match status {
+            Ok(status) if status.success() => {
+                // An `llm` step never carries evidence, and the type is what makes that true.
+                // What the model achieved that is checkable is observed by the command step
+                // after it.
+                StepOutcome::Nothing
+            }
+            Ok(status) => {
+                let tail: String = stderr_text
+                    .lines()
+                    .rev()
+                    .take(3)
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                StepOutcome::NoVerdict {
+                    reason: format!(
+                        "metaharness exited {}; {}the event stream is at {}",
+                        status
+                            .code()
+                            .map_or_else(|| "on a signal".to_owned(), |code| code.to_string()),
+                        if tail.is_empty() {
+                            String::new()
+                        } else {
+                            format!("it said: {tail}; ")
+                        },
+                        transcript.display()
+                    ),
+                }
+            }
+            Err(error) => StepOutcome::NoVerdict {
+                reason: format!("waiting on metaharness failed: {error}"),
+            },
         }
     }
-}
-
-/// The format claim on [`STEP_CONTEXT_FILE`].
-const STEP_CONTEXT_FORMAT: &str = "aep.drive-step-context/1";
-
-/// What a hook is told about the step it is adjudicating.
-///
-/// It carries **facts about the state**, never the rules: the surface a shell is held to is
-/// declared in the hook that enforces it, not here. A run that could name its own allowed surface
-/// could widen it, and a widening the run authored is a route around the constraint rather than a
-/// check on it.
-#[derive(Debug, serde::Serialize)]
-struct StepContextFile {
-    /// The format claim.
-    format: &'static str,
-    /// Where the run's records live — and where a hook appends its decisions.
-    run_directory: PathBuf,
-    /// The planning store this run is over.
-    store: PathBuf,
-    /// The workflow state the step belongs to.
-    state: String,
-    /// Which step of that state's list this is.
-    step_index: usize,
-    /// Which attempt at that step this is.
-    attempt: u32,
-    /// Whether `command.execute` is admitted here at all.
-    shell_offered: bool,
-    /// Every admitted capability, as the protocol spells it.
-    capabilities: Vec<String>,
-    /// The harness's own names for them, as passed to `--allowedTools`.
-    tools: Vec<String>,
-    /// What is still outstanding on a way out of this state, one line per unmet requirement.
-    ///
-    /// A fact about the state like every other field here, and not a rule: it is what the engine
-    /// has already evaluated to be missing, in the engine's own words. Added to
-    /// `aep.drive-step-context/1` additively — a reader that does not know the key does not read
-    /// it, and the hooks in `integrations/claude-code/hooks/` take named scalar fields by path.
-    reaching: Vec<String>,
 }
 
 impl CommandStepExecutor for CliExecutors {
@@ -1227,14 +1162,12 @@ impl OperatorStepExecutor for CliExecutors {
 
 impl LlmStepExecutor for CliExecutors {
     fn run_llm(&mut self, step: &LlmStep, context: &StepContext<'_>) -> StepOutcome {
-        // The seam § 4.9 point 3 names, and the reason it is a name rather than a trait: a second
-        // harness is a second executor selected by this string. `metaharness` is that second
-        // implementation — the same vendor binary, driven through the metaharness seam instead of
-        // a bare argv.
-        if step.harness == METAHARNESS_HARNESS {
-            return self.run_llm_metaharness(step, context);
-        }
-        if step.harness != LlmStep::DEFAULT_HARNESS {
+        // The seam § 4.9 point 3 names, and the reason it is a name rather than a trait: a
+        // second harness is a second executor selected by this string. Since
+        // `epic:metaharness-migration` there is no bare-argv path left to select — `claude-code`
+        // names the vendor, and the vendor is only ever driven through the metaharness seam.
+        // `metaharness` stays accepted as the name the executor first landed under.
+        if step.harness != LlmStep::DEFAULT_HARNESS && step.harness != METAHARNESS_HARNESS {
             return StepOutcome::NoVerdict {
                 reason: format!(
                     "the step names harness `{}`, and this build only invokes `{}` and `{}`",
@@ -1244,74 +1177,7 @@ impl LlmStepExecutor for CliExecutors {
                 ),
             };
         }
-
-        let transcripts = self.run_directory.join(TRANSCRIPTS);
-        if let Err(error) = fs::create_dir_all(&transcripts) {
-            return StepOutcome::NoVerdict {
-                reason: format!(
-                    "cannot write transcripts to {}: {error}",
-                    transcripts.display()
-                ),
-            };
-        }
-        let settings = self.run_directory.join(SETTINGS_FILE);
-        if !settings.exists() {
-            let _ = fs::write(&settings, "{}\n");
-        }
-        let transcript = transcript_path(
-            self.run_directory.as_path(),
-            context.state,
-            context.index,
-            context.attempt,
-        );
-
-        // Before the session, never during it: a hook fires inside a process the driver has already
-        // launched, so a context written late is a context the first tool call never saw.
-        let step_context = match self.write_step_context(context) {
-            Ok(path) => path,
-            Err(reason) => return StepOutcome::NoVerdict { reason },
-        };
-
-        let argv = claude_argv(
-            step,
-            context,
-            &settings,
-            &self.plugin_dirs,
-            &prompt_for(step, context),
-        );
-        let outcome = Process::new(&argv[0])
-            .args(&argv[1..])
-            .current_dir(&self.working_directory)
-            .env(STEP_CONTEXT_ENV, &step_context)
-            .stdin(Stdio::null())
-            .output();
-
-        let output = match outcome {
-            Ok(output) => output,
-            Err(error) => {
-                return StepOutcome::NoVerdict {
-                    reason: format!("`{}` could not be run: {error}", argv.join(" ")),
-                }
-            }
-        };
-        let _ = fs::write(&transcript, &output.stdout);
-
-        if output.status.success() {
-            // An `llm` step never carries evidence, and the type is what makes that true. What the
-            // model achieved that is checkable is observed by the command step after it.
-            StepOutcome::Nothing
-        } else {
-            StepOutcome::NoVerdict {
-                reason: format!(
-                    "the model invocation exited {}; the transcript is at {}",
-                    output
-                        .status
-                        .code()
-                        .map_or_else(|| "on a signal".to_owned(), |code| code.to_string()),
-                    transcript.display()
-                ),
-            }
-        }
+        self.run_llm_metaharness(step, context)
     }
 }
 
@@ -1377,55 +1243,6 @@ fn prompt_for(step: &LlmStep, context: &StepContext<'_>) -> String {
     prompt
 }
 
-/// The command line one `llm` step is invoked with.
-///
-/// Three rules are asserted over this value rather than left as notes, because every one of the
-/// failures would be silent: it **never** contains `--bare`, which skips hooks and would delete the
-/// driver's own enforcement arm; it **always** carries `--settings` (review finding **F15**); and it
-/// **always** carries `--strict-mcp-config`, which is what keeps a session's MCP surface to what
-/// this line gave it — nothing.
-fn claude_argv(
-    step: &LlmStep,
-    context: &StepContext<'_>,
-    settings: &Path,
-    plugin_dirs: &[PathBuf],
-    prompt: &str,
-) -> Vec<String> {
-    let mut argv = vec![
-        "claude".to_owned(),
-        "-p".to_owned(),
-        prompt.to_owned(),
-        "--output-format".to_owned(),
-        "stream-json".to_owned(),
-        "--verbose".to_owned(),
-        "--settings".to_owned(),
-        settings.display().to_string(),
-        // Every MCP configuration this line did not give the session is ignored — and it gives
-        // none. A scratch `CLAUDE_CONFIG_DIR` isolates a *directory*, and an account's MCP servers
-        // arrive with the login over the network: two of the four sessions in run `W4-1/1` listed
-        // three the tree had never heard of. `env.mcp_servers` gates at zero in the driven trace
-        // specifications, so without this flag a driven run on an account with servers attached
-        // fails its own transcript check for a reason nobody in the repository can fix.
-        "--strict-mcp-config".to_owned(),
-    ];
-    let tools = allowed_tools(context.tools);
-    if !tools.is_empty() {
-        argv.push("--allowedTools".to_owned());
-        argv.push(tools.join(","));
-    }
-    // The plugin, and with it `hooks/hooks.json` — the layer that sees a tool's arguments. A
-    // session launched without it is a session where every § 4.8 row whose mechanism is "plugin
-    // hook" is a claim with nothing behind it, which is the same silent, partial failure `--bare`
-    // would cause.
-    for directory in plugin_dirs {
-        argv.push("--plugin-dir".to_owned());
-        argv.push(directory.display().to_string());
-    }
-    // `step.skills` is deliberately not on this line: it is in the prompt. See `prompt_for`.
-    let _ = step;
-    argv
-}
-
 /// The harness's tool names for an admitted capability set.
 ///
 /// The rendering half of adapter point 2: the *decision* about which capabilities admit which
@@ -1454,6 +1271,201 @@ fn allowed_tools(config: &ToolConfig) -> Vec<String> {
     tools.sort();
     tools.dedup();
     tools
+}
+
+/// The session loop: every event line into the transcript, every decision back down stdin.
+///
+/// A free function of its streams so the executor stays under its own roof: nothing here knows a
+/// process, only a reader of event lines and a writer of command lines.
+fn answer_events(
+    context: &StepContext<'_>,
+    events: impl std::io::Read,
+    commands: &mut impl std::io::Write,
+    transcript: &mut impl std::io::Write,
+) {
+    for line in std::io::BufRead::lines(std::io::BufReader::new(events)) {
+        let Ok(line) = line else { break };
+        let _ = transcript
+            .write_all(line.as_bytes())
+            .and_then(|()| transcript.write_all(b"\n"));
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        if event["event"] == "tool.requested" && event["decision_required"] == true {
+            let call_id = event["call_id"].as_str().unwrap_or_default();
+            let name = event["name"].as_str().unwrap_or_default();
+            let decision = match decide_tool(context, name, &event["input"]) {
+                Ok(()) => serde_json::json!({ "decision": "allow" }),
+                Err(reason) => serde_json::json!({ "decision": "deny", "reason": reason }),
+            };
+            let command = serde_json::json!({
+                "format": "metaharness.command/1",
+                "id": format!("decide-{call_id}"),
+                "command": "tool.decide",
+                "call_id": call_id,
+                "decision": decision,
+            });
+            // A write that fails means the child is gone; the caller's wait reports how.
+            if commands
+                .write_all(format!("{command}\n").as_bytes())
+                .and_then(|()| commands.flush())
+                .is_err()
+            {
+                break;
+            }
+        }
+    }
+}
+
+/// The per-call policy: the retired shell hooks, in the driver's own process.
+///
+/// This is the § 10.1 shape the hooks existed to approximate: the layer that sees a call's
+/// *arguments* is the embedder, in Rust, and its verdict reaches the child through the
+/// metaharness seam before the call runs. Three checks, first refusal wins, every reason written
+/// for the model to act on rather than as a wall:
+///
+/// 1. **the driven surface** (`Bash`): one simple `protocol artifact|trace` invocation — no
+///    pipes, no redirection, no substitution — and no shell at all in a state that does not
+///    admit `command.execute`;
+/// 2. **the per-state allowlist**: the tool must render from a capability this state admits,
+///    which is what `--allowedTools` used to carry (and can no longer, because a bare
+///    `--allowedTools` entry auto-approves the whole tool before any seam is consulted);
+/// 3. **store integrity** (`Edit`/`Write`/`NotebookEdit`): the planning store's frontmatter is
+///    the `protocol` CLI's, in every state of every workflow.
+fn decide_tool(
+    context: &StepContext<'_>,
+    tool: &str,
+    input: &serde_json::Value,
+) -> Result<(), String> {
+    if tool == "Bash" {
+        return driven_surface(context, input);
+    }
+    let offered = allowed_tools(context.tools);
+    if !offered.iter().any(|name| name == tool) {
+        return Err(format!(
+            "`{tool}` is not offered in state `{}`; this state's tools are: {}",
+            context.state,
+            offered.join(", ")
+        ));
+    }
+    match tool {
+        "Edit" | "Write" | "NotebookEdit" => store_integrity(tool, input),
+        _ => Ok(()),
+    }
+}
+
+/// Guardrail 1, made mechanical: the planning store's frontmatter is the CLI's.
+///
+/// `Write` and `NotebookEdit` replace whole files and are denied under the store outright; an
+/// `Edit` is allowed only when neither string touches the `---` fence or a machine-owned key —
+/// decidable from the payload alone, which is exactly what the retired `store-integrity.sh`
+/// decided. The audit that does not depend on this firing is `protocol artifact validate`.
+fn store_integrity(tool: &str, input: &serde_json::Value) -> Result<(), String> {
+    let target = match tool {
+        "NotebookEdit" => input["notebook_path"].as_str().unwrap_or_default(),
+        _ => input["file_path"].as_str().unwrap_or_default(),
+    };
+    if !target.contains(".engineering/planning/") {
+        return Ok(());
+    }
+    if tool == "Write" || tool == "NotebookEdit" {
+        return Err(format!(
+            "`{tool}` replaces the whole of {target}, and the planning store's frontmatter is \
+             owned by the `protocol` CLI. Write the body with a targeted `Edit` below the \
+             closing `---`, and change frontmatter through `protocol artifact` — `new`, `move`, \
+             `relate`. A hand-retyped frontmatter is indistinguishable from a silently-altered \
+             one."
+        ));
+    }
+    for field in ["old_string", "new_string"] {
+        let Some(value) = input[field].as_str() else {
+            continue;
+        };
+        for line in value.lines() {
+            let trimmed = line.trim();
+            if trimmed == "---" {
+                return Err(format!(
+                    "the edit's `{field}` crosses the `---` frontmatter fence of {target}. Edit \
+                     only below the closing fence; the frontmatter is the CLI's."
+                ));
+            }
+            if let Some(key) = machine_owned_key(trimmed) {
+                return Err(format!(
+                    "the edit's `{field}` writes the machine-owned field `{key}` of {target}. \
+                     `status` moves only through `protocol artifact move`, which validates the \
+                     move against the kind's lifecycle; `id`, `kind`, `revision`, `relations` \
+                     and `format` are written by `protocol artifact new` and `protocol artifact \
+                     relate`. A hand-edited status is an unvalidated one."
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The machine-owned frontmatter key a line writes, if it writes one.
+fn machine_owned_key(line: &str) -> Option<&'static str> {
+    for key in ["id", "kind", "status", "revision", "relations", "format"] {
+        if let Some(rest) = line.strip_prefix(key) {
+            if rest.trim_start().starts_with(':') {
+                return Some(key);
+            }
+        }
+    }
+    None
+}
+
+/// The per-state shell surface: one simple invocation of `protocol artifact …` or
+/// `protocol trace …`, exactly what the retired `driven-surface.sh` held the grant to.
+///
+/// The surface lives here and not in any document the run can reach, deliberately: a run that
+/// could name its own allowed surface could widen it. Pattern-based and best-effort, as § 4.8
+/// says — granting `command.execute` grants a superset of the shell's reach, and this narrows it.
+fn driven_surface(context: &StepContext<'_>, input: &serde_json::Value) -> Result<(), String> {
+    if !context.tools.shell_offered() {
+        return Err(format!(
+            "state `{}` does not admit `command.execute`, so this step holds no shell. Anything \
+             a suite must observe is run by the driver as a `command` step and recorded with a \
+             verifier's provenance, not with yours.",
+            context.state
+        ));
+    }
+    let command = input["command"].as_str().unwrap_or_default();
+    if command.contains("$(")
+        || command
+            .chars()
+            .any(|c| matches!(c, ';' | '&' | '|' | '`' | '>' | '<' | '\n'))
+    {
+        return Err(format!(
+            "the command composes or redirects, and this run admits one simple invocation at a \
+             time: `{command}`. Run the `protocol` verbs one call per Bash tool use."
+        ));
+    }
+    let mut words = command.split_whitespace();
+    let program = words.next().unwrap_or_default();
+    let verb = words.next().unwrap_or_default();
+    if program.rsplit('/').next().unwrap_or(program) != "protocol" {
+        return Err(format!(
+            "`{}` is outside the surface this state admits. A driven step's shell exists so the \
+             `protocol` CLI is reachable; it is not a general shell. Build, test and inspection \
+             commands are `command` steps the driver runs, and their records carry a verifier's \
+             provenance rather than yours.",
+            if program.is_empty() {
+                "(nothing)"
+            } else {
+                program
+            }
+        ));
+    }
+    if verb != "artifact" && verb != "trace" {
+        return Err(format!(
+            "`protocol {}` is outside the surface this state admits: `protocol artifact …` and \
+             `protocol trace …`. Driving a run from inside a driven step, or moving the store's \
+             own governing documents, is not this step's business.",
+            if verb.is_empty() { "(no verb)" } else { verb }
+        ));
+    }
+    Ok(())
 }
 
 /// The harness name that selects the metaharness executor.
@@ -1559,7 +1571,7 @@ fn metaharness_argv(
         "--frame".to_owned(),
         frame.display().to_string(),
         "--decisions".to_owned(),
-        "frame".to_owned(),
+        "ask".to_owned(),
         "-p".to_owned(),
         prompt.to_owned(),
     ];
@@ -1746,8 +1758,8 @@ mod tests {
         ToolConfig::new(capabilities.iter().cloned().collect())
     }
 
-    /// The command line the driver would build for one `llm` step.
-    fn argv_for(skills: &[&str], plugins: &[&str]) -> Vec<String> {
+    /// The prompt the driver would build for one `llm` step.
+    fn prompt_with_skills(skills: &[&str]) -> String {
         let step = LlmStep {
             description: None,
             harness: LlmStep::DEFAULT_HARNESS.to_owned(),
@@ -1768,15 +1780,7 @@ mod tests {
             reaching: &reaching,
             preceding_llm: None,
         };
-        let plugin_dirs: Vec<PathBuf> = plugins.iter().map(PathBuf::from).collect();
-        let prompt = prompt_for(&step, &context);
-        claude_argv(
-            &step,
-            &context,
-            Path::new("/runs/T-1/1/settings.json"),
-            &plugin_dirs,
-            &prompt,
-        )
+        prompt_for(&step, &context)
     }
 
     /// What the step is trying to reach reaches the step, under a heading of its own.
@@ -1992,76 +1996,137 @@ mod tests {
         );
     }
 
-    /// Review finding **F15**, as a test rather than a note, because both failures are silent.
-    ///
-    /// `--bare` skips hooks. A future implementer reaching for a clean, reproducible environment —
-    /// a reasonable instinct in a repository this deterministic — would silently delete the
-    /// driver's own enforcement arm, and every enforcement row whose layer is "plugin hook" would
-    /// become a claim with nothing behind it. The tool set would still be constrained by
-    /// `--allowedTools`, so the failure is partial and silent, which is the worst shape it has.
-    #[test]
-    fn the_model_invocation_never_skips_hooks_and_always_carries_its_settings() {
-        let argv = argv_for(&["planning"], &["/plugins/engineering-protocols"]);
-        assert!(
-            !argv.iter().any(|word| word == "--bare"),
-            "`--bare` skips hooks, which is the driver's own enforcement arm: {argv:?}"
-        );
-        let settings = argv
-            .iter()
-            .position(|word| word == "--settings")
-            .expect("the settings flag is always present");
-        assert_eq!(argv[settings + 1], "/runs/T-1/1/settings.json");
-    }
-
-    /// A session's MCP surface is what the launch line gave it, and the launch line gives none.
-    ///
-    /// The gap the register row called impossible to close from here: a scratch `CLAUDE_CONFIG_DIR`
-    /// cannot exclude an account's servers, because they arrive with the login rather than out of a
-    /// file. `--strict-mcp-config` can, and the eval runner already passes it — a driver that did
-    /// not would launch sessions the eval's own specifications would then fail, on an account
-    /// property no document in this repository controls.
-    #[test]
-    fn a_session_is_launched_with_no_mcp_configuration_it_was_not_given() {
-        let argv = argv_for(&[], &[]);
-        assert!(
-            argv.iter().any(|word| word == "--strict-mcp-config"),
-            "an account's MCP servers arrive with the login, and this flag is what excludes \
-             them: {argv:?}"
-        );
-        assert!(
-            !argv.iter().any(|word| word == "--mcp-config"),
-            "and nothing hands one back: {argv:?}"
-        );
-    }
-
-    #[test]
-    fn a_named_plugin_directory_reaches_the_session_so_the_hooks_do() {
-        let argv = argv_for(&[], &["/plugins/a", "/plugins/b"]);
-        let named: Vec<&String> = argv
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| *index > 0 && argv[index - 1] == "--plugin-dir")
-            .map(|(_, word)| word)
-            .collect();
-        assert_eq!(named, ["/plugins/a", "/plugins/b"]);
-    }
-
     /// A step map's `skills:` list is a request to the model, not a command-line flag.
     ///
-    /// `--agents` takes a JSON object of *agent definitions*; passing a skill name to it is a usage
-    /// error that fails the whole invocation, and the first draft of this function did exactly
-    /// that. The skill reaches the session by being asked for, and the `Skill` tool answers.
+    /// The skill reaches the session by being asked for, and the `Skill` tool answers; nothing
+    /// about the invocation carries it, which is what keeps a skill list from becoming a second
+    /// tool surface.
     #[test]
-    fn a_steps_skills_are_asked_for_in_the_prompt_and_never_passed_as_agent_definitions() {
-        let argv = argv_for(&["planning"], &[]);
-        assert!(
-            !argv.iter().any(|word| word == "--agents"),
-            "`--agents` defines agents from JSON; it is not a skill selector: {argv:?}"
-        );
-        let prompt = &argv[2];
+    fn a_steps_skills_are_asked_for_in_the_prompt() {
+        let prompt = prompt_with_skills(&["planning"]);
         assert!(
             prompt.contains("Load the `planning` skill"),
             "the step's skill has to be asked for somewhere: {prompt}"
+        );
+    }
+
+    // ------------------------------------------------------------ the per-call policy
+
+    /// One context for the policy tests.
+    fn policy_context<'a>(state: &'a StateId, tools: &'a ToolConfig) -> StepContext<'a> {
+        StepContext {
+            state,
+            index: 0,
+            attempt: 1,
+            tools,
+            run_directory: Path::new("/runs/T-1/1"),
+            requirements: &[],
+            reaching: &[],
+            preceding_llm: None,
+        }
+    }
+
+    /// The retired `driven-surface.sh`, case for case: the grant is held to one simple
+    /// `protocol artifact|trace` invocation, and a state with no shell says so by name.
+    #[test]
+    fn the_shell_surface_is_one_simple_protocol_invocation() {
+        let state: StateId = "implement".parse().expect("a state id");
+        let shell = config(&[Capability::CommandExecution]);
+        let context = policy_context(&state, &shell);
+        let bash = |command: &str| {
+            decide_tool(&context, "Bash", &serde_json::json!({ "command": command }))
+        };
+
+        assert!(bash("protocol artifact list").is_ok());
+        assert!(bash("protocol trace check t.jsonl").is_ok());
+        assert!(bash("/usr/local/bin/protocol artifact list").is_ok());
+
+        assert!(
+            bash("protocol artifact list | tee out").is_err(),
+            "composition"
+        );
+        assert!(
+            bash("protocol artifact list; rm -rf /").is_err(),
+            "chaining"
+        );
+        assert!(bash("protocol artifact list > out").is_err(), "redirection");
+        assert!(bash("protocol artifact $(cat x)").is_err(), "substitution");
+        assert!(bash("cargo test").is_err(), "another program");
+        assert!(bash("protocol drive run").is_err(), "another verb");
+        assert!(bash("").is_err(), "an empty command");
+
+        let no_shell = config(&[Capability::RepositoryRead]);
+        let context = policy_context(&state, &no_shell);
+        let refusal = decide_tool(
+            &context,
+            "Bash",
+            &serde_json::json!({ "command": "protocol artifact list" }),
+        )
+        .expect_err("no shell in this state");
+        assert!(
+            refusal.contains("does not admit `command.execute`"),
+            "{refusal}"
+        );
+    }
+
+    /// The retired `store-integrity.sh`, case for case: whole-file writes under the store are
+    /// denied, an `Edit` is denied when it touches the fence or a machine-owned key, and a body
+    /// edit below the fence passes.
+    #[test]
+    fn the_planning_stores_frontmatter_is_the_clis() {
+        let state: StateId = "implement".parse().expect("a state id");
+        let writing = config(&[Capability::RepositoryWrite, Capability::RepositoryRead]);
+        let context = policy_context(&state, &writing);
+        let store_file = "/repo/.engineering/planning/story/one.md";
+
+        let write = serde_json::json!({ "file_path": store_file, "content": "x" });
+        assert!(decide_tool(&context, "Write", &write).is_err());
+        let notebook = serde_json::json!({ "notebook_path": store_file });
+        assert!(decide_tool(&context, "NotebookEdit", &notebook).is_err());
+
+        let edit = |old: &str, new: &str| {
+            decide_tool(
+                &context,
+                "Edit",
+                &serde_json::json!({ "file_path": store_file, "old_string": old, "new_string": new }),
+            )
+        };
+        assert!(edit("a body sentence", "a better body sentence").is_ok());
+        assert!(edit("---", "-- -").is_err(), "the fence");
+        assert!(edit("  ---  ", "x").is_err(), "the fence, padded");
+        assert!(
+            edit("a line", "status: done").is_err(),
+            "a machine-owned key"
+        );
+        assert!(edit("revision: 1", "x").is_err(), "owned key in old_string");
+        assert!(
+            edit("the status: of things", "x").is_ok(),
+            "mid-line mention of a key name is not a frontmatter write"
+        );
+
+        let elsewhere = serde_json::json!({ "file_path": "/repo/src/lib.rs", "content": "x" });
+        assert!(decide_tool(&context, "Write", &elsewhere).is_ok());
+    }
+
+    /// The allowlist that used to ride on `--allowedTools`, now a decision with a reason: a tool
+    /// no admitted capability renders to is denied naming the state's actual surface.
+    #[test]
+    fn a_tool_outside_the_states_surface_is_denied_with_the_surface_named() {
+        let state: StateId = "specify".parse().expect("a state id");
+        let reading = config(&[Capability::RepositoryRead]);
+        let context = policy_context(&state, &reading);
+
+        assert!(decide_tool(&context, "Read", &serde_json::json!({})).is_ok());
+        assert!(decide_tool(&context, "Skill", &serde_json::json!({})).is_ok());
+        let refusal = decide_tool(&context, "Edit", &serde_json::json!({ "file_path": "/x" }))
+            .expect_err("no write capability in this state");
+        assert!(
+            refusal.contains("not offered in state `specify`"),
+            "{refusal}"
+        );
+        assert!(
+            decide_tool(&context, "Task", &serde_json::json!({})).is_err(),
+            "a subagent is never offered"
         );
     }
 
@@ -2195,7 +2260,7 @@ mod tests {
             "--frame",
             "/runs/T-1/1/transcripts/implement-2-3.frame.json"
         ));
-        assert!(has("--decisions", "frame"));
+        assert!(has("--decisions", "ask"));
         assert!(has("-p", "do the thing"));
         assert!(has("--plugin-dir", "/plugins/claude-code"));
         assert!(argv.contains(&"--hermetic".to_owned()));

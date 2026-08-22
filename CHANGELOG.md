@@ -9,6 +9,23 @@ belongs in the commit message or in `docs/design/`.
 
 ## [Unreleased]
 
+### Changed
+
+- **Everything harness-shaped left this repository for metaharness**
+  (`epic:metaharness-migration`, waves 1–4 delivered). Every `llm` step now streams through
+  `metaharness run claude --decisions ask`, and the driver's own `decide_tool` answers each
+  `tool.requested` at decision time: the two `PreToolUse` shell hooks are ported to Rust case for
+  case (frontmatter fence, machine-owned keys, one simple `protocol artifact|trace` invocation)
+  plus the per-state allowlist that used to ride on `--allowedTools`. Decisions are `tool.decided`
+  events in the run's own transcript; `hook-decisions.jsonl`, the step-context file, the settings
+  file and `claude_argv` no longer exist. `integrations/claude-code/hooks/` is deleted; the plugin
+  is skills and agents. The eval — logic, recorded transcripts, contracts and results — migrated
+  whole to metaharness `evals/engineering-protocols/` (with `run.sh` retired alongside its
+  subject), and `integrations/codex/` to `evals/codex/`. The three trace expectation documents
+  moved to `conformance/trace/` as domain specifications. Suspended by name: the trace-spec join
+  over fresh transcripts, until `story:event-stream-trace-adapter` gives the event stream a
+  reader.
+
 ### Added
 
 - **`harness: metaharness` — a second executor on the seam that was waiting for one.** An `llm`

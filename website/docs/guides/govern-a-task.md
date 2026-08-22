@@ -193,7 +193,8 @@ and who has to sign.
 `development.driven`'s grant is the one place in this directory where a profile widens what an agent
 may reach, and the profile's own header says so rather than leaving it to be discovered. The
 narrowing is a hook, not a capability:
-`integrations/claude-code/hooks/driven-surface.sh` denies any `Bash` call that is not one simple
+the driver's own per-call policy (`decide_tool` in `crates/protocol-cli/src/drive.rs`,
+answering the metaharness seam) denies any `Bash` call that is not one simple
 invocation of `protocol artifact …` or `protocol trace …`. That constraint is pattern-based and
 best-effort — granting `command.execute` grants a superset of the shell's reach, and a hook narrows
 it rather than making it a function of the capability.

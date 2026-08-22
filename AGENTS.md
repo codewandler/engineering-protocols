@@ -148,11 +148,14 @@ passing one.
   alone so a renderer cannot become a second protocol implementation). `protocol drive
   run|status|resume` and `protocol workflow render` are the surfaces; step maps are the fifth
   document kind, under `drivers/`, and `development.driven` is the sixth profile — the only one that
-  grants a shell, held to the `protocol` CLI by the plugin's own hook. **Gates are evaluated only by
-  the engine**: the driver asks and does what it is told, and enforcement sits at two layers — the
-  per-state tool set at session launch and two `PreToolUse` hooks, `store-integrity` and
-  `driven-surface`, both shipped in `integrations/claude-code/hooks/` — with `protocol trace check`
-  reading the transcript afterwards to say whether it held. Record:
+  grants a shell, held to the `protocol` CLI by the driver's own per-call policy. **Gates are
+  evaluated only by the engine**: the driver asks and does what it is told, and enforcement is one
+  policy with one enforcer since `epic:metaharness-migration` — every `llm` step spawns through
+  `metaharness run claude` in ask mode, and `decide_tool` in `crates/protocol-cli/src/drive.rs`
+  (the retired `store-integrity`/`driven-surface` hooks, ported, plus the per-state allowlist)
+  answers each call with the decision recorded as a `tool.decided` event in the run's own stream.
+  The eval machinery and its results migrated to the metaharness repository
+  (`evals/engineering-protocols/`). Record:
   `docs/plan/harness-wave-2-driver-decision.md`; design
   `docs/design/harness-planning-and-driver-design-v0.1.md` §§ 4.1–4.9.
   The store this repository runs on is `.engineering/planning/`: **59 artifacts** — one initiative,

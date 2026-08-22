@@ -17,9 +17,12 @@ a copy that goes stale, and drift is the thing this project exists to refuse.
 | `skills/planning/` | the model, the four guardrails, and how to discover the store's vocabulary. Auto-triggers on planning talk or a `.engineering/planning/` directory; also invocable as `/engineering-protocols:planning` |
 | `agents/decomposer.md` | takes one epic id, drafts the stories that jointly cover it, each with an acceptance statement. Creates drafts only — never moves an artifact, never touches one it did not create |
 | `agents/plan-reviewer.md` | read-only semantic audit: stories that no longer cover their epic, finished epics still open, stale work, missing acceptance statements. Proposes moves, performs none |
-| `hooks/` | two `PreToolUse` hooks — the deterministic half of the guardrails. `store-integrity.sh` keeps the planning store's frontmatter the CLI's; `driven-surface.sh` holds a driven run's shell to the `protocol` verbs. See below |
-| `eval/` | two repeatable checks that the plugin works: `eval/run.sh` drops a headless agent into a scratch project and inspects what it created; `eval/run-driven.sh` does the same for a whole `protocol drive` run, hooks included. Both cost API money and neither is part of `task check`. See [eval/README.md](./eval/README.md) |
-| `eval/checks/` | nine shell verifiers for the agent-charter work, one per decomposed task, written red in the `establish_verifiers` state of run `W4-1/1` before any of their subjects existed. They call no API. See [eval/checks/README.md](./eval/checks/README.md) |
+
+The hooks and the eval that used to live here **migrated to the metaharness repository**
+(`epic:metaharness-migration`, 2026-08-22). The hooks' policy is now Rust inside the driver —
+`decide_tool` in `crates/protocol-cli/src/drive.rs`, answering the metaharness seam per call —
+and the eval machinery, its recorded transcripts and its results live in metaharness under
+`evals/engineering-protocols/`. See "Enforcement" below.
 
 ## Prerequisite: `protocol` on `PATH`
 
@@ -58,39 +61,28 @@ the drift starts: a flag gets added to the CLI, the command does not learn about
 now has two spellings of the same operation with different capabilities. The skill teaches the CLI;
 the CLI stays the only definition of what the CLI does.
 
-## The hooks, and what changed about "no hooks"
+## Enforcement, and where the hooks went
 
-Earlier versions of this file said the plugin ships **no hooks**, and gave a good reason: a hook
-layer would be *a second, weaker driver* — one that sees tool calls rather than workflow states and
-cannot ask the engine anything, because it has no execution to ask about. Two mechanisms both
-claiming to enforce the same thing is worse than one.
+Earlier versions of this plugin carried two `PreToolUse` shell hooks — `store-integrity.sh` and
+`driven-surface.sh` — as the driver's enforcement arm. Both retired on 2026-08-22 under
+`epic:metaharness-migration`, and the reasoning that once kept hooks *out* of this plugin is what
+retired them: a hook process could not call `Engine::authorize` and wrote its decisions to a side
+log the driver folded in late, and a session launched without the plugin ran unenforced while
+looking clean (run `W4-2` paid for eight such sessions).
 
-**That reasoning is unchanged. What changed is that the driver exists.** A hook is no longer a
-second driver: it is the driver's enforcement arm, configured *by* the driver, per state, for a run
-that is holding an execution. `--allowedTools` governs which tools a session is *offered* and is
-fixed at launch; a hook is the only layer that sees a call's **arguments**. Two layers with
-different failure modes, which is this project's enforce-and-verify argument applied one level down
-rather than belt-and-braces.
+The same rules hold today, one level down and in one place:
 
-| hook | matcher | what it does | active when |
-|---|---|---|---|
-| `hooks/store-integrity.sh` | `Edit\|Write\|NotebookEdit` | denies `Write` and `NotebookEdit` anywhere under `.engineering/planning/**`, and denies an `Edit` whose `old_string` or `new_string` crosses the `---` fence or writes a machine-owned field (`id`, `kind`, `status`, `revision`, `relations`, `format`). A targeted body edit is allowed — guardrail 2 says the body is yours | **always** |
-| `hooks/driven-surface.sh` | `Bash` | denies any shell command that is not one simple invocation of `protocol artifact …` or `protocol trace …` — no pipes, no redirection, no `&&`, no command substitution | **only inside a `protocol drive` run** |
+| rule | where it lives now | active when |
+|---|---|---|
+| the planning store's frontmatter is the CLI's: `Write`/`NotebookEdit` denied under `.engineering/planning/**`, an `Edit` denied when it crosses the `---` fence or writes a machine-owned field | `store_integrity` in `crates/protocol-cli/src/drive.rs`, answering the metaharness seam at decision time | every driven `llm` step |
+| a driven shell is one simple invocation of `protocol artifact …` or `protocol trace …` — no pipes, no redirection, no substitution | `driven_surface`, same place | every driven `llm` step |
+| a tool no admitted capability renders to is refused naming the state's surface | `decide_tool`, same place — the allowlist that used to ride on `--allowedTools` | every driven `llm` step |
 
-The second one is inert outside a driven run on purpose: a per-state rule with no state to read
-would be exactly the second, weaker driver the paragraph above refuses to ship. The first one is
-not a per-state rule at all — it reads no workflow state and asks nothing — so it holds everywhere.
-
-**Both hooks refuse rather than pass a call through unread.** Every rule they hold is about a tool
-*argument*, so they need `jq` or `python3`; with neither, a call they would have adjudicated is
-denied with a reason naming the missing dependency. Each hook's own header carries its full
-reasoning, including what it deliberately does not claim.
-
-**Every decision goes to `<run>/hook-decisions.jsonl`** when there is a run to write to — one JSON
-line per adjudicated call, allow and deny alike. A `PreToolUse` hook is a separate process and
-cannot call `Engine::authorize`, which mutates an in-memory execution inside the driver; the log is
-the channel by which its decisions reach the run's record. It is also the only record that can tell
-*denied* from *never attempted*, which the transcript's whole-run denial counter cannot.
+The decisions are `tool.decided` events in the run's own event stream — the transcript the driver
+writes — so *denied* and *never attempted* are distinguishable from the record itself, and there
+is no `hook-decisions.jsonl` to forget. Outside a driven run the store's protection is what it
+always also was: `protocol artifact validate`, which catches an illegal write whether or not any
+seam fired.
 
 ## Deferred, and why that is no longer a wait
 

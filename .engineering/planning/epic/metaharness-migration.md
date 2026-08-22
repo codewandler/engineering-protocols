@@ -29,31 +29,41 @@ metaharness already enforces — the exact failure `W4-2` paid to demonstrate wh
 
 ## Scope
 
-Migration waves, in dependency order; each is a story when picked up:
+Migration waves, in dependency order. The operator widened the goal on 2026-08-22: the eval does
+not merely move *onto* the metaharness binary, it moves *into* the metaharness repository —
+logic, recorded transcripts, contracts, results and metrics alike.
 
-1. **Ask mode** — the executor moves to `--decisions ask` streamed over the binary seam:
-   `Engine::authorize(&mut Execution, …)` answers each `tool.requested` at decision time, and the
-   hooks' per-argument narrowing (one program, two verbs, no pipes) returns as embedder code.
-   Removes the last capability the shell hooks have that the seam does not.
-2. **The eval moves** — `integrations/claude-code/eval/run.sh` sections 1–2 (scratch home,
-   credential copy, env scrub, flags) become `metaharness run claude --hermetic strict`, the trace
-   check becomes `--audit --spec … --auditor protocol`, and `run-driven.sh`'s denial census reads
-   `tool.decided` events instead of `hook-decisions.jsonl`. The deliberate-denial case is kept.
-3. **The hooks retire** — after waves 1–2 prove parity, `integrations/claude-code/hooks/` is
-   deleted here; the enforcement register rows move their mechanism column to the seam.
-4. **The bare argv retires** — driven maps default to `harness: metaharness`; `claude_argv` and
-   its settings/transcript plumbing leave `drive.rs`.
+1. **Ask mode** — **delivered 2026-08-22.** Every `llm` step streams through
+   `metaharness run claude --decisions ask`; `decide_tool` in `drive.rs` answers each
+   `tool.requested` at decision time — the two shell hooks ported case for case, plus the
+   per-state allowlist that used to ride on `--allowedTools`. Not yet wired:
+   `Engine::authorize` at decision time (every decision so far is a refusal, and a refusal
+   changes no engine state); the wiring lands with the first case where a decision would.
+2. **The eval moves — into metaharness** — **delivered 2026-08-22.** The whole of
+   `integrations/claude-code/eval/` lives at metaharness `evals/engineering-protocols/`:
+   `run-driven.sh` reads the census from `tool.decided` events, `run.sh` is retired with its
+   subject, the agent-eval checks and recorded transcripts moved intact, and the deliberate-denial
+   case is kept. The trace-spec join is suspended by name until a `metaharness.event/1` trace
+   adapter exists (`story:event-stream-trace-adapter`).
+3. **The hooks retire** — **delivered 2026-08-22.** `integrations/claude-code/hooks/` is deleted;
+   the plugin is skills and agents; every live document that named the hooks now names the
+   driver's policy.
+4. **The bare argv retires** — **delivered 2026-08-22.** `claude_argv`, the settings file and the
+   step-context side channel left `drive.rs`; `harness: claude-code` and `harness: metaharness`
+   both reach the one executor.
 5. **Codex arrives as an adapter** — the 2026-08-21 Codex research (rollout JSONL, portable
    `PreToolUse` hook, 0.145) is implemented as `metaharness-codex`, not as a second executor
-   here; `epic:cross-harness-portability`'s acceptance is run through it.
+   here; the codex integration residue is migrated to metaharness `evals/codex/`.
 
 ## Out of Scope
 
 - The plugin's **skills and agents** (`integrations/claude-code/skills/`, `agents/`): they are
   this repository's product for a person using Claude Code, not harness-driving machinery.
   Revisit only if metaharness grows a skill surface. Decides: operator.
-- `workflows/`, `drivers/`, `trace-spec` and the expectations files: the documents and the IR are
-  this repository's domain; metaharness projects into `trace-ir/1` and never rivals it (its D1).
+- `workflows/`, `drivers/` and `trace-spec`: the documents and the IR are this repository's
+  domain; metaharness projects into `trace-ir/1` and never rivals it (its D1). The three trace
+  expectation documents moved to `conformance/trace/` — domain specifications, not eval machinery
+  — and the migrated eval carries its own copies.
 - The plan→map coverage refusal (F-W4.2-4): governance machinery, not harness machinery; it stays
   here and is sequenced independently.
 
