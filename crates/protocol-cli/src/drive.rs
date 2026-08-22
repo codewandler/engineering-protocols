@@ -54,6 +54,7 @@ use aep_domain::ids::{StateId, TaskId, ToolRef};
 use aep_domain::task::Task;
 use aep_domain::time::{ObservedAt, Timestamp};
 use aep_domain::verification::Verifier;
+use aep_driver::coverage::CoverageReport;
 use aep_driver::executor::{
     CommandStepExecutor, LlmStepExecutor, OperatorStepExecutor, StepContext, StepOutcome,
 };
@@ -193,6 +194,16 @@ pub(crate) struct RunArgs {
     /// Take the store lock from a holder that is provably dead.
     #[arg(long)]
     take_lock: bool,
+    /// Start even though the map cannot produce evidence the plan will demand.
+    ///
+    /// **This weakens no rule the engine enforces.** The pre-flight it turns off is an *economic*
+    /// check, not a protocol one: without it a run walks every state and blocks at the guard that
+    /// wanted the record, which for `W4-2/1` cost $31.46 and 76 minutes. With this flag the gap is
+    /// still printed and the run still blocks at that guard — the caller has simply said they know,
+    /// which is the position somebody driving a run to a `--pause-on-approval` stop and supplying
+    /// the record by hand is legitimately in.
+    #[arg(long)]
+    allow_evidence_gap: bool,
 }
 
 /// The arguments of `protocol drive status`.
@@ -407,6 +418,25 @@ fn start(args: &RunArgs) -> Result<ExitCode> {
             outln!("  - {refusal}");
         }
         return Ok(ExitCode::from(1));
+    }
+
+    // F-W4.2-4: the other half of `check_run`, and the half that was missing. `check_run` asks
+    // whether every kind the map declares is one the protocol knows; this asks whether every kind
+    // the *plan* will demand is one some step can produce. Both questions were answerable from the
+    // same two documents before `W4-2/1` spent $31.46 and 76 minutes discovering the second one at
+    // a guard, six states in.
+    let coverage = aep_driver::evidence_coverage(&plan, &inputs.map);
+    if !coverage.is_covered() {
+        report_evidence_gap(&coverage, &inputs.map_origin, args.allow_evidence_gap);
+        if !args.allow_evidence_gap {
+            return Ok(ExitCode::from(1));
+        }
+    }
+    for warning in &coverage.warnings {
+        // Printed and never blocking. Each of these is a question nobody can answer from documents
+        // — who will have produced a record when the step runs, or whether a person will hand one
+        // over between runs — and refusing on an undecided question is what invariant 5 forbids.
+        outln!("note: {warning}");
     }
 
     // D3(c): the headless pre-flight, static and decidable and run before anything executes.
@@ -642,6 +672,47 @@ fn finish(
         RunStatus::Completed | RunStatus::AwaitingOperator => ExitCode::SUCCESS,
         _ => ExitCode::from(1),
     })
+}
+
+/// Prints the evidence the plan will demand and no step of the map can produce.
+///
+/// One line per **kind**, not per requirement: two principles wanting the same missing kind are one
+/// thing to fix. Every line names who asked and what stays shut, so the refusal can be navigated to
+/// rather than argued with — and the paragraph after it says what to do, because a refusal that does
+/// not answer the question it creates is a wall.
+fn report_evidence_gap(report: &CoverageReport, origin: &str, allowed: bool) {
+    if allowed {
+        outln!("{origin} cannot produce evidence this task's plan will demand, and `--allow-evidence-gap` was given:");
+    } else {
+        outln!("{origin} cannot produce evidence this task's plan will demand:");
+    }
+    for entry in &report.missing {
+        outln!(
+            "  - `{}`: demanded by {}, and no step of the map declares it",
+            entry.kind.as_str(),
+            entry.demanded_by.join("; ")
+        );
+        if !entry.blocks.is_empty() {
+            outln!("      blocks: {}", entry.blocks.join(", "));
+        }
+    }
+    outln!();
+    if allowed {
+        outln!(
+            "the run will walk every state before the guard that wants these and stop there. That \
+             is the cost the flag accepts; nothing about the guard itself has changed."
+        );
+        return;
+    }
+    outln!(
+        "no run under this map can reach `evidence.missing == 0`, so it would walk every state \
+         before that guard and stop at it. Three ways forward: add a `command` step whose \
+         `evidence:` declares the kind — one outside the driver's mintable set needs `record: \
+         <path>` and a verifier that writes the document, the way this repository's `checks` map \
+         mints `trace_conformance`; drive the task under a map that has one; or, if the record \
+         will arrive from outside the run, pass `--allow-evidence-gap` and accept that the run \
+         stops at the guard."
+    );
 }
 
 /// Everything only a person can answer that this run would reach.

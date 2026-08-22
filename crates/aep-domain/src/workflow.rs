@@ -214,8 +214,14 @@ impl Workflow {
             .collect()
     }
 
-    /// States reachable from the initial state.
-    fn reachable(&self) -> BTreeSet<&StateId> {
+    /// States reachable from the initial state, including it.
+    ///
+    /// Public because reachability decides what a *pre-flight* check may refuse on: a requirement
+    /// written on a state nothing can walk into blocks nothing, and a launch-time refusal that
+    /// counted one would be refusing a run for a rule that will never fire. Validation asks the
+    /// same question the other way round — which states are *un*reachable — so both callers read
+    /// one traversal rather than each keeping a copy of the graph walk.
+    pub fn reachable(&self) -> BTreeSet<&StateId> {
         let mut seen: BTreeSet<&StateId> = BTreeSet::new();
         let Some(initial) = self.states.get_key_value(&self.initial).map(|(id, _)| id) else {
             return seen;

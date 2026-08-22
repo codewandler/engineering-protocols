@@ -37,6 +37,21 @@ belongs in the commit message or in `docs/design/`.
 
 ### Added
 
+- **`protocol drive run` refuses a step map that cannot produce the evidence the plan will ask
+  for.** Before the first step, the resolved plan's evidence demands are compared with what the
+  map's steps declare, and a kind nothing can produce is a refusal with exit 1 — one line per kind,
+  naming the principle that asks for it and the transition or completion it holds shut. Governed run
+  `W4-2/1` learned the same thing at a guard six states in, having spent 76 minutes and $31.46 on a
+  question two documents on disk had already answered. The check respects `applies_when:` scoping (a
+  task declaring `change.code: false` is not refused for `contract_result` or `property_test_result`;
+  a task declaring nothing still is), ignores requirements on states no run can reach, and **warns
+  rather than refuses** where nothing can be decided from documents — a record only a person can
+  produce, or a demand pinning a verifier no step names. `--allow-evidence-gap` starts anyway,
+  printing the same gap; it changes no rule the engine enforces, so such a run still stops at the
+  guard. Both shipped maps currently report a gap: `verification` and `specification`, plus
+  `contract_result` and `property_test_result` for a task that declares no `change.code`.
+  Acceptance: `story:plan-map-coverage`.
+
 - **`harness: metaharness` — a second executor on the seam that was waiting for one.** An `llm`
   step naming it is spawned through `metaharness run claude` instead of a bare `claude` argv: the
   step's per-state surface travels as a sealed `metaharness.frame/1` document (digest-verified by

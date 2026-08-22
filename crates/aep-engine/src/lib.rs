@@ -49,7 +49,10 @@ pub mod trail;
 pub use clock::{Clock, FixedClock, SteppingClock, SystemClock};
 pub use engine::{Engine, EvidenceSubmission, ProtocolEngine, TransitionResult};
 pub use error::ProtocolError;
-pub use evaluate::{Evaluation, Requirement, RequirementSource, TransitionEvaluation};
+pub use evaluate::{
+    demanded_evidence, Blocked, DemandedEvidence, Evaluation, Requirement, RequirementSource,
+    TransitionEvaluation,
+};
 pub use execution::{Execution, Snapshot};
 pub use explain::{CompletionExplanation, DecisionExplanation};
 pub use load::{load_tree, load_tree_report, LoadErrors, LoadFailure, LoadOutcome};

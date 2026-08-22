@@ -115,10 +115,22 @@ impl Fixture {
     }
 
     /// Runs one `protocol drive` verb against this fixture.
+    ///
+    /// A `run` carries `--allow-evidence-gap`, and that is a statement about the fixture rather
+    /// than about the flag. This map declares `test_result`, `diff` and `static_analysis` and
+    /// nothing else, so F-W4.2-4's launch check refuses it: `spec-driven` wants a `specification`
+    /// record and `provenance-tracking` an independent `verification` one, and no step here mints
+    /// either. Every test below is about the routing loop, the lock or the report, none of which
+    /// that gap changes — so the tests say *I know* rather than growing two steps that write
+    /// evidence documents nobody reads. The refusal itself is tested on its own, without the flag,
+    /// in `a_map_that_cannot_produce_demanded_evidence_is_refused_before_the_first_step`.
     fn drive(&self, verb: &[&str], extra: &[&str]) -> Output {
         let mut args: Vec<String> = vec!["drive".to_owned()];
         args.extend(verb.iter().map(ToString::to_string));
         args.extend(self.location());
+        if verb == ["run"] {
+            args.push("--allow-evidence-gap".to_owned());
+        }
         args.extend(extra.iter().map(ToString::to_string));
         let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
         protocol(&borrowed)
@@ -466,6 +478,58 @@ fn two_maps_fit_the_workflow_so_the_driver_refuses_to_choose_and_names_both() {
     assert!(
         !fixture.runs().join("lock.json").exists(),
         "a refused start left a lock behind"
+    );
+}
+
+/// **F-W4.2-4** at the surface an operator meets: the map is checked against the plan it will
+/// drive, before anything runs.
+///
+/// `W4-2/1` learned this at a guard six states in, having spent ten model sessions, 76 minutes and
+/// $31.46. Everything the refusal below prints was in two documents on disk at launch.
+#[test]
+fn a_map_that_cannot_produce_demanded_evidence_is_refused_before_the_first_step() {
+    let fixture = Fixture::new("evidence-gap", false);
+    let mut args: Vec<String> = vec!["drive".to_owned(), "run".to_owned()];
+    args.extend(fixture.location());
+    let borrowed: Vec<&str> = args.iter().map(String::as_str).collect();
+    let output = protocol(&borrowed);
+    let said = format!("{}{}", stdout(&output), stderr(&output));
+
+    assert_eq!(code(&output), 1, "{said}");
+    for named in [
+        "specification",
+        "spec-driven",
+        "verification",
+        "provenance-tracking",
+        "adversarial_verify -> review",
+        "--allow-evidence-gap",
+    ] {
+        assert!(
+            said.contains(named),
+            "the refusal names the kind, who asked, what it blocks and the way through; `{named}` \
+             is missing:\n{said}"
+        );
+    }
+    assert!(
+        !fixture.runs().join("lock.json").exists(),
+        "a refused start left a lock behind"
+    );
+    assert!(
+        !fixture.runs().join("DRIVE-1").exists(),
+        "a refused start allocated a run directory, so the refusal was not before everything"
+    );
+
+    // And the way through, which is what makes this a refusal rather than a wall: the same command
+    // with the flag starts, prints the same gap, and gets as far as the run would have got anyway.
+    let allowed = fixture.drive(&["run"], &[]);
+    let told = stdout(&allowed);
+    assert!(
+        told.contains("--allow-evidence-gap` was given") && told.contains("specification"),
+        "the flag acknowledges the gap rather than hiding it:\n{told}"
+    );
+    assert!(
+        fixture.runs().join("DRIVE-1").exists(),
+        "the flagged run allocated a run directory:\n{told}"
     );
 }
 
